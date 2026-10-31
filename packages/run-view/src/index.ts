@@ -56,6 +56,7 @@ export {
   type GraphTask,
   type ScanGraphTask,
   type StudyGraphTask,
+  shownStatus,
   TASK_STATUS,
   TaskGraph,
   type TaskGraphProps,

@@ -60,12 +60,13 @@ export function ToCheckPanel({
   // handled item picked from Report still reads as one of them.
   const queue = items.filter((n) => !n.accepted || n === current);
   const at = current ? queue.indexOf(current) : -1;
-  const after = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].filter(
-    (n) => !n.accepted && n !== current,
-  );
-  const next = after[0];
-  // Where "Looks right" moves: the same task's next open item, else the scan's.
-  const then = after.find((n) => n.taskId === current?.taskId) ?? next;
+  const waiting = (n: NeedItem) => !n.accepted && n !== current;
+  // Next, as the arrows go: none after the last.
+  const next = queue.slice(at + 1).find(waiting);
+  // Where "Looks right" moves: the same task's next open item, else the scan's, round to the
+  // first still open.
+  const after = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].filter(waiting);
+  const then = after.find((n) => n.taskId === current?.taskId) ?? after[0];
   const task = current && tasks.find((t) => t.id === current.taskId);
   return (
     <div className="grid gap-3 p-3">

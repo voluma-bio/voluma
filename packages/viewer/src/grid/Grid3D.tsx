@@ -51,6 +51,7 @@ import {
   type GridScene,
   type MarkTool,
   type PaneHandle,
+  type PaneStatus,
   type ShownMark,
   type Zyx,
 } from "./scene";
@@ -62,7 +63,7 @@ export function Grid3D({
   contrast,
   onPoint,
   handle,
-  onLoading,
+  onStatus,
   tool,
   marks,
   onMark,
@@ -76,8 +77,7 @@ export function Grid3D({
   onMark(mark: GridMark): void;
   /** Set while the pane is mounted, for screenshots. */
   handle: { current: PaneHandle | null };
-  /** Whether the volume or a mesh is still loading or failed. */
-  onLoading(loading: boolean): void;
+  onStatus(status: PaneStatus): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -87,14 +87,14 @@ export function Grid3D({
     depth: DepthTexture;
     render(): void;
   } | null>(null);
-  const [status, setStatus] = useState<string>();
-  const [volumeStatus, setVolumeStatus] = useState<string>();
+  const [meshLoad, setMeshLoad] = useState<{ left: number; error?: string }>({ left: 0 });
+  const [volumeLoad, setVolumeLoad] = useState<{ loading: boolean; error?: string }>({
+    loading: true,
+  });
   const latest = useRef(onPoint);
   latest.current = onPoint;
   const marking = useRef({ tool, marks, onMark });
   marking.current = { tool, marks, onMark };
-  const cancelGesture = useRef<() => void>(() => {});
-  const ready = useRef(false);
   // The camera as last drawn: the mark layer projects with it between frames.
   const eye = useRef<PerspectiveCamera | null>(null);
   // The volume as drawn, for finding where a ray meets it.
@@ -188,7 +188,7 @@ export function Grid3D({
       renderer.clearDepth();
       renderer.render(annotations, camera);
       renderer.autoClear = true;
-      layer.current?.draw();
+      layer.draw();
     };
     const render = () => {
       frame ||= requestAnimationFrame(draw);
@@ -208,13 +208,7 @@ export function Grid3D({
           },
         },
       }),
-      layers() {
-        if (!ready.current) return [];
-        draw();
-        layer.current?.draw(false);
-        layer.current?.redraw();
-        return layer.current ? [renderer.domElement, layer.current.canvas] : [renderer.domElement];
-      },
+      layers: () => layer.layers(renderer.domElement, draw),
       show(saved) {
         if (!("camera" in saved)) return;
         camera.position.set(...saved.camera.position);
@@ -237,7 +231,8 @@ export function Grid3D({
     observer.observe(element);
 
     // A left click (not a drag) on a mesh moves the crosshair to the voxel under it: the first
-    // opaque mesh, so a structure inside a see-through bone shell wins over the shell.
+    // opaque mesh, so a structure inside a see-through bone shell wins over the shell. With Point,
+    // the press is the mark layer's gesture, so Esc or another tool drops it.
     let downAt: { x: number; y: number; pointerId: number } | null = null;
     const rayAt = (event: { clientX: number; clientY: number }) => {
       const rect = element.getBoundingClientRect();
@@ -278,18 +273,20 @@ export function Grid3D({
         event.button === 0 && !event.shiftKey && !event.ctrlKey && !event.metaKey
           ? { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
           : null;
+      if (downAt && marking.current.tool === "point") layer.start(event, false);
     };
     const up = (event: PointerEvent) => {
       const start = downAt;
       downAt = null;
-      if (
-        !start ||
-        event.pointerId !== start.pointerId ||
-        Math.hypot(event.clientX - start.x, event.clientY - start.y) > 3
-      )
-        return;
+      const clicked =
+        start &&
+        event.pointerId === start.pointerId &&
+        Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 3;
       const tool = marking.current.tool;
       if (tool === "point") {
+        if (!layer.owns(event)) return;
+        layer.cancel();
+        if (!clicked) return;
         const at = surfaceAt(event);
         if (!at) return;
         const voxel = at.map(Math.round) as [number, number, number];
@@ -297,7 +294,7 @@ export function Grid3D({
         latest.current(voxel);
         return;
       }
-      if (tool) return;
+      if (!clicked || tool) return;
       const ray = rayAt(event);
       const hits = ray.intersectObjects(meshes.children, true).filter((h) => h.object.visible);
       const opaque = (h: (typeof hits)[number]) =>
@@ -318,12 +315,10 @@ export function Grid3D({
 
     // Line: a drag that starts on the surface draws instead of rotating. Captured on the pane,
     // so the orbit controls on the canvas below never see the press.
-    let line: { from: Zyx; pointerId: number } | null = null;
+    let line: { from: Zyx } | null = null;
     const lineDown = (event: PointerEvent) => {
-      const own = layer.current;
       if (
         line ||
-        !own ||
         marking.current.tool !== "line" ||
         event.button !== 0 ||
         event.shiftKey ||
@@ -335,9 +330,9 @@ export function Grid3D({
       if (!from) return;
       event.stopPropagation();
       downAt = null;
-      element.setPointerCapture(event.pointerId);
-      line = { from, pointerId: event.pointerId };
-      own.hover = null;
+      layer.start(event);
+      line = { from };
+      layer.hover = null;
     };
     // Hover and a line's free end follow the pointer, one surface search per frame.
     let pending: PointerEvent | null = null;
@@ -346,17 +341,15 @@ export function Grid3D({
       const tool = marking.current.tool;
       if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 3)
         downAt = null;
-      if (line && event.pointerId !== line.pointerId) return;
+      if (line && !layer.owns(event)) return;
       if (!line && (event.buttons || (tool !== "point" && tool !== "line"))) return;
       pending = event;
       searching ||= requestAnimationFrame(() => {
         searching = 0;
         const at = pending && surfaceAt(pending);
         pending = null;
-        const own = layer.current;
-        if (!own) return;
         if (line) {
-          own.draft = at
+          layer.draft = at
             ? {
                 line: {
                   aZyx: [...line.from],
@@ -365,75 +358,47 @@ export function Grid3D({
                 },
               }
             : null;
-        } else own.hover = at;
-        own.redraw();
+        } else layer.hover = at;
+        layer.redraw();
       });
     };
-    // Ends a line: a release keeps it, a cancelled pointer or Esc drops it.
-    const cancel = () => {
+    // Whatever ends a gesture (`MarkLayer.cancel`) drops its line, click and pending search.
+    const stopReset = layer.onCancel(() => {
       cancelAnimationFrame(searching);
       searching = 0;
       pending = null;
       downAt = null;
-      const pointerId = line?.pointerId;
       line = null;
-      if (pointerId !== undefined && element.hasPointerCapture(pointerId))
-        element.releasePointerCapture(pointerId);
-      const own = layer.current;
-      if (own) {
-        own.draft = null;
-        own.hover = null;
-        own.redraw();
-      }
-    };
-    cancelGesture.current = cancel;
+    });
+    // A release keeps the line.
     const lineUp = (event: PointerEvent) => {
-      if (!line || event.pointerId !== line.pointerId) return;
+      if (!line || !layer.owns(event)) return;
       event.stopPropagation();
       // Resolve the release itself, not the last animation frame or last valid surface hit.
       const from = line.from;
-      const at = event.type === "pointerup" ? surfaceAt(event) : null;
-      cancel();
+      const at = surfaceAt(event);
+      layer.cancel();
       if (at) {
         const length = lengthMm(from, at, scene.spacingZyx);
         if (length > 0)
           marking.current.onMark({ line: { aZyx: [...from], bZyx: [...at], lengthMm: length } });
       }
     };
-    const key = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || (!line && !(downAt && marking.current.tool === "point")))
-        return;
-      event.preventDefault();
-      event.stopPropagation();
-      cancel();
-    };
     const leave = () => {
       pending = null;
-      const own = layer.current;
-      if (!own?.hover) return;
-      own.hover = null;
-      own.redraw();
+      if (!layer.hover) return;
+      layer.hover = null;
+      layer.redraw();
     };
     element.addEventListener("pointerdown", lineDown, { capture: true });
     element.addEventListener("pointermove", lineMove);
     element.addEventListener("pointerup", lineUp, { capture: true });
-    element.addEventListener("pointercancel", lineUp, { capture: true });
-    element.addEventListener("pointercancel", cancel);
-    element.addEventListener("lostpointercapture", cancel);
     element.addEventListener("pointerleave", leave);
-    // The pane takes no focus, so a line in progress listens on the window, ahead of the page.
-    globalThis.addEventListener("keydown", key, { capture: true });
     return () => {
-      cancel();
-      cancelGesture.current = () => {};
-      globalThis.removeEventListener("keydown", key, { capture: true });
-      cancelAnimationFrame(searching);
+      stopReset();
       element.removeEventListener("pointerdown", lineDown, { capture: true });
       element.removeEventListener("pointermove", lineMove);
       element.removeEventListener("pointerup", lineUp, { capture: true });
-      element.removeEventListener("pointercancel", lineUp, { capture: true });
-      element.removeEventListener("pointercancel", cancel);
-      element.removeEventListener("lostpointercapture", cancel);
       element.removeEventListener("pointerleave", leave);
       cancelAnimationFrame(frame);
       observer.disconnect();
@@ -455,8 +420,6 @@ export function Grid3D({
       handle.current = null;
     };
   }, []);
-
-  useEffect(() => cancelGesture.current(), [tool]);
 
   useEffect(() => {
     const t = three.current;
@@ -529,9 +492,11 @@ export function Grid3D({
       }
     }
     const missing = latestMeshes.current.filter((m) => !t.meshes.getObjectByName(m.id));
-    if (missing.length)
-      setStatus(`Loading ${missing.length} mesh${missing.length > 1 ? "es" : ""}…`);
-    let left = missing.length;
+    setMeshLoad({ left: missing.length });
+    const settle = (error?: string) => {
+      if (!abort.signal.aborted)
+        setMeshLoad((had) => ({ left: had.left - 1, error: had.error ?? error }));
+    };
     for (const m of missing)
       loadMesh(m, abort.signal)
         .then((geometry) => {
@@ -549,15 +514,9 @@ export function Grid3D({
           paint(mesh, latestMeshes.current.find((l) => l.id === m.id) ?? m);
           t.meshes.add(mesh);
           t.render();
+          settle();
         })
-        .catch((cause) => {
-          if (!abort.signal.aborted)
-            setStatus(`Couldn't load the ${m.name} mesh: ${(cause as Error).message}`);
-          left = -1;
-        })
-        .finally(() => {
-          if (--left === 0) setStatus(undefined);
-        });
+        .catch((cause) => settle(`Couldn't load the ${m.name} mesh: ${(cause as Error).message}`));
     return () => abort.abort();
   }, [meshIds]);
 
@@ -570,16 +529,19 @@ export function Grid3D({
     const { base, levels: all } = scene.image;
     const coarsest = all.length - 1;
     const target = volumeLevel(all);
-    setVolumeStatus("Loading the volume…");
+    setVolumeLoad({ loading: true });
     (async () => {
       for (const k of target === coarsest ? [coarsest] : [coarsest, target]) {
         const { data } = await readLevel(base, all[k]!.path, abort.signal);
         setLevels((had) => [...had.filter((l) => l.k !== k), { k, values: data }]);
       }
-      setVolumeStatus(undefined);
+      setVolumeLoad({ loading: false });
     })().catch((cause) => {
       if (!abort.signal.aborted)
-        setVolumeStatus(`Couldn't load the volume: ${(cause as Error).message}`);
+        setVolumeLoad({
+          loading: false,
+          error: `Couldn't load the volume: ${(cause as Error).message}`,
+        });
     });
     return () => abort.abort();
   }, [scene.image.base]);
@@ -611,12 +573,26 @@ export function Grid3D({
     };
   }, [shown, contrast]);
 
-  const chip = volumeStatus ?? status;
-  const latestLoading = useRef(onLoading);
-  latestLoading.current = onLoading;
-  const loading = !!chip || !shown;
-  ready.current = !loading && !!contrast;
-  useEffect(() => latestLoading.current(loading), [loading]);
+  const chip =
+    volumeLoad.error ??
+    (volumeLoad.loading
+      ? "Loading the volume…"
+      : (meshLoad.error ??
+        (meshLoad.left > 0
+          ? `Loading ${meshLoad.left} mesh${meshLoad.left > 1 ? "es" : ""}…`
+          : undefined)));
+  // A missing surface is missing content; the finer volume only sharpens the coarsest one.
+  const status: PaneStatus =
+    (!shown && !volumeLoad.error) || meshLoad.left > 0
+      ? "loading"
+      : volumeLoad.loading
+        ? "refining"
+        : volumeLoad.error || meshLoad.error
+          ? "failed"
+          : "ready";
+  const latestStatus = useRef(onStatus);
+  latestStatus.current = onStatus;
+  useEffect(() => latestStatus.current(status), [status]);
   return (
     <div ref={host} className={PANE}>
       {chip && (
