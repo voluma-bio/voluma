@@ -345,6 +345,11 @@ async function claimBody(
             ...options,
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
+            // Meta's default prompt cache is in-memory and evicted under pressure or after
+            // inactivity. Runs have long tool calls and many independent threads, so ask the
+            // Responses API to keep Meta prefixes for up to 24 hours. Anthropic long retention
+            // costs more per cache write, so leave its existing setting unchanged.
+            ...(m.provider === "meta" && { cacheRetention: "long" }),
           }),
         (attempt, delayMs, error) => {
           log(
