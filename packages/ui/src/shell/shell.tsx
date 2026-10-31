@@ -11,7 +11,8 @@
  *
  * Keys: `\` and `]` fold the left and right side, F toggles Full view (both sides folded), Esc
  * leaves it, and each panel may claim one key. Shift-click on a strip button stacks a second panel
- * on that side. Widths, the stacked split and which panels are open persist in localStorage.
+ * on that side. Widths and the stacked split persist in localStorage; each visit opens the
+ * screen's default panels.
  */
 import { X } from "lucide-react";
 import {
@@ -30,7 +31,7 @@ import { cx } from "../cx";
 export type ShellSide = "left" | "right";
 
 export type ShellPanelProps = {
-  /** Unique across the app; also the key its open state is stored under. */
+  /** Unique across the app. */
   id: string;
   side: ShellSide;
   /** Strip buttons are grouped (e.g. the study's sections, then the open scan's panels). */
@@ -41,7 +42,7 @@ export type ShellPanelProps = {
   count?: number;
   /** One key that toggles this panel. */
   shortcut?: string;
-  /** Opens the first time this panel appears, if its side has never been arranged. */
+  /** Opens when this panel mounts, not when its label or count changes. */
   defaultOpen?: boolean;
   /** The narrowest the side may be while this panel is open, in px. */
   minWidth?: number;
@@ -64,8 +65,6 @@ type Layout = {
   width: Record<ShellSide, number>;
   /** The top panel's share of the height when two are stacked. */
   split: Record<ShellSide, number>;
-  /** Sides the user has arranged; `defaultOpen` applies only before that. */
-  arranged: ShellSide[];
 };
 
 const STORAGE_KEY = "voluma.shell";
@@ -80,20 +79,13 @@ function loadLayout(): Layout {
     open: { left: [], right: [] },
     width: { left: WIDTH.left.initial, right: WIDTH.right.initial },
     split: { left: 0.5, right: 0.5 },
-    arranged: [],
   };
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
     if (
       stored &&
-      Array.isArray(stored.arranged) &&
-      stored.arranged.every((side: unknown) => side === "left" || side === "right") &&
       (["left", "right"] as const).every(
         (side) =>
-          Array.isArray(stored.open?.[side]) &&
-          stored.open[side].length <= 2 &&
-          stored.open[side].every((id: unknown) => typeof id === "string") &&
-          new Set(stored.open[side]).size === stored.open[side].length &&
           Number.isFinite(stored.width?.[side]) &&
           stored.width[side] >= WIDTH[side].min &&
           stored.width[side] <= WIDTH[side].max &&
@@ -102,7 +94,7 @@ function loadLayout(): Layout {
           stored.split[side] <= 0.8,
       )
     )
-      return stored;
+      return { ...fallback, width: stored.width, split: stored.split };
   } catch {
     // Storage may be unavailable, or an older build may have written another shape.
   }
@@ -111,7 +103,7 @@ function loadLayout(): Layout {
 
 function saveLayout(layout: Layout) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ width: layout.width, split: layout.split }));
   } catch {
     // Disabled or full storage must not make the shell unusable.
   }
@@ -193,8 +185,6 @@ export function AppShell({
     if (!active) saveLayout(layoutRef.current);
   }, []);
 
-  // Panels that are open but whose screen no longer renders them stay in `layout.open`, so they
-  // come back when the screen does; only registered ones show.
   const shown = useMemo(
     () => ({
       left: full ? [] : layout.open.left.filter((id) => regs.has(id)),
@@ -203,18 +193,37 @@ export function AppShell({
     [layout.open, regs, full],
   );
 
+  const mounted = useRef(new Set<string>());
+  const lastOpen = useRef<Layout["open"]>({ left: [], right: [] });
   const register = useCallback((reg: Registration) => {
     setRegs((prev) =>
       sameRegistration(prev.get(reg.id), reg) ? prev : new Map(prev).set(reg.id, reg),
     );
-    if (reg.defaultOpen)
-      setLayout((l) =>
-        l.arranged.includes(reg.side) || l.open[reg.side].includes(reg.id)
-          ? l
-          : { ...l, open: { ...l.open, [reg.side]: [...l.open[reg.side], reg.id].slice(-2) } },
-      );
+    if (mounted.current.has(reg.id)) return;
+    mounted.current.add(reg.id);
+    if (reg.defaultOpen) {
+      setFull(false);
+      setLayout((l) => ({
+        ...l,
+        open: { ...l.open, [reg.side]: [...l.open[reg.side], reg.id].slice(-2) },
+      }));
+    }
   }, []);
   const unregister = useCallback((id: string) => {
+    mounted.current.delete(id);
+    for (const side of ["left", "right"] as const)
+      lastOpen.current[side] = lastOpen.current[side].filter((panel) => panel !== id);
+    setLayout((l) =>
+      l.open.left.includes(id) || l.open.right.includes(id)
+        ? {
+            ...l,
+            open: {
+              left: l.open.left.filter((panel) => panel !== id),
+              right: l.open.right.filter((panel) => panel !== id),
+            },
+          }
+        : l,
+    );
     setRegs((prev) => {
       const next = new Map(prev);
       next.delete(id);
@@ -236,17 +245,14 @@ export function AppShell({
         return {
           ...l,
           open: { ...l.open, [reg.side]: next },
-          arranged: [...new Set([...l.arranged, reg.side])],
         };
       });
     },
     [full],
   );
 
-  const lastOpen = useRef<Layout["open"]>({ left: [], right: [] });
   const foldSide = useCallback((side: ShellSide) => {
-    // A side that never had a panel open has nothing to fold, and arranging it would stop its
-    // `defaultOpen` panels from opening on their own.
+    // A side that never had a panel open has nothing to fold.
     if (!layoutRef.current.open[side].length && !lastOpen.current[side].length) return;
     setFull(false);
     setLayout((l) => {
@@ -255,7 +261,6 @@ export function AppShell({
       return {
         ...l,
         open: { ...l.open, [side]: next },
-        arranged: [...new Set([...l.arranged, side])],
       };
     });
   }, []);
@@ -307,7 +312,6 @@ export function AppShell({
         : {
             ...l,
             open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) },
-            arranged: [...new Set([...l.arranged, reg.side])],
           },
     );
   }, []);
@@ -603,6 +607,10 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
   const { id, side, group, label, count, shortcut, defaultOpen, minWidth } = props;
   const icon = useRef(props.icon);
   icon.current = props.icon;
+  const scrollTop = useRef(0);
+  const restoreScroll = useCallback((el: HTMLDivElement | null) => {
+    if (el) el.scrollTop = scrollTop.current;
+  }, []);
   useEffect(() => {
     register({ id, side, group, label, icon, count, shortcut, defaultOpen, minWidth, order });
   }, [register, id, side, group, label, count, shortcut, defaultOpen, minWidth, order]);
@@ -627,7 +635,15 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
               <X className="size-3.5" />
             </button>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+          <div
+            ref={restoreScroll}
+            onScroll={(event) => {
+              scrollTop.current = event.currentTarget.scrollTop;
+            }}
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
+            {children}
+          </div>
         </>,
         slot,
       )
