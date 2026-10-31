@@ -224,7 +224,7 @@ function ScanReview({
   const study = useQuery({
     ...studyQuery(run.studyId),
     refetchInterval: (query) =>
-      query.state.data?.scans.some((scan) => isLive(scan.runs[0])) ? 5000 : false,
+      isLive(run) || query.state.data?.scans.some((scan) => isLive(scan.runs[0])) ? 5000 : false,
   });
   const store = useRunStore();
   const [reopened, setReopened] = useState(0);
