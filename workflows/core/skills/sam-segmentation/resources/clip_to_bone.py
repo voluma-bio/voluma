@@ -26,14 +26,14 @@ if __name__ == '__main__':
     if hu.shape != labels.shape:
         sidecar.fail(f'hu {hu.shape} and labels {labels.shape} are on different grids: map the labels to the scan first')
     sp = sidecar.grid(str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
-    before = np.bincount(labels.ravel(), minlength=256)
+    before = np.bincount(labels.ravel())
     for z in range(hu.shape[0]):
         labels[z][np.asarray(hu[z]) < a.threshold_hu] = 0
     np.save(a.out, labels)
     vox_mm3 = float(np.prod(sp))
     sidecar.write(a.out, like=str(sidecar.sidecar_path(a.labels)), inputs=[a.hu, a.labels],
                   params={'threshold_hu': a.threshold_hu})
-    after = np.bincount(labels.ravel(), minlength=256)
+    after = np.bincount(labels.ravel(), minlength=len(before))
     ids = [int(i) for i in np.nonzero(before[1:])[0] + 1]
     sidecar.emit(labels=a.out, volume_mm3={i: round(float(after[i]) * vox_mm3, 4) for i in ids},
                  removed_mm3={i: round(float(before[i] - after[i]) * vox_mm3, 4) for i in ids})
