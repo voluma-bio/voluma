@@ -4,7 +4,8 @@
  * written synchronously), and Pi's events go to the run's recorder (the stream
  * record, queued in the background). A thread with stored
  * history resumes from it unchanged, system message included, so the prompt cache
- * stays valid; steering and follow-ups are new messages, never edits.
+ * stays valid: the model keeps seeing the prompt and tool definitions the thread started
+ * with, and calls run on the current tools. Steering and follow-ups are new messages, never edits.
  *
  * `startThread` returns at once with a handle. While the thread runs, `send` steers a
  * message into it (Pi's steering queue: delivered after the current tool calls); one sent
@@ -19,7 +20,14 @@ import {
   type StreamFn,
   type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  getCurrentTools,
+  type Model,
+  type Tool as ToolDeclaration,
+  type ToolResultMessage,
+  Type,
+} from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
 import { isContextOverflowError } from "../../context-overflow";
@@ -62,7 +70,10 @@ export type StartThreadOptions = ThreadIdentity & {
   thinkingLevel?: ThinkingLevel;
   /** `models.streamSimple.bind(models)` from pi-ai. */
   streamFn: StreamFn;
-  /** Fixed for the thread's life: a resumed thread whose stored prompt or tools differ fails. */
+  /**
+   * A new thread stores both. A resumed thread keeps the stored prompt and tool definitions;
+   * it is refused only if the input schema of a tool it was given changed.
+   */
   systemPrompt: string;
   tools: Tool[];
   recorder: Recorder;
@@ -131,12 +142,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     },
   });
 
+  const agentTools = options.tools.map((tool) => toAgentTool(tool, options, batchSize));
   const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
-      tools: options.tools.map((tool) => toAgentTool(tool, options, batchSize)),
+      tools: agentTools,
       messages: [],
     },
     streamFn: options.streamFn,
@@ -218,11 +230,8 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // Every check that can refuse the thread runs before the thread's own events: a refused
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
       // from here; the run loop then stops it.
-      if (stored.length > 0 && !sameSystem(stored[0], system)) {
-        throw new ThreadStale(
-          "the stored system message differs from the current system prompt or tools; " +
-            "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
-        );
+      if (stored.length > 0 && stored[0]?.role !== "system") {
+        throw new ThreadStale("the stored history does not start with a system message");
       }
       // The model is part of a thread's identity, like its prompt: History is the record of it
       // (an assistant message names the model that wrote it), not `thread.started`, which may
@@ -236,6 +245,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
           `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
             "a resumed thread keeps its model",
         );
+      }
+      if (stored.length > 0) {
+        // The model keeps the tool definitions it started with (the system message in `stored`
+        // declares them; Pi would otherwise append the difference to the current tools).
+        agent.state.tools = storedTools(getCurrentTools(stored), agentTools);
       }
       const repairs = interruptedToolResults(stored, options.interrupted);
       const hasUser = stored.some((m) => m.role === "user");
@@ -434,8 +448,8 @@ function overflowRetryable(messages: AgentMessage[]): boolean {
 class ThreadFailure extends Error {}
 
 /**
- * The stored thread cannot be resumed as it is (its prompt, tools or model changed, e.g. by a
- * deploy): `ran` is false and `stale` true. The caller starts the work again on a new thread.
+ * The stored thread cannot be resumed as it is (a deploy changed the input of one of its tools,
+ * or its model changed): `ran` is false and `stale` true. The caller starts the work again on a new thread.
  */
 class ThreadStale extends ThreadFailure {}
 
@@ -512,11 +526,55 @@ function strictObjects<T>(schema: T): T {
   ) as T;
 }
 
-/** The stored system message must be the one the current prompt and tools would make. */
-function sameSystem(stored: AgentMessage | undefined, current: AgentMessage | undefined): boolean {
-  const key = (m: AgentMessage | undefined) =>
-    m?.role === "system" ? JSON.stringify([m.content, m.toolsAdded]) : undefined;
-  return key(stored) !== undefined && key(stored) === key(current);
+/**
+ * A schema without its `description` keywords, for comparing what a call may contain. Keys
+ * of a map of named schemas (`properties`, `$defs`) are names, so only their values are walked.
+ */
+function withoutDescriptions(schema: unknown, named = false): unknown {
+  if (Array.isArray(schema)) return schema.map((s) => withoutDescriptions(s));
+  if (typeof schema !== "object" || schema === null) return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => named || key !== "description")
+      .map(([key, value]) => [
+        key,
+        withoutDescriptions(value, !named && ["properties", "$defs", "definitions"].includes(key)),
+      ]),
+  );
+}
+
+/**
+ * The tools a resumed thread offers: the definitions it started with, run by the current tool
+ * of the same name. A tool whose input schema changed since is refused as stale: Pi checks a
+ * call against the stored schema and `execute` then parses it with the current one, so a call
+ * could pass one and fail the other for the rest of the thread. A description change resumes,
+ * the tool's or a field's (`.describe()`); a changed default or any other keyword is refused.
+ * A tool since removed answers a call with an error; a tool added since is not offered.
+ * (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
+ */
+function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTool[] {
+  return declared.map((d) => {
+    const now = current.find((t) => t.name === d.name);
+    if (
+      now &&
+      JSON.stringify(withoutDescriptions(now.parameters)) !==
+        JSON.stringify(withoutDescriptions(d.parameters))
+    ) {
+      throw new ThreadStale(`the input of ${d.name} changed since the thread started`);
+    }
+    return {
+      label: d.name,
+      execute: async () => ({
+        content: [{ type: "text" as const, text: `The tool ${d.name} is no longer available.` }],
+        details: {},
+        isError: true,
+      }),
+      ...now,
+      name: d.name,
+      description: d.description,
+      parameters: d.parameters,
+    };
+  });
 }
 
 /**

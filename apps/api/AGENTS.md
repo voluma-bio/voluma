@@ -80,8 +80,11 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   primary keys are still `events(id)` and `pi_messages(thread_id, idx)`, and `pi_messages.run_id` is
   still nullable, with a trigger that fills it for the previous API's inserts: the contract step is a
   later migration ([TODO](.context/TODO.md)).
-- **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
-  limit counts can't race. The lease is judged by the database's `now()`. An ingest write
+- **Browser writes, claim and `import:run`/`archive:run` hold one lock** (`QUEUE_LOCK`, a transaction
+  advisory lock), so limit counts can't race. `heartbeat` and `report` skip it: they only end or release
+  a running run, which lowers the counts a claim reads, and take just the run's event lock and row. The
+  only write that raises a count (`queued` to `running`) stays in the claim. This is the one place the
+  rule is stated; other comments point here. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
 - **Recovery ends a claim with a reason** (`shutdown`, `self-stop` from the runner's `released`;
@@ -95,10 +98,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
   checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
-  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock, then the run's event lock
-  (`eventLock`), then row locks** (a runner's append takes the event lock before it shares the run
+  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock (where taken), then the run's event lock
+  (`eventLock`), then row locks.** `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
+  each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` takes the
+  event and row locks before judging the run's state. A runner's append takes the event lock before it shares the run
   row, so a transaction holding the row and then asking for the event lock deadlocks with it:
-  `recover`, `heartbeat`, `report` and `decideMessage` take the event lock first, through the one
+  `recover`, `heartbeat`, `report`, `cancel` and `decideMessage` take the event lock first, through the one
   `eventLock` in `pg-event-log.ts`; `decide` (review decisions) checks the run has ended before
   taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
   to a queued or running run (409: one message, one claim) and reopens an ended `completed` one: it
