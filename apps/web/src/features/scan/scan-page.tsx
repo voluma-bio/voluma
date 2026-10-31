@@ -61,7 +61,7 @@ import {
 } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
-import { AiPanel } from "./ai-panel";
+import { AiPanel, useMessage } from "./ai-panel";
 import {
   gridMark,
   MarksPanel,
@@ -367,6 +367,23 @@ function ScanReview({
     () => (subjectShown ? marking.marks.filter((m) => m.gridKey === subjectShown.key) : []),
     [marking.marks, subjectShown],
   );
+  const snapshot = subjectShown ? marking.snapshot : undefined;
+  const message = useMessage({
+    run,
+    me,
+    tasks,
+    task,
+    about,
+    marks: sendable,
+    snapshot,
+    viewKey: subjectShown?.key,
+    onSent: (sent) => {
+      setAbout(undefined);
+      marking.drop(sent);
+      setReopened((n) => n + 1);
+      refetchRun();
+    },
+  });
 
   const open = items.filter((n) => !n.accepted).length;
   const { title } = scanTitle(run, study.data);
@@ -587,20 +604,12 @@ function ScanReview({
         >
           <AiPanel
             run={run}
-            me={me}
             scan={title}
             tasks={tasks}
-            task={task}
             about={about}
             marks={sendable}
-            snapshot={subjectShown ? marking.snapshot : undefined}
-            viewKey={subjectShown?.key}
-            onSent={(sent) => {
-              setAbout(undefined);
-              marking.drop(sent);
-              setReopened((n) => n + 1);
-              refetchRun();
-            }}
+            views={snapshot !== undefined}
+            message={message}
           />
         </ShellPanel>
         <div className="flex min-h-0 flex-1 flex-col bg-background">

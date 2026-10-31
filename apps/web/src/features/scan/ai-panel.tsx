@@ -20,7 +20,7 @@ import type { Run } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
 import { RotateCcw, Send } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { describe, type YourMark } from "./marks-panel";
 
 /** Why this person can't write to the run's AI now, or nothing when they can. */
@@ -29,13 +29,14 @@ function closedBecause(run: Run, me: Me): string | undefined {
   if (run.startedBy !== me.userId)
     return "Only the person who started this run can write to its AI.";
   if (run.credentials === "visitor") return "A run on your own keys can't be reopened.";
+  if (me.kind === "visitor") return "Guests can't reopen runs on Voluma's keys.";
   if (run.state.status !== "ended") return "The AI is working. You can write once it finishes.";
   if (run.state.outcome !== "completed")
     return "This run didn't finish, so its AI can't be reopened.";
   return undefined;
 }
 
-/** The API's refusal in plain words (a 409 carries the server's own); the text stays in the box. */
+/** The API's refusal in plain words (a 403 or 409 carries the server's own); the text stays in the box. */
 function refusal(error: Error): string {
   const status = error instanceof ApiError ? error.status : undefined;
   if (status === 409)
@@ -43,7 +44,8 @@ function refusal(error: Error): string {
       (error as ApiError).serverMessage ??
       "The AI is still answering, or the run can't be reopened. Try again once it finishes."
     );
-  if (status === 403) return "You can read this run but not write to its AI.";
+  if (status === 403)
+    return (error as ApiError).serverMessage ?? "You can't write to this run's AI.";
   if (status === 429) return "Too many runs are going right now. Try again shortly.";
   return "Couldn't send. Check your connection and try again.";
 }
@@ -57,10 +59,13 @@ async function base64(blob: Blob): Promise<string> {
   return btoa(text);
 }
 
-export function AiPanel({
+/**
+ * The message being written to the run's AI: its words, its id and its send. The page holds it, so
+ * closing the panel mid-message or mid-send loses nothing and can't send it twice.
+ */
+export function useMessage({
   run,
   me,
-  scan,
   tasks,
   task,
   about,
@@ -71,12 +76,11 @@ export function AiPanel({
 }: {
   run: Run;
   me: Me;
-  scan: string;
   tasks: TaskView[];
   /** The task in view. */
   task: TaskView | undefined;
-  /** Set by Something's wrong: the message is about this task, and the box takes focus. */
-  about: { taskId: string; at: number } | undefined;
+  /** Set by Something's wrong: the message is about this task. */
+  about: { taskId: string } | undefined;
   /** Your marks on the subject's views: the next message carries them. */
   marks: readonly YourMark[];
   /**
@@ -89,14 +93,8 @@ export function AiPanel({
   /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
   onSent: (marks: string[]) => void;
 }) {
-  const events = useEvents();
-  const items = useMemo(() => conversation(events), [events]);
   const subject = tasks.find((t) => t.id === (about?.taskId ?? task?.id));
   const [text, setText] = useState("");
-  const form = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (about) form.current?.querySelector("textarea")?.focus();
-  }, [about]);
   // The API deduplicates by id alone. A retry must keep the entire request, including its PNG.
   const tried = useRef<{
     fingerprint: string;
@@ -114,7 +112,8 @@ export function AiPanel({
       return { note: attempt.note, marks: attempt.marks, unseen };
     },
     onSuccess: (sent) => {
-      if (sent.note) setText("");
+      // Words typed while it was sending stay.
+      if (sent.note) setText((now) => (now.trim() === sent.note ? "" : now));
       setUnseen(sent.unseen);
       tried.current = undefined;
       onSent(sent.marks);
@@ -176,6 +175,36 @@ export function AiPanel({
     }
     send.mutate(tried.current);
   };
+  return { subject, text, setText, send, unseen, submit, closed };
+}
+
+export function AiPanel({
+  run,
+  scan,
+  tasks,
+  about,
+  marks,
+  views,
+  message: { subject, text, setText, send, unseen, submit, closed },
+}: {
+  run: Run;
+  scan: string;
+  tasks: TaskView[];
+  /** Set by Something's wrong: the box takes focus. */
+  about: { taskId: string; at: number } | undefined;
+  /** Your marks the next message carries, shown under "The AI sees". */
+  marks: readonly YourMark[];
+  /** The views are shown, so the message carries a picture of them. */
+  views: boolean;
+  message: ReturnType<typeof useMessage>;
+}) {
+  const events = useEvents();
+  const items = useMemo(() => conversation(events), [events]);
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (about) form.current?.querySelector("textarea")?.focus();
+  }, [about]);
+  const closedId = useId();
   const answering =
     run.state.status !== "ended" && items.length > 0 && items.at(-1)?.from === "person";
 
@@ -191,7 +220,7 @@ export function AiPanel({
         <span className="mr-0.5">The AI sees</span>
         <Chip>{scan}</Chip>
         {subject && <Chip>{subject.title}</Chip>}
-        {snapshot && <Chip>the views</Chip>}
+        {views && <Chip>the views</Chip>}
         {marks.length === 0 ? (
           <Chip>no marks of yours</Chip>
         ) : (
@@ -263,6 +292,7 @@ export function AiPanel({
           maxLength={10_000}
           value={text}
           disabled={closed !== undefined || send.isPending}
+          aria-describedby={closed ? closedId : undefined}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -271,7 +301,11 @@ export function AiPanel({
             }
           }}
         />
-        {closed && <p className="text-xs text-muted-foreground">{closed}</p>}
+        {closed && (
+          <p id={closedId} className="text-xs text-muted-foreground">
+            {closed}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex-1" />
           {subject && (
@@ -279,6 +313,7 @@ export function AiPanel({
               type="button"
               size="sm"
               disabled={closed !== undefined || send.isPending}
+              aria-describedby={closed ? closedId : undefined}
               onClick={() => submit(true)}
             >
               <RotateCcw aria-hidden />
@@ -290,6 +325,7 @@ export function AiPanel({
             variant="primary"
             size="sm"
             disabled={closed !== undefined || send.isPending || !text.trim()}
+            aria-describedby={closed ? closedId : undefined}
           >
             <Send aria-hidden />
             {send.isPending ? "Sending…" : "Send"}
