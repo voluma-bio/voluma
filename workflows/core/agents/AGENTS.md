@@ -36,12 +36,32 @@ after it. A snapshot that has `checker.md` and no `check.md` (a run from before 
   listed is not granted: that, not prose, is how the checker holds no `segment_sam` (its role still
   has to say it does not redo the task, since bash can run the classic segmentation).
   `segment_sam` is granted only when the runner has a gateway, and only to a role with a sandbox.
-- `subagents`: the roles this role may start (`main`: `[worker]`). The checker is started by code on
-  every `submit_task` and is never listed. A role that holds `start_worker` must list `worker` (the loader refuses it otherwise).
+- `sandbox`: `none` (host-side tools only), `confined` (the sandbox writes only its own
+  `/scratch/<name>/`; the rest of `/scratch` is read host-side) or `full` (all of `/scratch` is writable).
+  A role holding `bash` or `segment_sam` needs one. Code reads this, never the role's name.
+- `outputs`: `read` or `write`, the access the role's sandbox has to `/outputs`. `segment_sam` is
+  granted only to a role with a sandbox and `outputs: write`.
+- `checkedBy`: the role that checks a task this role submits (`worker`: `check`). A role holding
+  `submit_task` must name one. A role that is some role's `checkedBy` is a reviewer: its prompt says
+  so, and it opens only the scratch files the attempt under review cites.
+- `subagents`: the roles this role may start (`main`: `[worker]`), through `start_agent {role, task, brief}`.
+  A role holding `start_agent` lists at least one. A role that holds `start_worker` (kept registered
+  for runs started before `start_agent`; no file here offers it) must list `worker`. The checker is
+  started by code on every `submit_task` and is never listed.
 - `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,
   the workflow's own skill first.
 
+A snapshot from before `sandbox`, `outputs` and `checkedBy` existed has none of them; the loader fills
+them for `main`, `worker` and `check` with what the code did then (`BEFORE_FRONTMATTER` in
+`packages/workflow/src/load.ts`, to delete when no such run is live). A new role must declare them.
+
 Any other key fails the load.
+
+Each thread records the role file it runs on as `kind` on its `thread.started` (the role file's name).
+What it may do is read from that file in the run's snapshot, which never changes, so nothing else is
+recorded. Limit: whether a thread is a worker or a checker still comes from the fields of its start
+(task, attempt: `threadRole`), so `start_agent` starts roles that do a task as a worker does, and a
+`checkedBy` role is a checker; other thread shapes need a change there.
 
 ## What stays in the harness
 

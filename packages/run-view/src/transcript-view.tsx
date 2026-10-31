@@ -123,6 +123,7 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   bash: Terminal,
   view_image: Image,
   start_worker: ListChecks,
+  start_agent: ListChecks,
   submit_task: ListChecks,
   checkpoint: Flag,
   report_output: PackageCheck,

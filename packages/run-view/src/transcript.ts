@@ -234,6 +234,8 @@ export function toolTitle(name: string, input: unknown): string {
     }
     case "start_worker":
       return `Started a worker on ${taskTitle(s("taskId") ?? "a task")}`;
+    case "start_agent":
+      return `Started a worker on ${taskTitle(s("task") ?? "a task")}`;
     case "stop_worker":
       return `Stopped ${s("threadId") ?? "a worker"}`;
     case "accept":
