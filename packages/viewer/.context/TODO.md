@@ -13,3 +13,8 @@
   is as slow, sign many asset paths in one call or shard the levels.
 - Measure scroll and 3D frame times on a hardware GPU: orb Chromium renders with SwiftShader, where
   the 3D pane with the ROI meshes costs hundreds of milliseconds per frame.
+- 3D meshes build their bounds tree on the main thread as each loads: on OA6-1RK's six meshes
+  (2.6 M triangles) 35 to 350 ms each, about 1 s in all. If that stall shows, build it in a worker
+  (`three-mesh-bvh`'s `GenerateMeshBVHWorker`) or only once a tool that searches the surface is out.
+- Point in 3D samples the volume at the nearest voxel where the shader interpolates, so a point on
+  a thin, faint surface can land up to a voxel off what is drawn.
