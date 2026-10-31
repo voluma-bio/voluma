@@ -53,6 +53,8 @@ const client = runClient(
     onLeaseLost() {
       leaseFailures++;
     },
+    runStopped: new AbortController().signal,
+    onUnreachable() {},
   },
 );
 const lease = holdLease({
@@ -341,6 +343,7 @@ try {
 
       const layout = runLayout({
         runId: "probe",
+        inputId: "probe",
         inputPrefix: "inputs/",
         skills: [],
         roles: { worker: { scratch: "all", outputs: "write", subagents: [], tools: [] } },

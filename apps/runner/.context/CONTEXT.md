@@ -126,13 +126,30 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   dies or cannot be created fails the file (the sandbox session replaces an ended sandbox on the next call, and runs a command the provider refused once more). `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
-  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  (`reviewAssetPrefix`) and `/input-review` (`inputReviewPrefix(run.input.id)`) read-write,
+  no network. Only the trusted conversion sandbox mounts the input cache; agents do not.
+  The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
-  the converter imports `sidecar` through; the sandbox gets `RunLayout.convert`'s `PYTHONPATH` alone).
+  the converter imports `sidecar` through; `RunLayout.convert` supplies `PYTHONPATH` and the cache path,
+  and `superviseRun` adds `VOLUMA_REVIEW_RUNTIME` from the same run-pinned image as the sandbox spec).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
   failed file.
+- **Reuse across runs.** The converter takes `VOLUMA_REVIEW_CACHE` (or `--cache`) and caches
+  completed assets under a hash of its source code and `VOLUMA_REVIEW_RUNTIME` (the pinned
+  sandbox image), conversion mode and `.npy` hash. A cache hit
+  copies the assets into the run's own review prefix and emits its own `assets.ready`, so
+  viewer URLs and run authorization do not change. The cache holds only voxel-space assets:
+  affine, calibration and grid identity remain each run's reported outputs. Changes to bytes,
+  mode, converter code or runtime cannot reuse the old entry. Each publisher writes a unique
+  generation, `manifest.json` last, then writes a small `ready` record selecting it. Readers
+  select one immutable generation; another publisher never overwrites its files. Completed
+  and abandoned generations are not deleted during conversion.
+  Concurrent runs in one runner wait for the same input/file/mode's conversion; independent
+  runners may duplicate a cold conversion into separate generations. This is first-report
+  reuse, not eager upload-time preparation: DICOM intake still runs per run. Runs pinned to
+  converters without cache support keep their original conversion behavior.
 - **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
   lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
   `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
@@ -165,7 +182,7 @@ who ends it:
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Locally, `start` and
    `try-run` run in their own process group (`tools/dev-run.mjs`, recorded in `.dev/pids/`):
    Ctrl-C reaches it, and `pnpm dev:stop` stops it with the worktree's dev servers: SIGTERM, so active runs release, and SIGKILL only after 55 s.
-   The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
+   Event and history writes share one retry rule in `send` (`request.ts`): a network or 5xx failure is retried until 120 s (`SELF_STOP_SECONDS`) after its first failure, or until the run stops; it logs the first failure and then every 30 s. When the time runs out the run client's `onUnreachable` stops the run, so it is released and resumed, not failed. The stop is `self-stop`, or `refused` (a strike) when a heartbeat was acknowledged since the first failure: the API is up and refuses these writes, so a route that fails for good ends the run after 3 claims instead of looping. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each and polls until Modal has reported every one terminated (a sandbox Modal no longer knows counts as gone) and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Transient Modal errors are retried with backoff and logged, a permanent one (a revoked token) fails the claim; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
@@ -307,28 +324,29 @@ and rolling back to a runner that cannot decode `imageRef` need an operator poli
 there is no automatic conversion to inline rows.
 
 **Context compaction.** `adapters/pi/compaction.ts`; nothing rewrites history between requests, so the provider's
-cache prefix stays intact. Before each request the thread's input is estimated (last reply's input, cache and output
-tokens plus the chars/4 of what came after) and so are its images: bytes and count against the model's
-`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Trigger:
-input over min(400k, 0.9 x (`contextWindow` - reserve)), reserve = min(64k, model `maxTokens`, window/4); 350k when
-the window is unknown; or images over 40% of a limit. Past it, a runtime user message tells the thread to finish the
-step and write down what it needs, it gets 3 more turns, then its own model summarizes it on a warm branch (same
-messages, system message and tools, summary instruction appended). Skipped notice, compaction at once: another turn
-would not fit (input + reserve > window, or images over 70% of a limit). Cold summary (`[system, previous summary,
-messages to summarize]`, no kept tail, images left out): when the warm request plus the 16k summary would not fit
-(or images over 90%), and always when the provider refused a request as too large (`recover`, called from
+cache prefix stays intact. Token decisions use only what the last request used (the last reply's reported input, cache read and cache write
+tokens): nothing blocks or splits a request on an estimate, so a request may go past the budget. Only a thread with no
+reply since its last compaction (resumed after a crash) is judged by a chars/4 estimate of its view. Images are measured
+before each request: bytes and count against the model's
+`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Budget:
+min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 1.5 x reserve
+(reserve = min(64k, model `maxTokens`, budget/3); wrap-up room = reserve / 2; 304k on Meta, 104k on a 200k Claude, 352k on a 32k-output model), or images over 40% of a limit, a runtime
+user message tells the thread (once per compaction) to finish the step and write down what it needs. Compact: when a reply reported input over budget - reserve, the next request is the compaction request
+(336k, 136k, 368k), or images over 70% of a limit; its own model summarizes it on a warm branch (same messages, system message and tools, summary instruction
+appended). A thread already past it when the runner restarts compacts on its next request. Cold summary (`[system, previous summary,
+messages to summarize]`, no kept tail, images left out): when images are over 90% of a limit, and always when the provider refused a request as too large (`recover`, called from
 `start-thread.ts`; then one retry in the same thread, started by a note stored only after the summary was; a failed
 recovery leaves the refusal as the thread's failure (unless the summary's own error is transient: then it ends the thread as that error and the run retries it), and a second refusal ends it as before). A summary that stops on
 length is retried once with twice the room (the thread's reasoning setting stays, so the cache holds; both calls' usage is recorded); one that also called a tool is accepted by its text.
-A compaction that would leave the thread due again (the last turn alone is over a limit) waits until a request is tight or cold. A failed summary fails the thread with the provider's own error text (so `provider-error.ts` classifies it), the
-context in a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
+A compaction that would leave the thread due again (the last turn alone is over a limit) waits until images are near a limit. A summary that fails for any reason other than an overflow fails the thread with the provider's own error text (so `provider-error.ts` classifies it); an overflow of the warm summary request recovers through the cold summary. The
+context goes to a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
 it, a failed summary's usage too (an event with `compaction: true` and no text). The event carries `compaction: true`: the run page shows it as a collapsed "History summarized" row (the notices read "Context notice") and leaves it out of a thread's `said` and `reply`. The wrap-up and overflow notices go through the thread's inbox with sender `{kind: "runtime", notice: true}`, which `thread-log` does not count as a nudge. One overflow test (`context-overflow.ts`: a 400, a 413 or no
-status, and Pi's patterns) serves both this and the runner's classifier.
+status, Pi's patterns and Anthropic's "input length and `max_tokens` exceed context limit") serves both this and the runner's classifier.
 The result is a marker row `{role: "compaction", summary, keptFrom}` appended to `pi_messages`; every earlier row
 stays. `keptFrom` indexes the thread's messages (rows that are not markers); `foldHistory` rebuilds them and the
 latest marker (and derives where it sat), and a request carries `[system, summary message, messages from keptFrom]`
-(the last ~20% of each limit `load` checks: the trigger in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
-call keeps its results). The system prompt is untouched (resume compares it). Each compaction logs `compaction:
+(the last ~20% of each limit `load` checks: the compact threshold in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
+call keeps its results). The system prompt is untouched (resume compares it); tool declarations appended since the first message stay in the request ahead of the summary. Each compaction logs `compaction:
 thread …` with tokens before and after. Images stay in history until a compaction; the loader fetches only those from
 `keptFrom`.
 
@@ -433,7 +451,7 @@ script, from its docstring's first line; the loader reads it from the snapshot).
 (`supervise-run.ts` `grantsOf`); `segment_sam` is also dropped when the runner configures no gateway, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a resumed thread keeps the system prompt and tool
-definitions it started with, run by the current tools; it is `ThreadStale` only if the input schema of one of its tools changed; a changed description (the tool's or a field's) resumes, a changed default does not, and a tool removed since answers a call with an error). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
+definitions it started with, run by the current tools; a tool whose input schema changed (a `.default`, a `.min`, a new field), or that is new to the role, is declared to it by a system message Pi appends to the transcript (`resumedTools`), stored with the history so a later resume does not append it again, and new calls use the current schema; it costs one uncached request per thread on Meta and DeepSeek and none on Anthropic's Opus 5, measured; a tool removed since is declared removed the same way; a description change (the tool's or a field's) changes nothing sent. It is `ThreadStale` only when a tool it has called no longer exists, or its model changed: switching the model under a live thread would replay another provider's reasoning blocks and ids, which nothing has measured). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
@@ -457,7 +475,7 @@ not in the log, so a resumed thread takes it from the snapshotted role file and 
 
 # Runner: a claim that ends is a cut-off, not a stop
 
-A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
+A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 120 s, a lost
 lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
 (`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
 exactly as after a crash, and the run loop writes none for the root, even if a step threw
@@ -517,7 +535,7 @@ with `telemetry`; on Render search the service's logs for these:
 
 | grep | Line | Means |
 |---|---|---|
-| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
+| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `SELF_STOP_SECONDS` |
 | `telemetry heartbeat-rtt` | once a minute: `p50`, `max`, `n` | send-to-answer time of the acknowledged heartbeats (absent when none were acknowledged) |
 | `telemetry loop-block` | when a 100 ms timer fires over 1 s late: `…ms; in flight: <run> <thread> <tool>; …` | the loop was held that long, and the tool calls recorded as started and not yet resulted at that moment (`no tool`: none) |
 | `[<run>] telemetry unhandledRejection in this run` / `uncaughtException in this run` | on the error | an error nobody caught, tied to its run and logged through its redacting log: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on. After the run's report is fixed the line says `after its report was fixed` and nothing changes |
