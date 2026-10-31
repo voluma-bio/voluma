@@ -19,6 +19,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 | `pnpm check` | Lint, typecheck and tests across the workspace. CI runs the same |
 | `pnpm db:up` | Start the local Postgres container (once per machine; needs Docker) |
 | `pnpm dev` | API and web app on free ports, with this worktree's own database; prints both URLs |
+| `pnpm dev:stop` | Stop this worktree's `pnpm dev` and runner processes (recorded in `.dev/pids/`), and no one else's |
 | `pnpm worktrees:clean` | Read-only inventory of registered worktrees; automatic cleanup and `--yes` are disabled |
 | `pnpm format` | Biome format and safe fixes |
 | `pnpm check:pr-body <body.md>` | Check a PR body draft against the template |
@@ -106,14 +107,16 @@ cd ../voluma.worktrees/<name> && pnpm i
   The exception is R2: every worktree and staging use one bucket, so a script
   that writes R2 writes only keys staging never reads (`dev/…`, a local
   example's `example-local-<runId>`); see `apps/api/AGENTS.md`.
-- The machine is shared, so stop a process only by the PID you recorded
-  when you started it. Never stop one by name or pattern: `pkill -f` and
-  `pgrep -f` match anywhere in a command line, which hits other agents' dev
-  servers and any agent session launched with a prompt that contains the
-  pattern; `killall` hits every process with that name. Start a long-running
-  process as `setsid <cmd> > <log> 2>&1 & echo $! > <pidfile>`, and stop it
-  and its children with `kill -- -$(cat <pidfile>)`. If you lost the PID,
-  leave the process running and say so in your report.
+- The machine is shared. To stop `pnpm dev`, the runner (`start`, `try-run`) and their
+  children, run `pnpm dev:stop`: it stops only the process groups this worktree
+  recorded in `.dev/pids/` and lists anything else still running here. Stop any other
+  process only by the PID you recorded when you started it. Never stop one by name or
+  pattern: `pkill -f` and `pgrep -f` match anywhere in a command line, which hits other
+  agents' dev servers and any agent session launched with a prompt that contains the
+  pattern; `killall` hits every process with that name. Start another long-running
+  process as `setsid <cmd> > <log> 2>&1 & echo $! > <pidfile>`, and stop it and its
+  children with `kill -- -$(cat <pidfile>)`. If you lost the PID, leave the process
+  running and say so in your report.
 - Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.
