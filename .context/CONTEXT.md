@@ -333,6 +333,10 @@ Nothing they run shares mutable state:
   `voluma-pg` on port 54432, shared by all worktrees as a server only), migrates it, and
   writes `.dev/env.json` (git-ignored) for the runner. `.env` holds nothing per worktree;
   the API token is generated per launch (`pnpm db:reset` drops the worktree's database);
+- The API reloads through `tsx watch`, which ignores `node_modules`, with explicit
+  includes for `apps/api/src/**` and `packages/*/src/**`. Do not use Node's import-graph
+  `--watch`: pnpm installs and worktree removal change shared dependency hardlinks
+  and can restart another worktree's API;
 - Nx keeps its cache in the worktree's `.nx/` and runs without a daemon;
 - sandboxes are named `<runId>.<name>` and tagged with the run id, so give each
   worktree's runs their own run ids; the event log is in the worktree's own
