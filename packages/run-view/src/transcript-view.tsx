@@ -23,7 +23,7 @@ import { ActivityRow } from "./chat/activity-row";
 import { InfoButton, usageRows } from "./chat/info-button";
 import { Markdown, StreamingText } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
-import type { Thread } from "./run-model";
+import { plainError, type Thread } from "./run-model";
 import type { Row, Step, ToolStep } from "./transcript";
 
 export function TranscriptView({
@@ -109,7 +109,7 @@ function RowView({ row, threads }: { row: Row; threads?: Map<string, Thread> }) 
           role="alert"
           className="rounded-xl bg-destructive-tint px-3 py-2 text-ui text-destructive"
         >
-          {row.text}
+          {plainError(row.text)}
         </p>
       );
     case "agent": {

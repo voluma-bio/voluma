@@ -362,12 +362,14 @@ const formatNumber = (value: number) =>
  * "meta API error (404): The model does not exist". A body with no message is dropped.
  */
 export const plainError = (error: string) => {
-  const brace = error.search(/\{\s*"/);
+  const brace = error.search(/\{\s*\\?"/);
   const head = brace < 0 ? error : error.slice(0, brace);
-  const title = head.split("\n")[0]?.replace(/[:\s]+$/, "") || error;
+  const title = head.split("\n")[0]?.replace(/[:\s]+$/, "") || "Error";
   if (brace < 0) return title;
   try {
-    const json = JSON.parse(error.slice(brace));
+    const body = error.slice(brace);
+    // Some recorded providers escaped the whole JSON body inside their error text.
+    const json = JSON.parse(/^\{\s*\\"/.test(body) ? JSON.parse(`"${body}"`) : body);
     const message = json?.message ?? json?.error?.message ?? json?.error;
     if (typeof message === "string" && message) return `${title}: ${message}`;
   } catch (e) {
