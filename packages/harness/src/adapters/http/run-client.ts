@@ -9,7 +9,8 @@
  * - `redact` is applied to every body before it is sent: to a history message first (it is
  *   JSON text inside the JSON body, so escaped twice), then to the serialized body.
  *
- * Event appends make one attempt: the recorder owns their retry policy. History is the
+ * Event appends make one attempt: the recorder owns their retry policy. A network or 5xx failure
+ * is the port's `EventLogUnavailable`; a lease loss or a 4xx passes through. History is the
  * durable record and a failed write ends the thread, so its calls ride out an outage of about
  * HISTORY_BUDGET_MS; they are idempotent on the server (an idx repeated with the same
  * content is a no-op), so network and 5xx failures retry. A 409 on a history append is the
@@ -29,7 +30,7 @@ import {
   type Usage,
 } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
-import type { EventLog } from "../../ports/event-log";
+import { type EventLog, EventLogUnavailable } from "../../ports/event-log";
 import { type History, HistoryConflict } from "../../ports/history";
 import { LeaseLost } from "../../ports/lease-lost";
 import { type Endpoint, HttpError, postJson, send } from "./request";
@@ -73,7 +74,16 @@ export function runClient(
 
   return {
     async append(event: EventInput) {
-      await post(`${runPath}/events`, event);
+      try {
+        await post(`${runPath}/events`, event);
+      } catch (error) {
+        const refused =
+          error instanceof LeaseLost || (error instanceof HttpError && error.status < 500);
+        if (refused) throw error;
+        throw new EventLogUnavailable(error instanceof Error ? error.message : String(error), {
+          cause: error,
+        });
+      }
     },
     /** Every stored event of the run, oldest first: what a resumed run starts its recorder with. */
     async storedEvents() {
