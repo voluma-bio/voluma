@@ -124,24 +124,24 @@ export function directoryStore(root: string, mount: string): DirectoryStore {
       const folderPrefix = prefix.slice(0, prefix.lastIndexOf("/") + 1);
       const keys: string[] = [];
       await walk(pathOf(folderPrefix || "."), folderPrefix, keys);
-      const objects: (ObjectInfo & { key: string })[] = [];
-      const folders = new Set<string>();
+      // Entries in key order, a folder at its first key, so `limit` cuts as R2 does.
+      const entries: { key: string; folder: boolean }[] = [];
       for (const key of keys.filter((k) => k.startsWith(prefix)).sort()) {
         const slash = folder ? key.indexOf("/", prefix.length) : -1;
-        if (slash >= 0) folders.add(key.slice(0, slash + 1));
+        const name = slash >= 0 ? key.slice(0, slash + 1) : key;
+        if (entries.at(-1)?.key !== name) entries.push({ key: name, folder: slash >= 0 });
+      }
+      const objects: (ObjectInfo & { key: string })[] = [];
+      const folders: string[] = [];
+      for (const entry of entries.slice(0, limit)) {
+        if (entry.folder) folders.push(entry.key);
         else
           objects.push({
-            key,
-            ...(await store.head(key).then((h) => h ?? { size: 0, etag: undefined })),
+            key: entry.key,
+            ...((await store.head(entry.key)) ?? { size: 0, etag: undefined }),
           });
       }
-      const sortedFolders = [...folders];
-      return limit === undefined
-        ? { objects, folders: sortedFolders }
-        : {
-            objects: objects.slice(0, Math.max(0, limit - sortedFolders.length)),
-            folders: sortedFolders.slice(0, limit),
-          };
+      return { objects, folders };
     },
 
     async copy(from, to, { ifMatch } = {}) {
@@ -161,7 +161,12 @@ export function directoryStore(root: string, mount: string): DirectoryStore {
 
     async serve(request) {
       const url = new URL(request.url);
-      const key = decodeURIComponent(url.pathname.slice(mount.length + 1));
+      let key: string;
+      try {
+        key = decodeURIComponent(url.pathname.slice(mount.length + 1));
+      } catch {
+        return new Response("Bad path", { status: 403 });
+      }
       const expires = Number(url.searchParams.get("expires"));
       const size = url.searchParams.get("size") ?? "";
       const cache = url.searchParams.get("cache") ?? "";
@@ -180,6 +185,9 @@ export function directoryStore(root: string, mount: string): DirectoryStore {
         return new Response(found.body, {
           headers: {
             "Content-Length": String(found.size),
+            // Stored bytes are untrusted: never let a browser sniff or run them as a page.
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
             ...(cache && { "Cache-Control": cache }),
           },
         });

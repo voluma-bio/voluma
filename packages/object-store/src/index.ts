@@ -12,7 +12,7 @@ export type ObjectInfo = {
 
 export type ObjectStore = {
   /** The object's size and ETag, or null when there is none. */
-  head(key: string, signal?: AbortSignal): Promise<ObjectInfo | null>;
+  head(key: string, options?: { signal?: AbortSignal }): Promise<ObjectInfo | null>;
   /**
    * Streams an object. Throws `ObjectNotFound` when there is none. An object with no usable
    * length or a stored Content-Encoding is refused: the SDK doesn't decode it, so its bytes

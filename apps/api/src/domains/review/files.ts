@@ -1,12 +1,30 @@
 /** Review's keys in the object store: a run's files, message snapshots and converted assets. */
 import { evidenceKey, reviewAssetKey } from "@voluma/contracts/r2";
-import type { ObjectStore } from "@voluma/object-store";
+import { ObjectNotFound, type ObjectStore } from "@voluma/object-store";
 import { HTTPException } from "hono/http-exception";
-import { openObject } from "../../object-http";
 
 /** A URL is signed at the start of a window and valid for `ASSET_URL_SECONDS` from there, so a request gets one with at least the difference left. */
 const ASSET_WINDOW_SECONDS = 240;
 const ASSET_URL_SECONDS = 300;
+
+/** Opens an object for streaming: 404 when storage has none, 502 when storage fails. */
+export async function openObject(
+  store: ObjectStore,
+  key: string,
+  signal: AbortSignal,
+  messages: { missing: string; failed: string },
+  ifMatch?: string,
+): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }> {
+  try {
+    const { body, size } = await store.get(key, { ifMatch, signal });
+    return { body, byteLength: size };
+  } catch (error) {
+    const missing = error instanceof ObjectNotFound;
+    throw new HTTPException(missing ? 404 : 502, {
+      message: missing ? messages.missing : messages.failed,
+    });
+  }
+}
 
 export const openFile = (store: ObjectStore, key: string, signal: AbortSignal) =>
   openObject(store, key, signal, {

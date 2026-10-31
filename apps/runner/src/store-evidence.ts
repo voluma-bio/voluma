@@ -34,7 +34,7 @@ export function storeEvidence(store: ObjectStore): Evidence {
         file.root === "outputs"
           ? outputKey(runId, taskId, file.path)
           : scratchKey(runId, file.path);
-      const head = await store.head(key, signal);
+      const head = await store.head(key, { signal });
       if (!head) throw new EvidenceNotFound(key);
       const etag = head.etag;
       const seen = hashed.get(key);
@@ -50,7 +50,7 @@ export function storeEvidence(store: ObjectStore): Evidence {
       }
       const target = evidenceKey(runId, sha256);
       // Content-addressed and never overwritten.
-      if (!(await store.head(target, signal))) {
+      if (!(await store.head(target, { signal }))) {
         // ifMatch: a file rewritten since it was hashed fails the copy instead of storing
         // other bytes under this hash.
         await store.copy(key, target, { ifMatch: etag, signal });

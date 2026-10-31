@@ -8,8 +8,8 @@ import type { ObjectStore } from "@voluma/object-store";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requireUser, type UserEnv } from "../../domain";
-import { openObject } from "../../object-http";
 import type { ReviewDeps } from ".";
+import { openObject } from "./files";
 
 export function inputRoutes({ store }: ReviewDeps) {
   const app = new Hono<UserEnv & { Variables: { store: ObjectStore } }>();
@@ -30,7 +30,7 @@ export function inputRoutes({ store }: ReviewDeps) {
 
   app.get("/inputs/:inputId/download", async (c) => {
     const archive = await c.var.store
-      .head(referenceScanArchiveKey(), c.req.raw.signal)
+      .head(referenceScanArchiveKey(), { signal: c.req.raw.signal })
       .catch(() => {
         throw new HTTPException(502, { message: "Could not read the reference scan." });
       });
@@ -60,12 +60,7 @@ export function inputRoutes({ store }: ReviewDeps) {
         missing: "Reference scan archive not found.",
         failed: "Could not read the reference scan.",
       },
-      {
-        ifMatch: version,
-        validate: (size) => {
-          if (size <= 0) throw new Error("The reference archive must have a positive length.");
-        },
-      },
+      version,
     );
     c.header("Content-Type", "application/zip");
     c.header("Content-Length", String(byteLength));

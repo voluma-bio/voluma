@@ -54,7 +54,7 @@ export function r2Store(config: R2Config, options: R2Options = {}): ObjectStore 
   const Bucket = config.bucket;
 
   return {
-    async head(Key, signal) {
+    async head(Key, { signal } = {}) {
       try {
         const head = await client.send(new HeadObjectCommand({ Bucket, Key }), {
           abortSignal: signal,
