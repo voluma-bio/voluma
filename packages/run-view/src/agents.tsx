@@ -79,6 +79,7 @@ export function ThreadSpendInfo({ thread }: { thread: Thread }) {
 
 const MARK: Record<Thread["status"], string> = {
   running: "bg-info-tint text-info",
+  waiting: "bg-muted text-muted-foreground",
   paused: "bg-muted text-muted-foreground",
   completed: "bg-primary-tint text-primary-strong",
   failed: "bg-destructive-tint text-destructive",
@@ -123,7 +124,7 @@ const VERDICT = {
 } as const;
 
 function ResultLine({ thread }: { thread: Thread }) {
-  if (thread.status === "running" || thread.status === "paused")
+  if (thread.status === "running" || thread.status === "waiting" || thread.status === "paused")
     return (
       <p className="truncate font-mono text-meta text-muted-foreground">
         {thread.liveTool ?? thread.lastTool ?? "Starting"}
@@ -143,6 +144,7 @@ function ResultLine({ thread }: { thread: Thread }) {
 /** A thread's status as the one status vocabulary of `@voluma/ui`. */
 export const THREAD_STATUS: Record<Thread["status"], Status> = {
   running: "running",
+  waiting: "waiting",
   paused: "paused",
   completed: "done",
   failed: "stopped",
