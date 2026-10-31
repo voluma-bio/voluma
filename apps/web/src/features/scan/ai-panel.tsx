@@ -4,12 +4,17 @@
  * view, or the item's task after Something's wrong; "The AI sees" names what goes with it: the
  * scan, the task, a picture of the views as they show (`snapshot`) and your marks. A
  * message reopens a finished run for one answer: the AI talks it through and, when a redo would
- * help, offers one (`reply.offer`); "Yes, redo <task>" under its latest reply accepts it (`go`).
- * Who may write, and when, is the API's rule (`messages.ts`); the run read carries it as `cannotMessage` and the box shows it as its reason for being off.
+ * help, offers one (`reply.offer`). Under its latest offer, "Yes, redo <task>" and "No, keep it"
+ * start your answer in the box, where you can add detail; Send sends it (a `go` on the task, or a
+ * message about it). The answer is a message like any other, so it opens a conversation.
+ * When the AI is done with a message the chat says how it ended (`outcome`): what it did, or that
+ * it failed or was stopped and the earlier results stand. Until then it says the AI is working.
+ * Who may write, and when, is the API's rule (`messages.ts`); the run read carries it as
+ * `cannotMessage` and the box shows it as its reason for being off.
  */
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
-import { conversation } from "@voluma/contracts/conversation";
+import { type ConversationItem, conversation, openOffer } from "@voluma/contracts/conversation";
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
   MESSAGE_BODY_BYTES,
@@ -17,8 +22,8 @@ import {
 } from "@voluma/contracts/messages";
 import type { RunRead } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
-import { Button, Chip, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
-import { RotateCcw, Send } from "lucide-react";
+import { Button, Chip, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
+import { ArrowRight, RotateCcw, Send, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { describe, type YourMark } from "./marks-panel";
 
@@ -114,8 +119,10 @@ export function useMessage({
   /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
   onSent: (marks: string[]) => void;
 }) {
-  const subject = tasks.find((t) => t.id === (about?.taskId ?? task?.id));
   const [text, setText] = useDraft(`voluma:ai-draft:${run.id}`);
+  /** The AI's offer you are answering: `go` redoes its task, else you keep the task as it is. */
+  const [answer, setAnswer] = useState<{ replyId: string; taskId: string; go: boolean }>();
+  const subject = tasks.find((t) => t.id === (answer?.taskId ?? about?.taskId ?? task?.id));
   // The API deduplicates by id alone. A retry must keep the entire request, including its PNG.
   const tried = useRef<{
     fingerprint: string;
@@ -138,8 +145,8 @@ export function useMessage({
       return { marks: attempt.marks, offer: attempt.offer, unseen };
     },
     onSuccess: (sent) => {
-      // Accepting an offer sends no words: what is in the box stays.
-      if (!sent.offer) setText("");
+      setText("");
+      setAnswer(undefined);
       setUnseen(sent.unseen);
       if (sent.offer) setAccepted(sent.offer);
       tried.current = undefined;
@@ -150,32 +157,37 @@ export function useMessage({
     },
   });
   const closed = run.cannotMessage ?? undefined;
-  /** Sends the words, or with `offer` accepts the AI's offer to redo a task (a `go`, nothing else). */
-  const submit = (offer?: { replyId: string; taskId: string }) => {
-    const go = offer !== undefined;
-    if (closed !== undefined || inFlight.current || (!go && !text.trim())) return;
+  /**
+   * Sends the words. An answer to an offer carries only the words and the offer's task (with `go`
+   * when it redoes it), no picture and no marks; its words are optional.
+   */
+  const submit = () => {
+    const go = answer?.go === true;
+    if (closed !== undefined || inFlight.current || (!answer && !text.trim())) return;
     inFlight.current = true;
-    const note = go ? "" : text.trim();
-    const carried = !go && subject ? marks : [];
-    const fields = go
-      ? { taskId: offer.taskId, go: true as const }
+    const note = text.trim();
+    const carried = !answer && subject ? marks : [];
+    const fields = answer
+      ? go
+        ? { taskId: answer.taskId, go: true as const, ...(note && { text: note }) }
+        : { taskId: answer.taskId, text: note || KEEP_IT }
       : {
           text: note,
           ...(subject && { taskId: subject.id }),
           ...(subject && itemId && { itemId }),
           ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
         };
-    // A go is told apart by the offer it accepts: a later offer for the same task is a new message.
+    // An answer is told apart by the offer it answers: a later offer for the same task is a new message.
     const fingerprint = JSON.stringify({
       ...fields,
-      offer: offer?.replyId,
+      offer: answer?.replyId,
       marks: carried,
-      viewKey: !go && snapshot ? viewKey : undefined,
+      viewKey: !answer && snapshot ? viewKey : undefined,
     });
     if (tried.current?.fingerprint !== fingerprint) {
-      // Marks name a block of the task's results, so they go only with a task; a redo takes none.
+      // Marks name a block of the task's results, so they go only with a task; an answer takes none.
       const body: SendRunMessageRequest = { id: crypto.randomUUID(), ...fields };
-      // A redo has nothing to show the AI; a message carries the views as they are, in the room
+      // An answer has nothing to show the AI; a message carries the views as they are, in the room
       // the rest of the body leaves (base64 is 4 bytes per 3, plus the field's own JSON).
       const room = Math.floor(
         ((MESSAGE_BODY_BYTES - new Blob([JSON.stringify(body)]).size - 64) * 3) / 4,
@@ -183,7 +195,7 @@ export function useMessage({
       // Invoke capture before mutate: a mutation can pause offline while the user changes tasks.
       // A capture that fails sends the message without its picture, and says so.
       const picture: Promise<string | null | undefined> =
-        go || !snapshot
+        answer || !snapshot
           ? Promise.resolve(undefined)
           : room > 0
             ? snapshot(Math.min(MAX_MESSAGE_SNAPSHOT_BYTES, room))
@@ -193,8 +205,8 @@ export function useMessage({
       tried.current = {
         fingerprint,
         marks: carried.map((m) => m.id),
-        offer: offer?.replyId,
-        redo: offer?.taskId,
+        offer: answer?.replyId,
+        redo: go ? answer?.taskId : undefined,
         prepared: picture.then((data) => ({
           body: { ...body, ...(data && { snapshot: { mimeType: "image/png" as const, data } }) },
           unseen: data === null,
@@ -203,21 +215,41 @@ export function useMessage({
     }
     send.mutate(tried.current);
   };
-  return { subject, text, setText, send, unseen, submit, closed, accepted };
+  return {
+    subject,
+    text,
+    setText,
+    send,
+    unseen,
+    submit,
+    closed,
+    accepted,
+    answer,
+    setAnswer,
+  };
 }
+
+/** What a "No, keep it" answer says when you add nothing. */
+const KEEP_IT = "No, keep it.";
 
 export function AiPanel({
   run,
   scan,
   tasks,
+  inView,
+  onTask,
   about,
   marks,
   views,
-  message: { subject, text, setText, send, unseen, submit, closed, accepted },
+  message: { subject, text, setText, send, unseen, submit, closed, accepted, answer, setAnswer },
 }: {
   run: RunRead;
   scan: string;
   tasks: TaskView[];
+  /** The task in view: a redo of it needs no link to it. */
+  inView: string | undefined;
+  /** Shows a task's results. */
+  onTask: (taskId: string) => void;
   /** Set by Something's wrong: the box takes focus. */
   about: { taskId: string; at: number } | undefined;
   /** Your marks the next message carries, shown under "The AI sees". */
@@ -230,11 +262,18 @@ export function AiPanel({
   const items = useMemo(() => conversation(events), [events]);
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
-    if (about) form.current?.querySelector("textarea")?.focus();
-  }, [about]);
+    if (about || answer) form.current?.querySelector("textarea")?.focus();
+  }, [about, answer]);
+  // An answer is to the open offer: once a reply or message follows it, there is nothing to answer.
+  const offer = openOffer(items);
+  useEffect(() => {
+    if (answer && offer?.id !== answer.replyId) setAnswer(undefined);
+  }, [answer, offer, setAnswer]);
   const closedId = useId();
-  const answering =
-    run.state.status !== "ended" && items.length > 0 && items.at(-1)?.from === "person";
+  const titleOf = (id: string) => tasks.find((t) => t.id === id)?.title ?? id;
+  // The AI works on a message until its correction's outcome; a run that ended has stopped.
+  const waiting = [...items].reverse().find((m) => m.from !== "agent");
+  const working = run.state.status !== "ended" && waiting?.from === "person" ? waiting : undefined;
 
   const log = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -248,8 +287,8 @@ export function AiPanel({
         <span className="mr-0.5">The AI sees</span>
         <Chip>{scan}</Chip>
         {subject && <Chip>{subject.title}</Chip>}
-        {views && <Chip>the views</Chip>}
-        {marks.length === 0 ? (
+        {!answer && views && <Chip>the views</Chip>}
+        {answer ? null : marks.length === 0 ? (
           <Chip>no marks of yours</Chip>
         ) : (
           marks.map((m) => (
@@ -269,9 +308,9 @@ export function AiPanel({
                 <li key={m.id} className="ml-6 grid gap-1 rounded-lg bg-muted px-3 py-2">
                   <span className="text-xs text-muted-foreground">
                     You
-                    {m.taskId &&
-                      `, about ${tasks.find((t) => t.id === m.taskId)?.title ?? m.taskId}`}
+                    {m.taskId && !m.go && `, on ${titleOf(m.taskId)}`}
                   </span>
+                  {m.go && m.taskId && <p className="text-sm">Yes, redo {titleOf(m.taskId)}.</p>}
                   {m.text && <p className="text-sm whitespace-pre-wrap">{m.text}</p>}
                   {m.marks.length > 0 && (
                     <span className="flex flex-wrap gap-1">
@@ -287,39 +326,65 @@ export function AiPanel({
                       })}
                     </span>
                   )}
-                  {m.go && <StatusMark status="running" label="Asked for a redo" />}
+                </li>
+              ) : m.from === "outcome" ? (
+                <li key={m.id} className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">The AI</span>
+                  <Outcome
+                    outcome={m}
+                    title={m.redo && titleOf(m.redo)}
+                    onShow={m.redo === inView ? undefined : onTask}
+                  />
                 </li>
               ) : (
                 <li key={m.id} className="grid gap-1">
                   <span className="text-xs text-muted-foreground">The AI</span>
                   <Markdown text={m.text} className="text-sm" />
-                  {m.offer &&
-                    m === items.at(-1) &&
+                  {m === offer &&
                     closed === undefined &&
                     m.id !== accepted &&
+                    answer?.replyId !== m.id &&
                     (() => {
                       const offered = tasks.find((t) => t.id === m.offer?.taskId);
+                      if (!offered) return null;
+                      const pick = (go: boolean) =>
+                        setAnswer({ replyId: m.id, taskId: offered.id, go });
                       return (
-                        offered && (
+                        <span className="flex flex-wrap gap-2">
                           <Button
                             type="button"
                             size="sm"
-                            className="justify-self-start"
                             disabled={send.isPending}
-                            onClick={() => submit({ replyId: m.id, taskId: offered.id })}
+                            onClick={() => pick(true)}
                           >
                             <RotateCcw aria-hidden />
                             Yes, redo {offered.title}
                           </Button>
-                        )
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={send.isPending}
+                            onClick={() => pick(false)}
+                          >
+                            No, keep it
+                          </Button>
+                        </span>
                       );
                     })()}
                 </li>
               ),
             )}
-            {answering && (
+            {working && (
               <li>
-                <StatusMark status="running" label="The AI is answering" />
+                <StatusMark
+                  status="running"
+                  label={
+                    working.go && working.taskId
+                      ? `Redoing ${titleOf(working.taskId)}`
+                      : "The AI is answering"
+                  }
+                />
               </li>
             )}
           </ol>
@@ -333,10 +398,32 @@ export function AiPanel({
           submit();
         }}
       >
+        {answer && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Your answer</span>
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {answer.go ? `Redo ${titleOf(answer.taskId)}` : `Keep ${titleOf(answer.taskId)}`}
+            </span>
+            <IconButton
+              label="Cancel your answer"
+              size="sm"
+              disabled={send.isPending}
+              onClick={() => setAnswer(undefined)}
+            >
+              <X aria-hidden />
+            </IconButton>
+          </div>
+        )}
         <TextAreaField
           label="Message to the AI"
           hideLabel
-          placeholder="What's wrong and why? What does the AI need to do to get it right?"
+          placeholder={
+            answer
+              ? answer.go
+                ? "Anything the AI should know for the redo? Optional."
+                : "Anything the AI should know? Optional."
+              : "What's wrong and why? What does the AI need to do to get it right?"
+          }
           rows={3}
           maxLength={10_000}
           value={text}
@@ -361,7 +448,7 @@ export function AiPanel({
             type="submit"
             variant="primary"
             size="sm"
-            disabled={closed !== undefined || send.isPending || !text.trim()}
+            disabled={closed !== undefined || send.isPending || (!answer && !text.trim())}
             aria-describedby={closed ? closedId : undefined}
           >
             <Send aria-hidden />
@@ -379,6 +466,60 @@ export function AiPanel({
           </p>
         )}
       </form>
+    </div>
+  );
+}
+
+/**
+ * How a correction ended, as the AI's closing message: what it did, or that it failed or was
+ * stopped. A failed or stopped redo undid its changes, so the task's earlier results stand.
+ */
+function Outcome({
+  outcome: { status, text, redo },
+  title,
+  onShow,
+}: {
+  outcome: Extract<ConversationItem, { from: "outcome" }>;
+  /** The redone task's name. */
+  title: string | undefined;
+  /** Opens the redone task; unset when it is in view. */
+  onShow: ((taskId: string) => void) | undefined;
+}) {
+  if (status === "completed")
+    return (
+      <div className="grid gap-1.5 rounded-lg border border-border px-3 py-2">
+        <StatusMark status="done" label={title ? `Redid ${title}` : "Done"} />
+        {text && <Markdown text={text} className="text-sm" />}
+        {redo && onShow && (
+          <Button
+            type="button"
+            variant="link"
+            className="justify-self-start"
+            onClick={() => onShow(redo)}
+          >
+            Show {title}
+            <ArrowRight aria-hidden />
+          </Button>
+        )}
+      </div>
+    );
+  const stopped = status === "cancelled";
+  return (
+    <div className="grid gap-1.5 rounded-lg border border-border px-3 py-2">
+      <StatusMark
+        status="stopped"
+        label={
+          title
+            ? `Redo of ${title} ${stopped ? "stopped" : "failed"}`
+            : stopped
+              ? "Answer stopped"
+              : "Stopped with an error"
+        }
+      />
+      {title && <p className="text-sm">The earlier results of {title} stand.</p>}
+      {text && (
+        <p className="text-xs break-words whitespace-pre-wrap text-muted-foreground">{text}</p>
+      )}
     </div>
   );
 }
