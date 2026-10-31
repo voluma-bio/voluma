@@ -1,6 +1,6 @@
 /**
- * Run domain tables (Drizzle). `threads` is a projection of the thread.* events,
- * written in the same transaction as the event.
+ * Run domain tables (Drizzle). `threads` is unused: nothing writes or reads it, and a later
+ * migration drops it (its writer went with the run-keyed rows).
  *
  * Neither table uses `jsonb`. `pi_messages.message` is `text`: history is read back
  * byte for byte (the retry compare and the model's prompt cache depend on it), and
@@ -31,6 +31,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -66,17 +67,29 @@ export const events = pgTable(
   (t) => [
     unique("events_run_seq").on(t.runId, t.seq),
     index("events_thread").on(t.threadId, t.seq),
+    // The key the code uses, `(run_id, id)`; `id` stays the primary key until the contract step.
+    uniqueIndex("events_run_id_id").on(t.runId, t.id),
   ],
 );
 
+/**
+ * `run_id` is null only on rows an older API wrote; the trigger `pi_messages_fill_run_id` (in
+ * migration 0014, not declared here) fills it from the thread id's `<runId>.` prefix. The code reads
+ * and writes by `(run_id, thread_id, idx)`; `(thread_id, idx)` stays the primary key until the
+ * contract step (`NOT NULL`, the primary key moved to the run-keyed index).
+ */
 export const piMessages = pgTable(
   "pi_messages",
   {
+    runId: text(),
     threadId: text().notNull(),
     idx: integer().notNull(),
     message: text().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.threadId, t.idx] })],
+  (t) => [
+    primaryKey({ columns: [t.threadId, t.idx] }),
+    uniqueIndex("pi_messages_run_thread_idx").on(t.runId, t.threadId, t.idx),
+  ],
 );
 
 /**

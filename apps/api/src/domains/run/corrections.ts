@@ -145,7 +145,10 @@ export async function decideMessage(
     throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
   }
   const eventId = personEventId(runId, msg.id);
-  const [again] = await tx.select({ id: events.id }).from(events).where(eq(events.id, eventId));
+  const [again] = await tx
+    .select({ id: events.id })
+    .from(events)
+    .where(and(eq(events.runId, runId), eq(events.id, eventId)));
   const stateNow = async () => (await loadRun(tx, runId)).state;
   if (again) return { eventId, state: await stateNow(), duplicate: true };
 

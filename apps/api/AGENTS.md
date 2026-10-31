@@ -74,6 +74,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` restores
   a dump's original study, scans and inputs, refusing conflicting shared rows. Only legacy dumps
   without study metadata get a study of one.
+- **Rows are read and written by run.** Every query on `events` and `pi_messages` filters by `run_id`
+  (`events` has a unique index `(run_id, id)`, `pi_messages` `(run_id, thread_id, idx)`), and no
+  code reads a thread id's text; ingest scopes every write by the lease and the path's run. The
+  primary keys are still `events(id)` and `pi_messages(thread_id, idx)`, and `pi_messages.run_id` is
+  still nullable, with a trigger that fills it for the previous API's inserts: the contract step is a
+  later migration ([TODO](.context/TODO.md)).
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a

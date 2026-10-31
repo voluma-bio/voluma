@@ -2,7 +2,7 @@
  * Operator script: load a run dumped by `export-run.ts` into DATABASE_URL.
  *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
- * threads, pi messages, snapshots and provider calls first. Dumps with study metadata restore the original
+ * pi messages, snapshots and provider calls first. Dumps with study metadata restore the original
  * study and scans, refusing conflicting shared rows. Older dumps get a study of one scan.
  * The study's workflow is the one the dump names (the run's `workflowId` in older dumps, else its study's; their
  * pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
@@ -23,18 +23,10 @@ import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
 import { eventLock } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
-import {
-  events,
-  inputs,
-  piMessages,
-  runs,
-  studies,
-  studyScans,
-  threads,
-} from "../domains/run/schema";
+import { events, inputs, piMessages, runs, studies, studyScans } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
 import { withLocalDir } from "./r2-dir";
-import { assertRestorable, countsOf, describeCounts, piMessagesOf } from "./run-dump";
+import { assertRestorable, countsOf, describeCounts } from "./run-dump";
 
 const { values } = parseArgs({
   options: { from: { type: "string" }, replace: { type: "boolean" }, remote: { type: "boolean" } },
@@ -63,8 +55,8 @@ const dump = await withLocalDir(
       studyScans?: (typeof studyScans.$inferSelect)[];
       studyInputs?: (typeof inputs.$inferSelect)[];
       events: { id: string; seq: number; runId: string }[];
-      threads: { runId: string }[];
-      piMessages: { threadId: string }[];
+      // Dumps made before run-keyed rows also hold `threads` (ignored) and `pi_messages` without `runId`.
+      piMessages: { runId?: string }[];
       // Dumps from before these were exported have neither.
       reviewSnapshots?: { runId: string; generation: string }[];
       providerCalls?: { runId: string }[];
@@ -126,8 +118,7 @@ await db.transaction(async (tx) => {
   if (existing && !values.replace) throw new Error(`run ${runId} exists; pass --replace`);
   await tx.delete(providerCalls).where(eq(providerCalls.runId, runId));
   await tx.delete(reviewSnapshots).where(eq(reviewSnapshots.runId, runId));
-  await tx.delete(piMessages).where(piMessagesOf(runId));
-  await tx.delete(threads).where(eq(threads.runId, runId));
+  await tx.delete(piMessages).where(eq(piMessages.runId, runId));
   await tx.delete(events).where(eq(events.runId, runId));
   await tx.delete(runs).where(eq(runs.id, runId));
 
@@ -201,8 +192,10 @@ await db.transaction(async (tx) => {
     }
   };
   await insertAll(events, dump.events);
-  await insertAll(threads, dump.threads);
-  await insertAll(piMessages, dump.piMessages);
+  await insertAll(
+    piMessages,
+    dump.piMessages.map((m) => ({ ...m, runId })),
+  );
   await insertAll(
     reviewSnapshots,
     (dump.reviewSnapshots ?? []).map((snapshot) => ({

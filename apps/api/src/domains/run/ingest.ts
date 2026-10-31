@@ -9,8 +9,8 @@
  *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
  * Every route on a run carries the lease token (400 when missing); a stale one is a 409
- * `lease-lost`, checked in the write's own transaction. A thread id must begin with
- * `<runId>.`, else 400: the path's thread, and the event's `threadId` and `parentThreadId`.
+ * `lease-lost`, checked in the write's own transaction. Reads and writes
+ * are keyed by the path's run, so the lease scopes them whatever a thread's id looks like.
  * An event id stored under another run is a 409. A claim returns a visitor run's keys once (pg-queue.ts).
  */
 import { eventInputSchema, type RunEventsResponse } from "@voluma/contracts/events";
@@ -43,10 +43,6 @@ const storableRow = historyRowSchema.refine(
   (row) => !row.message.includes("\0"),
   "message contains a NUL byte",
 );
-
-/** A thread id carries its run's id, so one run can't write another's threads. */
-const inRun = (runId: string, threadId: string) => threadId.startsWith(`${runId}.`);
-const NOT_IN_RUN = "thread id must begin with <runId>.";
 
 const liveBatchSchema = z.object({ frames: z.array(liveFrameSchema).max(1000) });
 
@@ -111,13 +107,6 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
     if (event.runId !== c.req.param("runId")) {
       throw new HTTPException(400, { message: "event runId does not match the path" });
     }
-    const threads = [event.threadId];
-    if (event.type === "thread.started" && event.payload.parentThreadId) {
-      threads.push(event.payload.parentThreadId);
-    }
-    if (!threads.every((thread) => inRun(event.runId, thread))) {
-      throw new HTTPException(400, { message: NOT_IN_RUN });
-    }
     await eventLog.append(event, c.var.leaseToken);
     return c.body(null, 204);
   });
@@ -127,8 +116,8 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
   app.post("/ingest/runs/:runId/live", async (c) => {
     const runId = c.req.param("runId");
     const { frames } = await parseJson(c, liveBatchSchema);
-    if (!frames.every((f) => f.runId === runId && inRun(runId, f.threadId))) {
-      throw new HTTPException(400, { message: NOT_IN_RUN });
+    if (!frames.every((f) => f.runId === runId)) {
+      throw new HTTPException(400, { message: "frame runId does not match the path" });
     }
     await eventLog.checkLease(runId, c.var.leaseToken);
     for (const frame of frames) notifier.publish(runId, frame);
@@ -147,12 +136,6 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
       events: page.slice(0, EVENTS_PAGE),
       more: page.length > EVENTS_PAGE,
     } satisfies RunEventsResponse);
-  });
-
-  app.use("/ingest/runs/:runId/threads/:threadId/*", async (c, next) => {
-    const { runId, threadId } = c.req.param();
-    if (!inRun(runId, threadId)) throw new HTTPException(400, { message: NOT_IN_RUN });
-    await next();
   });
 
   app.get("/ingest/runs/:runId/threads/:threadId/messages", async (c) => {
