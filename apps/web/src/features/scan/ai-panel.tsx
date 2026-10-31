@@ -3,9 +3,9 @@
  * (`conversation`), and a box to write to it (`sendRunMessage`). A message is about the task in
  * view, or the item's task after Something's wrong; "The AI sees" names what goes with it: the
  * scan, the task, a picture of the views as they show (`snapshot`) and your marks. A
- * message reopens a finished run for one answer; "Redo" asks the AI to do the task again with
- * what was said. Who may write, and when, is the API's rule (`messages.ts`); the box says why it
- * is off.
+ * message reopens a finished run for one answer: the AI talks it through and, when a redo would
+ * help, offers one (`reply.offer`); "Yes, redo <task>" under its latest reply accepts it (`go`).
+ * Who may write, and when, is the API's rule (`messages.ts`); the box says why it is off.
  */
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
@@ -72,6 +72,7 @@ export function useMessage({
   marks,
   snapshot,
   viewKey,
+  itemId,
   onSent,
 }: {
   run: Run;
@@ -90,6 +91,8 @@ export function useMessage({
   snapshot: ((maxBytes: number) => Promise<Blob | null | undefined>) | undefined;
   /** Identity of the image/grid being captured, independent of the current camera. */
   viewKey: string | undefined;
+  /** The To check item open on the subject task, so the AI knows which one you mean. */
+  itemId: string | undefined;
   /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
   onSent: (marks: string[]) => void;
 }) {
@@ -123,18 +126,21 @@ export function useMessage({
     },
   });
   const closed = closedBecause(run, me);
-  const submit = (go: boolean) => {
+  /** Sends the words, or with `redo` accepts the AI's offer to redo that task (a `go`, nothing else). */
+  const submit = (redo?: string) => {
+    const go = redo !== undefined;
     if (closed !== undefined || inFlight.current || (!go && !text.trim())) return;
-    if (go && !subject) return;
     inFlight.current = true;
-    const note = text.trim();
+    const note = go ? "" : text.trim();
     const carried = !go && subject ? marks : [];
-    const fields = {
-      ...(note && { text: note }),
-      ...(subject && { taskId: subject.id }),
-      ...(go && { go: true as const }),
-      ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
-    };
+    const fields = go
+      ? { taskId: redo, go: true as const }
+      : {
+          text: note,
+          ...(subject && { taskId: subject.id }),
+          ...(subject && itemId && { itemId }),
+          ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
+        };
     const fingerprint = JSON.stringify({
       ...fields,
       marks: carried,
@@ -265,6 +271,18 @@ export function AiPanel({
                 <li key={m.id} className="grid gap-1">
                   <span className="text-xs text-muted-foreground">The AI</span>
                   <Markdown text={m.text} className="text-sm" />
+                  {m.offer && m === items.at(-1) && closed === undefined && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="justify-self-start"
+                      disabled={send.isPending}
+                      onClick={() => submit(m.offer?.taskId)}
+                    >
+                      <RotateCcw aria-hidden />
+                      Yes, redo {tasks.find((t) => t.id === m.offer?.taskId)?.title ?? "it"}
+                    </Button>
+                  )}
                 </li>
               ),
             )}
@@ -281,13 +299,13 @@ export function AiPanel({
         className="grid gap-2 border-t border-border p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          submit(false);
+          submit();
         }}
       >
         <TextAreaField
           label="Message to the AI"
           hideLabel
-          placeholder="Ask about what you're looking at, or say what should change"
+          placeholder="What's wrong and why? What does the AI need to do to get it right?"
           rows={3}
           maxLength={10_000}
           value={text}
@@ -297,7 +315,7 @@ export function AiPanel({
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              if (!e.repeat && !e.nativeEvent.isComposing) submit(false);
+              if (!e.repeat && !e.nativeEvent.isComposing) submit();
             }
           }}
         />
@@ -308,18 +326,6 @@ export function AiPanel({
         )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex-1" />
-          {subject && (
-            <Button
-              type="button"
-              size="sm"
-              disabled={closed !== undefined || send.isPending}
-              aria-describedby={closed ? closedId : undefined}
-              onClick={() => submit(true)}
-            >
-              <RotateCcw aria-hidden />
-              Redo {subject.title}
-            </Button>
-          )}
           <Button
             type="submit"
             variant="primary"
