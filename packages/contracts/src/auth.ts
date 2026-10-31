@@ -38,8 +38,8 @@
  * Rules for every request under `/api` that doesn't carry the runner's bearer token:
  *   - A non-GET/HEAD request must send `content-type: application/json`, or
  *     the server answers 415.
- *   - `Origin` must equal the app's origin, or the server answers 403
- *     `forbidden origin`. Browsers send it on same-origin fetches.
+ *   - `Origin` must equal the app's origin, or the server answers 403 (its
+ *     message tells a person to reload). Browsers send it on same-origin fetches.
  * `me` also answers 403 to a bearer (non-cookie) principal.
  */
 import { z } from "zod";
