@@ -12,8 +12,8 @@
  *                                  not a measurement or score of the study's workflow). `POST /api/run/studies`
  *                                  (`study.ts`) creates a study and starts its first runs.
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
- *   GET  /api/run/runs/:id         → 200 `runSchema`
- *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
+ *   GET  /api/run/runs/:id         → 200 `runReadSchema`: the run plus what this caller may do now
+ *   POST /api/run/runs/:id/cancel  → 200 `runReadSchema` with state `ended`/`cancelled`
  *                                  at once, even if the runner is still stopping (the
  *                                  server records it and the runner obeys); cancelling
  *                                  an ended run is a no-op; 403 for an example run.
@@ -21,7 +21,7 @@
  *                                  server writes `correction.ended {cancelled}`
  *   POST /api/review/runs/:id/messages (`messages.ts`) reopens a run that ended `completed`,
  *                                  moving it to `queued` for one claim
- *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runSchema`
+ *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runReadSchema`
  *                                  (409 unless the run is `awaiting-keys`; 403 unless
  *                                  the caller is its `startedBy`; 429: see Limits)
  *   GET  /api/run/inputs           → 200 `listInputsResponseSchema`, newest first: inputs a
@@ -281,6 +281,34 @@ export const runSchema = z
     { path: ["review"], message: "only successfully completed runs have review progress" },
   );
 export type Run = z.infer<typeof runSchema>;
+
+/**
+ * Why a decision on the run's results can't be taken now, whoever the caller is: the rule the
+ * accept and mark-reviewed routes enforce and `runReadSchema.cannotAccept` reports. The 403/409
+ * are those routes' statuses; the message is shown to the researcher as is.
+ */
+export function acceptRefusal(
+  run: Pick<Run, "example" | "state" | "review">,
+): { status: 403 | 409; message: string } | null {
+  if (run.example) return { status: 403, message: "Example runs can't be changed." };
+  if (run.state.status !== "ended")
+    return { status: 409, message: "You can decide once the run finishes." };
+  if (run.review === null)
+    return { status: 409, message: "This run didn't finish, so there is nothing to accept." };
+  return null;
+}
+
+/**
+ * A run as the scan page reads it: the run plus what this caller may do on it now, from the
+ * same functions that guard the writes. `cannotMessage` (a message to the run's AI,
+ * `messages.ts`) and `cannotAccept` (a decision on its results) are null when the caller may,
+ * else the reason, worded for the researcher. Only the browser parses this; the runner reads
+ * `runSchema`, so the fields are required here and nowhere the runner reads.
+ */
+export const runReadSchema = runSchema.and(
+  z.object({ cannotMessage: z.string().nullable(), cannotAccept: z.string().nullable() }),
+);
+export type RunRead = z.infer<typeof runReadSchema>;
 
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
 const keyField = z.string().min(1).max(512);

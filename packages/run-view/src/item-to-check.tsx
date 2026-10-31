@@ -39,6 +39,8 @@ export type ItemToCheckProps = {
   readOnly?: string;
   /** Something's wrong: tell the AI what should change. */
   onWrong?: () => void;
+  /** Why Something's wrong is off; the button stays, disabled. */
+  wrongReason?: string;
   /** The page's own way in after the decisions, such as the study's "Review in 3D". */
   actions?: ReactNode;
   /** What went wrong with the last decision. */
@@ -59,6 +61,7 @@ export function ItemToCheck({
   focusAccept = false,
   readOnly,
   onWrong,
+  wrongReason,
   actions,
   error,
   className,
@@ -97,8 +100,14 @@ export function ItemToCheck({
                 {accepting ? "Saving…" : "Looks right"}
               </Button>
             )}
-            {onWrong && <Button onClick={onWrong}>Something's wrong</Button>}
-            {readOnly && <span className="text-xs text-muted-foreground">{readOnly}</span>}
+            {onWrong && (
+              <Button disabled={wrongReason !== undefined} onClick={onWrong}>
+                Something's wrong
+              </Button>
+            )}
+            {(readOnly ?? wrongReason) && (
+              <span className="text-xs text-muted-foreground">{readOnly ?? wrongReason}</span>
+            )}
           </>
         )}
         {actions}
