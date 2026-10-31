@@ -2,7 +2,10 @@
  * Auto-compaction: keeps a thread's requests inside the model's window without rewriting
  * history between requests (the provider's prompt cache needs the sent prefix byte-identical).
  *
- * Each model has a budget: the smaller of `BUDGET_CAP` and its context window. Decisions use
+ * Each model has a budget: the smaller of `BUDGET_CAP` and its context window. The output
+ * reserve is min(64k, the model's `maxTokens`, budget / 3). Meta (1M window, 400k budget): warn
+ * 304k, compact 336k. Claude 200k: warn 104k, compact 136k. A 32k window: reserve 10.7k, so it
+ * does not compact on every request. Decisions use
  * only what the last request actually used (the last reply's reported input and cache tokens);
  * a request is never blocked or split on an estimate, so one may go past the budget (a 1M window
  * has room). When a reply reports input past `budget - 1.5 x the output reserve` (or the carried
@@ -50,8 +53,8 @@ const UNKNOWN_WINDOW_BUDGET = 350_000;
 const MAX_OUTPUT_RESERVE = 64_000;
 /** The wrap-up room, as a share of the reserve: a thread is warned this far below the compact point. */
 const WRAP_UP_SHARE = 0.5;
-/** The reserve is at most this share of the budget, so a small window does not compact on every request. */
-const MAX_RESERVE_SHARE = 0.25;
+/** The reserve is at most this share of the budget, so a small window does not compact on every request (a 32k window: reserve 10.7k). */
+const MAX_RESERVE_SHARE = 1 / 3;
 const MIN_THRESHOLD = 1_000;
 /** The recent turns kept verbatim, as a share of the compact threshold and of the request-size and image-count limits. */
 const KEEP_SHARE = 0.2;

@@ -137,8 +137,8 @@ describe("thresholds", () => {
       compact: 336_000,
     });
     expect(compactionThresholds(model(200_000, 64_000))).toMatchObject({
-      warn: 125_000,
-      compact: 150_000,
+      warn: 104_000,
+      compact: 136_000,
     });
     // a 32k-output model reserves only 32k
     expect(compactionThresholds(model(1_000_000, 32_000))).toMatchObject({
