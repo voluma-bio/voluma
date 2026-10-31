@@ -53,27 +53,25 @@ async function base64(blob: Blob): Promise<string> {
   return btoa(text);
 }
 
-export function AiPanel({
+/**
+ * The message being written to the run's AI: its words, its id and its send. The page holds it, so
+ * closing the panel mid-message or mid-send loses nothing and can't send it twice.
+ */
+export function useMessage({
   run,
-  me,
-  scan,
   tasks,
   task,
   about,
   marks,
   snapshot,
-  draft: text,
-  onDraft: setText,
   onSent,
 }: {
   run: Run;
-  me: Me;
-  scan: string;
   tasks: TaskView[];
   /** The task in view. */
   task: TaskView | undefined;
-  /** Set by Something's wrong: the message is about this task, and the box takes focus. */
-  about: { taskId: string; at: number } | undefined;
+  /** Set by Something's wrong: the message is about this task. */
+  about: { taskId: string } | undefined;
   /** Your marks on the subject's views: the next message carries them. */
   marks: readonly YourMark[];
   /**
@@ -82,18 +80,10 @@ export function AiPanel({
    */
   snapshot: ((maxBytes: number) => Promise<Blob | null | undefined>) | undefined;
   /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
-  /** The words being written. The page holds them, so they outlive this panel being closed. */
-  draft: string;
-  onDraft: (text: string) => void;
   onSent: (marks: string[]) => void;
 }) {
-  const events = useEvents();
-  const items = useMemo(() => conversation(events), [events]);
   const subject = tasks.find((t) => t.id === (about?.taskId ?? task?.id));
-  const form = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (about) form.current?.querySelector("textarea")?.focus();
-  }, [about]);
+  const [text, setText] = useState("");
   // A retry of the same message keeps its id, so the server stores it once. After a failure,
   // other words or other marks make it a new message: the first may have landed.
   const id = useRef(crypto.randomUUID());
@@ -137,12 +127,44 @@ export function AiPanel({
       return { note, marks: carried.map((m) => m.id) };
     },
     onSuccess: (sent) => {
-      if (sent.note) setText("");
+      // Words typed while it was sending stay.
+      if (sent.note) setText((now) => (now.trim() === sent.note ? "" : now));
       id.current = crypto.randomUUID();
       tried.current = undefined;
       onSent(sent.marks);
     },
   });
+  return { subject, text, setText, send, unseen };
+}
+
+export function AiPanel({
+  run,
+  me,
+  scan,
+  tasks,
+  about,
+  marks,
+  views,
+  message: { subject, text, setText, send, unseen },
+}: {
+  run: Run;
+  me: Me;
+  scan: string;
+  tasks: TaskView[];
+  /** Set by Something's wrong: the box takes focus. */
+  about: { taskId: string; at: number } | undefined;
+  /** Your marks the next message carries, shown under "The AI sees". */
+  marks: readonly YourMark[];
+  /** The views are shown, so the message carries a picture of them. */
+  views: boolean;
+  message: ReturnType<typeof useMessage>;
+}) {
+  const events = useEvents();
+  const items = useMemo(() => conversation(events), [events]);
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (about) form.current?.querySelector("textarea")?.focus();
+  }, [about]);
   const closed = closedBecause(run, me);
   const answering =
     run.state.status !== "ended" && items.length > 0 && items.at(-1)?.from === "person";
@@ -159,7 +181,7 @@ export function AiPanel({
         <span className="mr-0.5">The AI sees</span>
         <Chip>{scan}</Chip>
         {subject && <Chip>{subject.title}</Chip>}
-        {snapshot && <Chip>the views</Chip>}
+        {views && <Chip>the views</Chip>}
         {marks.length === 0 ? (
           <Chip>no marks of yours</Chip>
         ) : (

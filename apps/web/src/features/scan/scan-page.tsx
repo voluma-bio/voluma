@@ -63,7 +63,7 @@ import {
 } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
-import { AiPanel } from "./ai-panel";
+import { AiPanel, useMessage } from "./ai-panel";
 import { gridMark, MarksPanel, middleOf, nextTag, TOOLS, type YourMark } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
@@ -346,7 +346,6 @@ function ScanReview({
   );
   // Something's wrong: the AI panel opens on the item's task, the composer ready.
   const [about, setAbout] = useState<{ taskId: string; at: number }>();
-  const [draft, setDraft] = useState("");
   const tellAi = (taskOf: string) => {
     setAbout({ taskId: taskOf, at: Date.now() });
     openPanel("scan-ai");
@@ -360,6 +359,21 @@ function ScanReview({
     () => (subjectShown ? marking.marks.filter((m) => m.mark.volumeId === subjectShown) : []),
     [marking.marks, subjectShown],
   );
+  const snapshot = subjectShown ? marking.snapshot : undefined;
+  const message = useMessage({
+    run,
+    tasks,
+    task,
+    about,
+    marks: sendable,
+    snapshot,
+    onSent: (sent) => {
+      setAbout(undefined);
+      marking.drop(sent);
+      setReopened((n) => n + 1);
+      refetchRun();
+    },
+  });
 
   const open = items.filter((n) => !n.accepted).length;
   const { title } = scanTitle(run, study.data);
@@ -535,18 +549,10 @@ function ScanReview({
             me={me}
             scan={title}
             tasks={tasks}
-            task={task}
             about={about}
             marks={sendable}
-            snapshot={subjectShown ? marking.snapshot : undefined}
-            draft={draft}
-            onDraft={setDraft}
-            onSent={(sent) => {
-              setAbout(undefined);
-              marking.drop(sent);
-              setReopened((n) => n + 1);
-              refetchRun();
-            }}
+            views={snapshot !== undefined}
+            message={message}
           />
         </ShellPanel>
         <div className="flex min-h-0 flex-1 flex-col bg-background">
