@@ -5,7 +5,8 @@
  * so that reloads at once. A contract mismatch reloads only once `/` names a different entry
  * bundle than the one running, rechecking for about 30 s while the deploy switches over; if it
  * never does, the mismatch is this app's own bug and its error shows. Either way a tab reloads at
- * most once toward a given bundle, so a bundle that keeps failing can't loop.
+ * most once toward a given bundle, so a bundle that keeps failing can't loop. The reload waits for
+ * a held pointer and for work that holds it (`holdLeave`).
  */
 import { type ContractError, onContractError } from "@voluma/api-client";
 
@@ -16,32 +17,40 @@ const RECHECK_MS = [0, 5000, 10_000, 15_000];
 export function followDeploys(running: string) {
   window.addEventListener("vite:preloadError", (event) => {
     if (!claim(`voluma:preload-reload:${running}`)) return;
+    // Under a hold the import fails as it would without this handler (the sheet can't be read),
+    // and the reload waits for the held work.
+    if (holds > 0) return whenIdle(() => window.location.reload());
     event.preventDefault();
     window.location.reload();
   });
 
-  const pointer = trackPointer();
-  let leaving: Promise<boolean> | undefined;
+  trackPointer();
+  let found = false;
   let checking: Promise<boolean> | undefined;
   // A write's mismatch sends the tab Home rather than reloading the form that made it.
   let home = false;
+  // True: the failed call never settles, so nothing renders an error on the way out. Under a hold
+  // the leave may be long off, and held work waits on its writes (create and complete an upload,
+  // create the study): a write fails instead, so that work can end and release its hold. Reads
+  // keep hanging, so no error screen unmounts the held work.
+  const hang = (error: ContractError) => holds === 0 || !error.write;
   onContractError((error: ContractError) => {
     home ||= error.write;
-    if (leaving) return leaving;
+    if (found) return Promise.resolve(hang(error));
     checking ??= deployed(running).then((entry) => {
       checking = undefined;
       if (!entry || !claim(`voluma:deploy-reload:${entry}`)) {
         home = false;
         return false;
       }
-      leaving = Promise.resolve(true);
-      pointer.whenIdle(() => {
+      found = true;
+      whenIdle(() => {
         if (home) window.location.assign("/");
         else window.location.reload();
       });
       return true;
     });
-    return checking;
+    return checking.then((deploy) => deploy && hang(error));
   });
 }
 
@@ -76,33 +85,59 @@ function claim(key: string): boolean {
   }
 }
 
+let holds = 0;
+let pointerDown = false;
+/** The leave waiting for the page to go idle: set once a deploy is found. */
+let pending: (() => void) | undefined;
+
 /**
- * Whether the person is mid-gesture: a pointer held down (drawing a mark, dragging). `whenIdle`
- * runs `leave` now if not, or when the tab is hidden; else once the pointer is released. Typed
- * text needs no wait: The AI box keeps its draft across a reload (`ai-panel.tsx`).
+ * Keeps the tab from leaving for a deploy while work that a reload would lose is under way (a
+ * scan uploading). Returns the release; the tab leaves once the last hold is released. Release on
+ * every way the work ends, unmount included, or the tab stays on the old app.
  */
+export function holdLeave(): () => void {
+  holds += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    holds -= 1;
+    recheck();
+  };
+}
+
+/**
+ * Busy: a hold is taken, or a pointer is held down in a visible tab (drawing a mark, dragging).
+ * Typed text needs no wait: The AI box keeps its draft across a reload (`ai-panel.tsx`).
+ */
+const busy = () => holds > 0 || (pointerDown && document.visibilityState !== "hidden");
+
+// After the event, so a release's click has run.
+const recheck = () =>
+  setTimeout(() => {
+    if (!pending || busy()) return;
+    const leave = pending;
+    pending = undefined;
+    leave();
+  });
+
 function trackPointer() {
-  let pointerDown = false;
   window.addEventListener("pointerdown", () => (pointerDown = true), true);
   for (const type of ["pointerup", "pointercancel"])
-    window.addEventListener(type, () => (pointerDown = false), true);
+    window.addEventListener(
+      type,
+      () => {
+        pointerDown = false;
+        recheck();
+      },
+      true,
+    );
+  document.addEventListener("visibilitychange", recheck);
+}
 
-  const busy = () => pointerDown && document.visibilityState !== "hidden";
-
-  return {
-    whenIdle(leave: () => void) {
-      if (!busy()) return leave();
-      const events = ["visibilitychange", "pointerup", "pointercancel"] as const;
-      // After the event, so a release's click has run.
-      let left = false;
-      const check = () =>
-        setTimeout(() => {
-          if (left || busy()) return;
-          left = true;
-          for (const type of events) document.removeEventListener(type, check, true);
-          leave();
-        });
-      for (const type of events) document.addEventListener(type, check, true);
-    },
-  };
+/** Runs `leave` now if nothing is busy, else once it isn't. */
+function whenIdle(leave: () => void) {
+  if (!busy()) return leave();
+  // A leave already waiting (Home after a write) stands.
+  pending ??= leave;
 }

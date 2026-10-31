@@ -79,8 +79,8 @@ Either way the PR body names what breaks and which callers moved.
 
 A response only the browser reads changes in one step, no expand/contract: when
 a response fails its schema, an open tab checks whether `/` names a newer entry
-bundle and, once no pointer is held, reloads into it (a failed write goes Home
-instead); with no newer bundle the error shows
+bundle and, once no pointer is held and no work holds it (`holdLeave`), reloads
+into it (a failed write goes Home instead); with no newer bundle the error shows
 (`apps/web/src/shell/deploys.ts`). Runner-facing responses and stored events keep
 the two-step rule below.
 

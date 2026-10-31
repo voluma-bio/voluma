@@ -30,6 +30,7 @@ import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
+import { holdLeave } from "../../shell/deploys";
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
 import { linkTo } from "./link";
 import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./scan-files";
@@ -212,7 +213,7 @@ export function NewPage() {
                 : undefined;
 
   const start = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!workflow) throw new Error("no workflow");
       const request: CreateStudyRequest = {
         name: several ? studyName.trim() : table[0]?.name || "Scan",
@@ -226,7 +227,13 @@ export function NewPage() {
         start: table.filter((r) => startIds.includes(r.id)).map((r) => (r.input as Input).id),
         keys,
       };
-      return createStudy(request);
+      // A deploy's reload waits for the answer: leaving mid-request would hide whether it started.
+      const release = holdLeave();
+      try {
+        return await createStudy(request);
+      } finally {
+        release();
+      }
     },
     onSuccess: (detail) => {
       void queryClient.invalidateQueries({ queryKey: studiesQuery().queryKey });
@@ -240,7 +247,9 @@ export function NewPage() {
     },
   });
 
-  // Start as soon as the last upload lands; a scan that fails disarms it.
+  // Start as soon as the last upload lands; a scan that fails disarms it. Until then a deploy's
+  // reload waits, so the start asked for isn't dropped.
+  useEffect(() => (armed ? holdLeave() : undefined), [armed]);
   const ready = table.length > 0 && pending.length === 0 && !blocker;
   useEffect(() => {
     if (!armed) return;
