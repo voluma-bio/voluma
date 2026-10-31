@@ -38,6 +38,7 @@ import {
   levelIndex,
   type MarkTool,
   type PaneHandle,
+  type PaneStatus,
   type PaneView,
   planeAxes,
   type ShownMark,
@@ -65,7 +66,7 @@ export function SlicePane({
   onPoint,
   contrast,
   handle,
-  onLoading,
+  onStatus,
   tool,
   marks,
   onMark,
@@ -81,8 +82,7 @@ export function SlicePane({
   onMark(mark: GridMark): void;
   /** Set while the pane is mounted, for screenshots. */
   handle: { current: PaneHandle | null };
-  /** Whether the pane is short of its full picture (loading, refining or failed). */
-  onLoading(loading: boolean): void;
+  onStatus(status: PaneStatus): void;
 }) {
   const [ra, ca] = planeAxes(axis);
   const sr = scene.spacingZyx[ra];
@@ -110,9 +110,8 @@ export function SlicePane({
   const [error, setError] = useState<string>();
   const [traceError, setTraceError] = useState<string>();
   const [traces, setTraces] = useState<Map<string, BufferGeometry>>(new Map());
-  const latest = useRef({ point, onPoint, onLoading, tool, marks, onMark });
-  latest.current = { point, onPoint, onLoading, tool, marks, onMark };
-  const ready = useRef(false);
+  const latest = useRef({ point, onPoint, onStatus, tool, marks, onMark });
+  latest.current = { point, onPoint, onStatus, tool, marks, onMark };
 
   // Pane mm: columns run right, rows run down.
   const toPane = (p: Zyx): [number, number] => [p[ca] * sc, -p[ra] * sr];
@@ -180,7 +179,7 @@ export function SlicePane({
       camera.bottom = v.center[1] - height / 2 / v.zoom;
       camera.updateProjectionMatrix();
       renderer.render(s, camera);
-      layer.current?.draw();
+      layer.draw();
     };
     const fitZoom = (width: number, height: number) =>
       Math.min(width / (scene.shapeZyx[ca] * sc), height / (scene.shapeZyx[ra] * sr)) * 0.95;
@@ -193,13 +192,7 @@ export function SlicePane({
           view: { zoom: v.zoom / v.fit, center: [v.center[0], v.center[1]] },
         };
       },
-      layers() {
-        if (!ready.current) return [];
-        paint();
-        layer.current?.draw(false);
-        layer.current?.redraw();
-        return layer.current ? [renderer.domElement, layer.current.canvas] : [renderer.domElement];
-      },
+      layers: () => layer.layers(renderer.domElement, paint),
       show(saved: PaneView) {
         if (!("zoom" in saved)) return;
         if (!view.current) {
@@ -508,8 +501,8 @@ export function SlicePane({
       p[ra] = hundredths(Math.max(0, Math.min(scene.shapeZyx[ra] - 1, -mmY / sr)));
       return p as unknown as Zyx;
     };
+    // The gesture's pointer is the mark layer's; the rest of it is the pane's.
     let drag: {
-      pointerId: number;
       mode: "cross" | "pan" | MarkTool;
       x: number;
       y: number;
@@ -519,16 +512,16 @@ export function SlicePane({
       path: Zyx[];
       last: [number, number];
     } | null = null;
-    // What is being drawn lives on the mark layer, which redraws alone.
-    const marking = () => layer.current;
+    const stopReset = layer.onCancel(() => {
+      drag = null;
+    });
     const down = (event: PointerEvent) => {
       if (drag || !view.current) return;
       element.focus({ preventScroll: true });
-      element.setPointerCapture(event.pointerId);
+      layer.start(event);
       const pan = event.button === 1 || event.button === 2 || event.shiftKey;
       const from = toPosition(event);
       drag = {
-        pointerId: event.pointerId,
         mode: pan ? "pan" : (latest.current.tool ?? "cross"),
         x: event.clientX,
         y: event.clientY,
@@ -542,28 +535,25 @@ export function SlicePane({
     const move = (event: PointerEvent) => {
       const tool = latest.current.tool;
       if (!drag) {
-        const own = marking();
-        if (own && (tool === "point" || tool === "line")) {
-          own.hover = toVoxel(event);
-          own.redraw();
+        if (tool === "point" || tool === "line") {
+          layer.hover = toVoxel(event);
+          layer.redraw();
         }
         return;
       }
-      if (event.pointerId !== drag.pointerId) return;
+      if (!layer.owns(event)) return;
       if (drag.mode === "cross") latest.current.onPoint(toVoxel(event));
       else if (drag.mode !== "pan") {
         if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
           return;
         drag.moved = true;
-        const own = marking();
-        if (!own) return;
         // On the slice the gesture began on, even if the wheel stepped since.
         const to = [...toPosition(event)] as [number, number, number];
         to[axis] = drag.from[axis];
-        if (drag.mode === "box") own.draft = boxMark(round(drag.from), round(to));
+        if (drag.mode === "box") layer.draft = boxMark(round(drag.from), round(to));
         else if (drag.mode === "line") {
-          own.hover = null;
-          own.draft = {
+          layer.hover = null;
+          layer.draft = {
             line: {
               aZyx: [...drag.from],
               bZyx: [...to],
@@ -577,7 +567,7 @@ export function SlicePane({
             return;
           drag.last = [event.clientX, event.clientY];
           drag.path.push(to);
-          own.draft = {
+          layer.draft = {
             outline: {
               axis,
               zyx: drag.path.map((p) => [...p]),
@@ -585,7 +575,7 @@ export function SlicePane({
             },
           };
         }
-        own.redraw();
+        layer.redraw();
       } else {
         const v = view.current!;
         v.center = [
@@ -598,32 +588,20 @@ export function SlicePane({
       }
     };
     const up = (event: PointerEvent) => {
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      if (event.type === "pointerup") move(event);
-      const made = drag && event.type === "pointerup" ? finish(drag) : null;
-      cancel();
+      if (!drag || !layer.owns(event)) return;
+      move(event);
+      const made = finish(drag);
+      layer.cancel();
       if (!made) return;
       latest.current.onMark(made);
       // A point moves the crosshair to it, so every pane shows it.
       if ("point" in made) latest.current.onPoint(made.point);
     };
-    const cancel = () => {
-      const pointerId = drag?.pointerId;
-      drag = null;
-      if (pointerId !== undefined && element.hasPointerCapture(pointerId))
-        element.releasePointerCapture(pointerId);
-      const own = marking();
-      if (own) {
-        own.draft = null;
-        own.hover = null;
-        own.redraw();
-      }
-    };
     // The mark a finished gesture makes, if any: a click marks only with Point.
     const finish = (d: NonNullable<typeof drag>): GridMark | null => {
       if (d.mode === "cross" || d.mode === "pan") return null;
       if (d.mode === "point") return d.moved ? null : { point: [...round(d.from)] };
-      const made = marking()?.draft;
+      const made = layer.draft;
       if (made && "line" in made && made.line.lengthMm > 0) return made;
       if (made && "box" in made) return made;
       if (made && "outline" in made) {
@@ -634,10 +612,9 @@ export function SlicePane({
       return null;
     };
     const leave = () => {
-      const own = marking();
-      if (!own?.hover) return;
-      own.hover = null;
-      own.redraw();
+      if (!layer.hover) return;
+      layer.hover = null;
+      layer.redraw();
     };
     // A box dragged on one slice spans that slice's two axes; across the held axis it takes the
     // smaller of the two dragged sides in mm, centred on the slice, so it reads as a region.
@@ -681,12 +658,6 @@ export function SlicePane({
       latest.current.onPoint(p as unknown as Zyx);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && drag && drag.mode !== "cross" && drag.mode !== "pan") {
-        event.preventDefault();
-        event.stopPropagation();
-        cancel();
-        return;
-      }
       if (event.target !== element) return;
       const by = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key];
       if (by === undefined) return;
@@ -697,37 +668,37 @@ export function SlicePane({
     element.addEventListener("pointerdown", down);
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
-    element.addEventListener("pointercancel", up);
-    element.addEventListener("lostpointercapture", cancel);
     element.addEventListener("pointerleave", leave);
     element.addEventListener("wheel", wheel, { passive: false });
-    globalThis.addEventListener("keydown", key, { capture: true });
+    element.addEventListener("keydown", key);
     element.addEventListener("contextmenu", menu);
     return () => {
-      cancel();
+      stopReset();
       element.removeEventListener("pointerdown", down);
       element.removeEventListener("pointermove", move);
       element.removeEventListener("pointerup", up);
-      element.removeEventListener("pointercancel", up);
-      element.removeEventListener("lostpointercapture", cancel);
       element.removeEventListener("pointerleave", leave);
       element.removeEventListener("wheel", wheel);
-      globalThis.removeEventListener("keydown", key, { capture: true });
+      element.removeEventListener("keydown", key);
       element.removeEventListener("contextmenu", menu);
     };
-  }, [tool]);
+  }, []);
 
   const total = scene.shapeZyx[axis];
-  const refining =
-    shown &&
-    (shown.level !== level ||
-      shown.index !== index ||
-      shown.contrast !== contrast ||
-      shown.overlays !== scene.overlays);
-  const loading =
-    !shown || !!refining || !!error || !!traceError || traces.size !== traceMeshes.length;
-  ready.current = !loading;
-  useEffect(() => latest.current.onLoading(loading), [loading]);
+  // Another slice or level on its way: the picture shown is a stand-in.
+  const refining = shown && (shown.level !== level || shown.index !== index);
+  // A display change (contrast, overlays) also leaves the picture out of date for a moment.
+  const stale =
+    refining || (shown && (shown.contrast !== contrast || shown.overlays !== scene.overlays));
+  const status: PaneStatus =
+    (!shown && !error) || (traces.size !== traceMeshes.length && !traceError)
+      ? "loading"
+      : stale && !error
+        ? "refining"
+        : error || traceError
+          ? "failed"
+          : "ready";
+  useEffect(() => latest.current.onStatus(status), [status]);
   const scale = shown ? scene.image.levels[shown.level]!.scaleZyx[axis] : null;
   return (
     <div
@@ -740,7 +711,7 @@ export function SlicePane({
     >
       <span className={cx(CHIP, "bottom-2 left-2")}>
         {index + 1} / {total}
-        {scale && scale > 1 ? ` · 1:${scale}` : ""}
+        {scale && scale > 1 && <span className="ml-2">1:{scale}</span>}
       </span>
       {(!shown || refining) && !error && (
         <span className={cx(CHIP, "top-2 right-2")} role="status">

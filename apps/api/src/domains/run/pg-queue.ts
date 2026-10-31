@@ -33,11 +33,18 @@ import {
   usage,
 } from "./admission";
 import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
-import { decideMessage, endCorrection, GUEST_KEYS_MESSAGE, openCorrection } from "./corrections";
+import {
+  decideMessage,
+  endCorrection,
+  GUEST_KEYS_MESSAGE,
+  messageRefusal,
+  messageTargetOf,
+  openCorrection,
+} from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { cancelOpenThreads, eventLock } from "./pg-event-log";
+import { cancelOpenThreads, lockRun } from "./pg-event-log";
 import {
   loadRun,
   loadRuns,
@@ -50,7 +57,7 @@ import { events, inputs, runs, studies, studyScans } from "./schema";
 
 /**
  * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
- * import/archive. A heartbeat and a report take only the run's own locks (`eventLock`, then the
+ * import/archive. A heartbeat and a report take only the run's own locks (`lockRun`: event lock, then the
  * row), so a slow claim never delays an acknowledgement. They can skip this lock because they
  * only take a run off `running`, which lowers the counts a claim reads (`usage`); the one write
  * that raises them, `queued` → `running`, is the claim's, under this lock.
@@ -94,14 +101,9 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
     .from(runs)
     .where(and(eq(runs.state, "running"), where));
   for (const { id } of ids) {
-    await eventLock(tx, id); // before the row lock (`corrections.ts`)
     // The lock wait may have let a heartbeat extend the lease or a report end the claim: judge
     // the row again as it is now.
-    const [run] = await tx
-      .select()
-      .from(runs)
-      .where(and(eq(runs.id, id), eq(runs.state, "running"), where))
-      .for("update");
+    const run = await lockRun(tx, id, and(eq(runs.state, "running"), where));
     if (!run) continue;
     const { stalledClaims, exhausted, counted } = endClaim(run, reason);
     const base = {
@@ -155,11 +157,7 @@ async function inFlightTool(tx: Tx, runId: string, sinceSeq: number): Promise<st
  * False when the token is not that of a counted sweep (or the sweep failed the run).
  */
 async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason: ReleaseReason) {
-  const [run] = await tx
-    .select({ state: runs.state })
-    .from(runs)
-    .where(and(eq(runs.id, runId), eq(runs.struckLeaseToken, leaseToken)))
-    .for("update");
+  const run = await lockRun(tx, runId, eq(runs.struckLeaseToken, leaseToken));
   // A counted reason keeps its strike; an ended run (the sweep failed it) stays ended.
   if (!run || run.state === "ended" || isCounted(reason)) return false;
   await tx
@@ -440,20 +438,29 @@ export function pgRunQueue(
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
         vault.drop(runId);
-        // A report may end the run under its own locks: take them (event lock, then row) and
-        // judge the state they leave.
-        await eventLock(tx, runId);
-        const [locked] = await tx
-          .select({ state: runs.state })
-          .from(runs)
-          .where(eq(runs.id, runId))
-          .for("update");
+        // A report may end the run under its own locks: take them and judge the state they leave.
+        const locked = await lockRun(tx, runId);
         if (locked?.state === "ended") return { run: await loadRun(tx, runId) };
         await endUnfinished(tx, runId, "cancelled");
         return { run: await loadRun(tx, runId) };
       });
       notifier.notify(runId);
       return result;
+    },
+
+    /** Why `caller` can't message `run` now, or null (`messageRefusal`); the run read reports it. */
+    async cannotMessage(
+      reader: Reader,
+      caller: { userId: string; guest: boolean },
+      run: Run,
+    ): Promise<string | null> {
+      const refusal = await messageRefusal(
+        db,
+        messageContext(reader).pinsOf,
+        caller,
+        messageTargetOf(run),
+      );
+      return refusal?.message ?? null;
     },
 
     /** Whether `reader` may send this message now, without storing anything (`decideMessage`). */
@@ -587,12 +594,7 @@ export function pgRunQueue(
      */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       db.transaction(async (tx) => {
-        await eventLock(tx, runId); // a failing heartbeat ends the run's threads (`corrections.ts`)
-        const [run] = await tx
-          .select()
-          .from(runs)
-          .where(and(eq(runs.id, runId), eq(runs.leaseToken, leaseToken)))
-          .for("update");
+        const run = await lockRun(tx, runId, eq(runs.leaseToken, leaseToken));
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
         // An org dropped from config stops its running runs here (its queued ones fail at claim).
@@ -619,12 +621,7 @@ export function pgRunQueue(
      */
     async report(runId: string, leaseToken: string, report: RunnerReport) {
       await db.transaction(async (tx) => {
-        await eventLock(tx, runId); // before the row lock: `endUnfinished` appends events
-        const [run] = await tx
-          .select({ state: runs.state })
-          .from(runs)
-          .where(and(eq(runs.id, runId), eq(runs.leaseToken, leaseToken)))
-          .for("update");
+        const run = await lockRun(tx, runId, eq(runs.leaseToken, leaseToken));
         if (!run) {
           if (
             report.kind === "released" &&

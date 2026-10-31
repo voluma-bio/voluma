@@ -6,10 +6,11 @@
  * (`@source "<path to>/packages/run-view/src";`).
  */
 export { AgentThread } from "./agent-thread";
-export { Elapsed, THREAD_STATUS } from "./agents";
+export { THREAD_STATUS } from "./agents";
 export { DisclosureProvider } from "./chat/disclosure-store";
 export { Markdown } from "./chat/markdown";
 export { ThreadNavigationProvider } from "./chat/thread-navigation";
+export { TaskInfo } from "./info";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
 export { plainError, stoppedText } from "./run-error";
@@ -17,9 +18,12 @@ export {
   type AgentNode,
   agentLabel,
   agentTree,
+  CARD_TITLE,
+  cardId,
   haltOf,
   type NeedItem,
   runView,
+  runWork,
   type TaskState,
   type TaskView,
   type Thread,
@@ -32,6 +36,7 @@ export {
   liveStatus,
   plural,
   type RunStatus,
+  runCost,
   runHref,
   runStatus,
   scanLabel,
@@ -49,6 +54,7 @@ export {
   groupOf,
   isLive,
   kneeOf,
+  needsYouOf,
   StudyPanel,
   scanStatus,
 } from "./study-panel";
@@ -56,6 +62,7 @@ export {
   type GraphTask,
   type ScanGraphTask,
   type StudyGraphTask,
+  shownStatus,
   TASK_STATUS,
   TaskGraph,
   type TaskGraphProps,

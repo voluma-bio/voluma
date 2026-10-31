@@ -1,19 +1,17 @@
 /**
- * Report: the scan's task graph (report size), then the task in view: where it stands, what it is
- * for, its items, its values, how they compare with reference readers, its QC images
+ * Report: the scan's task graph (report size), then the task in view: where it stands (what it
+ * took and cost behind its info button), what it is for, its items, its values, how they compare with reference readers, its QC images
  * and its files. Picking a box sets up the views on that task; a box's agent opens its steps.
  */
 import { reviewFileUrl } from "@voluma/api-client";
 import type { ReviewTask } from "@voluma/contracts/review";
 import {
-  formatDuration,
   type NeedItem,
-  TASK_STATUS,
+  shownStatus,
   TaskGraph,
+  TaskInfo,
   type TaskView,
   taskStateWord,
-  useNow,
-  workedSeconds,
 } from "@voluma/run-view";
 import { EmptyState, List, Readout, Row, StatusGlyph, StatusMark, Table } from "@voluma/ui";
 import { Download, FileText } from "lucide-react";
@@ -58,7 +56,7 @@ export function ReportPanel({
           size="report"
           tasks={tasks.map((t) => ({
             ...t,
-            needs: t.needs.map((n) => items.find((i) => i.id === n.id) ?? n),
+            open: items.filter((n) => n.taskId === t.id && !n.accepted).length,
           }))}
           selected={task?.id}
           onSelect={onTask}
@@ -79,13 +77,6 @@ export function ReportPanel({
   );
 }
 
-/** Working time of a task's agents, together. */
-function took(task: TaskView, now: number): string | undefined {
-  if (task.threads.length === 0) return undefined;
-  const seconds = task.threads.reduce((sum, t) => sum + workedSeconds(t, now), 0);
-  return formatDuration(seconds);
-}
-
 function TaskDetail({
   runId,
   task,
@@ -102,8 +93,7 @@ function TaskDetail({
   onItem: (item: NeedItem) => void;
 }) {
   const open = items.filter((n) => !n.accepted).length;
-  const working = task.state === "running" || task.state === "checking";
-  const time = took(task, useNow(working));
+  const status = shownStatus(task.state, open);
   const references =
     reviewTask?.measurements.flatMap((m) => m.references.map((reference) => ({ m, reference }))) ??
     [];
@@ -113,17 +103,21 @@ function TaskDetail({
   return (
     <article aria-label={`${task.title} report`} className="grid gap-4 border-t border-border pt-4">
       <header className="grid gap-1.5">
-        <h3 className="text-base font-semibold">{task.title}</h3>
+        <div className="flex min-w-0 items-center gap-1">
+          <h3 className="min-w-0 text-base font-semibold">{task.title}</h3>
+          <TaskInfo task={task} />
+        </div>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          {open > 0 ? (
-            <StatusMark status="check" label={`${open} to check`} />
-          ) : (
-            <StatusMark
-              status={task.state === "to-check" ? "done" : TASK_STATUS[task.state]}
-              label={task.state === "to-check" ? "Done" : taskStateWord(task.state)}
-            />
-          )}
-          {time && <span>{working ? `${time} so far` : `Took ${time}`}</span>}
+          <StatusMark
+            status={status}
+            label={
+              status === "check"
+                ? `${open} to check`
+                : status === "done"
+                  ? "Done"
+                  : taskStateWord(task.state)
+            }
+          />
           {task.check && (
             <span>
               {task.check.verdict === "passed"

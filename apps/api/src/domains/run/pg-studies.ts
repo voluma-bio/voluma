@@ -1,11 +1,11 @@
 /**
  * Postgres adapter for the browser's reads of studies (`@voluma/contracts/study`): Home's
  * list, which carries each scan's newest run in brief, and one study with its scans, runs,
- * values, open checks and each scan's task states. Reads apply the caller's `ReadScope` as
+ * values, open checks and each scan's task states and open items. Reads apply the caller's `ReadScope` as
  * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
  * scans' values, checks and states are read from each fold here. Writes are the queue's.
  */
-import { taskStates } from "@voluma/contracts/review-state";
+import { latestRevision, scanNeedsYou, shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
@@ -50,10 +50,10 @@ function newestOf(results: RunResult[]) {
   return { newest, newestCompleted };
 }
 
-/** A completed run's measurement values and open checks, from its latest revision. */
+/** A completed run's measurement values and acceptable checks, from its latest revision. */
 function resultOf({ run, results }: RunResult) {
   const values: StudyScanDetail["values"] = {};
-  const toCheck: StudyScanDetail["toCheck"] = [];
+  const acceptable: StudyScanDetail["acceptable"] = [];
   for (const task of results.revisions.at(-1)?.tasks ?? []) {
     for (const m of task.measurements) {
       // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
@@ -65,7 +65,7 @@ function resultOf({ run, results }: RunResult) {
     }
     for (const check of task.checks) {
       if (check.status === "open")
-        toCheck.push({
+        acceptable.push({
           runId: run.id,
           taskId: task.id,
           resultRevisionId: task.resultRevisionId,
@@ -75,15 +75,12 @@ function resultOf({ run, results }: RunResult) {
         });
     }
   }
-  return { values, toCheck };
+  return { values, acceptable };
 }
 
-/** Every task of a run's latest plan in its state, a correction in progress's own; none before a plan. */
-function taskStateOf({ run, results, correcting, open, failed }: RunResult) {
-  const revision = correcting ?? results.revisions.at(-1);
-  if (!revision) return {};
-  return Object.fromEntries(taskStates(revision, { state: run.state, open, failed }));
-}
+/** The newest run's tasks as the scan review shows them (`shownTasks`); none without a run. */
+const tasksOf = (newest: RunResult | undefined) =>
+  shownTasks(newest && { ...newest, state: newest.run.state, revision: latestRevision(newest) });
 
 function summarize(study: Study, scanCount: number, results: RunResult[]): StudySummary {
   const { newest, newestCompleted } = newestOf(results);
@@ -97,13 +94,14 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
       if (at && at > lastActivityAt) lastActivityAt = at;
     }
   }
-  let toCheck = 0;
-  for (const { run } of newestCompleted.values()) toCheck += run.review?.remainingToCheck ?? 0;
+  let needsYou = 0;
+  for (const [id, { run }] of newest)
+    needsYou += scanNeedsYou(run.review, newestCompleted.get(id)?.run.review?.acceptable ?? 0);
   return {
     ...study,
     scanCount,
     scansCompleted: newestCompleted.size,
-    toCheck,
+    needsYou,
     lastActivityAt,
     newestRuns: [...newest.values()].map(
       ({ run }): StudyRunSummary => ({
@@ -113,7 +111,8 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
         state: run.state,
         tasks: run.tasks,
         review: run.review && {
-          remainingToCheck: run.review.remainingToCheck,
+          acceptable: run.review.acceptable,
+          needsYou: run.review.needsYou,
           reviewedAt: run.review.reviewedAt,
         },
         example: run.example,
@@ -195,8 +194,8 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 input: toInput(input),
                 runs: runsOf.get(scan.inputId) ?? [],
                 resultRunId: result?.run.id ?? null,
-                ...(result ? resultOf(result) : { values: {}, toCheck: [] }),
-                taskState: newestRun ? taskStateOf(newestRun) : {},
+                ...(result ? resultOf(result) : { values: {}, acceptable: [] }),
+                ...tasksOf(newestRun),
               };
             }),
           };

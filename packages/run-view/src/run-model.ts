@@ -8,8 +8,13 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { abandonedEvents, type FoldedTask } from "@voluma/contracts/fold";
 import type { TaskState } from "@voluma/contracts/ids";
-import type { Asset } from "@voluma/contracts/review";
-import { progress, reviewState, taskStates } from "@voluma/contracts/review-state";
+import type { Asset, Unacceptable } from "@voluma/contracts/review";
+import {
+  cardWithoutCheck,
+  progress,
+  reviewState,
+  taskStates,
+} from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import { type ThreadPlace, threadPlace } from "@voluma/contracts/thread-place";
@@ -199,6 +204,47 @@ export function workedSeconds(t: Thread, now: number): number {
   return t.endedSeconds + Math.max(0, end - Date.parse(t.openSince)) / 1000;
 }
 
+/**
+ * The spans a run worked: its first claim to its end, then each correction from its
+ * `run.reopened` to the root thread's next end or its `correction.ended`. The time between an
+ * end and a researcher's reopen is not work. The last span runs to the run's end, or to `now`
+ * while the run goes. A run queued again after a reopen or a lost runner has no `startedAt` in its
+ * state, so the first claim comes from the log. `redos` counts the corrections that redid a task
+ * (a reopen can end with only a reply); `reopens` every message that reopened it.
+ */
+export function runWork(
+  events: readonly RunEvent[],
+  state: RunState,
+  now: number,
+): { startedAt: string; seconds: number; redos: number; reopens: number } | undefined {
+  const startedAt =
+    (state.status === "queued" ? null : state.startedAt) ??
+    events.find((e) => e.type === "claim.started")?.createdAt;
+  if (!startedAt) return undefined;
+  const roots = new Set<string>();
+  const starts = [Date.parse(startedAt)];
+  const ends: (number | undefined)[] = [];
+  let redos = 0;
+  for (const e of events) {
+    if (e.type === "thread.started" && e.payload.parentThreadId === null) roots.add(e.threadId);
+    else if (e.type === "run.reopened") starts.push(Date.parse(e.createdAt));
+    else if (e.type === "revision.started" && e.payload.reason === "correction") redos += 1;
+    else if ((e.type === "thread.ended" && roots.has(e.threadId)) || e.type === "correction.ended")
+      // The latest end inside a span closes it: a resumed root can end more than once.
+      ends[starts.length - 1] = Date.parse(e.createdAt);
+  }
+  const last = state.status === "ended" ? Date.parse(state.endedAt) : now;
+  let seconds = 0;
+  starts.forEach((start, i) => {
+    const end =
+      i === starts.length - 1 && state.status !== "ended"
+        ? last
+        : (ends[i] ?? starts[i + 1] ?? last);
+    seconds += Math.max(0, end - start) / 1000;
+  });
+  return { startedAt, seconds, redos, reopens: starts.length - 1 };
+}
+
 /** Threads with a tool call still being written and none running say so; others are kept as is. */
 export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   const writing = new Set([...live.calls.values()].map((c) => c.threadId));
@@ -234,18 +280,17 @@ export function agentTree(threads: Thread[]): AgentNode[] {
 }
 
 /**
- * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
- * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
- * `short`, for a narrow place beside its outcome: "The AI's work", "Second check", "Second check 2".
+ * An agent's name where its task is already shown: "The AI's work", "Second AI check, try 2",
+ * "Lead AI". A check is numbered by its `attemptId`'s place among its worker's attempts once there are
+ * two; how many tries the worker took is in its info (`ThreadInfo`). `short`, for a narrow place
+ * beside its outcome: "Second check", "Second check, try 2".
  */
 export function agentLabel(t: Thread, threads: Thread[], { short = false } = {}): string {
   switch (t.kind) {
     case "main":
       return "Lead AI";
     case "worker":
-      return t.attempts.length > 1 && !short
-        ? `The AI's work, ${t.attempts.length} tries`
-        : "The AI's work";
+      return "The AI's work";
     case "check": {
       const attemptId = t.attemptId;
       const tries = attemptId
@@ -254,14 +299,14 @@ export function agentLabel(t: Thread, threads: Thread[], { short = false } = {})
       const n = tries && attemptId ? tries.indexOf(attemptId) + 1 : 0;
       if (!tries || tries.length < 2) return short ? "Second check" : "Second AI check";
       // A no-break space keeps the number with its word when a narrow box wraps the name.
-      return short ? `Second check\u00a0${n}` : `Second AI check of try ${n}`;
+      return short ? `Second check, try\u00a0${n}` : `Second AI check, try\u00a0${n}`;
     }
     default:
       return "Agent";
   }
 }
 
-/** An agent's name anywhere: "Segmentation: Second AI check of try 2", "Lead AI". */
+/** An agent's name anywhere: "Segmentation: Second AI check, try 2", "Lead AI". */
 export const agentTitle = (t: Thread, threads: Thread[]) =>
   t.taskId ? `${taskTitle(t.taskId)}: ${agentLabel(t, threads)}` : agentLabel(t, threads);
 
@@ -320,8 +365,11 @@ export type TaskView = {
   did?: string;
   /** What the task is for (`tasks.json`): its line while working, until `did` says more. */
   purpose?: string;
-  /** The second AI check's verdict on the current attempt: its sentence, and its full text. */
-  check?: { verdict: "passed" | "needs-review"; summary?: string; text: string };
+  /**
+   * The second AI check's verdict on the current attempt: the milestone that holds it (`id`, also a
+   * To check item's id when the verdict is the item), its sentence, and its full text.
+   */
+  check?: { id: string; verdict: "passed" | "needs-review"; summary?: string; text: string };
   /** The fold's `rejected`: the check sent the result back. */
   rejected: boolean;
   /** Why it failed or was skipped, task ids named by their titles. */
@@ -388,30 +436,46 @@ function resultRows(t: FoldedTask, state: TaskState): ResultRow[] {
   return rows;
 }
 
-/** The card for a task left To check with no check item: why it is there, in plain words. */
-function unexplained(t: FoldedTask, check: TaskView["check"], image: Asset | undefined): NeedItem {
+/** The title of a To check task's card without a check (`cardWithoutCheck`): why it is there. */
+export const CARD_TITLE: Record<Unacceptable, string> = {
+  "sent-back": "Sent back by the second AI",
+  "values-missing": "Values missing",
+  marked: "To check",
+};
+
+/** The item id of a task's card without a check, as `itemHref` opens it. */
+export const cardId = (taskId: string) => `${taskId}/to-check`;
+
+/** The card for a task left To check with no check item (`cardWithoutCheck`), in plain words. */
+function unexplained(
+  t: FoldedTask,
+  why: Unacceptable,
+  check: TaskView["check"],
+  image: Asset | undefined,
+): NeedItem {
   const base = {
-    id: `${t.id}/to-check`,
+    id: cardId(t.id),
     taskId: t.id,
     resultRevisionId: t.resultRevisionId,
     image,
     accepted: false,
     acceptable: false,
   };
-  if (t.rejected || check?.verdict === "needs-review")
+  const title = CARD_TITLE[why];
+  if (why === "sent-back")
     return {
       ...base,
-      title: "Sent back by the second AI",
+      title,
       text: check?.summary ?? "The second AI check sent the result back.",
       found: check?.text,
     };
-  if (t.missingRequired.length > 0)
+  if (why === "values-missing")
     return {
       ...base,
-      title: "Values missing",
+      title,
       text: `Not reported: ${t.missingRequired.map(outputName).join(", ")}.`,
     };
-  return { ...base, title: "To check", text: t.reason ?? "" };
+  return { ...base, title, text: t.reason ?? "" };
 }
 
 type RunView = {
@@ -419,8 +483,8 @@ type RunView = {
   threads: Thread[];
   /** One per plan task, in plan order; empty until the run has a plan. */
   tasks: TaskView[];
-  /** `progress` of the latest revision: tasks done of all, and the open check items. */
-  progress: { done: number; total: number; toCheck: number };
+  /** `progress` of the latest revision: tasks done of all, and the checks a person can accept. */
+  progress: { done: number; total: number; acceptable: number };
   spend: RunSpend;
 };
 
@@ -443,7 +507,7 @@ export function runView(
     return {
       threads,
       tasks: [],
-      progress: { done: 0, total: 0, toCheck: 0 },
+      progress: { done: 0, total: 0, acceptable: 0 },
       spend: spent,
     };
 
@@ -514,6 +578,7 @@ export function runView(
     const check: TaskView["check"] =
       t.checker && lastVerdict
         ? {
+            id: lastVerdict.id,
             verdict: t.checker.verdict,
             summary: summaries.get(lastVerdict.id),
             text: t.checker.text,
@@ -529,6 +594,7 @@ export function runView(
       accepted: c.status === "accepted",
       acceptable: true,
     }));
+    const card = cardWithoutCheck(t);
     const reason =
       state === "skipped"
         ? skipText(t)
@@ -551,7 +617,7 @@ export function runView(
       check,
       rejected: t.rejected,
       reason: reason ?? undefined,
-      needs: t.status === "to-check" && items.length === 0 ? [unexplained(t, check, image)] : items,
+      needs: card ? [unexplained(t, card, check, image)] : items,
       image,
       results: resultRows(t, state),
       valued: p.outputs.some((o) => o.kind === "measurement" || o.kind === "score"),

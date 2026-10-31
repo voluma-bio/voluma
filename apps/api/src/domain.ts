@@ -33,7 +33,7 @@ export type Principal =
 
 export type AppEnv = { Variables: { principal: Principal } };
 
-type UserPrincipal = Extract<Principal, { kind: "user" }>;
+export type UserPrincipal = Extract<Principal, { kind: "user" }>;
 
 /**
  * The filter every read applies, derived from the scope so no handler branches on it:

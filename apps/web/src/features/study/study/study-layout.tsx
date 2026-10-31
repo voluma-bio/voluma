@@ -9,7 +9,7 @@ import { ApiError } from "@voluma/api-client";
 import { studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { isLive, plural, StudyPanel } from "@voluma/run-view";
+import { isLive, needsYouOf, plural, StudyPanel } from "@voluma/run-view";
 import {
   Breadcrumb,
   Button,
@@ -114,7 +114,7 @@ function StudyChrome({ detail, workflow }: { detail: StudyDetail; workflow: Bund
   const base = `/studies/${detail.study.id}`;
   const rest = pathname.slice(base.length).replace(/^\//, "");
   const here = sectionOf(rest);
-  const toCheck = detail.scans.reduce((n, s) => n + s.toCheck.length, 0);
+  const toCheck = detail.scans.reduce((n, s) => n + needsYouOf(s), 0);
   const knees = detail.scans.some((s) => typeof s.scan.attributes.knee === "string");
   return (
     <>
