@@ -9,6 +9,13 @@ version and the mode (`--as`, `--axis`, `--int16`); asked again with the same ve
 nothing else; with the same version but another mode it exits 2 (use another `--out`), and with an older version or an
 unreadable manifest it converts again. Paths in the manifest are relative to `<out>/<sha256>/`.
 
+With `--cache` (default VOLUMA_REVIEW_CACHE), completed conversions are reused across runs of the same input.
+VOLUMA_REVIEW_RUNTIME must identify the pinned sandbox image. The cache is partitioned by the converter's code and
+runtime, mode and source bytes, not by a run's affine or grid id: assets contain voxel coordinates only.
+Cache hits copy the assets into `--out`, preserving run-scoped URLs and authorization. Each publisher writes a unique
+generation, then a small `ready` record selecting it. Readers select that immutable generation once; concurrent or
+interrupted publishers cannot modify its files. No calibration, source paths or geometry are read from the cache.
+
 Levels (OME-Zarr 0.4 on Zarr v2, Blosc zstd, 64-cubed chunks): level 0 is the source; each next level halves every axis
 (rounding up) until every axis is at most ceil(level 0 / 8); the last is one chunk. Images are averaged; labels and masks take the
 mode of each 2x2x2 block, a tie going to the foreground. A one-voxel sheet survives every level (it fills 4 of 8 voxels of a block: a tie), but a one-voxel rod does not
@@ -17,8 +24,12 @@ centre at source coordinate i*2^k + (2^k-1)/2, which is the translation in each 
 height field triangulated over its finite cells, wound so each normal points toward +axis. `mesh*.bin` is float32 vertices as full-resolution source voxel (x, y, z),
 then uint32 indices, little-endian. A cropped mask's levels and meshes are in its crop's voxels; the reader adds the crop's offset.
 """
+import hashlib
 import json
+import os
 import shutil
+import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -150,6 +161,7 @@ def write_meshes(arr, kind, out):
 
 def publish(src, dst):
     """Copies src to dst, 32 files at a time (a bucket mount is slow per file), manifest.json last so a copy cut short has none."""
+    dst.mkdir(parents=True, exist_ok=True)
     files = [p for p in src.rglob('*') if p.is_file() and p.name != 'manifest.json']
 
     def copy(p):
@@ -169,7 +181,12 @@ def main():
     ap.add_argument('--axis', type=int, choices=(0, 1, 2), help='surface only: the array axis the height is measured along')
     ap.add_argument('--int16', action='store_true', help='image only: round a float image to int16 at level 0')
     ap.add_argument('--out', required=True, help='directory that receives <sha256>/')
+    ap.add_argument('--cache', default=os.environ.get('VOLUMA_REVIEW_CACHE'),
+                    help='input-owned directory for completed conversions shared across runs (default VOLUMA_REVIEW_CACHE)')
     a = ap.parse_args()
+    runtime = os.environ.get('VOLUMA_REVIEW_RUNTIME')
+    if a.cache and not runtime:
+        sidecar.fail('VOLUMA_REVIEW_RUNTIME must identify the pinned sandbox image when using --cache')
     src = Path(a.source)
     if (a.kind == 'surface') != (a.axis is not None):
         sidecar.fail('--axis goes with --as surface, and only with it: say which array axis the heights are measured along')
@@ -204,6 +221,24 @@ def main():
             sidecar.fail(f'{final} already holds {src} converted as {done.get("mode")}; give --out another directory for {mode}')
         print(manifest_path.read_text().strip())
         return
+    cached = None
+    if a.cache:
+        # Include the pinned image: dependency changes can change output without changing this script.
+        code = hashlib.sha256(Path(__file__).read_bytes() + b'\0' + runtime.encode()).hexdigest()
+        mode_id = hashlib.sha256(json.dumps(mode, sort_keys=True).encode()).hexdigest()
+        cached = Path(a.cache) / code / mode_id / digest
+        try:
+            generation = cached / uuid.UUID((cached / 'ready').read_text().strip()).hex
+            text = (generation / 'manifest.json').read_text()
+            ready = json.loads(text)
+        except (FileNotFoundError, ValueError):
+            ready = {}
+        if (ready.get('sourceSha256') == digest and ready.get('converterVersion') == VERSION
+                and ready.get('mode') == mode):
+            publish(generation, final)
+            print(f'review assets: reused {digest} from input cache', file=sys.stderr)
+            print(text.strip())
+            return
     if a.int16:
         lo, hi = np.float64(np.inf), np.float64(-np.inf)
         for z in range(0, arr.shape[0], SLAB):
@@ -242,6 +277,11 @@ def main():
 
     text = json.dumps(manifest, allow_nan=False)
     (out / 'manifest.json').write_text(text + '\n')
+    if cached is not None:
+        # Never overwrite completed files: another publisher can stop halfway through its own generation.
+        generation = uuid.uuid4().hex
+        publish(out, cached / generation)
+        (cached / 'ready').write_text(generation + '\n')
     publish(out, final)  # manifest.json last: a reader never sees half a manifest
     shutil.rmtree(out)
     print(text)

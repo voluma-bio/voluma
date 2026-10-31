@@ -1,77 +1,63 @@
 /**
- * The sandbox spec of each role (`SandboxRole`), the one place a role's size, network and
- * mount access are written. A caller names the mounts; the builder fixes their access, so a
- * checker cannot be given a writable `/outputs` nor a convert sandbox a network.
+ * The sandbox spec of a layout (`SandboxLayout`), the one place a sandbox's size and network are
+ * written. The layout fixes the mounts and their access (a checker's `/outputs` is read-only,
+ * the convert sandbox's `/evidence` too) and whether the sandbox may reach the gateway; this adds the
+ * size, the lifetime and, for a sandbox that may reach it, the gateway.
  *
- * | role    | read-only mounts       | writable mounts            | network                     |
- * |---------|------------------------|----------------------------|-----------------------------|
- * | worker  | as the caller says     | as the caller says         | the gateway host or IPv4   |
- * | checker | `readOnly`             | `scratch` (its own prefix) | none                        |
- * | convert | `evidence`             | `review`                   | none                        |
- *
- * All three are 2 CPUs and 8 GiB: a worker or checker renders volumes, a convert sandbox
+ * All sandboxes are 2 CPUs and 8 GiB: a worker or checker renders volumes, a convert sandbox
  * holds a 1.25 GB float32 stack beside the DICOM.
  */
-import type { SandboxMount, SandboxSpec } from "./ports/sandbox";
+import type { SandboxLayout } from "./layout";
+import type { SandboxSpec } from "./ports/sandbox";
 
 const CPU = 2;
 const MEMORY_MIB = 8192;
 
-interface Common {
+export interface SandboxSettings {
   runId: string;
-  /** Unique within the run: `<taskId>.worker[.n]`, `<taskId>.check[.n]`, or the convert job's name. */
-  name: string;
   image: string;
   lifetimeSeconds: number;
   idleSeconds: number;
-  /** Set on every command: the thread layout's `env` (`PYTHONPATH`, `SCRATCH`); secrets do not belong here. */
-  env: Record<string, string>;
-  /** The working directory of every command: the thread's `scratch.path`. */
-  workdir?: string;
 }
 
-const base = (c: Common) => ({
-  runId: c.runId,
-  name: c.name,
-  image: c.image,
-  cpu: CPU,
-  memoryMiB: MEMORY_MIB,
-  lifetimeSeconds: c.lifetimeSeconds,
-  idleSeconds: c.idleSeconds,
-  env: c.env,
-  workdir: c.workdir,
-});
-
-const withAccess = (mounts: SandboxMount[], access: SandboxMount["access"]): SandboxMount[] =>
-  mounts.map((m) => ({ ...m, access }));
+export interface Gateway {
+  url: string;
+  token: string;
+  ipv4?: string;
+}
 
 /**
- * A worker. A gateway's dedicated IPv4 replaces its SNI allowlist; without an IPv4, shared
- * edges can still route by Host (#236). The URL and token go in the environment. No gateway:
- * no network.
+ * A gateway's dedicated IPv4 replaces its SNI allowlist; without an IPv4, shared edges can still
+ * route by Host (#236). The URL and token go in the environment. A sandbox whose layout does not
+ * reach the gateway, or with no gateway given: no network.
  */
-export function workerSandboxSpec(
-  options: Common & {
-    mounts: SandboxMount[];
-    gateway?: { url: string; token: string; ipv4?: string };
-  },
+export function specOf(
+  layout: SandboxLayout,
+  settings: SandboxSettings,
+  gateway?: Gateway,
 ): SandboxSpec {
-  const { gateway } = options;
+  const reach = layout.gateway ? gateway : undefined;
   // Keep HTTPS/443 required even when the network restriction is an IP rather than SNI.
-  const host = gateway && gatewayHost(gateway.url);
+  const host = reach && gatewayHost(reach.url);
   return {
-    ...base(options),
-    role: "worker",
-    mounts: options.mounts,
+    runId: settings.runId,
+    name: layout.name,
+    image: settings.image,
+    cpu: CPU,
+    memoryMiB: MEMORY_MIB,
+    lifetimeSeconds: settings.lifetimeSeconds,
+    idleSeconds: settings.idleSeconds,
+    mounts: layout.mounts,
+    env: reach
+      ? { ...layout.env, VOLUMA_GATEWAY_URL: reach.url, VOLUMA_GATEWAY_TOKEN: reach.token }
+      : layout.env,
+    workdir: layout.dir,
     network:
-      gateway && host
-        ? gateway.ipv4 !== undefined
-          ? { kind: "ipv4", address: gateway.ipv4 }
+      reach && host
+        ? reach.ipv4 !== undefined
+          ? { kind: "ipv4", address: reach.ipv4 }
           : { kind: "hosts", hosts: [host] }
         : { kind: "none" },
-    env: gateway
-      ? { ...options.env, VOLUMA_GATEWAY_URL: gateway.url, VOLUMA_GATEWAY_TOKEN: gateway.token }
-      : options.env,
   };
 }
 
@@ -83,34 +69,4 @@ function gatewayHost(gatewayUrl: string): string {
     throw new Error(`the gateway URL must be https:// with no port: ${gatewayUrl}`);
   }
   return url.hostname;
-}
-
-/** A checker: reads everything in `readOnly`, writes only its own `scratch` prefix. */
-export function checkSandboxSpec(
-  options: Common & { readOnly: SandboxMount[]; scratch: SandboxMount },
-): SandboxSpec {
-  return {
-    ...base(options),
-    role: "check",
-    mounts: [
-      ...withAccess(options.readOnly, "read-only"),
-      ...withAccess([options.scratch], "read-write"),
-    ],
-    network: { kind: "none" },
-  };
-}
-
-/** A review-asset conversion: reads `evidence`, writes the `review` prefixes. */
-export function convertSandboxSpec(
-  options: Common & { evidence: SandboxMount[]; review: SandboxMount[] },
-): SandboxSpec {
-  return {
-    ...base(options),
-    role: "convert",
-    mounts: [
-      ...withAccess(options.evidence, "read-only"),
-      ...withAccess(options.review, "read-write"),
-    ],
-    network: { kind: "none" },
-  };
 }

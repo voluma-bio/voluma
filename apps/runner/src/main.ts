@@ -19,8 +19,12 @@ import { type RunnerContext, runClaim } from "./run.ts";
 import { startTelemetry } from "./telemetry.ts";
 import { assertThinking } from "./thinking.ts";
 
-/** How long a shutdown waits for runs to report before it exits anyway. */
-const SHUTDOWN_BUDGET_MS = 30_000;
+/**
+ * How long a shutdown waits for runs to report before it exits anyway: Render kills the process
+ * 60 s after SIGTERM (`maxShutdownDelaySeconds`, `render.yaml`), and a release still retrying
+ * when this passes is lost, so it leaves 10 s of margin.
+ */
+const SHUTDOWN_BUDGET_MS = 50_000;
 
 const config = runnerConfig();
 const redact = redactor(config.secrets);

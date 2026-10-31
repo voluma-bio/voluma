@@ -26,14 +26,15 @@ import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
+import { runLayout } from "@voluma/harness/layout";
 import type { Sandbox } from "@voluma/harness/ports/sandbox";
-import { workerSandboxSpec } from "@voluma/harness/sandbox-specs";
+import { specOf } from "@voluma/harness/sandbox-specs";
 import { segmentSamTool } from "@voluma/harness/tools/segment-sam";
 import { runnerConfig } from "./config.ts";
 import { holdLease } from "./lease.ts";
 import { claimSandboxes, terminateClaim } from "./modal-sandbox.ts";
 import { redactor } from "./redact.ts";
-import { layoutOf } from "./run.ts";
+import { inputPrefixOf } from "./run.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
 import { usageMeter } from "./usage.ts";
 
@@ -111,7 +112,8 @@ const close = () =>
   (closing ??= (async () => {
     log("closing");
     rl.close();
-    await lease.end(true).catch(() => {});
+    lease.halt();
+    await lease.sendFinalUsage().catch(() => {});
     await sandbox?.destroy().catch((e) => log(`destroy failed: ${e}`));
     await terminateClaim(config.modal, run.id, claimId).catch((e) => log(`terminate failed: ${e}`));
     if (counted) meter.sandboxDown();
@@ -132,7 +134,14 @@ try {
     role: "worker",
     taskId: "dev",
   } as const;
-  const thread = layoutOf(run, [], false, () => true).forThread(devThread); // no workflow is loaded here, so no PYTHONPATH
+  const thread = runLayout({
+    runId: run.id,
+    inputId: run.input.id,
+    inputPrefix: inputPrefixOf(run),
+    skills: [], // no workflow is loaded here, so no PYTHONPATH
+    copiesInputs: () => true,
+    grants: { main: [], worker: ["segment_sam"], check: [] },
+  }).forThread(devThread);
   meter.sandboxUp();
   counted = true;
   sandbox = await claimSandboxes(
@@ -140,22 +149,21 @@ try {
     config.modal,
     claimId,
   )(
-    workerSandboxSpec({
-      runId: run.id,
-      name: thread.name,
-      image: config.sandbox.image,
-      lifetimeSeconds: config.sandbox.lifetimeSeconds,
-      idleSeconds: config.sandbox.idleSeconds,
-      mounts: thread.mounts,
-      env: thread.env,
-      workdir: thread.dir,
-      gateway: sandboxGateway(
+    specOf(
+      thread,
+      {
+        runId: run.id,
+        image: config.sandbox.image,
+        lifetimeSeconds: config.sandbox.lifetimeSeconds,
+        idleSeconds: config.sandbox.idleSeconds,
+      },
+      sandboxGateway(
         config,
         { runId: run.id, leaseToken, visitorMetaKey: claim.keys?.metaApiKey },
         thread.name,
         redact,
       ),
-    }),
+    ),
     abort.signal,
   );
   log(`sandbox ${thread.name} ready; commands: exec <cmd> | segment <json> | close`);

@@ -339,7 +339,13 @@ try {
           };
         });
 
-      const layout = runLayout("probe", "inputs/", []).forThread({
+      const layout = runLayout({
+        runId: "probe",
+        inputId: "probe",
+        inputPrefix: "inputs/",
+        skills: [],
+        grants: { main: [], worker: [], check: [] },
+      }).forThread({
         id: "probe.intake.worker",
         name: "intake.worker",
         role: "worker",
@@ -484,7 +490,7 @@ try {
   );
   assert.equal(leaseFailures, 0);
 } finally {
-  await lease.end(false);
+  lease.halt();
   server.disconnect();
   await once(server, "exit");
   await rm(scratch, { recursive: true, force: true });
