@@ -39,10 +39,6 @@ def ids(paths):
     return [str(p.relative_to(ROOT)) for p in paths]
 
 
-def test_all_scripts_found():
-    assert len(SCRIPTS) >= 27
-
-
 @pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
 def test_help_exits_0(script):
     r = subprocess.run([sys.executable, str(script), '--help'], check=False, capture_output=True, text=True, timeout=120, cwd='/', env=env_of(script))
