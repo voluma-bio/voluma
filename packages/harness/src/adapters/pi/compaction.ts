@@ -2,21 +2,20 @@
  * Auto-compaction: keeps a thread's requests inside the model's window without rewriting
  * history between requests (the provider's prompt cache needs the sent prefix byte-identical).
  *
- * Each model has a budget: the smaller of `BUDGET_CAP` and its context window. Once per
- * context-full event the thread goes through two steps. When a turn's tools finish with the
- * estimated input past `budget - 1.5 x the output reserve` (or the carried images near the
- * model's request-size or image-count limit), a notice goes in the thread's inbox ("finish the
- * step; the history will be summarized"). Before the first request past `budget - the output reserve`,
- * however many turns that took, the thread's own model summarizes it on a warm branch (the same
- * messages, system message and tools as the thread's requests, with only the summary instruction
- * appended, so the provider's cache serves the prefix). From then on requests carry
- * `[system, summary, recent turns]`. The window above the budget is only slack for a turn that
- * overshoots. When another turn would not fit the window, a thread already due compacts even if
- * the summary would leave it due again. When
- * the warm request itself would not fit, or the provider refused a request as too large
- * (`recover`), the summary is cold: `[system, previous summary, the messages to summarize]`
- * without the kept tail, with images left out, which is always smaller than the request that
- * failed.
+ * Each model has a budget: the smaller of `BUDGET_CAP` and its context window. Decisions use
+ * only what the last request actually used (the last reply's reported input and cache tokens);
+ * a request is never blocked or split on an estimate, so one may go past the budget (a 1M window
+ * has room). When a reply reports input past `budget - 1.5 x the output reserve` (or the carried
+ * images near the model's request-size or image-count limit), the next tool result carries a
+ * notice ("finish the step; the history will be summarized"). When it reports input past
+ * `budget - the output reserve`, the next request is the compaction request: the thread's own
+ * model summarizes on a warm branch (the same messages, system message and tools as the thread's
+ * requests, with only the summary instruction appended, so the provider's cache serves the
+ * prefix). From then on requests carry `[system, summary, recent turns]`. Only a thread with no
+ * reply yet since its last compaction (resumed after a crash) is judged by an estimate. When the
+ * images would not fit the provider's limits, the summary is cold: `[system, previous summary, the
+ * messages to summarize]` without the kept tail, with images left out. When the provider refuses a
+ * request as too large (`recover`), the summary is cold too.
  *
  * History stays append-only and keeps every message. A compaction is one more row, a marker
  * `{role: "compaction", summary, keptFrom}` stored where it happened: `keptFrom` indexes the
@@ -177,19 +176,18 @@ export function estimateTokens(message: AgentMessage): number {
 }
 
 /**
- * The next request's input: the last reply's reported input, cache and output tokens plus an
- * estimate for what came after it. A reply from before the last compaction reports a context that
- * no longer exists, so without a later one the whole view is estimated.
+ * How much the last request used: the last reply's reported input and cache tokens. Nothing is
+ * added for what came after it, and nothing refuses a request. A thread with no reply since its
+ * last compaction (a fresh summary, or a resume after a crash) has none to go by, so its view is
+ * estimated.
  */
 export function inputTokens(messages: AgentMessage[], compaction?: Compaction): number {
   for (let i = messages.length - 1; i >= (compaction?.at ?? 0); i--) {
     const m = messages[i];
     if (m?.role !== "assistant" || m.stopReason === "error" || m.stopReason === "aborted") continue;
     const u = m.usage;
-    const reported = u ? u.input + u.cacheRead + u.cacheWrite + u.output : 0;
-    if (reported > 0) {
-      return reported + messages.slice(i + 1).reduce((sum, x) => sum + estimateTokens(x), 0);
-    }
+    const reported = u ? u.input + u.cacheRead + u.cacheWrite : 0;
+    if (reported > 0) return reported;
   }
   return compactedView(messages, compaction).reduce((sum, x) => sum + estimateTokens(x), 0);
 }
@@ -300,8 +298,7 @@ export function compactor(args: {
   cap?: number;
 }): Compactor {
   const { threadId, model, streamFn, thinkingLevel } = args;
-  const { warn, compact: compactAt, reserve } = compactionThresholds(model, args.cap);
-  const window = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
+  const { warn, compact: compactAt } = compactionThresholds(model, args.cap);
   const maxBytes = model.inputLimits?.maxRequestBytes ?? FALLBACK_REQUEST_BYTES;
   const maxImages = model.inputLimits?.images?.maxPerRequest ?? FALLBACK_IMAGES_PER_REQUEST;
   // `load` marks a thread due past these; a compaction keeps KEEP_SHARE of each, so it leaves the
@@ -324,10 +321,10 @@ export function compactor(args: {
       tokens,
       warn: tokens > warn || imageShare > IMAGE_WARN,
       due: tokens > compactAt || imageShare > IMAGE_DUE,
-      /** Another turn might not fit the window. */
-      tight: tokens + reserve > window || imageShare > IMAGE_DUE,
-      /** The warm summary request might not fit. */
-      cold: tokens + SUMMARY_MAX_TOKENS > window || imageShare > IMAGE_COLD,
+      /** Another turn might not fit the provider's image limits (tokens never refuse a request). */
+      tight: imageShare > IMAGE_DUE,
+      /** The warm summary request might not fit the image limits. */
+      cold: imageShare > IMAGE_COLD,
     };
   }
 

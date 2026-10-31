@@ -123,7 +123,7 @@ describe("history with a compaction", () => {
       usage: { input: 300_000, output: 10, cacheRead: 0, cacheWrite: 0 },
     } as never;
     const messages = [system, user(1), stale, result("z", 1)];
-    expect(inputTokens(messages)).toBeGreaterThan(300_000);
+    expect(inputTokens(messages)).toBe(300_000);
     expect(inputTokens(messages, { summary: "S", keptFrom: 2, at: 4 })).toBeLessThan(100);
   });
 });
@@ -233,11 +233,14 @@ describe("compactor", () => {
     expect(view.length).toBeLessThan(messages.length);
   });
 
-  it("cold when the warm request would not fit: no kept tail, no images", async () => {
-    // 195k input in a 200k window: the warm request plus a 16k summary does not fit
-    const { c, requests } = setup([reply("SUM")]);
-    const messages = thread_(195_000);
-    messages.splice(4, 0, image(10));
+  it("cold when the images near the request limit: no kept tail, no images", async () => {
+    const { c, requests } = setup([reply("SUM")], {
+      contextWindow: 1_000_000,
+      maxTokens: 32_000,
+      inputLimits: { maxRequestBytes: 1_000 },
+    });
+    const messages = thread_(150_000);
+    messages.splice(4, 0, image(950));
     await c.prepare(messages);
     const sent = requests[0]?.messages ?? [];
     expect(sent.length).toBeLessThan(messages.length);
@@ -296,22 +299,6 @@ describe("compactor", () => {
       await c.prepare(messages);
     }
     expect(requests).toHaveLength(1);
-  });
-
-  it("a last turn that alone is due: summarize when tight, not on every request", async () => {
-    // Each turn is 450k tokens, over the 336k compact point, in a 1M window: two turns still fit.
-    const turn = (i: number): AgentMessage[] => [call(`b${i}`, 10), result(`b${i}`, 450_000)];
-    const { c, requests } = setup(
-      Array.from({ length: 30 }, () => reply("SUM")),
-      { contextWindow: 1_000_000, maxTokens: 32_000 },
-    );
-    const messages = [system, user(10)];
-    for (let i = 0; i < 8; i++) {
-      messages.push(...turn(i));
-      await c.prepare(messages);
-    }
-    // turns 3, 5, 7 (three turns do not fit); without the check, every turn from the second
-    expect(requests).toHaveLength(3);
   });
 
   it("the provider's error text reaches the caller unchanged", async () => {
