@@ -162,6 +162,7 @@ export function imageLoad(messages: AgentMessage[]): { count: number; bytes: num
 
 /** Pi's chars/4 estimate; an image counts as 4800 characters. */
 export function estimateTokens(message: AgentMessage): number {
+  const declared = message.role === "system" ? (message.toolsAdded ?? []) : [];
   const chars = (content: unknown): number => {
     if (typeof content === "string") return content.length;
     if (!Array.isArray(content)) return 0;
@@ -173,7 +174,8 @@ export function estimateTokens(message: AgentMessage): number {
       return sum;
     }, 0);
   };
-  return Math.ceil(chars((message as { content?: unknown }).content) / 4);
+  const declarations = declared.reduce((sum, t) => sum + JSON.stringify(t).length, 0);
+  return Math.ceil((chars((message as { content?: unknown }).content) + declarations) / 4);
 }
 
 /**
@@ -374,11 +376,7 @@ export function compactor(args: {
     }
     // Cold: only what is summarized (and the summary before it), the images left out.
     const request = cold
-      ? [
-          messages[0] as AgentMessage,
-          ...(compaction ? [summaryMessage(compaction.summary)] : []),
-          ...messages.slice(from, cut).map(withoutImages),
-        ]
+      ? compactedView(messages.slice(0, cut), compaction).map(withoutImages)
       : compactedView(messages, compaction);
     let reply = await summarize(request, SUMMARY_MAX_TOKENS, signal);
     // Reasoning counts inside the output limit on some providers and can use all of it: once more

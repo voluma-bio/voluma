@@ -44,7 +44,13 @@ import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
 import { SandboxUnavailableError, type Tool, type ToolResult } from "../../tools/tool";
-import { type Compactor, compactor, foldHistory } from "./compaction";
+import {
+  type Compaction,
+  type Compactor,
+  compactedView,
+  compactor,
+  foldHistory,
+} from "./compaction";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -281,7 +287,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         );
       }
       if (stored.length > 0) {
-        agent.state.tools = resumedTools(stored, agentTools);
+        agent.state.tools = resumedTools(stored, compaction, agentTools);
       }
       const repairs = interruptedToolResults(stored, options.interrupted);
       const hasUser = stored.some((m) => m.role === "user");
@@ -381,6 +387,17 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
                 replyId,
               );
               replyId = frames = undefined;
+            } else if (message.role === "system") {
+              // Pi's declaration of a resumed thread's changed tools (the first system message is stored with `persist(system)`).
+              const added = message.toolsAdded?.map((t) => t.name) ?? [];
+              const removed = message.toolsRemoved?.map((t) => t.name) ?? [];
+              const text = [
+                added.length > 0 && `added ${added.join(", ")}`,
+                removed.length > 0 && `removed ${removed.join(", ")}`,
+              ]
+                .filter(Boolean)
+                .join("; ");
+              if (text) emit("message", { role: "system", text: `Tools changed: ${text}` });
             } else if (message.role === "user") {
               const notices = noticesOf.get(message);
               if (!notices) throw new Error("a user message reached message_end without a sender");
@@ -599,10 +616,14 @@ function withoutDescriptions(schema: unknown, named = false): unknown {
  * the same way, unless the thread has called it: its history would hold calls to a tool that no
  * longer exists. (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
  */
-function resumedTools(stored: AgentMessage[], current: AgentTool[]): AgentTool[] {
+function resumedTools(
+  stored: AgentMessage[],
+  compaction: Compaction | undefined,
+  current: AgentTool[],
+): AgentTool[] {
   const declared = getCurrentTools(stored);
   const called = new Set(
-    stored.flatMap((m) =>
+    compactedView(stored, compaction).flatMap((m) =>
       m.role === "assistant"
         ? m.content.flatMap((b) => (b.type === "toolCall" ? [b.name] : []))
         : [],
