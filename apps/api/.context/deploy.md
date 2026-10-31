@@ -250,10 +250,17 @@ ended that exposure for what was only there.
 | `RENDER_API_KEY` (`.env`) | the repo `.env` of whoever deploys | Dashboard, Account Settings, API Keys: create a new one, replace it in `.env`, delete the old |
 | `WORKOS_COOKIE_PASSWORD` | `voluma-api` variables; `.env` | New value on `voluma-api`; restart. Every session cookie stops unsealing, so everyone signs in again. Rotate it whenever it may have leaked: it is the key to forging a session cookie, though a forged one still needs a token WorkOS signed |
 | `WORKOS_API_KEY` | `voluma-api` variables; `.env` | Dashboard, API Keys: create a new key, replace it on `voluma-api` and restart, then delete the old one. It authorizes token refresh and session revocation |
+| Test member's password (`WORKOS_TEST_PASSWORD`) | WorkOS user account; operators' secret stores and local environments used for probes | With the account owner's authorization, reset through AuthKit's password-recovery flow using the owner's mailbox, update the operators' secret copies, and revoke that user's existing WorkOS sessions. Verify a new sign-in without logging the password, cookies or tokens. This is separate from rotating `WORKOS_COOKIE_PASSWORD` or `WORKOS_API_KEY` |
 | `WORKOS_CLIENT_ID`, `WORKOS_LAB_ORGANIZATION_ID`, `WORKOS_JUDGES_ORGANIZATION_ID`, `APP_URL` | `voluma-api` variables | Identifiers, not secrets; change only if the WorkOS environment or the domain changes |
 | Model keys (`VOLUMA_OPENAI_API_KEY` and the others) | `.env` (runner) | Revoke and re-create in the provider console; replace in `.env`. Keep a spend cap on each |
 | R2 keys, `CLOUDFLARE_API_TOKEN` | `.env` (runner) | Cloudflare dashboard: roll the token, replace in `.env`. Keep the R2 token limited to the `voluma-staging` bucket |
 | Modal token | `.env` or `~/.modal.toml` | `modal token new`, revoke the old in the Modal dashboard |
+
+For a reported test-password exposure ([#132](https://github.com/voluma-bio/voluma/issues/132)),
+record the operator and time of the reset, session revocation and successful verification,
+never the credential values. A working sign-in or a move to a new host does not establish
+that the exposed password changed; leave that item open until the owner or an authorized
+operator supplies that evidence.
 
 The runner service holds the model key (`VOLUMA_META_API_KEY`), the Modal token and the R2 keys in
 its own variables (names in [../../runner/.context/deploy.md](../../runner/.context/deploy.md)); rotate them there as well as in `.env`. The API has its own R2 key (run files and scan uploads) in its variables; rotate that separately. The API holds no model keys.
