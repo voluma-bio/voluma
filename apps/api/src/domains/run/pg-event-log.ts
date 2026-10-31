@@ -5,8 +5,8 @@
  *    statement's snapshot is taken when it starts, so a lock taken inside the insert's
  *    own statement would not see the previous holder's row and `seq` would collide;
  * 2. check the lease token against the run row (`LeaseLost` rolls the append back);
- * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` inserts nothing, and is
- *    `EventIdTaken` if the stored event belongs to another run;
+ * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` (ids are unique per run) inserts
+ *    nothing;
  * 4. if the event was new, move the run's `last_progress_seq` when it is run-state progress
  *    (`claim-progress.ts`).
  *
@@ -26,13 +26,6 @@ import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
 import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs } from "./schema";
-
-/** An event id already stored under another run. */
-export class EventIdTaken extends Error {
-  constructor() {
-    super("event id belongs to another run");
-  }
-}
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 export const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
@@ -135,20 +128,13 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
     checkLease: (runId: string, leaseToken: string) =>
       db.transaction((tx) => assertLease(tx, runId, leaseToken)),
 
-    /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
+    /** Throws `LeaseLost`. */
     async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
         await eventLock(tx, event.runId);
         await assertLease(tx, event.runId, leaseToken);
         const inserted = await insertEvent(tx, event);
-        if (inserted.length === 0) {
-          const [stored] = await tx
-            .select({ id: events.id })
-            .from(events)
-            .where(and(eq(events.runId, event.runId), eq(events.id, event.id)));
-          if (!stored) throw new EventIdTaken();
-          return;
-        }
+        if (inserted.length === 0) return;
         const [row] = inserted;
         if (row && isProgress(event)) {
           await tx.update(runs).set({ lastProgressSeq: row.seq }).where(eq(runs.id, event.runId));

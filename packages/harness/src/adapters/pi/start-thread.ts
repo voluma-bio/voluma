@@ -211,17 +211,16 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     if (reply?.role !== "assistant") return [];
     const calls = reply.content.filter((b) => b.type === "toolCall");
     if (calls.at(-1)?.id !== last.toolCallId) return [];
+    // A batch whose every result terminates ends the turn: its inbox goes in the user message that
+    // follows, and there is no next request to warn.
+    const terminates = (m: AgentMessage) =>
+      m.role === "toolResult" && (m.details as { terminate?: boolean } | undefined)?.terminate;
+    if (messages.slice(replyAt + 1).every(terminates)) return [];
     if (!historyError && !cutOff()) {
       const notice = compacting.wrapUp(messages);
       if (notice) inbox.push({ text: notice, sender: NOTICE, lapses: true });
     }
-    // A batch whose every result terminates ends the turn: its inbox goes in the user message that follows.
-    const terminates = (m: AgentMessage) =>
-      m.role === "toolResult" && (m.details as { terminate?: boolean } | undefined)?.terminate;
-    const results = messages.slice(replyAt + 1);
-    if (inbox.length === 0 || [...results.filter((m) => m !== last), last].every(terminates)) {
-      return [];
-    }
+    if (inbox.length === 0) return [];
     return inbox.splice(0);
   };
 
