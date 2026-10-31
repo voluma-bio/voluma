@@ -1,7 +1,7 @@
 /**
  * What the header line says in the scan review: the study and the scan, its group, where the run
- * stands, and Run details: what the researcher may ask (how long it took, its workflow, its cost,
- * Stop while it goes), then what someone fixing a run needs (times, ids, commits, keys, failures,
+ * stands, and Run details: what the researcher may ask (how long it took, its workflow and models,
+ * its cost, Stop while it goes), then what someone fixing a run needs (times, ids, commits, keys, failures,
  * gateway requests). Below the header,
  * over the views: the run's own problems (it waits for its starter's keys, it failed) and a lost
  * connection.
@@ -22,8 +22,10 @@ import {
   runWork,
   scanLabel,
   stoppedText,
+  type Thread,
   useEvents,
   useNow,
+  useThreads,
 } from "@voluma/run-view";
 import {
   Button,
@@ -155,6 +157,27 @@ const clock = (iso: string) =>
     timeZoneName: "short",
   });
 
+const ROLE_MODEL = { main: "Lead AI model", worker: "Task AI model", check: "Second check model" };
+
+/**
+ * Which model the run calls: one "Model" line when every agent uses the same, else a line per
+ * role listing its models; none before an agent records one.
+ */
+function modelItems(threads: Thread[]): FactSection["items"] {
+  const byRole = new Map<keyof typeof ROLE_MODEL, Set<string>>();
+  for (const role of Object.keys(ROLE_MODEL) as (keyof typeof ROLE_MODEL)[]) {
+    const models = new Set<string>();
+    for (const t of threads) if (t.place === role && t.model) models.add(t.model);
+    if (models.size > 0) byRole.set(role, models);
+  }
+  const all = new Set([...byRole.values()].flatMap((m) => [...m]));
+  if (all.size === 1) return [["Model", [...all][0]]];
+  return [...byRole].map(([role, models]) => [
+    models.size > 1 ? `${ROLE_MODEL[role]}s` : ROLE_MODEL[role],
+    [...models].join(", "),
+  ]);
+}
+
 /** Mounted only while Run details is open, so its clock and the log scan run only then. */
 function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
   const { state, providerCalls } = run;
@@ -162,6 +185,8 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
   const events = useEvents();
   const work = runWork(events, state, useNow(live));
   const failed = useMemo(() => failedThreads(events).size, [events]);
+  const threads = useThreads();
+  const models = useMemo(() => modelItems(threads), [threads]);
   // Each claim records the commit its runner's checkout was at; a resume after a deploy adds one.
   const commits = useMemo(() => {
     const seen = new Set<string>();
@@ -177,6 +202,7 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
     [live ? "Worked so far" : "Took", work ? formatDuration(work.seconds) : "Not started"],
     ...(work?.redos ? [["Redos", String(work.redos)] as [string, string]] : []),
     ["Workflow", workflow],
+    ...models,
     // A request of unknown cost adds nothing to the sum, so the sum is a floor.
     [live ? "Spent so far" : "Cost", unknown > 0 ? `At least ${cost}` : cost],
   ];
