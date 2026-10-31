@@ -1,14 +1,16 @@
 # Runner: sandbox roles
 
-A sandbox is created from a spec with a role (`packages/harness/src/sandbox-specs.ts`), which fixes
-its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on every sandbox:
-`{run, name, claim, startedAt}`; `sandboxes:clean --run` ends all roles.
+A sandbox's spec is made by the harness from its layout (`specOf` in `packages/harness/src/sandbox-specs.ts`
+over a `SandboxLayout` from `layout.ts`): the layout fixes the mounts with their access and whether the
+sandbox reaches the gateway, `specOf` the size (2 CPUs, 8192 MiB) and the network. The runner supplies
+only `createSandbox(spec, signal)` (Modal) and the gateway's URL and token. Tags on every sandbox:
+`{run, name, claim, startedAt}`; `sandboxes:clean --run` ends all of them.
 
-| Role | Mounts | Network | Name |
+| Layout | Mounts | Network | Name |
 |---|---|---|---|
-| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist; no gateway: none | `<taskId>.worker[.n]` |
-| `check` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
-| `convert` | `evidence` read-only, `review` writable | none | the job's |
+| worker thread (main too, when its file grants `bash`) | `/inputs`, `/workflow` read-only; `/outputs` and its scratch writable | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist, only if the role holds `segment_sam`; else none | `<taskId>.worker[.n]` |
+| check thread | `/inputs`, `/workflow`, `/outputs` read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
+| `RunLayout.convert` | `/evidence`, `/workflow` read-only, `/review` writable | none | `convert` |
 
 `VOLUMA_GATEWAY_IPV4` selects a single-address CIDR policy instead of SNI, never both (Modal
 unions them). It must be an exclusive inbound IPv4, not a resolved shared Render/Cloudflare IP.
@@ -16,9 +18,9 @@ Staging leaves it unset: the Host-header escape is still open. CIDR permits all 
 to that address and still permits DNS; it does not make scans exfiltration-proof. Deployment
 choices, approval gates and probes: [gateway deploy](../../gateway/.context/deploy.md#dedicated-ip-cutover-236-awaiting-approval).
 
-The builder sets the access of each mount, and the Modal adapter refuses a network on a
-non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
-named by the thread's `name`, its id without the run id). `RunLayout.forThread(record)` (a `ThreadRecord`, or the identity of a thread about to start)
+The runner makes no choice here: the harness's sandbox session makes one sandbox per thread
+(`sandboxSession.get(threadId)`, named by the thread's `name`, its id without the run id) and one for
+the review-asset converter, all through the same session. `RunLayout.forThread(record)` (a `ThreadRecord`, or the identity of a thread about to start)
 (`packages/harness/src/layout.ts`) gives each thread its role, mounts, tool description, restart note,
 `keyOf` and bash-spill path, so a worker and a checker each see their own files:
 
@@ -69,7 +71,7 @@ named by the thread's `name`, its id without the run id). `RunLayout.forThread(r
 - Readers take a thread's `name`, `role` and `taskId` from its `ThreadRecord`, never from its id.
   `threadName` (`packages/contracts/src/threads.ts`) is the one parser of an id; ids are minted only
   in `run-loop.ts` (`nextThread`) and `supervise-run.ts` (`rootThreadIdOf`). The runner knows a
-  thread's layout, and so its name, by id from `run.ts`'s `laidOut` map (filled by the run loop).
+  thread's name for a log line with `threadName(runId, id)`; the harness finds a thread's layout from its `thread.started`.
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
@@ -116,12 +118,11 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
 `packages/harness/src/review-assets.ts` converts every file a task reports as a volume, a
 structure mask or a surface (`convertJob`) into review assets while the run is live, and
 records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:<sha256>`).
-`run.ts` starts it at claim beside `superviseRun`.
+`superviseRun` starts it at claim; `run.ts` orders its `drain` and the close.
 
 - **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
   whole log), minus files with an `assets.*` event; new events are polled once a second.
-  One file at a time, in one `convert` sandbox per claim (created at the first file, metered
-  like the others). A failed conversion is recorded and the worker moves on; a sandbox that
+  One file at a time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session: created at the first file, replaced when the provider ended it, metered by the runner's `createSandbox` like the others). A failed conversion is recorded and the worker moves on; a sandbox that
   dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
@@ -393,7 +394,7 @@ Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once
 (`sed -i`, editors), append, in-place edits and memory-mapped writes
 (`np.lib.format.open_memmap(mode="w+")`) fail there: the model builds a file under `/tmp`
 (local disk, lost on a sandbox restart) and `cp`s it in. The worker and check prompts
-(`prompts.ts`) and the bash tool description (`layout.ts`) say so.
+(`packages/harness/src/prompts.ts`) and the bash tool description (`layout.ts`) say so.
 
 **`/scratch` stays an R2 mount**, though it is only intermediate files. Two things need it to
 outlive a sandbox: a long bash output is stored there for the model to open (`toolOutputPath`),
@@ -425,9 +426,9 @@ lifetime) and once more 23 min into the replacement, before the exit code was lo
 # Runner: role text, tool grants and models come from `workflows/core/agents/`
 
 The worker's, checker's and (when its file grants `bash`) main's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
-(sandbox text per role, `prompts.ts` `systemPrompt`), then the role's skill list and the tool index (one line per skill
+(sandbox text per role, `packages/harness/src/prompts.ts` `systemPrompt`), then the role's skill list and the tool index (one line per skill
 script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
-(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
+(`supervise-run.ts` `grantsOf`); `segment_sam` is also dropped when the runner configures no gateway, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
 changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run."

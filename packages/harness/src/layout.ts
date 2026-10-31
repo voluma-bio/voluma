@@ -1,6 +1,6 @@
 /**
  * Where a run's files are, for the model and for the sandbox. The one place that pairs a mount
- * path with its R2 prefix, per thread: the runner mounts `mounts`, the tool descriptions say
+ * path with its R2 prefix, per thread: the sandbox spec mounts `mounts` (`specOf`), the tool descriptions say
  * `description`, and host-side tools turn paths into keys with `keyOf`.
  *
  * A worker mounts the run's `/scratch` and `/outputs` read-write and works in `/scratch/<its name>/`. A checker mounts `/outputs`
@@ -19,8 +19,10 @@
  * Every sandbox gets `SCRATCH`, its own folder `/scratch/<name>` (`ThreadLayout.dir`).
  */
 import {
+  evidencePrefix,
   outputsPrefix,
   relativePathSchema,
+  reviewAssetPrefix,
   scratchPrefix,
   toolOutputKey,
   workflowSnapshotPrefix,
@@ -32,7 +34,9 @@ import type { ThreadIdentity } from "./thread-log";
 const INPUTS = "/inputs";
 const OUTPUTS = "/outputs";
 const SCRATCH = "/scratch";
-const WORKFLOW = "/workflow";
+export const WORKFLOW = "/workflow";
+export const EVIDENCE = "/evidence";
+export const REVIEW = "/review";
 
 export interface ThreadLayout {
   /** `main` has a sandbox only if its role holds `bash` (`runLayout`'s `mainWorks`). */
@@ -49,6 +53,8 @@ export interface ThreadLayout {
   env: Record<string, string>;
   /** `/inputs` is copied to local disk in this thread's sandbox; otherwise it is the read-only mount. */
   copiesInputs: boolean;
+  /** The sandbox may reach the gateway (and gets its URL and token): the role holds `segment_sam`. */
+  gateway: boolean;
   /** The mounts, as bullet lines for the tool description. */
   description: string;
   /** Tells a model that resumes a thread which of its files survived in a new sandbox. */
@@ -67,6 +73,12 @@ export interface ThreadLayout {
   keyOf(path: string, access: "read" | "write"): string;
 }
 
+/** What a sandbox is created from (`specOf`): a thread's layout, or the run's convert sandbox. */
+export type SandboxLayout = Pick<
+  ThreadLayout,
+  "name" | "mounts" | "env" | "gateway" | "restartNote"
+> & { /** The command workdir; absent: the image's. */ dir?: string };
+
 type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "restartNote"> & {
   hostOnly: SandboxMount[];
 };
@@ -74,8 +86,11 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 export interface RunLayout {
   /** The main agent's role holds `bash` (`runLayout`'s `mainWorks`): its `/outputs` is writable. */
   mainWorks: boolean;
-  /** The run's `PYTHONPATH`, for a sandbox outside the threads (the convert sandbox). */
-  pythonPath: string;
+  /**
+   * The review-asset converter's sandbox, outside the threads: reads the evidence and the
+   * workflow, writes the review prefix, no network.
+   */
+  convert: SandboxLayout;
   /**
    * The layout of a thread. `cited` says whether the attempt a check reviews cites a scratch
    * file (the path after `/scratch/`); it gates the check's host-side reads of the rest of the
@@ -84,25 +99,42 @@ export interface RunLayout {
   forThread(thread: ThreadIdentity, cited?: (path: string) => boolean): ThreadLayout;
 }
 
-/**
- * `inputPrefix` is the R2 prefix of the run's read-only inputs. `copiesInputs(taskId)` says the
- * task's threads get them copied to local disk, which the workflow declares (`copyInputs`):
- * reading the DICOM straight from a cold mount is slow (measured on Modal: OA7-1R, 1,126 files,
- * 535 MB, intake took 179-302 s on the mount against a 7-16 s copy plus 6 s on local disk;
- * OA6-1RK 62-187 s against 5 s plus 4 s), while the 32-way copy hides the per-file latency. Only
- * the task that reads the DICOM is worth it: later tasks read `hu.npy` from `/outputs`, and the
- * copy costs every start and idle restart 5-16 s. The main thread never copies.
- * `skills` is `WorkflowDefinition.skills`: `PYTHONPATH` lets one skill's script import another
- * skill's module (module names are unique across skills, a test enforces it).
- */
-export function runLayout(
-  runId: string,
-  inputPrefix: string,
-  skills: readonly Skill[],
+export interface RunLayoutOptions {
+  runId: string;
+  /** The R2 prefix of the run's read-only inputs. */
+  inputPrefix: string;
+  /**
+   * `WorkflowDefinition.skills`: `PYTHONPATH` lets one skill's script import another skill's
+   * module (module names are unique across skills, a test enforces it).
+   */
+  skills: readonly Skill[];
   /** The main agent's role holds `bash`: it does tasks itself, so its `/outputs` is writable. */
+  mainWorks?: boolean;
+  /**
+   * The roles that hold `segment_sam`: their sandboxes reach the gateway (every sandbox has
+   * `voluma-sam` on its PATH, so one whose role cannot call it gets no network).
+   */
+  gatewayRoles?: ReadonlySet<ThreadLayout["role"]>;
+  /**
+   * Says a task's threads get `/inputs` copied to local disk, which the workflow declares
+   * (`copyInputs`): reading the DICOM straight from a cold mount is slow (measured on Modal:
+   * OA7-1R, 1,126 files, 535 MB, intake took 179-302 s on the mount against a 7-16 s copy plus
+   * 6 s on local disk; OA6-1RK 62-187 s against 5 s plus 4 s), while the 32-way copy hides the
+   * per-file latency. Only the task that reads the DICOM is worth it: later tasks read
+   * `hu.npy` from `/outputs`, and the copy costs every start and idle restart 5-16 s. The
+   * main thread never copies.
+   */
+  copiesInputs?: (taskId: string) => boolean;
+}
+
+export function runLayout({
+  runId,
+  inputPrefix,
+  skills,
   mainWorks = false,
-  copiesInputs: (taskId: string) => boolean = () => false,
-): RunLayout {
+  gatewayRoles = new Set(),
+  copiesInputs = () => false,
+}: RunLayoutOptions): RunLayout {
   const scratch = scratchPrefix(runId);
   const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
   const inputs = (copy: boolean): SandboxMount => ({
@@ -171,9 +203,22 @@ export function runLayout(
     };
   };
 
+  const convert: SandboxLayout = {
+    name: "convert",
+    // Read by the converter, which imports `sidecar` through the run's PYTHONPATH.
+    mounts: [
+      { path: EVIDENCE, prefix: evidencePrefix(runId), access: "read-only" },
+      { path: WORKFLOW, prefix: workflowSnapshotPrefix(runId), access: "read-only" },
+      { path: REVIEW, prefix: reviewAssetPrefix(runId), access: "read-write" },
+    ],
+    env: { PYTHONPATH: pythonPath },
+    gateway: false,
+    restartNote: "The sandbox was restarted.",
+  };
+
   return {
     mainWorks,
-    pythonPath,
+    convert,
     forThread({ name, role, taskId }, cited = () => false) {
       const copy = taskId !== undefined && copiesInputs(taskId);
       const dir = `${SCRATCH}/${name}`;
@@ -190,6 +235,7 @@ export function runLayout(
         role,
         name,
         copiesInputs: copy,
+        gateway: gatewayRoles.has(role),
         dir,
         env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>

@@ -19,7 +19,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import { corrections, type Folded } from "@voluma/contracts/fold";
 import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import { runLayout } from "./layout";
+import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 import { EvidenceNotFound } from "./ports/evidence";
 import { recorder } from "./recorder";
 import { type LoopConfig, type PlanTask, superviseRun } from "./supervise-run";
@@ -249,29 +249,39 @@ export function world(o: WorldOptions) {
   workerP.setResponses(Array(400).fill(factory(o.worker ?? worker, "worker")));
   checkP.setResponses(Array(400).fill(factory(o.check ?? checker(), "check")));
 
-  const role = (p: typeof mainP, tools: string[]) => () => ({
-    model: p.getModel(),
-    thinkingLevel: "off" as const,
-    streamFn: models.streamSimple.bind(models) as never,
-    systemPrompt: "faux",
+  const agent = (name: string, tools: string[]): AgentDefinition => ({
+    name,
+    description: "",
+    model: "faux",
     tools,
+    subagents: [],
+    skills: [],
+    body: `The ${name} of a scripted run.`,
   });
-  const roles = {
-    main: role(mainP, [
-      "start_worker",
-      "message",
-      "wait",
-      "stop_worker",
-      "answer",
-      "accept",
-      "change_plan",
-      "reply",
-      "finish_run",
-      ...(o.mainTools ?? []),
-    ]),
-    worker: role(workerP, ["report_output", "submit_task", ...(o.workerTools ?? [])]),
-    check: role(checkP, ["checkpoint", "ask"]),
+  const definition: WorkflowDefinition = {
+    dir: "workflows/mouse-oa",
+    commit: "a".repeat(40),
+    files: { tasks: [], outputs: [] } as unknown as WorkflowFiles,
+    skills: [],
+    toolIndex: [],
+    agents: {
+      main: agent("main", [
+        "start_worker",
+        "message",
+        "wait",
+        "stop_worker",
+        "answer",
+        "accept",
+        "change_plan",
+        "reply",
+        "finish_run",
+        ...(o.mainTools ?? []),
+      ]),
+      worker: agent("worker", ["report_output", "submit_task", ...(o.workerTools ?? [])]),
+      check: agent("check", ["checkpoint", "ask"]),
+    },
   };
+  const modelOf = { main: mainP, worker: workerP, check: checkP };
 
   const store = {
     append: async (e: { id: string } & Record<string, unknown>) => {
@@ -331,14 +341,16 @@ export function world(o: WorldOptions) {
 
   async function claim(reopened = false): Promise<Folded> {
     const rec = recorder(store as never, RUN, () => {}, 10, [...stored]);
-    return superviseRun({
+    const supervised = superviseRun({
       runId: RUN,
+      definition,
       plan: o.plan,
-      workflow: { tasks: [], outputs: [] } as unknown as WorkflowFiles,
+      selectedOutputs: undefined,
+      notes: undefined,
+      inputPrefix: "inputs/",
       workflows: [
         { repo: "voluma-bio/voluma", path: "workflows/mouse-oa", commit: "a".repeat(40) },
       ],
-      layout: runLayout(RUN, "inputs/", []),
       recorder: rec,
       history: {
         load: async (t) => {
@@ -351,10 +363,6 @@ export function world(o: WorldOptions) {
           if (rows[idx] === undefined) rows.push(m);
         },
       },
-      sandbox: async () => {
-        throw new Error("these runs call no sandbox");
-      },
-      releaseSandbox: () => {},
       evidence: {
         keep: async (_run, taskId, f) => {
           if (o.evidenceExists?.(f.root, taskId, f.path) === false)
@@ -375,19 +383,28 @@ export function world(o: WorldOptions) {
         restore: async () => {},
         discard: async () => {},
       },
-      roles,
-      briefs: {
-        main: () => "Run the plan.",
-        mainRestart: (_v, state) => `Restarted.\n${state}`,
-        worker: (t, brief) => `Your task is "${t.id}".\n${brief}`,
-        check: (t) => `Check task "${t.id}".`,
+      model: (role) => ({
+        model: modelOf[role].getModel(),
+        thinkingLevel: "off" as const,
+        streamFn: models.streamSimple.bind(models) as never,
+      }),
+      createSandbox: async () => {
+        throw new Error("these runs call no sandbox");
       },
+      sandbox: { image: "faux", lifetimeSeconds: 60, idleSeconds: 60 },
       config: o.config,
       providerError: o.providerError,
+      log: () => {},
       // A reopen clears the claim-end reason (`messages.ts`).
       ...(stored.length > 0 && !reopened && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
+      conversionSignal: abort.signal,
     });
+    try {
+      return await supervised.result;
+    } finally {
+      await supervised.close();
+    }
   }
 
   return {

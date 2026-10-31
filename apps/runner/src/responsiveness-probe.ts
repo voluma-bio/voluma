@@ -339,7 +339,7 @@ try {
           };
         });
 
-      const layout = runLayout("probe", "inputs/", []).forThread({
+      const layout = runLayout({ runId: "probe", inputPrefix: "inputs/", skills: [] }).forThread({
         id: "probe.intake.worker",
         name: "intake.worker",
         role: "worker",

@@ -31,6 +31,7 @@ import {
   fold,
   goMarkerId,
 } from "@voluma/contracts/fold";
+import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { RunLayout, ThreadLayout } from "./layout";
 import {
@@ -54,6 +55,7 @@ import {
   unresumableReason,
   verdictNudge,
 } from "./messages";
+import { checkPrompt, mainPrompt, mainRestartPrompt, systemPrompt, workerPrompt } from "./prompts";
 import type { Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
 import {
@@ -76,34 +78,16 @@ import type { Tool } from "./tools/tool";
 /** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
 type Lineage = { parentThreadId: string; attemptId?: string };
 
-/** What a host decides about a role's threads; the loop adds identity and the tools. */
-export interface RoleSetup {
-  systemPrompt: string;
+/** What the host decides about a thread's model; the loop adds the prompts, identity and tools. */
+export interface ModelSetup {
   model: Model<Api>;
   /** The Pi agent's thinking level, which Pi sends as `reasoning` and records on each reply. */
   thinkingLevel: ThinkingLevel;
   streamFn: StreamFn;
-  /** The tool names the role's file grants (`TOOL_NAMES`). */
-  tools: readonly string[];
 }
 
-/**
- * A role's setup for one thread. `recorded` is the model (`provider/id`) a resumed thread
- * started on, which it must keep.
- */
-export type RoleOf = (thread: ThreadLayout, recorded: string | undefined) => RoleSetup;
-
-/** The first message of each kind of thread, which the host writes. */
-export interface Briefs {
-  /** The main agent's first message: the plan, the deliverable, the researcher's notes. */
-  main(view: Folded): string;
-  /** `main.<n>`'s first message, when the thread before it cannot go on; `state` is the agents list and task table. */
-  mainRestart(view: Folded, state: string): string;
-  /** A worker's first message: the task as planned and the main agent's `brief`. */
-  worker(task: PlanTask, brief: string): string;
-  /** A check thread's first message: the task as planned and its reported outputs. */
-  check(task: PlanTask, state: FoldedTask): string;
-}
+/** A role of the workflow: the keys of `WorkflowDefinition.agents`. */
+export type AgentRole = ThreadLayout["role"];
 
 export interface LoopConfig {
   /** `needs-review` rounds a task gets before it is left to-check. */
@@ -124,8 +108,18 @@ export interface RunLoopOptions {
   runtime: TaskRuntime;
   threads: Threads;
   layout: RunLayout;
-  roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
-  briefs: Briefs;
+  /** The role files, skills and task files that write each thread's system prompt and first message. */
+  definition: WorkflowDefinition;
+  /** The outputs the researcher selected (every output when absent) and their notes, which the first messages carry. */
+  selectedOutputs: readonly string[] | undefined;
+  notes: string | undefined;
+  /**
+   * A thread's model. `recorded` is the model (`provider/id`) a resumed thread started on, which
+   * it must keep.
+   */
+  model(role: AgentRole, recorded: string | undefined): ModelSetup;
+  /** The tool names each role holds (`TOOL_NAMES`). */
+  grants: Record<AgentRole, readonly string[]>;
   config?: Partial<LoopConfig>;
   /** Builds the tools a thread's role names; the main agent's tools act through `agents`. */
   tools(thread: ThreadLayout, names: readonly string[], agents: Agents): Tool[];
@@ -202,11 +196,13 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const message = corrections(recorder.events()).open?.message;
     const inCorrection = d.undelivered.some((u) => u.kind === "person" && u.eventId === message);
     const covers = { promptCovers: recorder.events().at(-1)?.id };
-    if (n === 1 && !inCorrection) return { prompt: o.briefs.main(view) };
+    const first = () => mainPrompt(view, o.selectedOutputs, o.definition.files, o.notes);
+    if (n === 1 && !inCorrection) return { prompt: first() };
     const state = stateBlock(d, view, stateOf);
-    if (!inCorrection) return { prompt: o.briefs.mainRestart(view, state), ...covers };
-    const brief =
-      n === 1 ? `${o.briefs.main(view)}\n\n${state}` : o.briefs.mainRestart(view, state);
+    const restart = () =>
+      mainRestartPrompt(view, state, o.selectedOutputs, o.definition.files, o.notes);
+    if (!inCorrection) return { prompt: restart(), ...covers };
+    const brief = n === 1 ? `${first()}\n\n${state}` : restart();
     return { prompt: `${finishedRunText(view)}\n\n${brief}`, ...covers };
   }
 
@@ -216,14 +212,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const view = runtime.view();
     const taskId = r.taskId;
     const thread = o.layout.forThread(r, taskId ? (p) => runtime.cites(taskId, p) : undefined);
-    const role = o.roles[r.role](thread, d.threads.get(r.id)?.model);
+    const setup = o.model(r.role, d.threads.get(r.id)?.model);
     const common = {
       threadId: r.id,
-      systemPrompt: role.systemPrompt,
-      model: role.model,
-      thinkingLevel: role.thinkingLevel,
-      streamFn: role.streamFn,
-      tools: o.tools(thread, role.tools, agents),
+      systemPrompt: systemPrompt(o.definition, thread),
+      model: setup.model,
+      thinkingLevel: setup.thinkingLevel,
+      streamFn: setup.streamFn,
+      tools: o.tools(thread, o.grants[r.role], agents),
       interrupted: (tool: string, toolCallId: string) =>
         interruptedResult(derive(), r.id, tool, toolCallId),
     };
@@ -247,7 +243,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         kind: "worker" as const,
         taskId: r.taskId,
         parentThreadId: d.main ?? root,
-        prompt: o.briefs.worker(task, record?.brief ?? ""),
+        prompt: workerPrompt(task, record?.brief ?? "", o.notes),
       } satisfies ThreadSpec & Lineage;
     }
     const folded = runtime.taskOf(r.taskId);
@@ -258,7 +254,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       taskId: r.taskId,
       parentThreadId: root,
       ...(folded.attemptId && { attemptId: folded.attemptId }),
-      prompt: o.briefs.check(task, folded),
+      prompt: checkPrompt(task, folded, o.notes),
     } satisfies ThreadSpec & Lineage;
   }
 
@@ -334,7 +330,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const spec = specFor(thread);
       const task = planTask(runtime.view(), taskId);
       await begin(
-        { ...spec, parentThreadId: main, prompt: o.briefs.worker(task, brief) },
+        { ...spec, parentThreadId: main, prompt: workerPrompt(task, brief, o.notes) },
         startedEventId,
         spawnedBy,
       );
