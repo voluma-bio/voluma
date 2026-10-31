@@ -44,6 +44,7 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 import { isTransientProviderError } from "../../context-overflow";
+import { errorText } from "../../error-text";
 
 /** Jimmy's cap (2026-10-30): "300k or 400k". A thread's input stays under this, or under a smaller window. */
 const BUDGET_CAP = 400_000;
@@ -490,8 +491,6 @@ export function compactor(args: {
     },
   };
 }
-
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Both calls of a length retry were billed. */
 function addUsage(a: Usage, b: Usage): Usage {

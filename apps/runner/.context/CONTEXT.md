@@ -118,7 +118,7 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
 `packages/harness/src/review-assets.ts` converts every file a task reports as a volume, a
 structure mask or a surface (`convertJob`) into review assets while the run is live, and
 records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:<sha256>`).
-`superviseRun` starts it at claim; `run.ts` orders its `drain` and the close.
+`superviseRun` starts it at claim and drains it when the run ends; `run.ts` orders the close.
 
 - **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
   whole log), minus files with an `assets.*` event; new events are polled once a second.
@@ -150,19 +150,26 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   runners may duplicate a cold conversion into separate generations. This is first-report
   reuse, not eager upload-time preparation: DICOM intake still runs per run. Runs pinned to
   converters without cache support keep their original conversion behavior.
-- **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
-  lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
-  `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
-  `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
-  never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
+- **Signal.** One signal crosses the host/harness boundary: the cut-off, fired by a stop that will
+  not end the run (server stop, lost lease, self-stop, refused, loop-stalled, shutdown). The worker
+  and its sandbox creation obey it. The harness ends its own threads when the loop is done or
+  `Supervised.fail` is called (an uncaught error in the claim's scope, which ends the run as failed).
+  A cut-off worker records nothing; the next claim finds the files again and the
   converter skips what has a `manifest.json` of its version and mode.
-- **Drain.** An `ended` report waits for the queue (`DRAIN_MS`, 10 minutes, the lease
-  heartbeating meanwhile), before the sandboxes close. Then every output still without an
-  `assets.*` event is recorded `assets.failed` ("timed out", or "the run ended before the file
-  was converted" for an output stored late), so an ended run leaves no file "preparing". Events go
+- **Drain.** A normal end (completed or failed) waits for the queue inside `superviseRun`'s
+  `result` (`DRAIN_MS`, 10 minutes, the lease heartbeating meanwhile), before the sandboxes close.
+  Then every output still without an `assets.*` event is recorded `assets.failed` ("timed out",
+  "the run ended before the file was converted", or, when `prepare` failed, the setup error), so an ended run leaves no file "preparing" whatever step failed.
+  The worker starts once `prepare` (workflow load, role-model checks, ending an earlier claim's
+  sandboxes) has resolved. When `prepare` fails there is no worker: `superviseRun` records the
+  outputs itself with the run's error, through the same check-then-record step as the drain
+  (`failUnfinishedAssets`), so every record made after the run ended goes through one cut-off check.
+  `prepare` retries transient store errors a few times. Events go
   through `emit` (retried) and count as done once stored. This is **permanent for the run**: the next claim
-  skips it and review shows the object without assets. A stop during the drain ends it at once and the run is reported `released` (nothing, for a server stop or a lost lease) instead of `ended`, so the next claim resumes the queue.
-  A `released` report does not drain.
+  skips it and review shows the object without assets. A cut-off at any point before the failed
+  events are queued (the drain checks and queues them in one synchronous step) makes `result` say
+  `cut-off`: the run is reported `released` (nothing, for a server stop or a lost lease), so the next claim resumes the queue.
+  A cut-off run does not drain.
 - **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of
   float32) is the long pole. Add sandboxes if the drain times out in practice.
 
@@ -171,8 +178,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
-1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the run loop ends,
-   draining the convert queue meanwhile (a close takes ~30 s) and then closing the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
+1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when `superviseRun`'s result says the run ended (the convert queue already drained; a close takes ~30 s) and then closes the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
