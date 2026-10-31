@@ -390,7 +390,7 @@ function rowsOf(
   let briefed = false;
   const seen = new Set<string>();
   let root: string | undefined;
-  // Each shown thread's calls step its cache state, so compaction calls count too.
+  // Each shown thread's calls step its cache state, a compaction summary resets it (see `spend`).
   const cache = new Map<string, CacheState>();
   for (const e of events) {
     if (orchestration) {
@@ -434,7 +434,8 @@ function rowsOf(
         const p = e.payload;
         if (p.role === "assistant") {
           let cacheMiss = false;
-          if (p.usage) {
+          if (p.compaction) cache.delete(e.threadId);
+          else if (p.usage) {
             const step = cacheStep(cache.get(e.threadId), p.usage);
             cache.set(e.threadId, step.next);
             cacheMiss = step.miss;

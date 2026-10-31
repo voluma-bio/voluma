@@ -13,6 +13,9 @@
  *   are not model calls, so `calls` stays the model calls that reported usage. Requests whose
  *   cost is unknown (`unknownCostCalls`) add no dollars and are counted apart as gateway
  *   requests, not SAM operations.
+ * - Cache misses (`cacheMisses`) are judged per thread by `cacheStep`. A compaction summary is a
+ *   call but is not judged, and the thread's next call starts a new baseline: it re-reads only the
+ *   system prompt of a far shorter history, which is not a lost cache.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. A thread with no task (the root, the main
  *   agent) belongs to `main`.
@@ -187,10 +190,16 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         close(e.threadId, at);
         break;
       case "message": {
-        const used = e.payload.role === "assistant" ? e.payload.usage : undefined;
+        const m = e.payload;
+        const used = m.role === "assistant" ? m.usage : undefined;
         if (!used) break;
-        const { miss, next } = cacheStep(cache.get(e.threadId), used);
-        cache.set(e.threadId, next);
+        let miss = false;
+        if (m.role === "assistant" && m.compaction) cache.delete(e.threadId);
+        else {
+          const step = cacheStep(cache.get(e.threadId), used);
+          cache.set(e.threadId, step.next);
+          miss = step.miss;
+        }
         add(e.threadId, (s) => {
           s.cacheMisses += miss ? 1 : 0;
           s.costUsd += used.costUsd;

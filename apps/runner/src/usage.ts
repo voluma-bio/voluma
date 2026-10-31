@@ -31,11 +31,11 @@ export function usageMeter() {
   const cache = new Map<string, CacheState>();
   return {
     /** One model call's usage: its cost goes to the heartbeat, its tokens and cache miss to the per-role totals. */
-    addModelCall(role: ModelRole, threadId: string, used: ModelUsage | undefined) {
+    addModelCall(role: ModelRole, threadName: string, used: ModelUsage | undefined) {
       if (!used) return;
       this.addModelCost(used.costUsd);
-      const { miss, next } = cacheStep(cache.get(threadId), used);
-      cache.set(threadId, next);
+      const { miss, next } = cacheStep(cache.get(threadName), used);
+      cache.set(threadName, next);
       const t = tokens.get(role) ?? { calls: 0, input: 0, cacheRead: 0, misses: 0 };
       t.misses += miss ? 1 : 0;
       t.calls++;
@@ -43,7 +43,7 @@ export function usageMeter() {
       t.cacheRead += used.cacheRead;
       tokens.set(role, t);
     },
-    /** One line per role: calls, uncached input, cache reads, the share of the prompt read from cache, and the calls that lost the cache. */
+    /** One line per role: calls, uncached input, cache reads, the share of the prompt read from cache, and the calls that lost the cache. The meter cannot see a compaction (the run view resets its baseline there), so the call after one counts as a miss here; it lives for one claim, so a thread's first call after a restart is never a miss here, unlike the run view. */
     cacheSummary(): string[] {
       return [...tokens].map(([role, t]) => {
         const share = t.input + t.cacheRead > 0 ? t.cacheRead / (t.input + t.cacheRead) : 0;
