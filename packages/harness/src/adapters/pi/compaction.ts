@@ -66,6 +66,11 @@ const SUMMARY_MAX_TOKENS = 16_000;
 const FALLBACK_REQUEST_BYTES = 32 * 1024 * 1024;
 const FALLBACK_IMAGES_PER_REQUEST = 100;
 /**
+ * Per-provider image counts for models whose pi-ai data declares none. Meta documents 50 images per
+ * request, enforced with HTTP 400 (https://dev.meta.ai/docs/image-understanding).
+ */
+const PROVIDER_IMAGES_PER_REQUEST: Readonly<Record<string, number>> = { meta: 50 };
+/**
  * Shares of the request-size and image-count limits. Past WARN the thread is told to wrap up (a
  * `view_image` call adds up to 4 MiB); past DUE it compacts at once; past COLD even the warm
  * summary request might not fit, so it summarizes without the tail.
@@ -381,7 +386,10 @@ export function compactor(args: {
   const { threadId, model, streamFn, thinkingLevel } = args;
   const { warn, compact: compactAt } = compactionThresholds(model, args.cap);
   const maxBytes = model.inputLimits?.maxRequestBytes ?? FALLBACK_REQUEST_BYTES;
-  const maxImages = model.inputLimits?.images?.maxPerRequest ?? FALLBACK_IMAGES_PER_REQUEST;
+  const maxImages =
+    model.inputLimits?.images?.maxPerRequest ??
+    PROVIDER_IMAGES_PER_REQUEST[model.provider] ??
+    FALLBACK_IMAGES_PER_REQUEST;
   // `load` marks a thread due past these; a compaction keeps KEEP_SHARE of each, so it leaves the
   // thread not due on every axis (a limit added to one must be added to the other).
   const keep: Budget = {

@@ -334,7 +334,7 @@ cache prefix stays intact. Token decisions use only what the last request used (
 tokens): nothing blocks or splits a request on an estimate, so a request may go past the budget. Only a thread with no
 reply since its last compaction (resumed after a crash) is judged by a chars/4 estimate of its view. Images are measured
 before each request: bytes and count against the model's
-`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Budget:
+`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; when a model declares none, 32 MiB and 100 images, or its provider's documented count: 50 for Meta). Budget:
 min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 1.5 x reserve
 (reserve = min(64k, model `maxTokens`, budget/3); wrap-up room = reserve / 2; 304k on Meta, 104k on a 200k Claude, 352k on a 32k-output model), or images over 40% of a limit, a runtime
 user message tells the thread (once per compaction) to finish the step and write down what it needs. Compact: when a reply reported input over budget - reserve, the next request is the compaction request
