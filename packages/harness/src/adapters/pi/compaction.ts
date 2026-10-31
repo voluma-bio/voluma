@@ -4,7 +4,7 @@
  *
  * Once per context-full event the thread goes through three steps. Before a request, when the
  * estimated input passes the trigger (or the carried images near the model's request-size or
- * image-count limit), a notice is steered in ("finish the step; the history will be summarized")
+ * image-count limit), a notice goes in the thread's inbox ("finish the step; the history will be summarized")
  * and the thread gets `WRAP_UP_TURNS` more turns. Then, before the next request, its own model
  * summarizes the thread on a warm branch (the same messages, system message and tools as the
  * thread's requests, with only the summary instruction appended, so the provider's cache serves
@@ -267,7 +267,7 @@ The most recent messages are kept as they are after your summary, so spend it on
 export interface Compactor {
   /** The messages a request carries; summarizes the thread first when it is due. */
   prepare(messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]>;
-  /** After a turn that called tools: the notice to steer in once compaction is due and another turn fits, else undefined. */
+  /** After a turn that called tools: the notice to put in the inbox once compaction is due and another turn fits, else undefined. */
   wrapUp(messages: AgentMessage[]): string | undefined;
   /** Sets the thread's latest compaction, from its stored history. */
   restore(compaction: Compaction | undefined): void;
