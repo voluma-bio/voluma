@@ -386,9 +386,14 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
               replyId = frames = undefined;
             } else if (message.role === "system") {
               // Pi's declaration of a resumed thread's changed tools (the first system message is stored with `persist(system)`).
-              const added = message.toolsAdded?.map((t) => t.name) ?? [];
-              const removed = message.toolsRemoved?.map((t) => t.name) ?? [];
+              // A tool redefined in place comes as a removal and an addition of the same name.
+              const addedNames = message.toolsAdded?.map((t) => t.name) ?? [];
+              const removedNames = message.toolsRemoved?.map((t) => t.name) ?? [];
+              const changed = addedNames.filter((n) => removedNames.includes(n));
+              const added = addedNames.filter((n) => !changed.includes(n));
+              const removed = removedNames.filter((n) => !changed.includes(n));
               const text = [
+                changed.length > 0 && `changed ${changed.join(", ")}`,
                 added.length > 0 && `added ${added.join(", ")}`,
                 removed.length > 0 && `removed ${removed.join(", ")}`,
               ]
