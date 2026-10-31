@@ -60,7 +60,7 @@ const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => To
 export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
   // The task and main tools are built once for the thread, not once per name.
   const coordination: Record<string, Tool> = {
-    ...taskTools(deps.runtime),
+    ...taskTools(deps.runtime, deps.main.agents.changed),
     ...mainTools(deps.main),
   };
   return names.map((name) => {

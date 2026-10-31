@@ -381,6 +381,43 @@ describe("run loop", () => {
     });
   });
 
+  describe("a worker's question", () => {
+    /** t1's worker asks, ends its turn, and does the task only once it has heard the answer. */
+    const asking: Script = (t) => {
+      if (!t.calls.some((c) => c.name === "ask")) return call("ask", { question: "Which scale?" });
+      return told(t, /The main agent answers/) ? worker(t) : "Carrying on without an answer.";
+    };
+    const answering: Script = (t) => {
+      const [askId] = openAskIds(t);
+      return t.fresh && askId ? call("answer", { askId, text: "Use the fine scale." }) : undefined;
+    };
+
+    it("a restart right after the answer: the resumed worker still gets it, once", async () => {
+      const w = world({
+        plan: T1,
+        main: first(answering, chain(["t1", "t2"])),
+        workerTools: ["ask"],
+        worker: (t) => (t.task === "t1" ? asking(t) : worker(t)),
+        cutAfter: (e) => e.type === "answer",
+      });
+      const folded = await w.run();
+      expect(w.wasCut, w.text()).toBe(true);
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done", "t2:done"]);
+      const heard = w.stored.filter(
+        (e) =>
+          e.type === "message" &&
+          e.threadId === tid("t1.worker") &&
+          e.payload.role === "user" &&
+          /The main agent answers/.test(e.payload.text),
+      );
+      expect(heard).toHaveLength(1);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+  });
+
   // A stale mark stops every worker and check of the dependent, whatever its status, so
   // `start_agent` on the stale task needs no `stop_worker`.
   it("redo with attempted dependents: a correction marks them stale and stops their worker", async () => {

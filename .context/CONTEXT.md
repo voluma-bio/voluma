@@ -147,8 +147,8 @@ and check threads.
   cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
 - **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates:
   it starts workers (`start_agent`), steers them or sends feedback on a rejected task
-  (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan
-  (`change_plan`, recorded as `plan.changed` before it applies) and ends the run
+  (`message`), answers a checker's or worker's question (`answer`; a worker's `ask` does not end its turn, and the answer joins its inbox), accepts a rejected task, changes the plan
+  (`change_plan`, recorded as `plan.changed` before it applies; each running worker gets a one-line inbox message of what changed) and ends the run
   (`finish_run`). Its tools are `tools/main-tools.ts`; each writes under an id derived from the
   call (`tools/effects.ts`), so a call a crash cut off is answered from the log. It hears about
   the run only through **delivery messages** that resume it: the notices (a submit, a worker that

@@ -32,3 +32,7 @@ live on staging and no old runner is running:
    `check-limit` rule there (`thread-log.ts`, `messages.ts` case) and `"provider-outage"` in the
    `messages.ts` label table.
 5. Archived `run.json` dumps from before need the docs-repo `convert-t1b.ts` once before import.
+
+## `checkThreadId` → `threadId` on the `answer` event (PR #384)
+
+A worker's `ask` is answered through the same `answer` event, so `checkThreadId` now holds a worker's id too. Rename it to `threadId` by expand/contract (see the stored-event rule in the root `AGENTS.md`), and fix the doc comments in `events.ts` that still say "a check thread asked" / "answered a check thread's `ask`".

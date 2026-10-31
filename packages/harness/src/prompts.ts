@@ -5,8 +5,8 @@
  * prompt is fixed for its life (a resumed thread that differs fails), so it takes only the
  * role's rules and the skill list, both fixed by the run's snapshot. What varies goes in the
  * first message, which gives each role what its role file says it gets: main the plan, the
- * deliverable and the researcher's notes; a worker its task, the main agent's brief and the
- * notes; a checker the task as planned, what the worker reported and the evidence it cited,
+ * deliverable and the researcher's notes; a worker its task, the plan, the deliverable, the main
+ * agent's brief and the notes; a checker the task as planned, what the worker reported and the evidence it cited,
  * never the worker's account.
  */
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
@@ -83,21 +83,39 @@ function notesBlock(notes: string | undefined): string {
     : "";
 }
 
-export function workerPrompt(task: PlanTask, brief: string, notes: string | undefined): string {
+/**
+ * A worker's first message: its task in full, the whole plan with its own task marked and the
+ * deliverable (so it knows who uses its outputs), then the main agent's brief and the notes.
+ */
+export function workerPrompt(
+  task: PlanTask,
+  brief: string,
+  view: Folded,
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+  notes: string | undefined,
+): string {
   const needs = task.dependsOn.length
     ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
     : "It builds on no other task.";
-  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}\n\nFrom the main agent:\n${brief}${notesBlock(notes)}`;
+  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}\n\n${planBlock(view, workflow, { id: task.id, reader: "worker" })}\n\n${deliverableBlock(selected, workflow)}\n\nFrom the main agent:\n${brief}${notesBlock(notes)}`;
 }
 
 const list = (items: string[]) => (items.length ? items.join("\n") : "(none)");
 
 /**
  * The check thread's first message: the task as planned, each output the worker reported with
- * its value, and the evidence files it cited, then the researcher's notes. Never a checkpoint's
- * text, the worker's messages or its notes on a value (only the reason a value is missing).
+ * its value, and the evidence files it cited, then the plan, the deliverable and the researcher's
+ * notes. Never the brief, a checkpoint's text, the worker's messages or its notes on a value (only the reason a value is missing).
  */
-export function checkPrompt(task: PlanTask, state: FoldedTask, notes: string | undefined): string {
+export function checkPrompt(
+  task: PlanTask,
+  state: FoldedTask,
+  view: Folded,
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+  notes: string | undefined,
+): string {
   const evidenceName = new Map(state.evidence.map((a) => [a.id, a.name]));
   const evidenceOf = (ids: string[]) => {
     const names = ids.flatMap((id) => evidenceName.get(id) ?? []);
@@ -133,13 +151,33 @@ Outputs the worker reported (other structures, volumes and annotations are in it
 ${list(reported)}
 
 Evidence files the worker cited (open them with view_image):
-${list(cited)}${notesBlock(notes)}`;
+${list(cited)}
+
+${planBlock(view, workflow, { id: task.id, reader: "check" })}
+
+${deliverableBlock(selected, workflow)}${notesBlock(notes)}`;
 }
 
-/** The plan as the main agent reads it: each task with what it builds on, what it does and the outputs it reports. */
-function planBlock(view: Folded, workflow: WorkflowFiles): string {
+/**
+ * The plan as the main agent or a worker reads it: each task with what it builds on, what it does
+ * and the outputs it reports. For a worker or a check, `own` is its task, which its message already
+ * gives in full.
+ */
+function planBlock(
+  view: Folded,
+  workflow: WorkflowFiles,
+  own?: { id: string; reader: "worker" | "check" },
+): string {
   const names = new Map(workflow.outputs.map((o) => [o.id, o.name]));
+  const intro =
+    own?.reader === "worker"
+      ? "Every task of the run, so you know what builds on yours and who uses your outputs. The main agent can change it; if it changes your task or the plan while you work, you are told.\n\n"
+      : own
+        ? "Every task of the run, so you can judge whether this task's outputs serve the tasks that build on it.\n\n"
+        : "";
   const tasks = view.plan.tasks.map((t) => {
+    if (t.id === own?.id)
+      return `### ${t.id}${t.title ? ` — ${t.title}` : ""} (${own.reader === "worker" ? "your task" : "the task you check"}, in full above)`;
     const outputs = t.outputs.map(
       (o) =>
         `  - ${o.id}${names.has(o.id) ? ` (${names.get(o.id)})` : ""}: ${o.kind}${o.required ? ", required" : ""}`,
@@ -150,7 +188,7 @@ ${taskBrief(t)}
 Reports:
 ${outputs.length ? outputs.join("\n") : "  (no outputs)"}`;
   });
-  return `## The plan\n\n${tasks.join("\n\n")}`;
+  return `## The plan\n\n${intro}${tasks.join("\n\n")}`;
 }
 
 /** The outputs the researcher selected: what the run is for. */
