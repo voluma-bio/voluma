@@ -144,7 +144,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     model: options.model,
     thinkingLevel: options.thinkingLevel,
     streamFn: options.streamFn,
-    interrupted: options.interrupted,
     store: async (row) => {
       const ok = await persistRow(row);
       return ok;

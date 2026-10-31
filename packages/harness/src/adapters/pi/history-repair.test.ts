@@ -26,6 +26,7 @@ describe("read-time repair is a pure function of the stored rows", () => {
     const rows = [
       JSON.stringify(user("a")),
       "{not json",
+      '{"role":"assistant","content":null,"stopReason":"toolUse"}',
       '{"role":"compaction","summary":',
       JSON.stringify(user("b")),
     ];
@@ -33,21 +34,20 @@ describe("read-time repair is a pure function of the stored rows", () => {
     const first = foldHistory(rows);
     expect(JSON.stringify(foldHistory(rows))).toBe(JSON.stringify(first));
     expect(rows).toEqual(before);
-    expect(first.messages).toHaveLength(3);
+    expect(first.messages).toHaveLength(4);
     expect(first.compaction).toBeUndefined();
     expect(first.unreadable).toEqual([
       { idx: 1, rule: "unreadable-message" },
-      { idx: 2, rule: "unreadable-marker" },
+      { idx: 2, rule: "unreadable-message" },
+      { idx: 3, rule: "unreadable-marker" },
     ]);
   });
 
   it("an unanswered call mid-history gets a fixed result and a stray result is left out", () => {
     const messages = [user("a"), call("c1"), user("b"), result("c2"), call("c3"), result("c3")];
     const before = JSON.stringify(messages);
-    const repaired = repairToolPairs(messages, undefined, () => {});
-    expect(JSON.stringify(repairToolPairs(messages, undefined, () => {}))).toBe(
-      JSON.stringify(repaired),
-    );
+    const repaired = repairToolPairs(messages, () => {});
+    expect(JSON.stringify(repairToolPairs(messages, () => {}))).toBe(JSON.stringify(repaired));
     expect(JSON.stringify(messages)).toBe(before);
     expect(repaired.map((m) => m.role)).toEqual([
       "user",
@@ -58,9 +58,7 @@ describe("read-time repair is a pure function of the stored rows", () => {
       "toolResult",
     ]);
     expect((repaired[2] as { toolCallId: string }).toolCallId).toBe("c1");
-    expect(repairToolPairs([user("a"), call("c"), result("c")], undefined, () => {})).toHaveLength(
-      3,
-    );
+    expect(repairToolPairs([user("a"), call("c"), result("c")], () => {})).toHaveLength(3);
   });
 
   it("an image that keeps failing to read becomes a note, the same on every load", async () => {

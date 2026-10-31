@@ -57,7 +57,6 @@ export function repairLog(threadId: string) {
  */
 export function repairToolPairs(
   messages: AgentMessage[],
-  interrupted: Interrupted | undefined,
   log: (rule: string, detail: string) => void,
 ): AgentMessage[] {
   const out: AgentMessage[] = [];
@@ -66,8 +65,8 @@ export function repairToolPairs(
   const close = () => {
     for (const call of pending.values()) {
       log("unanswered-call", `call ${call.id} (${call.name})`);
-      // Timestamp 0: a fixed message, so the request is the same every time.
-      out.push(interruptedResult(call, interrupted, 0));
+      // Fixed text and timestamp 0: nothing here is stored, so it may depend on nothing but the rows.
+      out.push(interruptedResult(call, undefined, 0));
       repaired = true;
     }
     pending = new Map();

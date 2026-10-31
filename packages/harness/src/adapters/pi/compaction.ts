@@ -45,7 +45,7 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 import { isTransientProviderError } from "../../context-overflow";
-import { type Interrupted, repairLog, repairToolPairs } from "./history-repair";
+import { repairLog, repairToolPairs } from "./history-repair";
 
 /** Jimmy's cap (2026-10-30): "300k or 400k". A thread's input stays under this, or under a smaller window. */
 const BUDGET_CAP = 400_000;
@@ -124,7 +124,15 @@ export function readRow(text: string): RowKind {
       ? { kind: "marker", marker: { summary: row.summary, keptFrom: row.keptFrom as number } }
       : { kind: "unreadable", marker: true };
   }
-  return typeof row.role === "string"
+  const content = (row as { content?: unknown }).content;
+  // Later code iterates an assistant's or a result's content, so a wrong shape is unreadable.
+  const shaped =
+    row.role === "user"
+      ? Array.isArray(content) || typeof content === "string"
+      : row.role === "assistant" || row.role === "toolResult"
+        ? Array.isArray(content)
+        : typeof row.role === "string";
+  return shaped
     ? { kind: "message", message: row as AgentMessage }
     : { kind: "unreadable", marker: false };
 }
@@ -363,8 +371,6 @@ export function compactor(args: {
   onSummary(reply: AssistantMessage, summary: string): void;
   /** Overrides the budget cap (a test or a local trial). */
   cap?: number;
-  /** The text of the result a call with none is given (`history-repair.ts`). */
-  interrupted?: Interrupted;
 }): Compactor {
   const { threadId, model, streamFn, thinkingLevel } = args;
   const { warn, compact: compactAt } = compactionThresholds(model, args.cap);
@@ -381,7 +387,7 @@ export function compactor(args: {
   const logRepair = repairLog(threadId);
   /** What a request carries: the compacted view with its tool calls and results paired. */
   const requestView = (messages: AgentMessage[], at = compaction) =>
-    repairToolPairs(compactedView(messages, at), args.interrupted, logRepair);
+    repairToolPairs(compactedView(messages, at), logRepair);
   /** The wrap-up notice went out since the last compaction. */
   let warned = false;
 

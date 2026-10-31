@@ -13,3 +13,10 @@
 - **Delete `WORKER_BEFORE_FRONTMATTER` (`packages/workflow/src/load.ts`)** with it: it fills `scratch`, `outputs` and `checkedBy` for a worker file written before it declared them.
 - **A new role file still cannot start any other kind of thread.** `threadPlace` (`packages/contracts/src/thread-place.ts`) derives main/worker/check from a start's task and attempt, and `run-loop.ts` starts the entry role as `main`, checks as `check`. Open that to a role named by its file before adding a role with a new shape (a reviewer with no task, a helper under a worker).
 - **`redoRefusal` writes one text for two readers.** `fold.ts`'s `redoRefusal(view, taskId)` returns a message naming the task id, which the main agent needs; the API sends the same text as its 409 for a person's go, so the panel can show a raw task id. Return a reason instead, and let each caller word it (the plan title for the person, the id for the agent).
+- **History read-time repair leftovers (#385).**
+  - A compaction marker cut off in its first ~20 bytes is read as an unreadable message, not a marker, so every later `keptFrom` is off by one. Recognise a prefix of `{"role":"compaction"` as a marker.
+  - `unanswered-call` repeats what pi-ai's `transformMessages` already does for unanswered calls (only the wording differs). Keep only `orphan-result`, which Pi lacks, and drop the `close()` half of `repairToolPairs`.
+  - Every row is parsed twice per load (`image-refs` and `foldHistory`). Classify once and pass the rows through.
+  - Repairs are logged from two places: the row rules in `start-thread.ts` and the pairing rules through `repairLog` in the compactor. Give them one owner.
+  - A bad row 0 (system message), or a bad system row that declared tools (`toolsAdded`), still fails the thread as `ThreadStale`. Rebuilding that prompt would change the request bytes.
+  - A finished thread whose final reply row is unreadable ends on the placeholder user message, so it counts as unfinished and may run one more turn with no input. `isFinished` can't tell that from a lost mid-run row.
