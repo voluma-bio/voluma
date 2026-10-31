@@ -182,7 +182,7 @@ who ends it:
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Locally, `start` and
    `try-run` run in their own process group (`tools/dev-run.mjs`, recorded in `.dev/pids/`):
    Ctrl-C reaches it, and `pnpm dev:stop` stops it with the worktree's dev servers: SIGTERM, so active runs release, and SIGKILL only after 55 s.
-   The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
+   Event and history writes share one retry rule in `send` (`request.ts`): a network or 5xx failure is retried until 120 s (`SELF_STOP_SECONDS`) after its first failure, or until the run stops; it logs the first failure and then every 30 s. When the time runs out the run client's `onUnreachable` stops the run, so it is released and resumed, not failed. The stop is `self-stop`, or `refused` (a strike) when a heartbeat was acknowledged since the first failure: the API is up and refuses these writes, so a route that fails for good ends the run after 3 claims instead of looping. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each and polls until Modal has reported every one terminated (a sandbox Modal no longer knows counts as gone) and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Transient Modal errors are retried with backoff and logged, a permanent one (a revoked token) fails the claim; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
@@ -475,7 +475,7 @@ not in the log, so a resumed thread takes it from the snapshotted role file and 
 
 # Runner: a claim that ends is a cut-off, not a stop
 
-A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
+A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 120 s, a lost
 lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
 (`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
 exactly as after a crash, and the run loop writes none for the root, even if a step threw
@@ -535,7 +535,7 @@ with `telemetry`; on Render search the service's logs for these:
 
 | grep | Line | Means |
 |---|---|---|
-| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
+| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `SELF_STOP_SECONDS` |
 | `telemetry heartbeat-rtt` | once a minute: `p50`, `max`, `n` | send-to-answer time of the acknowledged heartbeats (absent when none were acknowledged) |
 | `telemetry loop-block` | when a 100 ms timer fires over 1 s late: `…ms; in flight: <run> <thread> <tool>; …` | the loop was held that long, and the tool calls recorded as started and not yet resulted at that moment (`no tool`: none) |
 | `[<run>] telemetry unhandledRejection in this run` / `uncaughtException in this run` | on the error | an error nobody caught, tied to its run and logged through its redacting log: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on. After the run's report is fixed the line says `after its report was fixed` and nothing changes |

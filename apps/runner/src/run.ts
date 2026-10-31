@@ -179,7 +179,16 @@ async function claimBody(
   const client = runClient(
     config.api,
     { runId, leaseToken },
-    { redact, onLeaseLost: () => stop("lease-lost") },
+    {
+      redact,
+      onLeaseLost: () => stop("lease-lost"),
+      runStopped: halt.signal,
+      // Heartbeats answered during the failure window prove the API is up: the run is refused
+      // those writes, not cut off from it, so the stop counts as a strike and a route that fails
+      // for good ends the run instead of looping.
+      onUnreachable: (firstFailureAt) =>
+        stop((lease?.acknowledgedAt() ?? 0) > firstFailureAt ? "refused" : "self-stop"),
+    },
   );
   let lease: ReturnType<typeof holdLease> | undefined;
   let events: Recorder | undefined;
@@ -295,11 +304,9 @@ async function claimBody(
         },
       },
       runId,
-      (reason) => stop(reason === "lease-lost" ? "lease-lost" : "self-stop"),
-      undefined,
+      () => stop("lease-lost"),
       stored,
       live,
-      halt.signal,
     );
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.
