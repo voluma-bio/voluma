@@ -124,7 +124,7 @@ export const checkpointInputSchema = z.object({
     "A milestone in plain language, e.g. 'Width on the plane square to the shaft: 3.39 mm.'",
   ),
   summary: nonEmpty.describe(
-    "One or two plain sentences for the researcher: what this milestone shows, without file names or working detail.",
+    "One or two plain sentences for the researcher: what this milestone shows, without file names, working detail or the words worker, checker or task id.",
   ),
   evidence: evidencePaths,
   verdict: z
@@ -134,7 +134,7 @@ export const checkpointInputSchema = z.object({
   toCheck: z
     .object({
       title: nonEmpty.describe(
-        "What the reviewer should look at, as one plain sentence. One item per checkpoint call.",
+        "What the reviewer should look at, as one plain sentence about the scan, not about who did or checked the work. One item per checkpoint call.",
       ),
       focus: focusSchema
         .optional()
@@ -157,7 +157,9 @@ export type ReportOutputInput = z.infer<typeof reportOutputInputSchema>;
  */
 export const submitTaskInputSchema = z.object({
   taskId: taskIdSchema,
-  summary: nonEmpty.describe("One or two plain sentences for the researcher: what the task found."),
+  summary: nonEmpty.describe(
+    "One or two plain sentences for the researcher: what the task found, without the words worker, checker or task id.",
+  ),
 });
 export type SubmitTaskInput = z.infer<typeof submitTaskInputSchema>;
 
