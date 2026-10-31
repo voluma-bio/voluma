@@ -373,6 +373,7 @@ async function claimBody(
       plan: computed.tasks,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
+      inputId: run.input.id,
       inputPrefix: inputPrefixOf(run),
       previousClaim: claim.previousClaim?.reason,
       providerError: providerFailure,

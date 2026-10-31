@@ -126,13 +126,30 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   dies or cannot be created fails the file (the sandbox session replaces an ended sandbox on the next call, and runs a command the provider refused once more). `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
-  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  (`reviewAssetPrefix`) and `/input-review` (`inputReviewPrefix(run.input.id)`) read-write,
+  no network. Only the trusted conversion sandbox mounts the input cache; agents do not.
+  The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
-  the converter imports `sidecar` through; the sandbox gets `RunLayout.convert`'s `PYTHONPATH` alone).
+  the converter imports `sidecar` through; `RunLayout.convert` supplies `PYTHONPATH` and the cache path,
+  and `superviseRun` adds `VOLUMA_REVIEW_RUNTIME` from the same run-pinned image as the sandbox spec).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
   failed file.
+- **Reuse across runs.** The converter takes `VOLUMA_REVIEW_CACHE` (or `--cache`) and caches
+  completed assets under a hash of its source code and `VOLUMA_REVIEW_RUNTIME` (the pinned
+  sandbox image), conversion mode and `.npy` hash. A cache hit
+  copies the assets into the run's own review prefix and emits its own `assets.ready`, so
+  viewer URLs and run authorization do not change. The cache holds only voxel-space assets:
+  affine, calibration and grid identity remain each run's reported outputs. Changes to bytes,
+  mode, converter code or runtime cannot reuse the old entry. Each publisher writes a unique
+  generation, `manifest.json` last, then writes a small `ready` record selecting it. Readers
+  select one immutable generation; another publisher never overwrites its files. Completed
+  and abandoned generations are not deleted during conversion.
+  Concurrent runs in one runner wait for the same input/file/mode's conversion; independent
+  runners may duplicate a cold conversion into separate generations. This is first-report
+  reuse, not eager upload-time preparation: DICOM intake still runs per run. Runs pinned to
+  converters without cache support keep their original conversion behavior.
 - **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
   lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
   `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
