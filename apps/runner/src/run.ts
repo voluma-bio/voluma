@@ -344,7 +344,6 @@ async function claimBody(
         );
         return stream;
       };
-    const files = storeFiles(objects);
     const primary = { main: mainModel, worker: workerModel, check: checkModel };
     supervised = superviseRun({
       runId,
