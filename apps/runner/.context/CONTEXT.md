@@ -419,8 +419,11 @@ check), the role files' levels are ignored and `RUNNER_THINKING` alone applies (
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
-role's set level against its model (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
-no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
+role's set level against its model (the role files load per run); both use `thinking.ts` and check
+only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
+guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
+DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
+without asking Muse for an unsupported effort. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop

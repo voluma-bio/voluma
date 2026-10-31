@@ -223,9 +223,9 @@ export function runnerConfig() {
     models,
     /**
      * The thinking level of every thread of a `voluma` run (`RUNNER_THINKING`), set as each Pi
-     * agent's `thinkingLevel`; main.ts refuses a level an alias's model does
-     * not support, since Pi would quietly use another. Unset: "off", Pi's default, which sends no
-     * level (DeepSeek: thinking disabled; other providers: their default). Visitor runs: "off".
+     * agent's `thinkingLevel`; main.ts refuses a non-off level an alias's model does
+     * not support, since Pi would quietly use another. Unset or "off": no requested effort
+     * (DeepSeek: thinking disabled; Muse: provider default). Visitor runs: "off".
      */
     thinking: thinkingLevel(),
     /**
