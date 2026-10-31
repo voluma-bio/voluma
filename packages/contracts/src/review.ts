@@ -448,8 +448,6 @@ export const taskSchema = z.object({
   /** The r2 task segment (`outputKey`). */
   id: taskIdSchema,
   title: z.string(),
-  /** What the task asked of the agent. */
-  ask: z.string(),
   dependsOn: z.array(z.string()),
   /** The task's status in this revision: its status at that point in the log (`fold.ts`) */
   status: taskStatusSchema,

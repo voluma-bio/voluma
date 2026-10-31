@@ -14,7 +14,7 @@
  *   the latest stamped `task` event, otherwise `in-progress`. A task with no attempt is
  *   `pending` with a null `attemptId`, its latest worker thread if one started, nothing
  *   reported and nothing owed (empty `missing` and `missingRequired`), and the run's first
- *   revision as its `resultRevisionId`. `title` and `ask` are the plan's; `sentBack` lists
+ *   revision as its `resultRevisionId`. `title` is the plan's; `sentBack` lists
  *   the attempts the check sent back (`rejected` when it did), and `satisfied` is
  *   `isSatisfied` of the row.
  * - A check thread's checkpoints join the attempt it checks without changing
@@ -138,7 +138,6 @@ export type FoldedTask = Pick<
   ReviewTask,
   | "id"
   | "title"
-  | "ask"
   | "status"
   | "resultRevisionId"
   | "checker"
@@ -803,7 +802,6 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
       const row = {
         id: a.taskId,
         title: planned?.title ?? a.taskId,
-        ask: planned?.instructions ?? "",
         attemptId: a.id,
         status: skip ? "to-check" : a.status,
         reason: skip ? skip.reason : a.reason,

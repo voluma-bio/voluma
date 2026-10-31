@@ -13,8 +13,9 @@ import type { Status } from "@voluma/ui";
 /** "1 run", "3 runs"; `many` for an irregular plural. */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00. */
+/** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00; none is $0. */
 export function formatUsd(usd: number): string {
+  if (usd === 0) return "$0";
   return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
 }
 

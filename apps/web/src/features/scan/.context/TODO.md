@@ -6,7 +6,7 @@
   run's task purpose, work, evidence and remaining decisions unaided, without a jargon table.
   The browser walk of ce5a0f21 establishes reachability, not researcher comprehension.
 - [#145](https://github.com/voluma-bio/voluma/issues/145): verify genuine recorded post-#306
-  provider fail-fast, paused lost-lease and awaiting-keys states when records are available.
+  provider fail-fast, waiting (lost-lease) and awaiting-keys states when records are available.
   The retained 2026-10-30 archive covers historical error rendering and attribution only.
   Do not synthesize those records or restore spend caps/outage holds. Acceptance status stays
   with #210/#174. Bounded rendering fixes: [#327](https://github.com/voluma-bio/voluma/pull/327).
