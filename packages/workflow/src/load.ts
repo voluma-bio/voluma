@@ -192,6 +192,13 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       texts.set(path, await store.get(key));
   }
 
+  // A snapshot cut before `checker.md` became `check.md` (R2 snapshots are write-once): refused
+  // before its role files parse, since an old one may not match the current format.
+  if (texts.has(`${AGENTS_DIR}/checker.md`) && !texts.has(`${AGENTS_DIR}/check.md`))
+    throw new Error(
+      "This run was made by an older version of Voluma and can't be resumed; start a new run.",
+    );
+
   // The workflow's own skill (named for its directory) first, then its others, then core's, each
   // group sorted: the order must not depend on how the store lists keys.
   const own = `${dir}/skills/${dir.slice(dir.lastIndexOf("/") + 1)}/SKILL.md`;
@@ -290,8 +297,8 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       throw new WorkflowParseError(path, `skill "${unknown}" is not a skill of this workflow`);
     agents[agent.name] = { ...agent, skills: agent.skills ?? skillNames };
   }
-  const { main, worker, checker, ...others } = agents;
-  for (const [name, role] of Object.entries({ main, worker, checker })) {
+  const { main, worker, check } = agents;
+  for (const [name, role] of Object.entries({ main, worker, check })) {
     if (!role) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/${name}.md`, "not found");
   }
   return {
@@ -303,8 +310,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     agents: {
       main: main as AgentDefinition,
       worker: worker as AgentDefinition,
-      checker: checker as AgentDefinition,
-      others,
+      check: check as AgentDefinition,
     },
   };
 }

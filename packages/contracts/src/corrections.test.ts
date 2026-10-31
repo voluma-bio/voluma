@@ -80,10 +80,16 @@ describe("corrections", () => {
     const l = log();
     message(l, "m1", true);
     const claim = () => corrections(l.events).open?.claimEnded;
-    l.add("thread.started", "root:s1", `${RUN}.supervisor`, { kind: "supervisor" } as never);
+    l.add("thread.started", "root:s1", `${RUN}.supervisor`, {
+      kind: "supervisor",
+      parentThreadId: null,
+    } as never);
     l.add("thread.ended", "root:e1", `${RUN}.supervisor`, { status: "failed" } as never);
     expect(claim()).toBe(false);
-    l.add("thread.started", "root:s2", `${RUN}.supervisor`, { kind: "supervisor" } as never);
+    l.add("thread.started", "root:s2", `${RUN}.supervisor`, {
+      kind: "supervisor",
+      parentThreadId: null,
+    } as never);
     expect(claim()).toBe(false);
     rootEnds(l, "root:e2");
     expect(claim()).toBe(true);

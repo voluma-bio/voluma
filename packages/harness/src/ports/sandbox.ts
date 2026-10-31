@@ -28,7 +28,7 @@ export interface SandboxMount {
  * What a sandbox is for. The role fixes its size, its network and the mounts it may hold:
  * the builders in `sandbox-specs.ts` are the only places that write them.
  */
-export type SandboxRole = "worker" | "checker" | "convert";
+export type SandboxRole = "worker" | "check" | "convert";
 
 /** `none`: no network at all. `hosts`: HTTPS to these hosts only; everything else is refused. */
 export type SandboxNetwork = { kind: "none" } | { kind: "hosts"; hosts: string[] };

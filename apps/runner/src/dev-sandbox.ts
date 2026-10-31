@@ -126,7 +126,13 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal
 
 let exitCode = 0;
 try {
-  const thread = layoutOf(run, [], false, () => true).forThread(`${run.id}.dev.worker`); // no workflow is loaded here, so no PYTHONPATH
+  const devThread = {
+    id: `${run.id}.dev.worker`,
+    name: "dev.worker",
+    role: "worker",
+    taskId: "dev",
+  } as const;
+  const thread = layoutOf(run, [], false, () => true).forThread(devThread); // no workflow is loaded here, so no PYTHONPATH
   meter.sandboxUp();
   counted = true;
   sandbox = await claimSandboxes(
@@ -157,7 +163,7 @@ try {
   const tool = segmentSamTool(thread);
   const context = {
     runId: run.id,
-    threadId: `${run.id}.${thread.name}`,
+    threadId: devThread.id,
     kind: "worker" as const,
     toolCallId: "dev",
     batchSize: 1,

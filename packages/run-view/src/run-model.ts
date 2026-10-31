@@ -12,6 +12,7 @@ import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
+import { type ThreadRole, threadRole } from "@voluma/contracts/thread-role";
 import { openThreads } from "@voluma/contracts/threads";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
@@ -28,7 +29,10 @@ export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "canc
 
 export type Thread = {
   id: string;
-  kind: "supervisor" | "main" | "worker" | "check" | "chat";
+  /** From its first start (`threadRole`). */
+  role: ThreadRole;
+  /** The role file's name or `supervisor`: a label (`agentLabel`); behaviour reads the fields below. */
+  kind: string;
   /** The thread that started it, from its `thread.started`; null on the run's root. */
   parentId: string | null;
   taskId?: string;
@@ -105,6 +109,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         } else
           threads.set(e.threadId, {
             id: e.threadId,
+            role: threadRole(e.payload),
             kind: e.payload.kind,
             parentId: e.payload.parentThreadId,
             taskId: e.payload.task,
@@ -158,8 +163,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
     if (t.status === "running") t.liveTool = [...(running.get(t.id)?.values() ?? [])].at(-1);
     // `spend` over one worker's or checker's events counts them all for its task, so that one
     // task's spend is the thread's own.
-    if (t.kind === "worker" || t.kind === "check")
-      t.spend = spend(own.get(t.id) ?? []).tasks[0]?.spend;
+    if (t.taskId) t.spend = spend(own.get(t.id) ?? []).tasks[0]?.spend;
   }
   return { threads: [...threads.values()], lastAt };
 }
@@ -195,6 +199,10 @@ export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   );
 }
 
+export const isMain = (t: Pick<Thread, "role">) => t.role === "main";
+
+export const isCheck = (t: Pick<Thread, "role"> | undefined) => t?.role === "check";
+
 export type AgentNode = { thread: Thread; children: AgentNode[] };
 
 /**
@@ -204,7 +212,7 @@ export type AgentNode = { thread: Thread; children: AgentNode[] };
  */
 export function agentTree(threads: Thread[]): AgentNode[] {
   const nodes = new Map(
-    threads.filter((t) => t.kind !== "supervisor").map((t) => [t.id, { thread: t, children: [] }]),
+    threads.filter((t) => t.parentId !== null).map((t) => [t.id, { thread: t, children: [] }]),
   );
   const roots: AgentNode[] = [];
   for (const node of nodes.values()) {
@@ -236,8 +244,6 @@ export function agentLabel(t: Thread, threads: Thread[], { short = false } = {})
       if (!tries || tries.length < 2) return short ? "Second check" : "Second AI check";
       return short ? `Check ${n}` : `Second AI check of try ${n}`;
     }
-    case "chat":
-      return "Chat";
     default:
       return "Agent";
   }
@@ -505,7 +511,7 @@ export function runView(
     else if (e.type === "checkpoint") {
       writer.set(e.id, e.threadId);
       if (e.payload.summary) summaries.set(e.id, e.payload.summary);
-      if (e.payload.verdict && loggedById.get(e.threadId)?.kind === "check")
+      if (e.payload.verdict && isCheck(loggedById.get(e.threadId)))
         verdicts.set(e.payload.attemptId, e.payload.verdict);
     } else if (
       e.type === "task" &&
@@ -517,14 +523,14 @@ export function runView(
       const set = sentBack.get(e.payload.taskId) ?? new Set();
       sentBack.set(e.payload.taskId, set.add(e.payload.attemptId));
     }
-  const runningOf = (kind: Thread["kind"]) =>
+  const runningOf = (checks: boolean) =>
     new Set(
       logged.threads.flatMap((t) =>
-        t.kind === kind && running.has(t.id) && t.taskId ? [t.taskId] : [],
+        isCheck(t) === checks && running.has(t.id) && t.taskId ? [t.taskId] : [],
       ),
     );
-  const working = runningOf("worker");
-  const checking = runningOf("check");
+  const working = runningOf(false);
+  const checking = runningOf(true);
   const runFailed = halt?.kind === "ended" && halt.outcome === "failed";
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));
   const corrections = new Set(
