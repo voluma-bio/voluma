@@ -336,7 +336,7 @@ user message tells the thread (once per compaction) to finish the step and write
 appended). A thread already past it when the runner restarts compacts on its next request. Cold summary (`[system, previous summary,
 messages to summarize]`, no kept tail, images left out): when images are over 90% of a limit, and always when the provider refused a request as too large (`recover`, called from
 `start-thread.ts`; then one retry in the same thread, started by a note stored only after the summary was; a failed
-recovery leaves the refusal as the thread's failure (unless the summary's own error is transient: then it ends the thread as that error and the run retries it), and a second refusal ends it as before). A summary that stops on
+recovery leaves the refusal as the thread's failure (a transient error of the summary ends the thread as that error, like any provider failure), and a second refusal ends it as before). A summary that stops on
 length is retried once with twice the room (the thread's reasoning setting stays, so the cache holds; both calls' usage is recorded); one that also called a tool is accepted by its text.
 A compaction that would leave the thread due again (the last turn alone is over a limit) waits until images are near a limit. A summary that fails for any reason other than an overflow fails the thread with the provider's own error text (so `provider-error.ts` classifies it); an overflow of the warm summary request recovers through the cold summary. The
 context goes to a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
@@ -357,29 +357,62 @@ files. Sandbox reads bound the bytes read, not the size reported by `stat` (file
 Evidence may be given as a plain path (`/outputs/<task>/x`, `/scratch/<thread>/x`). An outputs `{root, path}` ref
 is always relative to `/outputs/<task>/`: `keep` never strips another task-id segment, which could name a real subfolder.
 
-**Provider errors fail fast.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429
-(waiting the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every
-role's calls (the main thread too) and keeps retrying those errors (`isTransientProviderError`)
-when the call failed before streaming any content: backoff from 1 s doubling to a 30 s cap, until
-60 s have passed since the first attempt (Pi's own tries count against it; an attempt in flight is
-not cut short), each retry logged with its role and attempt. The run's abort ends the wait. Any
-other error, a 4xx included (Meta's `404 model_not_found` too), or the spent budget, ends the call
-at once. The failed reply is stored and the thread ends `failed` with the provider's message. The
-run loop (`packages/harness/src/run-loop.ts`) sees a thread this process ran that failed on a
-provider error (`providerFailure` in `provider-error.ts`: any 4xx or 5xx status, a connection
-failure, an empty account) and fails the run with it in `state.error`: "the AI stopped on an error
-from its provider: <message>", or "<task title>: the AI stopped on an error from its provider:
-<message>". A retryable error (the set above) on a thread that already streamed content, or that
-outlasted the 60 s, resumes that thread once ("The model provider failed during your last reply;
-continue.") before the run fails; the resumed call has its own 60 s. A context overflow (400/413
-"prompt is too long", `context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`)
-is not a provider error (only with status 400/413 or none; a 5xx body never counts): it fails that thread only. A failed main is never resumed: `main()` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that fails too fails the run with its error. A failed worker keeps its history; main replaces it with `stop_worker` then `start_agent`. Nothing
-releases the run to wait or redoes the thread. `provider-error.ts` holds the classification: it
-reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
-`<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
-with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
-A run held "AI unavailable" under the earlier release rule is claimed again at the next claim
-(see `apps/api/.context/deploy.md`).
+**Provider errors.** Pi is the only retry layer, and it retries only the request up to its response headers.
+`run.ts` passes it `maxRetries: 10`, `maxRetryDelayMs: 30 s` and `timeoutMs: 60 s` for every role. Pi retries a 408,
+409, 429 (waiting the server's `retry-after`; a longer ask than 30 s fails the call at once), 5xx or dropped
+connection, with a backoff that doubles from 0.5 s to a cap of 8 s: ten retries are about 50 s of provider trouble
+(measured: 11 attempts over 50.5 s against a stub that answered 503), longer when the server sends `retry-after`
+(10 × 30 s at most), and a quota 429 is retried the same 10 times before it fails. Pi has no total budget and logs
+nothing, so `model-fetch.ts` hands it a `fetch` that logs every failed attempt (`<role> model call attempt N failed:
+HTTP 503 …`, `timed out waiting for the response`, or the network error with its cause). The timeout is the SDK's: it
+covers the wait for the response headers only (the SDK clears its timer when `fetch` resolves), so a healthy stream
+is never cut. Meta sends its headers after prefill (24.7 s at most, measured at 805k tokens), so 60 s holds. A
+request that hangs before its headers is retried every time: a dead endpoint holds a call for up to 11 × 60 s plus
+the backoff, about 12 minutes, before the thread fails. A stream that stalls after its headers is cut by nothing
+but the run's end (a thread in that state counts as running, so the loop's `stuckLimit` never fires).
+
+**After the headers nothing retries.** A stream that drops, an error sent inside the stream (Meta's `server_error`
+and `response.failed`, Anthropic's `overloaded_error`) or undici's `terminated` reaches the thread as it is. The
+texts differ by provider, so the thread records the fact instead of the runner guessing from text: Pi emits a reply's
+`message_start` as a live partial only once the headers are in (a call that failed before them gets `message_start`
+with the final error message), and `start-thread.ts` writes `interrupted: true` on the failed `thread.ended` when
+the reply that ended the thread had started. A compaction summary call reports the same for its own call
+(`onProviderStreamEvent` fires only for body events). A refusal, a length stop and a context overflow are never
+interrupted, and neither is a failure before any call (stored history). The field is optional: an API from before it
+strips it, and that one end then reads as not interrupted (a fresh main, as before).
+
+What survives goes to the run loop (`packages/harness/src/run-loop.ts`), which asks `provider-error.ts` for the
+text's class (the unit test there pins the texts) and reads `interrupted` from the end:
+- *fatal* (any other 4xx: auth, `404 model_not_found`, an empty account): fails the run at once, on any thread
+  (`checkFatal`).
+- Main's other failures are all in `mainFailed`:
+  - *transient* (the set Pi retries, before the headers): fails the run.
+  - *interrupted*: the same thread is resumed with its history as it was plus one runtime message ("The model
+    provider failed during your last reply; continue."), unless the end before it on that thread was an interrupted
+    failure too and the thread has made no reply (a message or tool call) since its latest start: then the run fails. It is read from the log, so a restart or a
+    correction days later does not change it.
+  - anything else (a context overflow, a length stop, a refusal): a fresh `main.<n>` with the restart brief, once.
+- A worker or check that ended `failed` is a failed thread like any other: main gets the inbox notice and decides,
+  nothing resumes it automatically. For a worker, `message` resumes it or `stop_worker` then `start_agent` replaces
+  it. A check that failed with no verdict stays the task's check while `under-review` (`checkAwaitsMain`, whatever
+  the error): `message` on it resumes it with its transcript and sandbox, and `stop_worker` stops it and starts a
+  fresh check at once (`agents.replaceCheck`; a task may have its attempts' checks plus two replacements, then it is
+  left to check). If main does neither (it is told, idle, and nothing else runs), the task goes `to-check` with the
+  reason "The second AI check could not finish: <error>", which says "its AI provider failed" when it was one. A live
+  check that asked a question is still `answer`'s.
+
+The run's error reads "the AI stopped on an error from its provider: <message>", or "<task title>: the AI stopped
+on an error from its provider: <message>". Only threads this process started count for a fatal or transient failure, so one an earlier claim
+recorded (a reopened run's old workers) never fails the new claim. A context overflow (400/413 "prompt is too
+long", `context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`) is not a provider error (only with
+status 400/413 or none; a 5xx body never counts): it fails that thread only. A main that failed that way is never
+resumed: `mainFailed` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that
+fails too fails the run with its error. Nothing releases the run to wait. `provider-error.ts` reads the status in the
+text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's `<status> {...}`, `<status> <html>` or
+`<status> status code (no body)`; Pi's `Server requested Ns retry delay` is transient by itself) and, for an
+Anthropic error sent mid-stream with no status, its documented `error.type` (`overloaded_error` is 529,
+`rate_limit_error` 429). A run held "AI unavailable" under the earlier release rule is claimed again at the next
+claim (see `apps/api/.context/deploy.md`).
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check). The harness defaults the rest (`LoopConfig`). No limit is
@@ -526,7 +559,7 @@ restart counter of its own.
 The [responsiveness audit](responsiveness-audit.md) records measured history,
 snapshot, evidence, live-output and provider-response bounds, with a free local
 replay command. Provider normalization must yield through Pi's awaited stream
-hook (`model-retry.ts`): buffered tool arguments otherwise starve heartbeat timers
+hook (`streamFor` in `run.ts`): buffered tool arguments otherwise starve heartbeat timers
 even though every iterator step is async. These measurements do not bound unlimited
 stored history; context compaction does not by itself bound the resume response.
 

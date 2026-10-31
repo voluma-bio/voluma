@@ -20,3 +20,8 @@
   - Repairs are logged from two places: the row rules in `start-thread.ts` and the pairing rules through `repairLog` in the compactor. Give them one owner.
   - A bad row 0 (system message), or a bad system row that declared tools (`toolsAdded`), still fails the thread as `ThreadStale`. Rebuilding that prompt would change the request bytes.
   - A finished thread whose final reply row is unreadable ends on the placeholder user message, so it counts as unfinished and may run one more turn with no input. `isFinished` can't tell that from a lost mid-run row.
+- **Provider-failure follow-ups (PR #378).** The replacement cap (`run-loop.ts`, `startedFor(...).length >= maxFixRounds + 1 + 2`) counts every check of the task over the whole log; fix rounds reset at a correction and on `stale`, the cap does not, so count only checks since the current attempt opened.
+- **A crash between `runtime.stop` and `agents.replaceCheck` in `stop_worker` drops the replacement.** Main is told the stop completed and `checks()` writes `CHECK_STOPPED` (to-check); `checks()` could call `replaceCheck` for a check a `stop_worker` effect stopped with no newer check.
+- **`interruptedTexts` in `adapters/pi/compaction.ts` is keyed by error text and never cleared.** Harmless while the compactor is made per invocation; one "the last summary call failed after it started" flag, reset on each `summarize`, says the same.
+- **`message` resumes of a failed check are not capped** (only `stop_worker` replacements are): a check that keeps failing can be resumed forever by main.
+- **A model stream that stalls after its headers is cut by nothing.** No idle timeout covers a reply that has started and goes quiet.

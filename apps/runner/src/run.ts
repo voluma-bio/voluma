@@ -30,7 +30,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout as delay, setImmediate } from "node:timers/promises";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
@@ -55,7 +55,7 @@ import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
-import { retryTransient } from "./model-retry.ts";
+import { loggedFetch } from "./model-fetch.ts";
 import { providerFailure } from "./provider-error.ts";
 import { r2Outputs } from "./r2-outputs.ts";
 import { type Redact, redactor } from "./redact.ts";
@@ -86,8 +86,20 @@ const WIND_DOWN_MS = 5_000;
 const RELEASE_FLUSH_MS = 15_000;
 /** How long an ended run waits for the review assets still being converted before it reports. */
 const DRAIN_MS = 10 * 60_000;
-/** Pi's own retries of a model call (429 honours retry-after, 5xx, dropped connections). */
-const MODEL_RETRIES = 3;
+/**
+ * Pi's retries of a model call (408, 409, 429, 5xx, dropped connections) are the only ones: the
+ * backoff doubles from 0.5 s to a cap of 8 s, so 10 retries cover about a minute of provider
+ * trouble; a server asking for more than MODEL_MAX_RETRY_DELAY_MS fails the call at once.
+ */
+const MODEL_RETRIES = 10;
+const MODEL_MAX_RETRY_DELAY_MS = 30_000;
+/**
+ * Time the provider gets to answer a request with its headers (the SDK clears the timer then,
+ * so a streaming body is not cut). Meta sends them after prefill: 24.7 s at most, measured at
+ * 805k tokens. A request that hangs before its headers is retried, so a dead endpoint holds a
+ * call for up to 11 × 60 s plus the backoff.
+ */
+const MODEL_REQUEST_TIMEOUT_MS = 60_000;
 
 export interface RunnerContext {
   config: Config;
@@ -349,31 +361,31 @@ async function claimBody(
       }
       return fallback;
     };
-    const callModel = (role: string) =>
-      retryTransient(
-        (m, context, options) =>
-          models.streamSimple(m, context, {
-            ...options,
-            apiKey: keyFor(m.provider),
-            maxRetries: MODEL_RETRIES,
-            // Meta's default prompt cache is in-memory and evicted under pressure or after
-            // inactivity. Runs have long tool calls and many independent threads, so ask the
-            // Responses API to keep Meta prefixes for up to 24 hours. Anthropic long retention
-            // costs more per cache write, so leave its existing setting unchanged.
-            ...(m.provider === "meta" && { cacheRetention: "long" }),
-          }),
-        (attempt, delayMs, error) => {
-          log(
-            `${role} model call failed (${error}); retry ${attempt} in ${Math.round(delayMs / 1000)}s`,
-          );
-        },
-      );
     const streamFor =
       (role: string): ModelSetup["streamFn"] =>
       (m, context, options) => {
-        const stream = callModel(role)(m, context, options);
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
         const threadId = options?.sessionId as string;
+        const stream = models.streamSimple(m, context, {
+          ...options,
+          apiKey: keyFor(m.provider),
+          maxRetries: MODEL_RETRIES,
+          maxRetryDelayMs: MODEL_MAX_RETRY_DELAY_MS,
+          timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+          fetch: loggedFetch(role, log, options?.signal),
+          // All registered providers await this before normalizing each event. An async
+          // iterator alone can drain buffered deltas entirely through microtasks, starving
+          // lease timers.
+          onProviderStreamEvent: async (event, model) => {
+            await options?.onProviderStreamEvent?.(event, model);
+            await setImmediate();
+          },
+          // Meta's default prompt cache is in-memory and evicted under pressure or after
+          // inactivity. Runs have long tool calls and many independent threads, so ask the
+          // Responses API to keep Meta prefixes for up to 24 hours. Anthropic long retention
+          // costs more per cache write, so leave its existing setting unchanged.
+          ...(m.provider === "meta" && { cacheRetention: "long" }),
+        });
         stream.result().then(
           (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
           () => {},
