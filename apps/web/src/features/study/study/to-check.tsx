@@ -198,7 +198,14 @@ function Item({
       text={item.detail}
       state={accept.isSuccess ? "accepted" : "open"}
       onAccept={
-        readOnly ? undefined : () => accept.mutate({ checkId: item.checkId, taskId: item.taskId })
+        readOnly
+          ? undefined
+          : () =>
+              accept.mutate({
+                checkId: item.checkId,
+                taskId: item.taskId,
+                resultRevisionId: item.resultRevisionId,
+              })
       }
       accepting={accept.isPending}
       readOnly={readOnly}

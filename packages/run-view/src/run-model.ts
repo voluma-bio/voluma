@@ -149,7 +149,8 @@ function threadsOf(
         if (t) t.result = { text: e.payload.text, verdict: e.payload.verdict };
         break;
       case "message":
-        if (t && e.payload.role === "assistant" && e.payload.text) t.said = e.payload.text;
+        if (t && e.payload.role === "assistant" && !e.payload.compaction && e.payload.text)
+          t.said = e.payload.text;
         break;
     }
   }
@@ -266,6 +267,8 @@ export type NeedItem = {
   /** The check's id (`acceptCheck`). */
   id: string;
   taskId: string;
+  /** The task result this item describes; decisions must not substitute a fresher result. */
+  resultRevisionId: string;
   /** None for the fold's generic "Marked to check": the task's name says as much. */
   title?: string;
   /** What is wrong, in the checkpoint's researcher sentence when it has one. */
@@ -406,7 +409,14 @@ function resultRows(t: FoldedTask, state: TaskState): ResultRow[] {
 
 /** The card for a task left To check with no check item: why it is there, in plain words. */
 function unexplained(t: FoldedTask, check: TaskView["check"], image: Asset | undefined): NeedItem {
-  const base = { id: `${t.id}/to-check`, taskId: t.id, image, accepted: false, acceptable: false };
+  const base = {
+    id: `${t.id}/to-check`,
+    taskId: t.id,
+    resultRevisionId: t.resultRevisionId,
+    image,
+    accepted: false,
+    acceptable: false,
+  };
   if (t.rejected || check?.verdict === "needs-review")
     return {
       ...base,
@@ -529,6 +539,7 @@ export function runView(
     const items: NeedItem[] = t.checks.map((c) => ({
       id: c.id,
       taskId: p.id,
+      resultRevisionId: t.resultRevisionId,
       title: c.title === GENERIC_CHECK ? undefined : c.title,
       text: summaries.get(c.id) ?? skipText(t) ?? c.detail,
       image: imageOf(t.milestones.find((m) => m.id === c.id)?.evidenceIds ?? []) ?? image,

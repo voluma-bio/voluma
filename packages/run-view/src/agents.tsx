@@ -27,7 +27,7 @@ function spendRows(s: Spend): InfoSection["rows"] {
   if (s.unknownCostCalls > 0)
     rows.push([
       "Cost unknown",
-      `${count(s.unknownCostCalls)} paid tool ${s.unknownCostCalls === 1 ? "call" : "calls"}`,
+      `${count(s.unknownCostCalls)} gateway ${s.unknownCostCalls === 1 ? "request" : "requests"}`,
     ]);
   if (s.toolCostUsd > 0) rows.push(["Paid tools", formatUsd(s.toolCostUsd)]);
   // `bash` calls only: the runs list's sandbox time is the sandbox's uptime, which is longer.

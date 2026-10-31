@@ -1,5 +1,6 @@
 /**
- * The `provider_calls` table: one row per call the provider gateway admits (`apps/gateway`).
+ * The `provider_calls` table: one row per gateway request admitted (`apps/gateway`), not per
+ * SAM operation. Upload, response, delete and retry requests each have their own row.
  * The row is inserted `open` when the call is admitted, and updated once when the call ends. No request or reply body is stored. There is no foreign key to `runs`,
  * as for the run domain's other tables: nothing about a run may fail a row's write.
  *

@@ -38,6 +38,7 @@ export function pgRunRecords(
       if (state.state !== "ended") {
         const record = await db.transaction(
           async (tx) => (await results(tx, eq(runs.id, runId)))[0],
+          { isolationLevel: "repeatable read" },
         );
         if (!record) return null;
         if (!decision(record)) return record;

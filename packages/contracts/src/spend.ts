@@ -7,11 +7,12 @@
  *   sums over threads.
  * - Cost and tokens: the `usage` on each assistant `message`, for the thread that wrote the
  *   event; an event from a thread with no `thread.started` before it counts only in `total`.
- * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately and added
+ * - Gateway requests (`Run.providerCalls`) are passed in separately and added
  *   to `costUsd` and `toolCostUsd`: `total` takes their `costUsd`, and each `bySandbox`
  *   entry's cost also goes to the thread that wrote the `sandbox` event with that `name`. They
- *   are not model calls, so `calls` stays the model calls that reported usage. Calls whose
- *   cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
+ *   are not model calls, so `calls` stays the model calls that reported usage. Requests whose
+ *   cost is unknown (`unknownCostCalls`) add no dollars and are counted apart as gateway
+ *   requests, not SAM operations.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. A thread with no task (the root, the main
  *   agent) belongs to `main`.
@@ -40,7 +41,7 @@ export type Spend = {
   costUsd: number;
   /** The paid tool calls' part of `costUsd`. */
   toolCostUsd: number;
-  /** Paid tool calls cut off before their usage arrived: their cost is unknown, and not in `costUsd`. */
+  /** Gateway requests with unknown cost, not included in `costUsd`; not SAM operations. */
   unknownCostCalls: number;
   /** Model calls that reported usage. */
   calls: number;

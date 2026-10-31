@@ -31,6 +31,12 @@ Merging to `main` deploys to Render staging each service whose build filter (`re
 (which serves the web app), the runner and the gateway, together and in no fixed order; see
 [apps/api/.context/deploy.md](apps/api/.context/deploy.md).
 
+Merges never wait for runs. A live run carries on through any number of these deploys: no
+failure, no lost agent context, no human click. A change that would break a live run during the
+deploy overlap (a column dropped while the old code still reads it, a narrowed stored event or
+runner-facing response) ships in two PRs, expand first; anything that still breaks a live run is a
+bug, not a reason to hold merges.
+
 Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.
 
 ## Boundaries
