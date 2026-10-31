@@ -76,10 +76,8 @@ describe("fold", () => {
         { id: "c", dependsOn: [], outputs: [] },
       ],
     });
-    l.thread("w2", "worker");
-    l.add("thread.started", "w2:again", "w2", {
-      parentThreadId: null,
-      workflows: [],
+    l.add("thread.started", "w2:started", "w2", {
+      parentThreadId: "root",
       kind: "worker",
       task: "c",
     });

@@ -57,13 +57,12 @@ export interface WorkflowDefinition {
   toolIndex: ToolIndexEntry[];
   /**
    * The role files of `workflows/core/agents/`, the same for every workflow. The loader requires
-   * `main`, `worker` and `checker`; `others` holds the rest by name.
+   * `main`, `worker` and `check`.
    */
   agents: {
     main: AgentDefinition;
     worker: AgentDefinition;
-    checker: AgentDefinition;
-    others: Record<string, AgentDefinition>;
+    check: AgentDefinition;
   };
 }
 

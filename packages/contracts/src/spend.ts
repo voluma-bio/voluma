@@ -13,8 +13,8 @@
  *   are not model calls, so `calls` stays the model calls that reported usage. Calls whose
  *   cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
- *   spend covers all its attempts: worker, check and any redo. The supervisor and main agent
- *   threads belong to no task: that is `main`. A chat thread counts only in `total`.
+ *   spend covers all its attempts: worker, check and any redo. A thread with no task (the root, the main
+ *   agent) belongs to `main`.
  * - Wall time is per thread, the sum of its spans, each from a `thread.started` to the
  *   thread's first `thread.ended` after it (a later end, such as a cancel of finished work,
  *   adds nothing), or to the thread's latest event while it has none (running, or cut off
@@ -33,6 +33,7 @@
  */
 import type { RunEvent } from "./events";
 import type { ProviderCalls } from "./run";
+import { threadRole } from "./thread-role";
 
 export type Spend = {
   /** Model calls plus paid tool calls, in US dollars. */
@@ -97,7 +98,7 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
   const total = empty();
   // threadId → its own spend and where it counts besides `total` (a task, `main`, or neither).
   const threads = new Map<string, Spend>();
-  const owner = new Map<string, { task: string } | "main" | null>();
+  const owner = new Map<string, { task: string } | "main">();
   const ended = new Map<string, number>();
   const open = new Map<string, { since: number; last: number }>();
   // toolCallId → the `bash` call's thread and start.
@@ -136,18 +137,16 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
     const at = Date.parse(e.createdAt);
     switch (e.type) {
       case "thread.started": {
-        const { kind, task, parentThreadId } = e.payload;
-        if (parentThreadId === null && kind === "supervisor") {
+        const { task } = e.payload;
+        if (threadRole(e.payload) === "root") {
           // The root starts again only after the runner restarted, which cut off every thread.
           root = e.threadId;
           for (const threadId of [...open.keys()]) close(threadId);
         } else close(e.threadId);
         if (!owner.has(e.threadId)) {
           threads.set(e.threadId, empty());
-          if (kind === "supervisor" || kind === "main") owner.set(e.threadId, "main");
-          else if (task !== undefined && (kind === "worker" || kind === "check"))
-            owner.set(e.threadId, { task });
-          else owner.set(e.threadId, null);
+          // A thread with a task is that task's; any other (the root, the main agent) is `main`'s.
+          owner.set(e.threadId, task !== undefined ? { task } : "main");
         }
         open.set(e.threadId, { since: at, last: at });
         break;

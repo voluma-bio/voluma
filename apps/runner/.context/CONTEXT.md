@@ -7,12 +7,12 @@ its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on ever
 | Role | Mounts | Network | Name |
 |---|---|---|---|
 | `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
-| `checker` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
+| `check` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
 | `convert` | `evidence` read-only, `review` writable | none | the job's |
 
 The builder sets the access of each mount, and the Modal adapter refuses a network on a
 non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
-named by the thread id without the run id). `RunLayout.forThread(threadId)`
+named by the thread's `name`, its id without the run id). `RunLayout.forThread(record)` (a `ThreadRecord`, or the identity of a thread about to start)
 (`packages/harness/src/layout.ts`) gives each thread its role, mounts, tool description, restart note,
 `keyOf` and bash-spill path, so a worker and a checker each see their own files:
 
@@ -26,7 +26,7 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   attempt under review cites (`{root: "scratch"}` refs on its checkpoints and outputs, and the
   `root: "scratch"` files in an output's own payload, `fileRefsOf`), and no others: the worker's
   scripts, logs and notes stay unread. Cited means the path, not the bytes. `keyOf` asks the
-  `(path) => boolean` that `forThread(threadId, cited)` takes; callers pass
+  `(path) => boolean` that `forThread(thread, cited)` takes; callers pass
   `(p) => runtime.cites(taskId, p)`, answered from the fold (`FoldedTask.citedScratch`).
   The same `keyOf` check validates the evidence a checker names. The main agent
   (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
@@ -60,7 +60,10 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   `$SCRATCH` as the working directory and in the prompt. A checker that writes `/scratch/v1.jpg`
   locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
   citation resolves to the worker's file.
-- Thread ids are built and parsed in `packages/harness/src/thread-id.ts`.
+- Readers take a thread's `name`, `role` and `taskId` from its `ThreadRecord`, never from its id.
+  `threadName` (`packages/contracts/src/threads.ts`) is the one parser of an id; ids are minted only
+  in `run-loop.ts` (`nextThread`) and `supervise-run.ts` (`rootThreadIdOf`). The runner knows a
+  thread's layout, and so its name, by id from `run.ts`'s `laidOut` map (filled by the run loop).
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
@@ -401,7 +404,7 @@ script, from its docstring's first line; the loader reads it from the snapshot).
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text).
+changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run."
 Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
