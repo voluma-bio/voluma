@@ -11,12 +11,12 @@
  *
  * Event appends make one attempt: the recorder owns their retry policy. A network or 5xx failure
  * is the port's `EventLogUnavailable`; a lease loss or a 4xx passes through. History is the
- * durable record and a failed write ends the thread, so its calls ride out an outage of about
- * HISTORY_BUDGET_MS; they are idempotent on the server (an idx repeated with the same
+ * durable record and a failed write ends the thread, so its calls retry until the run stops
+ * (`policy.runStopped`, which the heartbeat's self-stop aborts); they are idempotent on the server (an idx repeated with the same
  * content is a no-op), so network and 5xx failures retry. A 409 on a history append is the
  * port's `HistoryConflict`. `storedEvents` is the resume read, paged (`@voluma/contracts/events`).
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
- * `heartbeat` makes one attempt: the caller keeps the usage and resends it if this throws.
+ * `heartbeat` makes one attempt, cut at HEARTBEAT_ATTEMPT_MS: the caller keeps the usage and resends it if this throws.
  * `report` ends or releases the run, with the last event seq it read; a 409 means the server ended the run first or the lease
  * is no longer ours, so it returns false (the caller logs that nothing was stored). A network failure is retried for REPORT_BUDGET_MS; the
  * lease expires on its own after that.
@@ -27,7 +27,6 @@ import {
   type HeartbeatResponse,
   heartbeatResponseSchema,
   type ReportRequest,
-  SELF_STOP_SECONDS,
   type Usage,
 } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
@@ -36,8 +35,9 @@ import { type History, HistoryConflict } from "../../ports/history";
 import { LeaseLost } from "../../ports/lease-lost";
 import { type Endpoint, HttpError, postJson, send } from "./request";
 
-/** The longest outage a history write rides out: the run's own self-stop (`lease.ts`) ends it anyway. */
-const HISTORY_BUDGET_MS = SELF_STOP_SECONDS * 1000;
+const READ_BUDGET_MS = 60_000;
+/** Short, so a heartbeat lost to a dead connection is retried in seconds (`lease.ts`). */
+const HEARTBEAT_ATTEMPT_MS = 5_000;
 const REPORT_BUDGET_MS = 60_000;
 
 export interface RunClient extends EventLog, History {
@@ -52,7 +52,7 @@ export interface RunClient extends EventLog, History {
 export function runClient(
   endpoint: Endpoint,
   claim: { runId: string; leaseToken: string },
-  policy: { redact(text: string): string; onLeaseLost(): void },
+  policy: { redact(text: string): string; onLeaseLost(): void; runStopped: AbortSignal },
 ): RunClient {
   const { leaseToken } = claim;
   const { redact } = policy;
@@ -69,10 +69,10 @@ export function runClient(
       throw error;
     }
   }
-  const post = (path: string, body: unknown, retryForMs?: number) =>
-    guarded(() => postJson(endpoint, path, body, { leaseToken, retryForMs, redact }));
+  const post = (path: string, body: unknown, retry?: Parameters<typeof send>[3]) =>
+    guarded(() => postJson(endpoint, path, body, { leaseToken, retry, redact }));
   const get = (path: string) =>
-    guarded(() => send(endpoint, path, { leaseToken }, HISTORY_BUDGET_MS));
+    guarded(() => send(endpoint, path, { leaseToken }, { forMs: READ_BUDGET_MS }));
 
   return {
     async append(event: EventInput) {
@@ -106,7 +106,10 @@ export function runClient(
     async appendMessage(threadId, idx, message) {
       try {
         const row = { idx, message: redact(message) } satisfies HistoryRow;
-        await post(historyPath(threadId), row, HISTORY_BUDGET_MS);
+        await post(historyPath(threadId), row, {
+          forMs: Number.POSITIVE_INFINITY,
+          until: policy.runStopped,
+        });
       } catch (error) {
         if (error instanceof HttpError && error.status === 409) {
           throw new HistoryConflict(error.message);
@@ -118,12 +121,16 @@ export function runClient(
       await post(`${runPath}/live`, { frames });
     },
     async heartbeat(usage) {
-      const response = await post(`${runPath}/heartbeat`, { usage });
+      const response = await post(
+        `${runPath}/heartbeat`,
+        { usage },
+        { attemptTimeoutMs: HEARTBEAT_ATTEMPT_MS },
+      );
       return heartbeatResponseSchema.parse(await response.json());
     },
     async report(report) {
       try {
-        await post(`${runPath}/report`, { report }, REPORT_BUDGET_MS);
+        await post(`${runPath}/report`, { report }, { forMs: REPORT_BUDGET_MS });
         return true;
       } catch (error) {
         if (error instanceof LeaseLost || (error instanceof HttpError && error.status === 409)) {

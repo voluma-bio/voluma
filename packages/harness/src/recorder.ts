@@ -22,12 +22,14 @@
  *
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
  * `onStop("lease-lost")` once (the creator aborts the run) and drops every event still queued.
- * An unavailable store is retried for as long as the run lives, so an API outage the lease rides
- * out (`LEASE_SECONDS`) costs the run nothing. The retries end at the first failed attempt once
- * `runStopped` aborts (the heartbeat's self-stop, or any other release), the same stop with
- * reason "unreachable": the run is not at fault, so the creator releases it for another claim to
- * resume, and `failure()` stays empty. Events queued before the abort are still delivered while
- * the store answers.
+ * An event is retried until SELF_STOP_SECONDS have passed since its first failure, the same
+ * window the heartbeat's self-stop gives an outage, so an API that refuses only event writes
+ * cannot hold the queue for ever. A store still unavailable then is the same stop with reason
+ * "unreachable": the run is not at fault, so the creator releases it for another claim to
+ * resume, and `failure()` stays empty. The retries also end at the first failed attempt once
+ * `runStopped` aborts (the run is being released anyway); events queued before the abort are
+ * still delivered while the store answers. The first failure of an event is logged, then one
+ * line every 30 s.
  *
  * An event the store refuses, and an `emit` of an invalid event (our code broke the
  * contract), is lost: `failure()` holds the error, and the supervisor fails the run on it
@@ -39,6 +41,7 @@ import {
   eventInputSchema,
   type RunEvent,
 } from "@voluma/contracts/events";
+import { SELF_STOP_SECONDS } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
 import type { LiveBatcher, LiveBody } from "./live";
 import { type EventLog, EventLogUnavailable } from "./ports/event-log";
@@ -78,8 +81,8 @@ class RecorderStopped extends Error {
 }
 
 const RETRY_DELAY_MS = 2_000;
-/** The retry delay grows by RETRY_DELAY_MS per attempt up to this many times it. */
-const MAX_DELAY_STEPS = 5;
+const GIVE_UP_AFTER_MS = SELF_STOP_SECONDS * 1000;
+const LOG_EVERY_MS = 30_000;
 
 /** `stored` is the run's already stored events, for a resume. */
 export function recorder(
@@ -90,6 +93,7 @@ export function recorder(
   stored: readonly RunEvent[] = [],
   live?: LiveBatcher,
   runStopped?: AbortSignal,
+  giveUpAfterMs = GIVE_UP_AFTER_MS,
 ): Recorder {
   let queue: Promise<unknown> = Promise.resolve();
   let stopped = false; // the creator has been told to stop: nothing more is delivered
@@ -104,8 +108,10 @@ export function recorder(
     onStop(reason);
   }
 
-  /** Stores the event (retried until `runStopped` aborts) and adds it to the view, or throws. */
+  /** Stores the event (retried for `giveUpAfterMs` from its first failure) and adds it to the view, or throws. */
   async function deliver(event: EventInput): Promise<void> {
+    let firstFailure = 0;
+    let loggedAt = 0;
     try {
       for (let attempt = 1; ; attempt++) {
         if (stopped) throw new RecorderStopped();
@@ -117,13 +123,19 @@ export function recorder(
         } catch (error) {
           if (error instanceof LeaseLost) stop("lease-lost");
           if (!(error instanceof EventLogUnavailable)) throw error;
-          if (runStopped?.aborted) {
+          const now = Date.now();
+          firstFailure ||= now;
+          if (now - firstFailure >= giveUpAfterMs || runStopped?.aborted) {
             stop("unreachable");
             throw error;
           }
-          await new Promise((resolve) =>
-            setTimeout(resolve, retryDelayMs * Math.min(attempt, MAX_DELAY_STEPS)),
-          );
+          if (now - loggedAt >= LOG_EVERY_MS) {
+            loggedAt = now;
+            console.error(
+              `recorder: ${event.type} ${event.id} not stored for ${Math.round((now - firstFailure) / 1000)} s, retrying: ${error.message}`,
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
         }
       }
     } catch (error) {

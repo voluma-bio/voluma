@@ -164,7 +164,7 @@ who ends it:
    then closes its sandbox (no `stopped` event is stored); the service waits up to 50 s (Render's grace is 60 s), and the release retries for what is left of it after a 15 s cap on the flush of events (the final usage is always sent), so a deploy that overlaps an API outage is still recorded as `shutdown`. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
-   The recorder retries an unreachable API (network or 5xx) until the run stops, which the heartbeat's self-stop does after `SELF_STOP_SECONDS`; history writes give up after the same time. The run is then released and resumed, not failed. A 4xx refusal still fails it.
+   The recorder stops a run the same way (`self-stop`) when one event stays unstored (network or 5xx) for 45 s (`SELF_STOP_SECONDS`) from its first failure, logged on the first failure and then every 30 s: the run is released and resumed, not failed. History writes retry until the run stops, with the same logging. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each and polls until Modal has reported every one terminated (a sandbox Modal no longer knows counts as gone) and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Transient Modal errors are retried with backoff and logged, a permanent one (a revoked token) fails the claim; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
@@ -456,7 +456,7 @@ not in the log, so a resumed thread takes it from the snapshotted role file and 
 
 # Runner: a claim that ends is a cut-off, not a stop
 
-A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for `SELF_STOP_SECONDS` (120 s), a lost
+A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
 lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
 (`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
 exactly as after a crash, and the run loop writes none for the root, even if a step threw

@@ -98,13 +98,12 @@ import { z } from "zod";
 import { runSchema, visitorKeysSchema } from "./run";
 
 /** How long a run stays leased after the server's last heartbeat for it. */
-export const LEASE_SECONDS = 135;
+export const LEASE_SECONDS = 60;
 /** How often the runner heartbeats each run it holds. */
 export const HEARTBEAT_SECONDS = 15;
 /**
- * How long the runner rides out an API it cannot reach before it stops the run: from the send of
- * the last acknowledged heartbeat. It is the longest API outage a run survives, so it also
- * bounds every retry the runner makes for the run.
+ * How long the runner rides out an API it cannot reach before it stops the run, counted from the
+ * send of the last acknowledged heartbeat. It also bounds every retry the runner makes for events.
  */
 export const SELF_STOP_SECONDS = LEASE_SECONDS - HEARTBEAT_SECONDS;
 /** How often an idle runner asks for a run. */

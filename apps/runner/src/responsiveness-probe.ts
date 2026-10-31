@@ -53,6 +53,7 @@ const client = runClient(
     onLeaseLost() {
       leaseFailures++;
     },
+    runStopped: new AbortController().signal,
   },
 );
 const lease = holdLease({

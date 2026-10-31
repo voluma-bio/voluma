@@ -179,7 +179,7 @@ async function claimBody(
   const client = runClient(
     config.api,
     { runId, leaseToken },
-    { redact, onLeaseLost: () => stop("lease-lost") },
+    { redact, onLeaseLost: () => stop("lease-lost"), runStopped: halt.signal },
   );
   let lease: ReturnType<typeof holdLease> | undefined;
   let events: Recorder | undefined;

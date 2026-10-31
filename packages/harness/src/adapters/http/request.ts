@@ -32,15 +32,23 @@ function parseJson(text: string): unknown {
   }
 }
 
-/** `retryForMs`: keep retrying network and 5xx failures until this long has passed. */
+const LOG_EVERY_MS = 30_000;
+
+/**
+ * `retryForMs`: keep retrying network and 5xx failures until this long has passed, or until
+ * `until` aborts (the call's owner stopped; an attempt in flight is cut too). A retrying call
+ * logs its first failure and then one every 30 s. `attemptTimeoutMs` bounds each attempt.
+ */
 export async function send(
   endpoint: Endpoint,
   path: string,
   init: RequestInit & { leaseToken?: string },
-  retryForMs = 0,
+  retry: { forMs?: number; until?: AbortSignal; attemptTimeoutMs?: number } = {},
 ): Promise<Response> {
   const { leaseToken, ...fetchInit } = init;
-  const deadline = Date.now() + retryForMs;
+  const { forMs = 0, until, attemptTimeoutMs = ATTEMPT_TIMEOUT_MS } = retry;
+  const deadline = Date.now() + forMs;
+  let loggedAt = 0;
   for (let attempt = 1; ; attempt++) {
     try {
       const response = await fetch(new URL(path, endpoint.baseUrl), {
@@ -50,7 +58,9 @@ export async function send(
           authorization: `Bearer ${endpoint.token}`,
           ...(leaseToken && { [LEASE_TOKEN_HEADER]: leaseToken }),
         },
-        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+        signal: until
+          ? AbortSignal.any([AbortSignal.timeout(attemptTimeoutMs), until])
+          : AbortSignal.timeout(attemptTimeoutMs),
       });
       if (response.ok) return response;
       const text = await response.text();
@@ -62,9 +72,14 @@ export async function send(
       if (
         error instanceof LeaseLost ||
         (error instanceof HttpError && error.status < 500) ||
+        until?.aborted ||
         Date.now() >= deadline
       ) {
         throw error;
+      }
+      if (Date.now() - loggedAt >= LOG_EVERY_MS) {
+        loggedAt = Date.now();
+        console.error(`${path}: will retry: ${error instanceof Error ? error.message : error}`);
       }
     }
     await new Promise((resolve) =>
@@ -77,7 +92,11 @@ export function postJson(
   endpoint: Endpoint,
   path: string,
   body: unknown,
-  options: { leaseToken?: string; retryForMs?: number; redact?(text: string): string } = {},
+  options: {
+    leaseToken?: string;
+    retry?: Parameters<typeof send>[3];
+    redact?(text: string): string;
+  } = {},
 ): Promise<Response> {
   const text = JSON.stringify(body);
   return send(
@@ -89,6 +108,6 @@ export function postJson(
       body: options.redact ? options.redact(text) : text,
       leaseToken: options.leaseToken,
     },
-    options.retryForMs,
+    options.retry,
   );
 }

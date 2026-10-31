@@ -4,7 +4,9 @@
  * the run stops that the runner learns here: the server ended it (`stop`), the lease is gone
  * (`LeaseLost`), or no heartbeat has been acknowledged for SELF_STOP_SECONDS,
  * counted from when the last acknowledged one was sent (the claim, before the first). That is
- * before the server's expiry whatever the network delay, and needs no shared clock.
+ * before the server's expiry whatever the network delay, and needs no shared clock. A heartbeat
+ * that fails is retried after HEARTBEAT_RETRY_SECONDS, so the lease is renewed as soon as the API
+ * answers again; the cadence stays HEARTBEAT_SECONDS otherwise.
  *
  * Not every missed window is lost contact. If the runner's own event loop was blocked for most of
  * it while this was the only live run, the run starved its heartbeats: that stop is
@@ -27,6 +29,7 @@ export type StopReason =
   | Extract<ReleaseReason, "self-stop" | "loop-stalled" | "refused">;
 
 const SELF_STOP_MS = SELF_STOP_SECONDS * 1000;
+const HEARTBEAT_RETRY_SECONDS = 2;
 
 export function holdLease(options: {
   client: Pick<RunClient, "heartbeat">;
@@ -38,6 +41,8 @@ export function holdLease(options: {
 }) {
   const { client, meter, onStop, onRoundTrip, log } = options;
   let inFlight: Promise<void> | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let halted = false;
   // The window counts from the send of the last acknowledged heartbeat (the claim, before the first).
   const arm = (sentAt: number, stalledAtSend: number) =>
     setTimeout(
@@ -55,6 +60,7 @@ export function holdLease(options: {
       const { stop } = await client.heartbeat(usage);
       onRoundTrip(Date.now() - sentAt);
       clearTimeout(deadline);
+      clearTimeout(retry);
       deadline = arm(sentAt, stalledAtSend);
       if (stop) onStop("stop");
     } catch (error) {
@@ -67,20 +73,24 @@ export function holdLease(options: {
         onStop("refused");
       } else if (!(error instanceof LeaseLost)) {
         log(`heartbeat failed, will retry: ${error instanceof Error ? error.message : error}`);
+        if (!halted) retry = setTimeout(tick, HEARTBEAT_RETRY_SECONDS * 1000);
       }
     }
   }
 
-  const timer = setInterval(() => {
+  function tick() {
     inFlight ??= beat().finally(() => {
       inFlight = undefined;
     });
-  }, HEARTBEAT_SECONDS * 1000);
+  }
+  const timer = setInterval(tick, HEARTBEAT_SECONDS * 1000);
 
   return {
     /** Stops the timers at once, so a run being closed can't also stop with a late `self-stop`. */
     halt() {
+      halted = true;
       clearInterval(timer);
+      clearTimeout(retry);
       clearTimeout(deadline);
     },
     /** Sends the usage since the last acknowledged heartbeat, after the one in flight. */
