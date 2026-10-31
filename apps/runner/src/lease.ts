@@ -2,7 +2,7 @@
  * Holds one run's lease (`@voluma/contracts/runner`): a heartbeat every HEARTBEAT_SECONDS
  * carrying the usage since the last acknowledged one. It calls `onStop` for the three ways
  * the run stops that the runner learns here: the server ended it (`stop`), the lease is gone
- * (`LeaseLost`), or no heartbeat has been acknowledged for LEASE_SECONDS - HEARTBEAT_SECONDS,
+ * (`LeaseLost`), or no heartbeat has been acknowledged for SELF_STOP_SECONDS,
  * counted from when the last acknowledged one was sent (the claim, before the first). That is
  * before the server's expiry whatever the network delay, and needs no shared clock.
  *
@@ -14,7 +14,7 @@
  * costs one strike, a body that is refused every time ends the run at the limit. Only a window in
  * which no call got an answer is a plain `self-stop`.
  */
-import { HEARTBEAT_SECONDS, LEASE_SECONDS, type ReleaseReason } from "@voluma/contracts/runner";
+import { HEARTBEAT_SECONDS, type ReleaseReason, SELF_STOP_SECONDS } from "@voluma/contracts/runner";
 import { HttpError } from "@voluma/harness/adapters/http/request";
 import type { RunClient } from "@voluma/harness/adapters/http/run-client";
 import { LeaseLost } from "@voluma/harness/ports/lease-lost";
@@ -26,7 +26,7 @@ export type StopReason =
   | "lease-lost"
   | Extract<ReleaseReason, "self-stop" | "loop-stalled" | "refused">;
 
-const SELF_STOP_MS = (LEASE_SECONDS - HEARTBEAT_SECONDS) * 1000;
+const SELF_STOP_MS = SELF_STOP_SECONDS * 1000;
 
 export function holdLease(options: {
   client: Pick<RunClient, "heartbeat">;

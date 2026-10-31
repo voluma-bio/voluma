@@ -22,11 +22,12 @@
  *
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
  * `onStop("lease-lost")` once (the creator aborts the run) and drops every event still queued.
- * A store still unavailable after the retries is the same stop with reason "unreachable":
- * the run is not at fault, so the creator releases it for another claim to resume, and
- * `failure()` stays empty. The retries also end at the first failed attempt once `runStopped`
- * aborts (the run is being released anyway), so a hanging API cannot hold the run past its
- * stop; events queued before the abort are still delivered while the store answers.
+ * An unavailable store is retried for as long as the run lives, so an API outage the lease rides
+ * out (`LEASE_SECONDS`) costs the run nothing. The retries end at the first failed attempt once
+ * `runStopped` aborts (the heartbeat's self-stop, or any other release), the same stop with
+ * reason "unreachable": the run is not at fault, so the creator releases it for another claim to
+ * resume, and `failure()` stays empty. Events queued before the abort are still delivered while
+ * the store answers.
  *
  * An event the store refuses, and an `emit` of an invalid event (our code broke the
  * contract), is lost: `failure()` holds the error, and the supervisor fails the run on it
@@ -76,8 +77,9 @@ class RecorderStopped extends Error {
   }
 }
 
-const ATTEMPTS = 5;
 const RETRY_DELAY_MS = 2_000;
+/** The retry delay grows by RETRY_DELAY_MS per attempt up to this many times it. */
+const MAX_DELAY_STEPS = 5;
 
 /** `stored` is the run's already stored events, for a resume. */
 export function recorder(
@@ -102,7 +104,7 @@ export function recorder(
     onStop(reason);
   }
 
-  /** Stores the event (up to ATTEMPTS tries) and adds it to the view, or throws. */
+  /** Stores the event (retried until `runStopped` aborts) and adds it to the view, or throws. */
   async function deliver(event: EventInput): Promise<void> {
     try {
       for (let attempt = 1; ; attempt++) {
@@ -115,11 +117,13 @@ export function recorder(
         } catch (error) {
           if (error instanceof LeaseLost) stop("lease-lost");
           if (!(error instanceof EventLogUnavailable)) throw error;
-          if (attempt >= ATTEMPTS || runStopped?.aborted) {
+          if (runStopped?.aborted) {
             stop("unreachable");
             throw error;
           }
-          await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+          await new Promise((resolve) =>
+            setTimeout(resolve, retryDelayMs * Math.min(attempt, MAX_DELAY_STEPS)),
+          );
         }
       }
     } catch (error) {

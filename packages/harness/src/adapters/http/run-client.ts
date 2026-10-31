@@ -27,6 +27,7 @@ import {
   type HeartbeatResponse,
   heartbeatResponseSchema,
   type ReportRequest,
+  SELF_STOP_SECONDS,
   type Usage,
 } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
@@ -35,7 +36,8 @@ import { type History, HistoryConflict } from "../../ports/history";
 import { LeaseLost } from "../../ports/lease-lost";
 import { type Endpoint, HttpError, postJson, send } from "./request";
 
-const HISTORY_BUDGET_MS = 60_000;
+/** The longest outage a history write rides out: the run's own self-stop (`lease.ts`) ends it anyway. */
+const HISTORY_BUDGET_MS = SELF_STOP_SECONDS * 1000;
 const REPORT_BUDGET_MS = 60_000;
 
 export interface RunClient extends EventLog, History {
