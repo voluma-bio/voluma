@@ -17,8 +17,5 @@ API routes and `@voluma/api-client` calls they need are still in place, waiting 
 - **Older revisions.** The scan review always shows the latest results; the old `?revision=` let
   a reader open an earlier one read-only, and the redirect now drops it. The data is already in
   `getReviewRun` (`revisions`).
-- **Study pages link without an item.** `features/study` sends `/runs/:runId?task=` (study
-  page) and `/runs/:id/live` (new study); both redirect, and the scan review opens the task's
-  first open item. They should link `runHref` with `item=<checkId>` (#309).
 - **Whether `NeedItem` ids stay stable across a redo's new revision**, which `useAccepting`'s
   local `done` set relies on. Not checked.
