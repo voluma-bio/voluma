@@ -22,6 +22,7 @@ import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 import { EvidenceNotFound } from "./ports/evidence";
 import { recorder } from "./recorder";
+import type { ProviderFailure } from "./run-loop";
 import { type LoopConfig, type PlanTask, superviseRun } from "./supervise-run";
 
 export const RUN = "r1";
@@ -190,8 +191,8 @@ export interface WorldOptions {
   delayStore?: (e: RunEvent) => number;
   /** Milliseconds a thread's history takes to load (to hold a resume in its start-up at a chosen moment). */
   delayLoad?: (threadId: string) => number;
-  /** Whether a failed thread's error text says the model provider failed. */
-  providerError?: (error: string) => "transient" | "fatal" | undefined;
+  /** Whether a failed thread's error says the model provider failed (`RunLoopOptions.providerError`). */
+  providerError?: (error: string, threadId: string) => ProviderFailure | undefined;
   /** Whether evidence storage holds this file (default: every file); `keep` rejects with `EvidenceNotFound` otherwise. */
   evidenceExists?: (root: "outputs" | "scratch", taskId: string, path: string) => boolean;
   /** Runs for every event the store accepts (for tests that need something to happen at that moment). */

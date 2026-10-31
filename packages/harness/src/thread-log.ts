@@ -74,6 +74,8 @@ interface ThreadFields {
   pendingFeedback: { text: string; from: string } | undefined;
   /** How many times the log shows it started: the first run and each resume. */
   starts: number;
+  /** How many of those starts resumed it after an invocation that ended `failed`. */
+  failedResumes: number;
   /** The model it started on (`provider/id`); a resume keeps it. Absent: not recorded. */
   model: string | undefined;
   /** Tool calls the log shows without a result, by tool call id; after a cut-off, what it was cut off in. */
@@ -108,7 +110,7 @@ export type Notice = {
   | { kind: "submitted" }
   /** A worker's turn ended without submitting; `reply` is what it said last. */
   | { kind: "worker-idle"; reply: string }
-  | { kind: "failed"; error: string }
+  | { kind: "failed"; error: string; place: "worker" | "check" }
   /** `rule` says how the check ended (`check-result`, `fix-limit`; `check-limit` only in runs from when checks were time-limited). */
   | {
       kind: "check-result";
@@ -410,6 +412,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           lastSummary: record?.lastSummary,
           pendingFeedback: record?.pendingFeedback,
           starts: (record?.starts ?? 0) + 1,
+          failedResumes: (record?.failedResumes ?? 0) + (record?.end?.status === "failed" ? 1 : 0),
           model: record?.model ?? e.payload.model,
           openCalls: record?.openCalls ?? new Map(),
           asks: record?.asks ?? [],
@@ -441,7 +444,15 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (first && record.place !== "main") {
           const base = { eventId: e.id, threadId: e.threadId, taskId: record.taskId };
           if (e.payload.status === "failed") {
-            notice({ ...base, kind: "failed", error: e.payload.error ?? "it failed" }, at);
+            notice(
+              {
+                ...base,
+                kind: "failed",
+                error: e.payload.error ?? "it failed",
+                place: record.place,
+              },
+              at,
+            );
           } else if (
             e.payload.status === "completed" &&
             record.place === "worker" &&

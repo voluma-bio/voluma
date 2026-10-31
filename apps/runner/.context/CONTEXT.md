@@ -357,36 +357,52 @@ files. Sandbox reads bound the bytes read, not the size reported by `stat` (file
 Evidence may be given as a plain path (`/outputs/<task>/x`, `/scratch/<thread>/x`). An outputs `{root, path}` ref
 is always relative to `/outputs/<task>/`: `keep` never strips another task-id segment, which could name a real subfolder.
 
-**Provider errors.** Pi is the only retry layer. `run.ts` passes it `maxRetries: 10`, `maxRetryDelayMs: 30 s`
-and `timeoutMs: 60 s` for every role. Pi retries a 408, 409, 429 (waiting the server's `retry-after`, a longer ask
-than 30 s fails the call at once), 5xx or dropped connection, with a backoff that doubles from 0.5 s to a cap of
-8 s: ten retries are about 50 s of provider trouble (measured: 11 attempts over 50.5 s against a stub that
-answered 503), longer when the server sends `retry-after`. Pi has no total budget and logs nothing, so
-`model-fetch.ts` hands it a `fetch` that logs every failed attempt (`<role> model call attempt N of 11 failed:
-HTTP 503 …`, or the network error). The timeout is the SDK's: it covers the wait for the response headers only (the
-SDK clears its timer when `fetch` resolves), so a hung request is cut after 60 s and retried, and a healthy stream
-is never cut; a stream that stalls after its headers is cut by nothing but the run's end (a worker or main in
-that state counts as running, so the loop's `stuckLimit` never fires). A hung request ends as `Request timed out.`,
-which the classifier calls transient.
+**Provider errors.** Pi is the only retry layer, and it retries only the request up to its response headers.
+`run.ts` passes it `maxRetries: 10`, `maxRetryDelayMs: 30 s` and `timeoutMs: 60 s` for every role. Pi retries a 408,
+409, 429 (waiting the server's `retry-after`; a longer ask than 30 s fails the call at once), 5xx or dropped
+connection, with a backoff that doubles from 0.5 s to a cap of 8 s: ten retries are about 50 s of provider trouble
+(measured: 11 attempts over 50.5 s against a stub that answered 503), longer when the server sends `retry-after`
+(10 × 30 s at most), and a quota 429 is retried the same 10 times before it fails. Pi has no total budget and logs
+nothing, so `model-fetch.ts` hands it a `fetch` that logs every failed attempt (`<role> model call attempt N failed:
+HTTP 503 …`, `timed out waiting for the response`, or the network error with its cause). The timeout is the SDK's: it
+covers the wait for the response headers only (the SDK clears its timer when `fetch` resolves), so a healthy stream
+is never cut. Meta sends its headers after prefill (24.7 s at most, measured at 805k tokens), so 60 s holds. A
+request that hangs before its headers is retried every time: a dead endpoint holds a call for up to 11 × 60 s plus
+the backoff, about 12 minutes, before the thread fails. A stream that stalls after its headers is cut by nothing
+but the run's end (a thread in that state counts as running, so the loop's `stuckLimit` never fires).
 
-What survives Pi's retries goes to the run loop (`packages/harness/src/run-loop.ts`, `checkFatal`), which asks
-`provider-error.ts`: a *fatal* provider error (any other 4xx: auth, `404 model_not_found`, an empty account) fails
-the run at once, on any thread; a *transient* one (the set Pi retries) fails the run only when it ended the main
-agent. A worker or check that ended `failed` on a transient error is a failed thread like any other: main gets the
-inbox notice and decides (`message` to resume it, or `stop_worker` then `start_agent`); a check that failed this way
-takes the check-failed path (the task goes `to-check` with a reason). Nothing resumes a thread on its own. The
-run's error reads "the AI stopped on an error from its provider: <message>", or "<task title>: the AI stopped on an
-error from its provider: <message>". Only threads this process started count, so a failure an earlier claim recorded
-(a reopened run's old workers) never fails the new claim. A context overflow (400/413 "prompt is too long",
-`context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`) is not a provider error (only with
-status 400/413 or none; a 5xx body never counts): it fails that thread only. A failed main is never resumed:
-`main()` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that fails too
-fails the run with its error. A failed worker keeps its history. Nothing releases the run to wait.
-`provider-error.ts` reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
-`<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
-with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
-A run held "AI unavailable" under the earlier release rule is claimed again at the next claim
-(see `apps/api/.context/deploy.md`).
+**After the headers nothing retries.** A stream that drops, an error sent inside the stream (Meta's `server_error`
+and `response.failed`, Anthropic's `overloaded_error`) or undici's `terminated` reaches the thread as it is. The
+texts differ by provider, so `model-fetch.ts` also reports the first 2xx answer, and `run.ts` keeps the threads
+whose latest call got one: a failure of such a call is *interrupted*, whatever its text.
+
+What survives goes to the run loop (`packages/harness/src/run-loop.ts`, `checkFatal`), which asks
+`provider-error.ts` (the unit test there pins the texts):
+- *fatal* (any other 4xx: auth, `404 model_not_found`, an empty account): fails the run at once, on any thread.
+- *transient* (the set Pi retries, before the headers): fails the run when it ended the main agent.
+- *interrupted* (after the headers): the main agent is resumed once, the same thread with its history as it was plus
+  one runtime message ("The model provider failed during your last reply; continue."). A second one fails the run.
+  The count is the log's: starts of that thread after a `failed` end.
+- A worker or check that ended `failed` on a transient or interrupted error is a failed thread like any other: main
+  gets the inbox notice and decides, nothing resumes it automatically. For a worker, `message` resumes it or
+  `stop_worker` then `start_agent` replaces it. A check stays the task's check while `under-review`: `message` on it
+  resumes it with its transcript and sandbox, and `stop_worker` on it stops it, after which `startChecks` starts a
+  fresh check (a check stopped without a reason, which only main does). If main does neither (it is told, idle, and
+  nothing else runs), the task goes `to-check` with the reason "The second AI check could not finish: its AI provider
+  failed (<error>)". A live check that asked a question is still `answer`'s.
+
+The run's error reads "the AI stopped on an error from its provider: <message>", or "<task title>: the AI stopped
+on an error from its provider: <message>". Only threads this process started count, so a failure an earlier claim
+recorded (a reopened run's old workers) never fails the new claim. A context overflow (400/413 "prompt is too
+long", `context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`) is not a provider error (only with
+status 400/413 or none; a 5xx body never counts): it fails that thread only. A main that failed that way is never
+resumed: `main()` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that
+fails too fails the run with its error. Nothing releases the run to wait. `provider-error.ts` reads the status in the
+text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's `<status> {...}`, `<status> <html>` or
+`<status> status code (no body)`; Pi's `Server requested Ns retry delay` is transient by itself) and, for an
+Anthropic error sent mid-stream with no status, its documented `error.type` (`overloaded_error` is 529,
+`rate_limit_error` 429). A run held "AI unavailable" under the earlier release rule is claimed again at the next
+claim (see `apps/api/.context/deploy.md`).
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check). The harness defaults the rest (`LoopConfig`). No limit is

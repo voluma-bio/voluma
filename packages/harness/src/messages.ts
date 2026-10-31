@@ -67,6 +67,13 @@ export function checkReason(t: FoldedTask, status: "done" | "to-check"): string 
     : "The second AI check passed it, but items are still open for a person.";
 }
 
+/** Why a task is left to check when its check failed on a provider error and the main agent did not act on it. */
+export const checkProviderFailed = (error: string) =>
+  `The second AI check could not finish: its AI provider failed (${clip(error, REPLY_MAX)}).`;
+
+/** What the main agent is told when the provider failed after its reply started; its history is as it was. */
+export const PROVIDER_FAILED_RESUME = "The model provider failed during your last reply; continue.";
+
 export const fixLimitReason = (rounds: number) =>
   `The second AI check still found problems after ${rounds} rounds of fixes; this task is left for a person.`;
 
@@ -149,7 +156,7 @@ export function noticeLine(n: Notice): string {
     case "worker-idle":
       return `- ${who} stopped without submitting${n.reply ? `. Its last words: "${clip(n.reply, REPLY_MAX)}"` : "."}`;
     case "failed":
-      return `- ${who} failed: ${clip(n.error, REPLY_MAX)}`;
+      return `- ${who} failed: ${clip(n.error, REPLY_MAX)}${n.place === "check" ? ` Its check has no verdict yet: \`message\` it to resume it where it stopped, or \`stop_worker\` it for a fresh check. If you do neither, ${n.taskId} is left to check for the researcher.` : ""}`;
     case "ask":
       return `- ${who} asks (askId ${askRef(n.threadName, n.threadId, n.eventId)}): "${n.question}" Reply with \`answer\`.`;
     case "stale":

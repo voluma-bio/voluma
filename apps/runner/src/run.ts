@@ -95,7 +95,9 @@ const MODEL_RETRIES = 10;
 const MODEL_MAX_RETRY_DELAY_MS = 30_000;
 /**
  * Time the provider gets to answer a request with its headers (the SDK clears the timer then,
- * so a streaming body is not cut): a streamed reply sends them at once, a hung request sends none.
+ * so a streaming body is not cut). Meta sends them after prefill: 24.7 s at most, measured at
+ * 805k tokens. A request that hangs before its headers is retried, so a dead endpoint holds a
+ * call for up to 11 × 60 s plus the backoff.
  */
 const MODEL_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -359,16 +361,22 @@ async function claimBody(
       }
       return fallback;
     };
+    // The threads whose latest model call got its response headers: a failure of that call came
+    // after the reply started, so Pi did not retry it (`provider-error.ts`).
+    const replyStarted = new Set<string>();
     const streamFor =
       (role: string): ModelSetup["streamFn"] =>
       (m, context, options) => {
+        // `sessionId` is the thread's id, for a turn and for a compaction summary.
+        const threadId = options?.sessionId as string;
+        replyStarted.delete(threadId);
         const stream = models.streamSimple(m, context, {
           ...options,
           apiKey: keyFor(m.provider),
           maxRetries: MODEL_RETRIES,
           maxRetryDelayMs: MODEL_MAX_RETRY_DELAY_MS,
           timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
-          fetch: loggedFetch(role, MODEL_RETRIES + 1, log, options?.signal),
+          fetch: loggedFetch(role, log, options?.signal, () => replyStarted.add(threadId)),
           // All registered providers await this before normalizing each event. An async
           // iterator alone can drain buffered deltas entirely through microtasks, starving
           // lease timers.
@@ -382,8 +390,6 @@ async function claimBody(
           // costs more per cache write, so leave its existing setting unchanged.
           ...(m.provider === "meta" && { cacheRetention: "long" }),
         });
-        // `sessionId` is the thread's id, for a turn and for a compaction summary.
-        const threadId = options?.sessionId as string;
         stream.result().then(
           (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
           () => {},
@@ -399,7 +405,7 @@ async function claimBody(
       inputId: run.input.id,
       inputPrefix: inputPrefixOf(run),
       previousClaim: claim.previousClaim?.reason,
-      providerError: providerFailure,
+      providerError: (error, threadId) => providerFailure(error, replyStarted.has(threadId)),
       workflows: run.workflows,
       recorder: events,
       history: client,

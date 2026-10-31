@@ -65,6 +65,13 @@ export const CONNECTION =
   /^Connection error\.?$|^Request timed out\.?$|^Anthropic stream ended before message_stop/;
 
 /**
+ * Pi's error when a retryable answer (a 429 or a 5xx) asks for a longer wait than its cap. The SDK's
+ * message follows in a shape `statusOf` may not read (`429 Rate limit reached`), but Pi throws this
+ * only for a status it would have retried.
+ */
+const SERVER_DELAY = /^Server requested \d+s retry delay/;
+
+/**
  * An account out of money: Anthropic's spend cap and empty balance are `400 invalid_request_error`
  * and OpenAI's is `429 insufficient_quota`, told apart from a bad request or a rate limit only by
  * the message.
@@ -82,6 +89,7 @@ export function isTransientProviderError(message: string | undefined): boolean {
   const status = statusOf(m);
   return (
     CONNECTION.test(m) ||
+    (SERVER_DELAY.test(m) && !OUT_OF_MONEY.test(m)) ||
     status === 408 ||
     status === 409 ||
     (status === 429 && !OUT_OF_MONEY.test(m)) ||
