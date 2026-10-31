@@ -182,7 +182,7 @@ who ends it:
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Locally, `start` and
    `try-run` run in their own process group (`tools/dev-run.mjs`, recorded in `.dev/pids/`):
    Ctrl-C reaches it, and `pnpm dev:stop` stops it with the worktree's dev servers: SIGTERM, so active runs release, and SIGKILL only after 55 s.
-   The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
+   Event and history writes share one retry rule in `send` (`request.ts`): a network or 5xx failure is retried until 120 s (`SELF_STOP_SECONDS`) after its first failure, or until the run stops; it logs the first failure and then every 30 s. When the time runs out the run client's `onUnreachable` stops the run, so it is released and resumed, not failed. The stop is `self-stop`, or `refused` (a strike) when a heartbeat was acknowledged since the first failure: the API is up and refuses these writes, so a route that fails for good ends the run after 3 claims instead of looping. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each and polls until Modal has reported every one terminated (a sandbox Modal no longer knows counts as gone) and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Transient Modal errors are retried with backoff and logged, a permanent one (a revoked token) fails the claim; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
@@ -346,7 +346,7 @@ The result is a marker row `{role: "compaction", summary, keptFrom}` appended to
 stays. `keptFrom` indexes the thread's messages (rows that are not markers); `foldHistory` rebuilds them and the
 latest marker (and derives where it sat), and a request carries `[system, summary message, messages from keptFrom]`
 (the last ~20% of each limit `load` checks: the compact threshold in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
-call keeps its results). The system prompt is untouched (resume compares it). Each compaction logs `compaction:
+call keeps its results). The system prompt is untouched (resume compares it); tool declarations appended since the first message stay in the request ahead of the summary. Each compaction logs `compaction:
 thread …` with tokens before and after. Images stay in history until a compaction; the loader fetches only those from
 `keptFrom`.
 
@@ -451,7 +451,7 @@ script, from its docstring's first line; the loader reads it from the snapshot).
 (`supervise-run.ts` `grantsOf`); `segment_sam` is also dropped when the runner configures no gateway, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a resumed thread keeps the system prompt and tool
-definitions it started with, run by the current tools; it is `ThreadStale` only if the input schema of one of its tools changed; a changed description (the tool's or a field's) resumes, a changed default does not, and a tool removed since answers a call with an error). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
+definitions it started with, run by the current tools; a tool whose input schema changed (a `.default`, a `.min`, a new field), or that is new to the role, is declared to it by a system message Pi appends to the transcript (`resumedTools`), stored with the history so a later resume does not append it again, and new calls use the current schema; it costs one uncached request per thread on Meta and DeepSeek and none on Anthropic's Opus 5, measured; a tool removed since is declared removed the same way; a description change (the tool's or a field's) changes nothing sent. It is `ThreadStale` only when a tool it has called no longer exists, or its model changed: switching the model under a live thread would replay another provider's reasoning blocks and ids, which nothing has measured). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
@@ -475,7 +475,7 @@ not in the log, so a resumed thread takes it from the snapshotted role file and 
 
 # Runner: a claim that ends is a cut-off, not a stop
 
-A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
+A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 120 s, a lost
 lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
 (`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
 exactly as after a crash, and the run loop writes none for the root, even if a step threw
@@ -535,7 +535,7 @@ with `telemetry`; on Render search the service's logs for these:
 
 | grep | Line | Means |
 |---|---|---|
-| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
+| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `SELF_STOP_SECONDS` |
 | `telemetry heartbeat-rtt` | once a minute: `p50`, `max`, `n` | send-to-answer time of the acknowledged heartbeats (absent when none were acknowledged) |
 | `telemetry loop-block` | when a 100 ms timer fires over 1 s late: `…ms; in flight: <run> <thread> <tool>; …` | the loop was held that long, and the tool calls recorded as started and not yet resulted at that moment (`no tool`: none) |
 | `[<run>] telemetry unhandledRejection in this run` / `uncaughtException in this run` | on the error | an error nobody caught, tied to its run and logged through its redacting log: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on. After the run's report is fixed the line says `after its report was fixed` and nothing changes |

@@ -8,25 +8,21 @@
  * never writes a derived event twice.
  *
  * `emit` is the stream record's: it returns at once, nothing in the agent loop waits for the
- * API, and a failed delivery is retried in the background (the only place events are
- * retried; the client makes one attempt). A retrying `emit` holds back every later event,
+ * API, and a slow or failing delivery goes on in the background (the event log retries it,
+ * `run-client.ts`). A retrying `emit` holds back every later event,
  * because nothing should be decided past a gap in the record. `append` is the runtime's: it
  * waits its turn in the queue and resolves once the store has acknowledged the event; it
  * throws if the event is invalid or the store refuses it, and the id can be written again.
- * Both retry under one policy, and only an unavailable store (`EventLogUnavailable`) is
- * retried: a refusal fails at once. A retry after a lost response is safe because the store
- * ignores an event id it already holds.
+ * A retry after a lost response is safe because the store ignores an event id it already holds.
  * Live frames are not events (see `@voluma/contracts/stream`): `live` hands them to a batcher
  * (`live.ts`) that never waits, and they do not join the queue, the view or `flush`. The creator of the recorder `flush()`es when its threads end so the
  * record is complete before the process exits.
  *
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
- * `onStop("lease-lost")` once (the creator aborts the run) and drops every event still queued.
- * A store still unavailable after the retries is the same stop with reason "unreachable":
- * the run is not at fault, so the creator releases it for another claim to resume, and
- * `failure()` stays empty. The retries also end at the first failed attempt once `runStopped`
- * aborts (the run is being released anyway), so a hanging API cannot hold the run past its
- * stop; events queued before the abort are still delivered while the store answers.
+ * `onLeaseLost` once (the creator aborts the run) and drops every event still queued. The
+ * event log retries an unavailable store itself, for a bounded time (`run-client.ts`), and
+ * stops the run when that runs out; the recorder then drops what is still queued too, and
+ * `failure()` stays empty: the run is not at fault, so it is released for another claim to resume.
  *
  * An event the store refuses, and an `emit` of an invalid event (our code broke the
  * contract), is lost: `failure()` holds the error, and the supervisor fails the run on it
@@ -76,52 +72,34 @@ class RecorderStopped extends Error {
   }
 }
 
-const ATTEMPTS = 5;
-const RETRY_DELAY_MS = 2_000;
-
 /** `stored` is the run's already stored events, for a resume. */
 export function recorder(
   eventLog: EventLog,
   runId: string,
-  onStop: (reason: "lease-lost" | "unreachable") => void,
-  retryDelayMs = RETRY_DELAY_MS,
+  onLeaseLost: () => void,
   stored: readonly RunEvent[] = [],
   live?: LiveBatcher,
-  runStopped?: AbortSignal,
 ): Recorder {
   let queue: Promise<unknown> = Promise.resolve();
-  let stopped = false; // the creator has been told to stop: nothing more is delivered
+  let stopped = false; // the lease is lost or the log unreachable: nothing more is delivered
   const held: RunEvent[] = [...stored];
   const ids = new Set(held.map((e) => e.id)); // held, and queued for delivery
   const storedIds = new Set(ids);
   let failure: unknown;
 
-  function stop(reason: "lease-lost" | "unreachable") {
-    if (stopped) return;
-    stopped = true;
-    onStop(reason);
-  }
-
-  /** Stores the event (up to ATTEMPTS tries) and adds it to the view, or throws. */
+  /** Stores the event (the log retries it) and adds it to the view, or throws. */
   async function deliver(event: EventInput): Promise<void> {
     try {
-      for (let attempt = 1; ; attempt++) {
-        if (stopped) throw new RecorderStopped();
-        try {
-          await eventLog.append(event);
-          held.push({ ...event, seq: held.length + 1 });
-          storedIds.add(event.id);
-          return;
-        } catch (error) {
-          if (error instanceof LeaseLost) stop("lease-lost");
-          if (!(error instanceof EventLogUnavailable)) throw error;
-          if (attempt >= ATTEMPTS || runStopped?.aborted) {
-            stop("unreachable");
-            throw error;
-          }
-          await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
-        }
+      if (stopped) throw new RecorderStopped();
+      try {
+        await eventLog.append(event);
+      } catch (error) {
+        if (error instanceof LeaseLost && !stopped) onLeaseLost();
+        if (error instanceof LeaseLost || error instanceof EventLogUnavailable) stopped = true;
+        throw error;
       }
+      held.push({ ...event, seq: held.length + 1 });
+      storedIds.add(event.id);
     } catch (error) {
       ids.delete(event.id); // the id can be written again
       throw error;
