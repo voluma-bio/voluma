@@ -86,7 +86,7 @@ export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
  *
  * Both require the latest successfully completed result. 400: invalid request;
  * 404: unknown/unreadable run or unknown task/check; 403: read-only example;
- * 409: obsolete baseRevisionId, no current completed result, or Mark reviewed with
+ * 409: obsolete baseRevisionId or task resultRevisionId, no current completed result, or Mark reviewed with
  * open checks. Authentication and Origin rules are the same as run.ts. Readable
  * non-example runs have shared review state: authorized readers can review them,
  * including guests reviewing their own runs, not one review state per researcher.
@@ -104,6 +104,8 @@ export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
 export const acceptCheckRequestSchema = z.object({
   baseRevisionId: z.string().min(1),
   taskId: taskIdSchema,
+  /** The task result displayed with this check, not a newly fetched run summary. */
+  resultRevisionId: z.string().min(1),
 });
 export type AcceptCheckRequest = z.infer<typeof acceptCheckRequestSchema>;
 

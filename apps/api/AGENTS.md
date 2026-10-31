@@ -142,7 +142,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   atomically; preserve that order to avoid deadlocking runner appends. Review owns policy;
   Run owns authorization filters, sequence allocation and persistence. No domain imports
   the other. `review-state` overlays acceptance on `fold` without changing scientific state.
-- Accept check resolves one current task-result/check identity; only explicit Mark reviewed
+- Accept check compares the request's displayed task `resultRevisionId` with the current task
+  before deduplicating or writing its decision; the completed base revision must also match.
+  Only explicit Mark reviewed
   at zero remaining sets `reviewedAt`. Both are idempotent, shared across authorized
   readers, and forbidden on examples. The same derived summary is `Run.review` and
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs

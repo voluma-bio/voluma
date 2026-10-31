@@ -37,7 +37,7 @@ export function ReportPanel({
   task: TaskView | undefined;
   /** Its review data (values, references, files), once the run has some. */
   reviewTask: ReviewTask | undefined;
-  /** Every item of the scan, with what was accepted here. */
+  /** Every item of the scan, reconciled with authoritative human decisions. */
   items: NeedItem[];
   onTask: (taskId: string) => void;
   onItem: (item: NeedItem) => void;
