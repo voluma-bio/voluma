@@ -73,8 +73,11 @@ and check threads.
   order whose failures never end a thread (events are retried). Live tool output
   (`ToolContext.output`) streams as live frames (`bash.ts`). `startThread({prompt, input?})`: a new thread sends
   the prompt; a thread with history sends `input`, or continues if there is none. On
-  resume it answers every tool call without a result (appended, never editing history)
-  and fails if the stored system message differs from the current prompt and tools. `apps/runner` wires it (see "The runner service" below).
+  resume it answers a crash's tool calls without a result (appended, never editing history)
+  and fails if the stored system message differs from the current prompt and tools. One bad history row
+  never fails a thread: stored rows are never rewritten, and the request is a pure function of them
+  (`packages/harness/src/adapters/pi/history-repair.ts`: an unreadable row, an unanswered mid-history call, a stray result,
+  an image that cannot be read), each repair logged once per run as `history-repair: thread <id>: <rule>`. `apps/runner` wires it (see "The runner service" below).
   The sandbox is created on the first `bash` call and destroyed at the end (every exit path, and what a crash
   leaves: `apps/runner/.context/CONTEXT.md`). A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and

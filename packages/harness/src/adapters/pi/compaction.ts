@@ -24,7 +24,8 @@
  * `{role: "compaction", summary, keptFrom}` stored where it happened: `keptFrom` indexes the
  * thread's messages (the rows that are not markers) and the latest marker wins. `foldHistory`
  * rebuilds the messages and that marker, so a resumed thread sends what the model saw before it
- * stopped; rows written before compaction existed hold no marker and load as before.
+ * stopped; rows written before compaction existed hold no marker and load as before. An unreadable
+ * row is repaired at read time and never rewritten (`foldHistory`, `history-repair.ts`).
  *
  * Model after meridian-flow's runtime compaction (trigger from the usable window less an output
  * reserve, wrap-up before the summary, warm-branch summary, rolling cold summary for a request
@@ -44,6 +45,8 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 import { isTransientProviderError } from "../../context-overflow";
+import { errorText } from "../../error-text";
+import { repairLog, repairToolPairs } from "./history-repair";
 
 /** Jimmy's cap (2026-10-30): "300k or 400k". A thread's input stays under this, or under a smaller window. */
 const BUDGET_CAP = 400_000;
@@ -100,12 +103,39 @@ export interface Compaction {
   at: number;
 }
 
-/** A stored compaction marker, or undefined for any other row. The one place a row is told to be a marker. */
-export function parseMarker(text: string): Omit<Compaction, "at"> | undefined {
+/** What a stored row is. `unreadable` is a row that does not parse (or is not a message); `marker` says it was meant to be a compaction marker. */
+export type RowKind =
+  | { kind: "marker"; marker: Omit<Compaction, "at"> }
+  | { kind: "message"; message: AgentMessage }
+  | { kind: "unreadable"; marker: boolean };
+
+/** The one place a row is told apart: a marker, a message, or neither. Never throws. */
+export function readRow(text: string): RowKind {
   // A message's own JSON escapes its quotes, so this substring only occurs in a marker.
-  if (!text.includes('"role":"compaction"')) return undefined;
-  const row = JSON.parse(text) as { role?: string; summary: string; keptFrom: number };
-  return row.role === "compaction" ? { summary: row.summary, keptFrom: row.keptFrom } : undefined;
+  const marker = text.includes('"role":"compaction"');
+  let row: { role?: unknown; summary?: unknown; keptFrom?: unknown } | null;
+  try {
+    row = JSON.parse(text);
+  } catch {
+    return { kind: "unreadable", marker };
+  }
+  if (typeof row !== "object" || row === null) return { kind: "unreadable", marker };
+  if (row.role === "compaction") {
+    return Number.isInteger(row.keptFrom) && typeof row.summary === "string"
+      ? { kind: "marker", marker: { summary: row.summary, keptFrom: row.keptFrom as number } }
+      : { kind: "unreadable", marker: true };
+  }
+  const content = (row as { content?: unknown }).content;
+  // Later code iterates an assistant's or a result's content, so a wrong shape is unreadable.
+  const shaped =
+    row.role === "user"
+      ? Array.isArray(content) || typeof content === "string"
+      : row.role === "assistant" || row.role === "toolResult"
+        ? Array.isArray(content)
+        : typeof row.role === "string";
+  return shaped
+    ? { kind: "message", message: row as AgentMessage }
+    : { kind: "unreadable", marker: false };
 }
 
 /** The row a compaction is stored as. */
@@ -117,19 +147,42 @@ export const compactionRow = (c: Compaction): string =>
     timestamp: Date.now(),
   });
 
-/** The thread's messages (every one, markers left out) and its latest compaction, from the stored rows. */
+/** Stands for a message row that cannot be read, so every later message keeps its index (`keptFrom` counts them). */
+const UNREADABLE_MESSAGE: AgentMessage = {
+  role: "user",
+  content: "[a stored message could not be read and is left out]",
+  timestamp: 0,
+};
+
+/**
+ * The thread's messages (every one, markers left out) and its latest compaction, from the stored
+ * rows. A pure function of the rows: a row that cannot be read never fails the thread. An
+ * unreadable message becomes a fixed note in its place; an unreadable marker is skipped, so the
+ * latest readable one stands. `unreadable` lists them by row index, for the caller to log.
+ */
 export function foldHistory(rows: string[]): {
   messages: AgentMessage[];
   compaction?: Compaction;
+  unreadable?: { idx: number; rule: "unreadable-message" | "unreadable-marker" }[];
 } {
   const messages: AgentMessage[] = [];
+  const unreadable: NonNullable<ReturnType<typeof foldHistory>["unreadable"]> = [];
   let compaction: Compaction | undefined;
-  for (const text of rows) {
-    const marker = parseMarker(text);
-    if (marker) compaction = { ...marker, at: messages.length };
-    else messages.push(JSON.parse(text) as AgentMessage);
+  for (const [idx, text] of rows.entries()) {
+    const row = readRow(text);
+    if (row.kind === "marker") compaction = { ...row.marker, at: messages.length };
+    else if (row.kind === "message") messages.push(row.message);
+    else if (row.marker) unreadable.push({ idx, rule: "unreadable-marker" });
+    else {
+      unreadable.push({ idx, rule: "unreadable-message" });
+      messages.push(UNREADABLE_MESSAGE);
+    }
   }
-  return { messages, ...(compaction && { compaction }) };
+  return {
+    messages,
+    ...(compaction && { compaction }),
+    ...(unreadable.length > 0 && { unreadable }),
+  };
 }
 
 const summaryMessage = (summary: string): AgentMessage => ({
@@ -337,6 +390,10 @@ export function compactor(args: {
     images: maxImages * KEEP_SHARE,
   };
   let compaction: Compaction | undefined;
+  const logRepair = repairLog(threadId);
+  /** What a request carries: the compacted view with its tool calls and results paired. */
+  const requestView = (messages: AgentMessage[], at = compaction) =>
+    repairToolPairs(compactedView(messages, at), logRepair);
   /** The wrap-up notice went out since the last compaction. */
   let warned = false;
 
@@ -411,8 +468,8 @@ export function compactor(args: {
     }
     // Cold: only what is summarized (and the summary before it), the images left out.
     const request = cold
-      ? compactedView(messages.slice(0, cut), compaction).map(withoutImages)
-      : compactedView(messages, compaction);
+      ? requestView(messages.slice(0, cut)).map(withoutImages)
+      : requestView(messages);
     let reply = await summarize(request, SUMMARY_MAX_TOKENS, signal);
     // Reasoning counts inside the output limit on some providers and can use all of it: once more
     // with twice the room. The thread's reasoning setting stays, as changing it would miss the cache.
@@ -458,7 +515,7 @@ export function compactor(args: {
     async prepare(messages, signal) {
       const now = load(messages);
       if (now.due) await compact(messages, now.tokens, now.cold, now.urgent, signal);
-      return compactedView(messages, compaction);
+      return requestView(messages);
     },
 
     wrapUp(messages) {
@@ -490,8 +547,6 @@ export function compactor(args: {
     },
   };
 }
-
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Both calls of a length retry were billed. */
 function addUsage(a: Usage, b: Usage): Usage {

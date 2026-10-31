@@ -13,14 +13,17 @@
  * A failed image read is retried once with jittered backoff. The S3 client already retries 5xx
  * and throttling; this layer covers what it gives up on or cannot see: a stream that breaks
  * mid-body, or stalls past `READ_TIMEOUT_MS`. Any error but `FileNotFound` (the one
- * classification the Files port makes) is retried, since a transient R2 error must not fail the
- * history load and stop the thread; after the last attempt it propagates.
+ * classification the Files port makes) is retried; after the last attempt the image becomes a
+ * note for this load only (nothing is stored, so a later resume that can read it sends the
+ * image again). The note differs from the image, so the provider's prompt cache misses from that
+ * message on, now and once more when the file reads again; a failed history load would stop the
+ * thread instead. A row that is not valid JSON passes through for `foldHistory` to handle.
  */
 import { createHash } from "node:crypto";
 import { historyImageKey } from "@voluma/contracts/r2";
 import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
-import { parseMarker } from "./compaction";
+import { readRow } from "./compaction";
 
 // view_image returns at most 1 MiB per image. Its stored object is on writable scratch,
 // so check the stream before buffering it: a sandbox can replace it with a larger file.
@@ -72,7 +75,12 @@ export function withImageRefs(
         break;
       } catch (error) {
         if (error instanceof FileNotFound) return note("its file was deleted");
-        if (attempt >= READ_ATTEMPTS) throw error;
+        if (attempt >= READ_ATTEMPTS) {
+          console.error(
+            `image-refs: repair image-unreadable: reading ${key} for thread ${threadId} failed after ${READ_ATTEMPTS} attempts, noted for this load: ${String(error)}`,
+          );
+          return note("its file could not be read");
+        }
         console.error(
           `image-refs: reading ${key} for thread ${threadId} failed, retrying: ${String(error)}`,
         );
@@ -89,29 +97,27 @@ export function withImageRefs(
 
   return {
     async load(threadId) {
-      const rows = (await history.load(threadId)).map((text) => ({
-        text,
-        marker: parseMarker(text),
-        row:
-          text.includes('"imageRef"') || text.includes('"image"')
-            ? (JSON.parse(text) as Row)
-            : undefined,
-      }));
-      // `keptFrom` indexes the messages, the rows that are not compaction markers.
-      const keptFrom = rows.filter((r) => r.marker).at(-1)?.marker?.keptFrom ?? 0;
+      const rows = (await history.load(threadId)).map((text) => ({ text, kind: readRow(text) }));
+      // `keptFrom` indexes the messages: every row that is not a marker, unreadable ones too
+      // (`foldHistory` keeps a place for them).
+      const markers = rows.flatMap((r) => (r.kind.kind === "marker" ? [r.kind.marker] : []));
+      const keptFrom = markers.at(-1)?.keptFrom ?? 0;
       let at = 0;
       return Promise.all(
         rows.map(async (r) => {
-          const index = r.marker ? -1 : at++;
-          const blocks = r.row && blocksOf(r.row);
-          if (!r.row || !blocks || !has(r.row, "imageRef")) return r.text;
+          const isMarker =
+            r.kind.kind === "marker" || (r.kind.kind === "unreadable" && r.kind.marker);
+          const index = isMarker ? -1 : at++;
+          const row = r.kind.kind === "message" ? (r.kind.message as unknown as Row) : undefined;
+          const blocks = row && blocksOf(row);
+          if (!row || !blocks || !has(row, "imageRef")) return r.text;
           const content =
             index >= keptFrom
               ? await Promise.all(
                   blocks.map((b) => (b.type === "imageRef" ? fetchImage(threadId, b) : b)),
                 )
               : [...blocks.filter((b) => b.type !== "imageRef"), { type: "text", text: GONE_NOTE }];
-          return JSON.stringify({ ...r.row, content });
+          return JSON.stringify({ ...row, content });
         }),
       );
     },

@@ -51,6 +51,7 @@ import {
   compactor,
   foldHistory,
 } from "./compaction";
+import { interruptedResult } from "./history-repair";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -267,7 +268,10 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     try {
       const rows = await history.load(threadId);
       nextIdx = rows.length;
-      const { messages: stored, compaction } = foldHistory(rows);
+      const { messages: stored, compaction, unreadable } = foldHistory(rows);
+      for (const { idx, rule } of unreadable ?? []) {
+        console.warn(`history-repair: thread ${threadId}: ${rule} row ${idx}`);
+      }
       compacting.restore(compaction);
       // Every check that can refuse the thread runs before the thread's own events: a refused
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
@@ -665,12 +669,12 @@ function resumedTools(
 }
 
 /**
- * Error results for the tool calls of the last assistant message that have none: a
- * crash, or a failed write, leaves them there, and providers reject a call without a
- * result. They are appended after the history, never editing it. Pi repairs the same
- * gap when it builds a request, but only we can put the result in the stored history and
- * the stream record. Any other unanswered call cannot come from a crash or a failed write
- * (a failed write stops all writing), so the history is not trusted.
+ * Error results for the tool calls of the last assistant message that have none, when only
+ * results follow it: a crash, or a failed write, leaves them there, and providers reject a call
+ * without a result. They are appended after the history, never editing it. Pi repairs the same
+ * gap when it builds a request, but only we can put the result in the stored history and the
+ * stream record. Any other unanswered call (a bad row, a hand edit) is repaired in the request
+ * only (`history-repair.ts`) and stays as stored.
  * Errored and aborted assistant messages are skipped: Pi drops them from requests.
  */
 function interruptedToolResults(
@@ -680,40 +684,17 @@ function interruptedToolResults(
   const kept = messages.filter(
     (m) => !(m.role === "assistant" && (m.stopReason === "error" || m.stopReason === "aborted")),
   );
-  const answered = new Set(kept.flatMap((m) => (m.role === "toolResult" ? [m.toolCallId] : [])));
-  const unanswered = kept.flatMap((m, i) =>
-    m.role === "assistant"
-      ? m.content.flatMap((block) =>
-          block.type === "toolCall" && !answered.has(block.id) ? [{ block, at: i }] : [],
-        )
+  const lastAssistant = kept.map((m) => m.role).lastIndexOf("assistant");
+  const last = kept[lastAssistant];
+  if (last?.role !== "assistant") return [];
+  const tail = kept.slice(lastAssistant + 1);
+  if (!tail.every((m) => m.role === "toolResult")) return [];
+  const answered = new Set(tail.flatMap((m) => (m.role === "toolResult" ? [m.toolCallId] : [])));
+  return last.content.flatMap((block) =>
+    block.type === "toolCall" && !answered.has(block.id)
+      ? [interruptedResult(block, interrupted)]
       : [],
   );
-  const lastAssistant = kept.map((m) => m.role).lastIndexOf("assistant");
-  const tailIsResults = kept.slice(lastAssistant + 1).every((m) => m.role === "toolResult");
-  if (
-    unanswered.some(({ at }) => at !== lastAssistant) ||
-    (unanswered.length > 0 && !tailIsResults)
-  ) {
-    throw new ThreadFailure("the stored history has a tool call without a result in its middle");
-  }
-  return unanswered.map(({ block }) => {
-    const built = interrupted?.(block.name, block.id);
-    return {
-      role: "toolResult" as const,
-      toolCallId: block.id,
-      toolName: block.name,
-      content: [
-        {
-          type: "text" as const,
-          text:
-            built ??
-            "No result was recorded; the command may have run. Check its effects before running it again.",
-        },
-      ],
-      isError: built === undefined,
-      timestamp: Date.now(),
-    };
-  });
 }
 
 /** Pi continues a thread only from a user or tool-result message; otherwise it needs a new user message. */
