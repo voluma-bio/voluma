@@ -96,13 +96,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
   checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
-  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock (where taken), then the run's event lock
-  (`eventLock`), then row locks.** `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
-  each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` takes the
-  event and row locks before judging the run's state. A runner's append takes the event lock before it shares the run
-  row, so a transaction holding the row and then asking for the event lock deadlocks with it:
-  `recover`, `heartbeat`, `report`, `cancel` and `decideMessage` take the event lock first, through the one
-  `eventLock` in `pg-event-log.ts`; `decide` (review decisions) checks the run has ended before
+  queue lock for `sendMessage`. **Lock order: the queue lock (where taken), then `lockRun`
+  (`pg-event-log.ts`: event lock, then the run row; the only way the API takes a run row `FOR UPDATE`).** Exceptions: the gateway's `admitCall` (`packages/provider-calls/src/calls.ts`) locks the row alone and never takes the event lock after it; `FOR SHARE` reads (`assertLease`, `pg-snapshots.ts`) are separate. `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
+  each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` locks
+  the run before judging its state. `decide` (review decisions) checks the run has ended before
   taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
   to a queued or running run (409: one message, one claim) and reopens an ended `completed` one: it
   writes `run.reopened`, clears `lastClaimEnd`, `stalledClaims` and the lease. A run is in a
@@ -147,7 +144,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   id, and `reviewIntegrityIssues` (`fold-test-log.ts`) checks that in the fold tests.
 - It reads runs and writes human decisions only through `RunRecords` (`src/ports`), wired
   to Run's `pg-run-records.ts`. Reads use one repeatable-read snapshot. Decisions hold
-  the existing event-sequence lock **before** the run-row lock, then validate and append
+  the event lock **before** the run-row lock (both through `lockRun`), then validate and append
   atomically; preserve that order to avoid deadlocking runner appends. Review owns policy;
   Run owns authorization filters, sequence allocation and persistence. No domain imports
   the other. `review-state` overlays acceptance on `fold` without changing scientific state.

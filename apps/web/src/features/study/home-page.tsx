@@ -164,15 +164,15 @@ function needsYou(v: StudyView): React.ReactNode[] {
   const failures = runs.filter(failed);
   const keys = runs.filter((r) => r.state.status === "awaiting-keys");
   const parts: string[] = [];
-  if (study.toCheck > 0 && !one) {
-    // `toCheck` sums each scan's newest completed run, which `newestRuns` lacks for a scan
-    // rerunning; the scan count is exact only when the newest runs hold every open check.
-    const open = study.newestRuns.filter((r) => (r.review?.remainingToCheck ?? 0) > 0);
-    const shown = open.reduce((n, r) => n + (r.review?.remainingToCheck ?? 0), 0);
+  if (study.needsYou > 0 && !one) {
+    // `needsYou` sums each scan's newest completed run, which `newestRuns` lacks for a scan
+    // rerunning; the scan count is exact only when the newest runs hold every item.
+    const open = study.newestRuns.filter((r) => (r.review?.needsYou ?? 0) > 0);
+    const shown = open.reduce((n, r) => n + (r.review?.needsYou ?? 0), 0);
     parts.push(
-      shown === study.toCheck
-        ? `${study.toCheck} to check across ${plural(open.length, "scan")}.`
-        : `${study.toCheck} to check.`,
+      shown === study.needsYou
+        ? `${study.needsYou} to check across ${plural(open.length, "scan")}.`
+        : `${study.needsYou} to check.`,
     );
   }
   if (failures.length > 0)
@@ -187,10 +187,10 @@ function needsYou(v: StudyView): React.ReactNode[] {
         ? "Paused until you add your API key."
         : `${plural(keys.length, "scan")} paused until you add your API key.`,
     );
-  if (parts.length === 0 && study.toCheck === 0) return [];
+  if (parts.length === 0 && study.needsYou === 0) return [];
   const cell =
-    study.toCheck > 0 ? (
-      <StatusMark status="check" label={`${study.toCheck} to check`} />
+    study.needsYou > 0 ? (
+      <StatusMark status="check" label={`${study.needsYou} to check`} />
     ) : failures[0] ? (
       <StatusMark {...runStatus(failures[0])} />
     ) : (
@@ -290,7 +290,7 @@ function StudyTable({ views }: { views: StudyView[] }) {
               const chip = studyStatus({
                 scans: v.study.scanCount,
                 newest: v.study.newestRuns,
-                toCheck: v.study.toCheck,
+                needsYou: v.study.needsYou,
               });
               return <StatusMark {...chip} />;
             },

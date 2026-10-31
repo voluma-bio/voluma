@@ -5,7 +5,7 @@
  * headline measurements by group.
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
-import { formatUsd, plural, scanLabel, scanStatus, TaskGraph } from "@voluma/run-view";
+import { formatUsd, needsYouOf, plural, scanLabel, scanStatus, TaskGraph } from "@voluma/run-view";
 import { Box, Button, Count, EmptyState, List, PageHead, RowLink, StatusMark } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Box as Cube, Maximize2 } from "lucide-react";
@@ -18,7 +18,6 @@ import { ScanMatrix } from "./scan-matrix";
 import { useStudy } from "./study-layout";
 import {
   byMostToCheck,
-  checkTitles,
   farFromGroup,
   reviewHref,
   scanHref,
@@ -26,6 +25,7 @@ import {
   studyGraph,
   studySpend,
   taskState,
+  waitsOn,
 } from "./study-model";
 
 export function Dashboard() {
@@ -150,8 +150,8 @@ function Summary({
   base: string;
 }) {
   const finished = detail.scans.filter((s) => s.resultRunId !== null).length;
-  const items = detail.scans.reduce((n, s) => n + s.toCheck.length, 0);
-  const withItems = detail.scans.filter((s) => s.toCheck.length > 0).length;
+  const items = detail.scans.reduce((n, s) => n + needsYouOf(s), 0);
+  const withItems = detail.scans.filter((s) => needsYouOf(s) > 0).length;
   const outcomes = detail.scans.map(({ runs: [run] }) =>
     run?.state.status === "ended" ? run.state.outcome : undefined,
   );
@@ -238,16 +238,16 @@ function NeedsYou({
 }) {
   const far = new Set(workflow.headline.flatMap((o) => [...farFromGroup(detail, o).keys()]));
   const rows: { scan: StudyScanDetail; subtitle: string; cell: ReactNode }[] = [];
-  for (const scan of [...detail.scans].sort((a, b) => b.toCheck.length - a.toCheck.length)) {
+  for (const scan of [...detail.scans].sort((a, b) => needsYouOf(b) - needsYouOf(a))) {
     const run = scan.runs[0];
-    if (scan.toCheck.length > 0)
+    if (needsYouOf(scan) > 0)
       rows.push({
         scan,
-        subtitle: checkTitles(scan.toCheck),
+        subtitle: waitsOn(scan, workflow) || (stoppedLine(scan, workflow) ?? ""),
         cell: (
           <span className="flex items-center gap-2">
             {far.has(scan.scan.inputId) && <span className="text-xs text-check">far</span>}
-            <StatusMark status="check" label={`${scan.toCheck.length} to check`} />
+            <StatusMark status="check" label={`${needsYouOf(scan)} to check`} />
           </span>
         ),
       });
