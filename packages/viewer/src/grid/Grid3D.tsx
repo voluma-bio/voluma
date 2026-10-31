@@ -168,6 +168,8 @@ export function Grid3D({
     let frame = 0;
     const draw = () => {
       frame = 0;
+      // A hidden pane draws nothing; showing it resizes it, which draws.
+      if (!element.clientWidth) return;
       renderer.setRenderTarget(target);
       renderer.render(s, camera);
       renderer.setRenderTarget(null);
