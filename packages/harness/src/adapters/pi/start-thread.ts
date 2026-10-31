@@ -22,13 +22,14 @@ import {
 import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
+import { isContextOverflowError } from "../../context-overflow";
 import { replyFrames } from "../../live";
 import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
 import { SandboxUnavailableError, type Tool, type ToolResult } from "../../tools/tool";
-import { elideOldImages } from "./elide-images";
+import { type Compactor, compactor, foldHistory } from "./compaction";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -111,6 +112,25 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     return 1;
   };
 
+  // `compacting` is built before the agent but needs `persistRow`, declared below with the history cursor.
+  const compacting: Compactor = compactor({
+    threadId,
+    model: options.model,
+    thinkingLevel: options.thinkingLevel,
+    streamFn: options.streamFn,
+    store: (row) => persistRow(row),
+    // The summary was a model call: its usage is spend (`spend.ts` counts assistant `message`s).
+    onSummary: (reply, summary) => {
+      const used = usageOf(reply);
+      emit("message", {
+        role: "assistant",
+        text: summary,
+        compaction: true,
+        ...(used && { usage: used }),
+      });
+    },
+  });
+
   const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
@@ -120,7 +140,8 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       messages: [],
     },
     streamFn: options.streamFn,
-    transformContext: async (messages) => elideOldImages(messages),
+    // The one place a request's messages differ from the thread's: after a compaction.
+    transformContext: async (messages, signal) => compacting.prepare(messages, signal),
     sessionId: threadId,
   });
   // Pi made the system message the current prompt and tools call for.
@@ -131,10 +152,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   // emitted (the stream record follows the history), and the agent stops.
   let nextIdx = 0;
   let historyError: unknown;
-  const persist = async (message: AgentMessage): Promise<boolean> => {
+  const persist = (message: AgentMessage) => persistRow(JSON.stringify(message));
+  const persistRow = async (row: string): Promise<boolean> => {
     if (historyError || cutOff()) return false;
     try {
-      await history.appendMessage(threadId, nextIdx, JSON.stringify(message));
+      await history.appendMessage(threadId, nextIdx, row);
       nextIdx++;
       return true;
     } catch (error) {
@@ -189,8 +211,10 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     const abort = () => agent.abort();
     signal?.addEventListener("abort", abort);
     try {
-      const stored = (await history.load(threadId)).map((row) => JSON.parse(row) as AgentMessage);
-      nextIdx = stored.length;
+      const rows = await history.load(threadId);
+      nextIdx = rows.length;
+      const { messages: stored, compaction } = foldHistory(rows);
+      compacting.restore(compaction);
       // Every check that can refuse the thread runs before the thread's own events: a refused
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
       // from here; the run loop then stops it.
@@ -306,6 +330,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             }
             break;
           }
+          case "turn_end": {
+            // Tools ran, so another turn follows: the thread can still use the notice.
+            if (historyError || cutOff() || event.toolResults.length === 0) break;
+            const notice = compacting.wrapUp(agent.state.messages);
+            if (notice) agent.steer(userMessage(notice, NOTICE));
+            break;
+          }
           case "tool_execution_start":
             // The call is in History (its assistant message was stored first) unless a write failed.
             if (historyError || cutOff()) break;
@@ -325,8 +356,18 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         for (const { text, sender } of early.splice(0)) agent.steer(userMessage(text, sender));
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
-        // A message steered in as the loop was ending is still queued.
-        while (!historyError && !signal?.aborted && agent.hasQueuedMessages()) {
+        // A message steered in as the loop was ending is still queued. A request the provider
+        // refused as too large is retried once, after a compaction; the note that starts the retry
+        // is stored only once the summary was.
+        while (!historyError && !signal?.aborted) {
+          if (overflowRetryable(agent.state.messages)) {
+            const recovered = await compacting.recover(agent.state.messages, signal).catch((e) => {
+              // The summary's own provider failure ends the thread as that failure, which the run retries.
+              throw new ThreadFailure(e instanceof Error ? e.message : String(e));
+            });
+            if (!recovered) break;
+            agent.steer(userMessage(OVERFLOW_NOTE, NOTICE));
+          } else if (!agent.hasQueuedMessages()) break;
           await agent.continue();
         }
       }
@@ -372,6 +413,21 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     },
     done: run(),
   };
+}
+
+/** The sender of compaction notices: the runtime, but not a nudge. */
+const NOTICE: UserSender = { kind: "runtime", notice: true };
+
+const OVERFLOW_NOTE =
+  "The last request was too large for the model, so your history was summarized. Continue the task.";
+
+/** Whether the thread ended on a too-large request whose predecessor, if it was one, was not also refused. */
+function overflowRetryable(messages: AgentMessage[]): boolean {
+  const replies = messages.filter((m) => m.role === "assistant");
+  const [last, before] = [replies.at(-1), replies.at(-2)];
+  const refused = (m: AgentMessage | undefined) =>
+    m?.role === "assistant" && m.stopReason === "error" && isContextOverflowError(m.errorMessage);
+  return messages.at(-1) === last && refused(last) && !refused(before);
 }
 
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
