@@ -74,7 +74,7 @@ import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
 /** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
-type Lineage = { parentThreadId: string; attemptId?: string };
+type Lineage = { name: string; parentThreadId: string; attemptId?: string };
 
 /** What a host decides about a role's threads; the loop adds identity and the tools. */
 export interface RoleSetup {
@@ -219,6 +219,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const role = o.roles[r.role](thread, d.threads.get(r.id)?.model);
     const common = {
       threadId: r.id,
+      name: r.name,
       systemPrompt: role.systemPrompt,
       model: role.model,
       thinkingLevel: role.thinkingLevel,
@@ -268,18 +269,13 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * reused. The loop steps again when the thread settles and
    * its end is stored. Call inside `section`: a stop cannot come between the append and the start.
    */
-  async function begin(
-    thread: Pick<ThreadIdentity, "id" | "name">,
-    spec: ThreadSpec & Lineage,
-    startedEventId: string,
-    spawnedBy?: string,
-  ) {
-    const { parentThreadId, attemptId, ...start } = spec;
+  async function begin(spec: ThreadSpec & Lineage, startedEventId: string, spawnedBy?: string) {
+    const { name, parentThreadId, attemptId, ...start } = spec;
     await recorder.append(
-      thread.id,
+      spec.threadId,
       "thread.started",
       {
-        name: thread.name,
+        name,
         parentThreadId,
         kind: spec.kind,
         ...(spec.taskId && { task: spec.taskId }),
@@ -300,7 +296,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   /** Resumes a thread that is not running, from its History, with a message. Never a stopped one. */
   async function resume(r: ThreadRecord, text: string, sender: UserSender) {
     if (stateOf(r) === "stopped") throw new Error(`${r.id} was stopped and is never resumed`);
-    await begin(r, { ...specFor(r), input: { text, sender } }, `${r.id}:started:${r.starts + 1}`);
+    await begin({ ...specFor(r), input: { text, sender } }, `${r.id}:started:${r.starts + 1}`);
   }
 
   /**
@@ -324,12 +320,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
 
   const startMain = (d: ThreadLog) => {
     const thread = nextThread(d, { role: "main" });
-    return begin(thread, specFor(thread), `${thread.id}:started`);
+    return begin(specFor(thread), `${thread.id}:started`);
   };
 
   const startCheck = (d: ThreadLog, taskId: string) => {
     const thread = nextThread(d, { role: "check", taskId });
-    return begin(thread, specFor(thread), `${thread.id}:started`);
+    return begin(specFor(thread), `${thread.id}:started`);
   };
 
   const agents: Agents = {
@@ -340,7 +336,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const spec = specFor(thread);
       const task = planTask(runtime.view(), taskId);
       await begin(
-        thread,
         { ...spec, parentThreadId: main, prompt: o.briefs.worker(task, brief) },
         startedEventId,
         spawnedBy,

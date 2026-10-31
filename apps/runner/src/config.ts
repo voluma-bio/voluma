@@ -6,6 +6,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { isIPv4 } from "node:net";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
@@ -198,9 +199,14 @@ export function runnerConfig() {
     : optional("GATEWAY_TOKEN_SECRET");
   if (!gatewayUrl !== !gatewaySecret)
     throw new Error("set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET together, or neither");
+  // A launcher's quick tunnel is not the deployed gateway; never pin it to an inherited IP.
+  const gatewayIpv4 = local ? undefined : optional("VOLUMA_GATEWAY_IPV4");
+  if (gatewayIpv4 !== undefined && (!gatewayUrl || !isIPv4(gatewayIpv4))) {
+    throw new Error("VOLUMA_GATEWAY_IPV4 needs a gateway URL and one IPv4 address (no CIDR)");
+  }
   const gateway =
     gatewayUrl && gatewaySecret
-      ? { url: gatewayUrl, secrets: parseTokenSecrets(gatewaySecret) }
+      ? { url: gatewayUrl, ipv4: gatewayIpv4, secrets: parseTokenSecrets(gatewaySecret) }
       : undefined;
   const r2 = {
     accountId: required("R2_ACCOUNT_ID"),
@@ -223,9 +229,9 @@ export function runnerConfig() {
     models,
     /**
      * The thinking level of every thread of a `voluma` run (`RUNNER_THINKING`), set as each Pi
-     * agent's `thinkingLevel`; main.ts refuses a level an alias's model does
-     * not support, since Pi would quietly use another. Unset: "off", Pi's default, which sends no
-     * level (DeepSeek: thinking disabled; other providers: their default). Visitor runs: "off".
+     * agent's `thinkingLevel`; main.ts refuses a non-off level an alias's model does
+     * not support, since Pi would quietly use another. Unset or "off": no requested effort
+     * (DeepSeek: thinking disabled; Muse: provider default). Visitor runs: "off".
      */
     thinking: thinkingLevel(),
     /**

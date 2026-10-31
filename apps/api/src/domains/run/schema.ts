@@ -74,7 +74,7 @@ export const events = pgTable(
 
 /**
  * `run_id` is null only on rows an older API wrote; the trigger `pi_messages_fill_run_id` (in
- * migration 0014, not declared here) fills it from the thread id's `<runId>.` prefix. The code reads
+ * migration 0015, not declared here) fills it from the thread id's `<runId>.` prefix. The code reads
  * and writes by `(run_id, thread_id, idx)`; `(thread_id, idx)` stays the primary key until the
  * contract step (`NOT NULL`, the primary key moved to the run-keyed index).
  */
