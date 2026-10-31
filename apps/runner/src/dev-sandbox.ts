@@ -132,6 +132,7 @@ try {
     id: `${run.id}.dev.worker`,
     name: "dev.worker",
     role: "worker",
+    agent: "worker",
     taskId: "dev",
   } as const;
   const thread = runLayout({
@@ -139,7 +140,8 @@ try {
     inputPrefix: inputPrefixOf(run),
     skills: [], // no workflow is loaded here, so no PYTHONPATH
     copiesInputs: () => true,
-    grants: { main: [], worker: ["segment_sam"], check: [] },
+    agents: { worker: { sandbox: "full", outputs: "write", subagents: [] } },
+    grants: { worker: ["segment_sam"] },
   }).forThread(devThread);
   meter.sandboxUp();
   counted = true;

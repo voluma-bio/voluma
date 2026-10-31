@@ -343,11 +343,13 @@ try {
         runId: "probe",
         inputPrefix: "inputs/",
         skills: [],
-        grants: { main: [], worker: [], check: [] },
+        agents: { worker: { sandbox: "full", outputs: "write", subagents: [] } },
+        grants: { worker: [] },
       }).forThread({
         id: "probe.intake.worker",
         name: "intake.worker",
         role: "worker",
+        agent: "worker",
         taskId: "intake",
       });
       await measure("bash-256MiB-64KiB-chunks", async () => {

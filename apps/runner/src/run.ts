@@ -48,6 +48,7 @@ import {
 } from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
 import type { ObjectStore } from "@voluma/object-store";
+import type { AgentDefinition } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -228,7 +229,7 @@ async function claimBody(
     // models only: the main thread keeps its configured model when that is one, else the
     // visitor model.
     const roleModel = (role: ModelRole) => {
-      const alias = definition.agents[role].model;
+      const alias = (definition.agents[role] as AgentDefinition).model;
       const model = ctx.aliases[alias];
       if (!model) throw new Error(roleModelUnset(role, alias));
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
@@ -238,20 +239,17 @@ async function claimBody(
       if (visitor) return "off";
       const level = config.modelForced
         ? config.thinking
-        : (definition.agents[role].thinking ?? config.thinking);
+        : ((definition.agents[role] as AgentDefinition).thinking ?? config.thinking);
       assertThinking(level, [model], `the ${role} role's`);
       return level ?? "off";
     };
-    const workerModel = roleModel("worker");
-    const checkModel = roleModel("check");
-    const mainModel = roleModel("main");
-    const thinking = {
-      worker: roleThinking("worker", workerModel),
-      check: roleThinking("check", checkModel),
-      main: roleThinking("main", mainModel),
-    };
-    log(`models: worker ${workerModel.id}, check ${checkModel.id}, main ${mainModel.id}`);
-    log(`thinking: worker ${thinking.worker}, check ${thinking.check}, main ${thinking.main}`);
+    const roles = Object.keys(definition.agents);
+    const primary = Object.fromEntries(roles.map((r) => [r, roleModel(r)]));
+    const thinking: Record<string, ReturnType<typeof roleThinking>> = Object.fromEntries(
+      roles.map((r) => [r, roleThinking(r, primary[r] as Model<Api>)]),
+    );
+    log(`models: ${roles.map((r) => `${r} ${primary[r]?.id}`).join(", ")}`);
+    log(`thinking: ${roles.map((r) => `${r} ${thinking[r]}`).join(", ")}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
@@ -331,7 +329,7 @@ async function claimBody(
         const [provider = "", ...id] = recorded.split("/");
         const allowed = visitor
           ? isVisitorSafe({ provider, id: id.join("/") })
-          : [workerModel, checkModel, mainModel].some((m) => `${m.provider}/${m.id}` === recorded);
+          : Object.values(primary).some((m) => `${m.provider}/${m.id}` === recorded);
         return (allowed && models.getModel(provider, id.join("/"))) || primary;
       }
       return primary;
@@ -367,7 +365,6 @@ async function claimBody(
         );
         return stream;
       };
-    const primary = { main: mainModel, worker: workerModel, check: checkModel };
     supervised = superviseRun({
       runId,
       definition,
@@ -384,8 +381,8 @@ async function claimBody(
       files: storeFiles(objects),
       outputs: r2Outputs(config.r2),
       model: (role, recorded) => ({
-        model: threadModel(primary[role], recorded),
-        thinkingLevel: thinking[role],
+        model: threadModel(primary[role] as Model<Api>, recorded),
+        thinkingLevel: thinking[role] ?? "off",
         streamFn: streamFor(role),
       }),
       createSandbox,

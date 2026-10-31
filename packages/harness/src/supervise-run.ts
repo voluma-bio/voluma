@@ -100,16 +100,16 @@ export interface Supervised {
 
 /**
  * The tools each role holds: its file's list, less `segment_sam` where it cannot be used. That
- * needs the gateway and a sandbox that runs analysis: a worker's, or the main agent's when it
- * holds `bash`. The checker never holds it (it does not redo the task).
+ * needs the gateway and a sandbox that produces results: one with `/outputs` writable. A role
+ * that only inspects (its `/outputs` is read-only) never holds it: it does not redo the task.
  */
 function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<AgentRole, readonly string[]> {
-  const grant = (role: AgentRole) => {
-    const { tools } = def.agents[role];
-    const analyses = role === "worker" || (role === "main" && tools.includes("bash"));
-    return tools.filter((t) => t !== "segment_sam" || (gateway && analyses));
-  };
-  return { main: grant("main"), worker: grant("worker"), check: grant("check") };
+  return Object.fromEntries(
+    Object.values(def.agents).map(({ name, tools, sandbox, outputs }) => {
+      const analyses = sandbox !== "none" && outputs === "write";
+      return [name, tools.filter((t) => t !== "segment_sam" || (gateway && analyses))];
+    }),
+  );
 }
 
 const ROOT_NAME = "supervisor";
@@ -126,6 +126,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     runId,
     inputPrefix: options.inputPrefix,
     skills: definition.skills,
+    agents: definition.agents,
     grants,
     // From the workflow's task, so a task the main agent adds from it keeps the flag.
     copiesInputs: (id) => copyInputs.has(id),
@@ -245,6 +246,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
             recorder,
             runtime,
             agents,
+            subagents: definition.agents[thread.agent]?.subagents ?? [],
             workflow: definition.files,
           },
         }),

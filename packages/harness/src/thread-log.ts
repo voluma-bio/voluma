@@ -22,6 +22,7 @@ import {
 import type { Mark } from "@voluma/contracts/messages";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
+import { threadRole } from "@voluma/contracts/thread-role";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
 import { callKey, effectId } from "./tools/effects";
@@ -50,13 +51,15 @@ export type TaskThread = ThreadFields & { role: Role; taskId: string };
 export type ThreadRecord = TaskThread | (ThreadFields & { role: "main"; taskId?: undefined });
 
 /** Who a thread is: what its layout and start need, whether it is a logged record or a thread about to start. */
-export type ThreadIdentity = { id: string; name: string } & (
+export type ThreadIdentity = { id: string; agent: string; name: string } & (
   | { role: "main"; taskId?: undefined }
   | { role: Role; taskId: string }
 );
 
 interface ThreadFields {
   id: string;
+  /** The role file the thread runs on (`thread.started`'s `kind`): the facts that decide its sandbox, tools and checker. */
+  agent: string;
   /** The id without the run id (`main.2`, `segmentation.worker`): its sandbox's name and its folder under `/scratch`. */
   name: string;
   /** How its latest invocation ended; undefined while the log shows it started and not ended. */
@@ -142,14 +145,15 @@ type NoticeBody = Notice extends infer N ? (N extends unknown ? Omit<N, "at"> : 
 
 /** A call of the main agent that a rebuilt result reads back (`calls`). */
 export type MainCall =
-  | { name: "start_worker"; brief: string }
+  | { name: "start_worker" | "start_agent"; brief: string }
   | { name: "message"; threadId: string; text: string };
 
 /** The stored input of a main-agent call; undefined for other tools or an input of another shape. */
 function mainCall(name: string, input: unknown): MainCall | undefined {
   if (typeof input !== "object" || input === null) return undefined;
   const i = input as Record<string, unknown>;
-  if (name === "start_worker" && typeof i.brief === "string") return { name, brief: i.brief };
+  if ((name === "start_worker" || name === "start_agent") && typeof i.brief === "string")
+    return { name, brief: i.brief };
   if (name === "message" && typeof i.threadId === "string" && typeof i.text === "string") {
     return { name, threadId: i.threadId, text: i.text };
   }
@@ -213,7 +217,7 @@ function briefOf(started: PayloadOf<"thread.started">, calls: ThreadLog["calls"]
     started.spawnedBy && started.parentThreadId
       ? calls.get(callKey(started.parentThreadId, started.spawnedBy))
       : undefined;
-  return call?.name === "start_worker" ? call.brief : "";
+  return call?.name === "start_worker" || call?.name === "start_agent" ? call.brief : "";
 }
 
 /** The state of a thread; undefined for an id the log has not seen start. */
@@ -361,13 +365,15 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           value.root = { id: e.threadId, ended: value.root.ended, endedThisClaim: false };
           break;
         }
-        const known =
-          kind === "main" ? kind : (kind === "worker" || kind === "check") && task && kind;
-        if (!known) break;
+        // What the thread is (its place in the run) comes from the fields of its start; `kind`
+        // is the role file it runs on (`agent`), which says what it holds and may do.
+        const known = threadRole(e.payload);
+        if (known === "root") break;
         // A cut-off start that was given an input is resumed with that input, not a cut-off line.
         if (record && !record.end && !record.inputPending) resumedCutOff.add(e.threadId);
         const fields: ThreadFields = {
           id: e.threadId,
+          agent: kind,
           name: threadNameOf(e),
           end: undefined,
           nudges: record?.nudges ?? 0,

@@ -249,12 +249,16 @@ export function world(o: WorldOptions) {
   workerP.setResponses(Array(400).fill(factory(o.worker ?? worker, "worker")));
   checkP.setResponses(Array(400).fill(factory(o.check ?? checker(), "check")));
 
-  const agent = (name: string, tools: string[]): AgentDefinition => ({
+  const agent = (
+    name: string,
+    tools: string[],
+    facts: Pick<AgentDefinition, "sandbox" | "outputs" | "checkedBy" | "subagents">,
+  ): AgentDefinition => ({
     name,
     description: "",
     model: "faux",
     tools,
-    subagents: [],
+    ...facts,
     skills: [],
     body: `The ${name} of a scripted run.`,
   });
@@ -265,20 +269,33 @@ export function world(o: WorldOptions) {
     skills: [],
     toolIndex: [],
     agents: {
-      main: agent("main", [
-        "start_worker",
-        "message",
-        "wait",
-        "stop_worker",
-        "answer",
-        "accept",
-        "change_plan",
-        "reply",
-        "finish_run",
-        ...(o.mainTools ?? []),
-      ]),
-      worker: agent("worker", ["report_output", "submit_task", ...(o.workerTools ?? [])]),
-      check: agent("check", ["checkpoint", "ask"]),
+      main: agent(
+        "main",
+        [
+          "start_worker",
+          "message",
+          "wait",
+          "stop_worker",
+          "answer",
+          "accept",
+          "change_plan",
+          "reply",
+          "finish_run",
+          ...(o.mainTools ?? []),
+        ],
+        { sandbox: "none", outputs: "read", checkedBy: "check", subagents: ["worker"] },
+      ),
+      worker: agent("worker", ["report_output", "submit_task", ...(o.workerTools ?? [])], {
+        sandbox: "full",
+        outputs: "write",
+        checkedBy: "check",
+        subagents: [],
+      }),
+      check: agent("check", ["checkpoint", "ask"], {
+        sandbox: "confined",
+        outputs: "read",
+        subagents: [],
+      }),
     },
   };
   const modelOf = { main: mainP, worker: workerP, check: checkP };
@@ -381,7 +398,7 @@ export function world(o: WorldOptions) {
         discard: async () => {},
       },
       model: (role) => ({
-        model: modelOf[role].getModel(),
+        model: modelOf[role as keyof typeof modelOf].getModel(),
         thinkingLevel: "off" as const,
         streamFn: models.streamSimple.bind(models) as never,
       }),

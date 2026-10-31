@@ -15,16 +15,15 @@ import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/defin
 import type { ThreadLayout } from "./layout";
 import type { PlanTask } from "./task-runtime";
 
-function common(role: "worker" | "check", thread: ThreadLayout): string {
+function common(thread: ThreadLayout): string {
   const dir = thread.dir;
-  const files =
-    role === "worker"
-      ? `/outputs/<task id>/ holds each task's result files, and ${dir}/ is your own folder for intermediate files (the other threads' folders are beside it under /scratch); both are kept if the sandbox restarts. /outputs and /scratch are network-backed mounts`
-      : `/outputs/<task id>/ holds the worker's result files (read-only), and ${dir}/ is your own folder for intermediate files, kept if the sandbox restarts; the rest of /scratch is not available to your shell, and view_image opens only the scratch files the worker cited as evidence. ${dir} is a network-backed mount`;
+  const files = !thread.reviewer
+    ? `/outputs/<task id>/ holds each task's result files, and ${dir}/ is your own folder for intermediate files (the other threads' folders are beside it under /scratch); both are kept if the sandbox restarts. /outputs and /scratch are network-backed mounts`
+    : `/outputs/<task id>/ holds the worker's result files (read-only), and ${dir}/ is your own folder for intermediate files, kept if the sandbox restarts; the rest of /scratch is not available to your shell, and view_image opens only the scratch files the worker cited as evidence. ${dir} is a network-backed mount`;
   return `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel, SimpleITK, matplotlib and pyvista (offscreen) is installed. There is no network.
 /inputs holds the scan (${thread.copiesInputs ? "a local copy" : "read-only, read from the bucket, not copied"}), ${files}: write each file whole, once. They do not support rename within them (\`sed -i\`, editors), append (\`>>\`), in-place edits or memory-mapped writes (\`np.lib.format.open_memmap\` in write mode, \`np.memmap\`). Build a file under /tmp (local disk, lost on restart), then \`cp\` it in.
 Commands start in $SCRATCH (${dir}): write your working files under $SCRATCH, and cite one as {root: "scratch", path: <path inside $SCRATCH>}.
-Check what you report against the files themselves, and say which file or header each number came from. Record your work with the task tools. Name a file in an output or checkpoint as {root: "scratch", path: <path inside $SCRATCH>} for your working folder, or {root: "outputs", path: <path inside /outputs/<task id>/>} for a task's result file${role === "check" ? " you inspected" : ""}.`;
+Check what you report against the files themselves, and say which file or header each number came from. Record your work with the task tools. Name a file in an output or checkpoint as {root: "scratch", path: <path inside $SCRATCH>} for your working folder, or {root: "outputs", path: <path inside /outputs/<task id>/>} for a task's result file${thread.reviewer ? " you inspected" : ""}.`;
 }
 
 /**
@@ -55,12 +54,12 @@ function toolIndex(def: WorkflowDefinition, role: AgentDefinition, shell: boolea
 
 /** The role file's body, then the generated environment text, skill list and tool index. */
 export function systemPrompt(def: WorkflowDefinition, thread: ThreadLayout): string {
-  const role = def.agents[thread.role];
-  // The main agent has a shell only if its file grants bash, and then works as a worker does.
-  const shell = thread.role !== "main" || role.tools.includes("bash");
+  const role = def.agents[thread.agent];
+  if (!role) throw new Error(`${thread.name} runs on ${thread.agent}, which is not a role file`);
+  const shell = role.sandbox !== "none";
   const skills = `${skillList(def, role, shell)}\n\n${toolIndex(def, role, shell)}`;
   if (!shell) return `${role.body}\n\n${skills}`;
-  return `${role.body}\n\n${common(thread.role === "check" ? "check" : "worker", thread)}\n\n${skills}`;
+  return `${role.body}\n\n${common(thread)}\n\n${skills}`;
 }
 
 function taskBrief(task: PlanTask): string {

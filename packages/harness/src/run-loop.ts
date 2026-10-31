@@ -78,7 +78,7 @@ import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
 /** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
-type Lineage = { name: string; parentThreadId: string; attemptId?: string };
+type Lineage = { name: string; agent: string; parentThreadId: string; attemptId?: string };
 
 /** What the host decides about a thread's model; the loop adds the prompts, identity and tools. */
 export interface ModelSetup {
@@ -88,8 +88,8 @@ export interface ModelSetup {
   streamFn: StreamFn;
 }
 
-/** A role of the workflow: the keys of `WorkflowDefinition.agents`. */
-export type AgentRole = ThreadLayout["role"];
+/** A role file of the workflow: the keys of `WorkflowDefinition.agents`. */
+export type AgentRole = string;
 
 export interface LoopConfig {
   /** `needs-review` rounds a task gets before it is left to-check. */
@@ -97,6 +97,9 @@ export interface LoopConfig {
   /** Deliveries with no notice in a row before code ends the run. */
   stuckLimit: number;
 }
+
+/** The role file the run's first thread runs on; the loader requires it. */
+const MAIN_AGENT = "main";
 
 export const LOOP_DEFAULTS: LoopConfig = {
   maxFixRounds: 2,
@@ -208,15 +211,16 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const view = runtime.view();
     const taskId = r.taskId;
     const thread = o.layout.forThread(r, taskId ? (p) => runtime.cites(taskId, p) : undefined);
-    const setup = o.model(r.role, d.threads.get(r.id)?.model);
+    const setup = o.model(r.agent, d.threads.get(r.id)?.model);
     const common = {
       threadId: r.id,
       name: r.name,
+      agent: r.agent,
       systemPrompt: systemPrompt(o.definition, thread),
       model: setup.model,
       thinkingLevel: setup.thinkingLevel,
       streamFn: setup.streamFn,
-      tools: o.tools(thread, o.grants[r.role], agents),
+      tools: o.tools(thread, o.grants[r.agent] ?? [], agents),
       interrupted: (tool: string, toolCallId: string) =>
         interruptedResult(derive(), r.id, tool, toolCallId),
     };
@@ -262,14 +266,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * its end is stored. Call inside `section`: a stop cannot come between the append and the start.
    */
   async function begin(spec: ThreadSpec & Lineage, startedEventId: string, spawnedBy?: string) {
-    const { name, parentThreadId, attemptId, ...start } = spec;
+    const { name, agent, parentThreadId, attemptId, ...start } = spec;
     await recorder.append(
       spec.threadId,
       "thread.started",
       {
         name,
         parentThreadId,
-        kind: spec.kind,
+        kind: agent,
         ...(spec.taskId && { task: spec.taskId }),
         ...(attemptId && { attemptId }),
         ...(spawnedBy && { spawnedBy }),
@@ -298,6 +302,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   function nextThread(
     d: ThreadLog,
     of: { role: "main" } | { role: Role; taskId: string },
+    agent: string,
   ): ThreadIdentity {
     const base = of.role === "main" ? "main" : `${of.taskId}.${of.role}`;
     let n =
@@ -307,24 +312,33 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const nameOf = (n: number) => (n === 1 ? base : `${base}.${n}`);
     while (threads.stale(`${runId}.${nameOf(n)}`)) n++;
     const named = { id: `${runId}.${nameOf(n)}`, name: nameOf(n) };
-    return { ...named, ...of };
+    return { ...named, agent, ...of };
   }
 
   const startMain = (d: ThreadLog) => {
-    const thread = nextThread(d, { role: "main" });
+    const thread = nextThread(d, { role: "main" }, MAIN_AGENT);
     return begin(specFor(thread), `${thread.id}:started`);
   };
 
+  /** The role that checks what the task's latest worker submitted: its role file's `checkedBy`. */
+  const checkerOf = (taskId: string) => {
+    const worker = runtime.taskOf(taskId)?.threads.worker;
+    const agent = worker && derive().threads.get(worker)?.agent;
+    const checker = agent && o.definition.agents[agent]?.checkedBy;
+    if (!checker) throw new Error(`${taskId} has no role to check it`);
+    return checker;
+  };
+
   const startCheck = (d: ThreadLog, taskId: string) => {
-    const thread = nextThread(d, { role: "check", taskId });
+    const thread = nextThread(d, { role: "check", taskId }, checkerOf(taskId));
     return begin(specFor(thread), `${thread.id}:started`);
   };
 
   const agents: Agents = {
     state: (d, id) => threadState(d.threads.get(id), threads.running(id)),
     fixLimitReached: (d, taskId) => fixLimitReached(d, taskId, config.maxFixRounds),
-    startWorker: async ({ taskId, brief, mainThreadId: main, spawnedBy, startedEventId }) => {
-      const thread = nextThread(derive(), { role: "worker", taskId });
+    startAgent: async ({ agent, taskId, brief, mainThreadId: main, spawnedBy, startedEventId }) => {
+      const thread = nextThread(derive(), { role: "worker", taskId }, agent);
       const spec = specFor(thread);
       const task = planTask(runtime.view(), taskId);
       await begin(

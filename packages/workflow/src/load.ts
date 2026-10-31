@@ -64,6 +64,9 @@ const agentSchema = z.strictObject({
   model: z.string().min(1),
   thinking: z.enum(THINKING_LEVELS).optional(),
   tools: z.array(z.string().min(1)),
+  sandbox: z.enum(["none", "confined", "full"]).optional(),
+  outputs: z.enum(["read", "write"]).optional(),
+  checkedBy: z.string().min(1).optional(),
   subagents: z.array(z.string().min(1)).default([]),
   skills: z.array(z.string().min(1)).optional(),
 });
@@ -95,6 +98,23 @@ function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
 
 const frontmatter = (file: string, text: string) => parseFile(file, text, frontmatterSchema).data;
 
+/**
+ * What the three role files said before they declared `sandbox`, `outputs` and `checkedBy`: a run's
+ * snapshot from then has no such keys and must build the same sandboxes. Delete with the last such
+ * snapshot (no live run started before this change).
+ */
+const BEFORE_FRONTMATTER: Record<
+  string,
+  (tools: string[]) => Pick<AgentDefinition, "sandbox" | "outputs" | "checkedBy">
+> = {
+  main: (tools) =>
+    tools.includes("bash")
+      ? { sandbox: "confined", outputs: "write" }
+      : { sandbox: "none", outputs: "read" },
+  worker: () => ({ sandbox: "full", outputs: "write", checkedBy: "check" }),
+  check: () => ({ sandbox: "confined", outputs: "read" }),
+};
+
 /** `skills` still unresolved: `parseAgent` leaves the default to the caller, who knows the skills. */
 type ParsedAgent = Omit<AgentDefinition, "skills"> & { skills?: string[] };
 
@@ -109,12 +129,27 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
     throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the harness`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
+  const legacy = BEFORE_FRONTMATTER[name]?.(data.tools);
+  const sandbox = data.sandbox ?? legacy?.sandbox;
+  const outputs = data.outputs ?? legacy?.outputs;
+  if (!sandbox || !outputs) {
+    throw new WorkflowParseError(path, "frontmatter sandbox and outputs are required");
+  }
+  if (sandbox === "none" && data.tools.some((t) => ["bash", "segment_sam"].includes(t))) {
+    throw new WorkflowParseError(
+      path,
+      'a role with sandbox "none" cannot hold bash or segment_sam',
+    );
+  }
   return {
     name,
     description: data.description.replace(/\s+/g, " ").trim(),
     model: data.model,
     thinking: data.thinking,
     tools: data.tools,
+    sandbox,
+    outputs,
+    checkedBy: data.checkedBy ?? (data.sandbox ? undefined : legacy?.checkedBy),
     subagents: data.subagents,
     skills: data.skills,
     body,
@@ -281,6 +316,15 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     const path = `${AGENTS_DIR}/${agent.name}.md`;
     const missing = agent.subagents.find((n) => !found[n]);
     if (missing) throw new WorkflowParseError(path, `subagent "${missing}" is not a role file`);
+    if (agent.checkedBy && !found[agent.checkedBy]) {
+      throw new WorkflowParseError(path, `checkedBy "${agent.checkedBy}" is not a role file`);
+    }
+    if (agent.tools.includes("submit_task") && !agent.checkedBy) {
+      throw new WorkflowParseError(path, "a role with submit_task names its checker (checkedBy)");
+    }
+    if (agent.tools.includes("start_agent") && agent.subagents.length === 0) {
+      throw new WorkflowParseError(path, "a role with start_agent lists the roles it may start");
+    }
     if (agent.tools.includes("start_worker") && !agent.subagents.includes("worker")) {
       throw new WorkflowParseError(
         path,
@@ -303,6 +347,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     skills,
     toolIndex,
     agents: {
+      ...agents,
       main: main as AgentDefinition,
       worker: worker as AgentDefinition,
       check: check as AgentDefinition,

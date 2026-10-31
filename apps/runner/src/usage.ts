@@ -7,7 +7,8 @@ import type { ModelUsage } from "@voluma/contracts/events";
 import type { Usage } from "@voluma/contracts/runner";
 import { type CacheState, cacheStep } from "@voluma/contracts/spend";
 
-export type ModelRole = "main" | "worker" | "check";
+/** A role file of the run's workflow. */
+export type ModelRole = string;
 
 export function usageMeter() {
   let modelCostUsd = 0;
