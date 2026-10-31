@@ -12,8 +12,9 @@ How a member's own scan becomes an input (`inputs.ts`; contract: `@voluma/contra
   `startRun` answers the uploader 409 (`input-not-ready`) and everyone else 404 while it
   uploads. Cancel deletes the row only while it is `uploading`, and complete marks it
   ready only if the row survives, so the two can't leave a ready scan with missing files.
-- **R2 is optional as a group** (`R2_*` env, shared with Review's reference download):
-  without it upload routes answer 503. The API's key must be able to write objects. The
+- **R2 is optional as a group** (`R2_*` env, shared with Review's run files):
+  without it (and without `OBJECT_STORE_DIRECTORY`, which serves the PUTs itself at
+  `/api/storage/*`, so a `url` in the response may be a path on the API's origin) upload routes answer 503. The API's key must be able to write objects. The
   bucket's CORS allows `PUT` from any origin (rule `scan-upload-put`, set through the
   Cloudflare API): the presigned URL is the credential, so the origin adds nothing.
 - **Scripts.** `src/ops/upload-scan.ts` (`pnpm --filter @voluma/api upload:scan`) signs in with

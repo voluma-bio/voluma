@@ -165,14 +165,9 @@ function useAccepting(run: Run) {
         r ? { ...r, review: res.review } : r,
       );
     },
+    // `useAcceptCheck` already words the failure (read-only, changed since, couldn't save).
     onSettled: (_res, e, { checkId }) => {
-      if (e)
-        setError({
-          id: checkId,
-          text:
-            (e instanceof ApiError && e.serverMessage) ||
-            "Couldn't save that. Check your connection and try again.",
-        });
+      if (e) setError({ id: checkId, text: e.message });
     },
   });
   const readOnly = run.example
