@@ -74,6 +74,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` restores
   a dump's original study, scans and inputs, refusing conflicting shared rows. Only legacy dumps
   without study metadata get a study of one.
+- **Rows are read and written by run.** Every query on `events` and `pi_messages` filters by `run_id`
+  (`events` has a unique index `(run_id, id)`, `pi_messages` `(run_id, thread_id, idx)`), and no
+  code reads a thread id's text; ingest scopes every write by the lease and the path's run. The
+  primary keys are still `events(id)` and `pi_messages(thread_id, idx)`, and `pi_messages.run_id` is
+  still nullable, with a trigger that fills it for the previous API's inserts: the contract step is a
+  later migration ([TODO](.context/TODO.md)).
 - **Browser writes, claim and `import:run`/`archive:run` hold one lock** (`QUEUE_LOCK`, a transaction
   advisory lock), so limit counts can't race. `heartbeat` and `report` skip it: they only end or release
   a running run, which lowers the counts a claim reads, and take just the run's event lock and row. The

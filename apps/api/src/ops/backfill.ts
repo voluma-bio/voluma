@@ -100,7 +100,7 @@ export async function uploadBackfill(
  * The log with the backfill in it: the recorded plan replaced; each output and To check item
  * placed in its task's last attempt, before that attempt's final `task` event, on the thread that
  * attempt opened on; `assets.ready` for each converted file appended on the root thread.
- * `rows` are the example's events, in order, with ids already renamed to the example's.
+ * `rows` are the example's events, in order, under the example's `run_id` (ids and thread ids are the source's).
  */
 export function backfillRows(
   exampleId: string,
@@ -115,6 +115,12 @@ export function backfillRows(
   if (!planned) throw new Error("the run has no first revision.started to put the plan in");
   planned.payload = { ...(planned.payload as object), plan: backfill.plan };
 
+  const root = result.find(
+    (r) =>
+      r.type === "thread.started" &&
+      (r.payload as { parentThreadId: unknown }).parentThreadId === null,
+  );
+  if (!root) throw new Error("the run has no root thread.started to put the assets on");
   const added: EventRow[] = [];
   const inserts = new Map<number, EventRow[]>(); // index of the anchor task event -> rows before it
   const place = (
@@ -181,7 +187,7 @@ export function backfillRows(
     const row: EventRow = {
       id: `${exampleId}:assets:${asset.sourceSha256}`,
       runId: exampleId,
-      threadId: `${exampleId}.supervisor`,
+      threadId: root.threadId,
       type: "assets.ready",
       payload: asset,
       createdAt: last.createdAt,

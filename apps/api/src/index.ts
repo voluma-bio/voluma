@@ -268,7 +268,7 @@ app.onError((error, c) => {
 });
 
 // Fail fast on a bad URL, bad credentials or a missing migration; /health stays liveness-only.
-await client`select 1 from threads limit 0`;
+await client`select run_id from pi_messages limit 0`;
 await reads.ensureReferenceInputs([...limits.keys()]);
 
 const server = serve(
