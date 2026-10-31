@@ -9,7 +9,15 @@ import { Box as Cube, X } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
-import { cellOf, checkTitles, scanHref, stoppedLine, studyGraph, taskState } from "./study-model";
+import {
+  cardsOf,
+  cellOf,
+  scanHref,
+  stoppedLine,
+  studyGraph,
+  taskState,
+  waitsOn,
+} from "./study-model";
 
 export function WorkflowPage() {
   const { detail, workflow } = useStudy();
@@ -61,9 +69,11 @@ export function WorkflowPage() {
               const href = scanHref(scan);
               if (!href) return [];
               const { status, open } = cellOf(scan, selected.id);
-              const items = scan.toCheck.filter((i) => i.taskId === selected.id);
-              // The task's first item when it has one, so the review opens on it.
-              const to = items[0] ? itemHref(items[0]) : href;
+              const items = scan.acceptable.filter((i) => i.taskId === selected.id);
+              const [card] = cardsOf(scan, selected.id);
+              // The task's first item or card when it has one, so the review opens on it.
+              const to = items[0] ? itemHref(items[0]) : (card?.href ?? href);
+              const waits = waitsOn(scan, workflow, selected.id);
 
               return [
                 <RowLink
@@ -71,11 +81,7 @@ export function WorkflowPage() {
                   to={linkTo(to)}
                   title={scanLabel(scan.scan)}
                   subtitle={
-                    items.length > 0
-                      ? checkTitles(items)
-                      : status === "stopped"
-                        ? stoppedLine(scan, workflow)
-                        : undefined
+                    waits ? waits : status === "stopped" ? stoppedLine(scan, workflow) : undefined
                   }
                   cells={[
                     <StatusMark

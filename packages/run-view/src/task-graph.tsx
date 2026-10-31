@@ -23,12 +23,13 @@ export type GraphTask = { id: string; title: string; dependsOn: string[] };
 /** A task at study size: its state on each scan of the study, in the study's scan order. */
 export type StudyGraphTask = GraphTask & { scans: Status[] };
 
-/** What a box at scan size needs of a task; the report size also lists its `threads`. */
-export type ScanGraphTask = Pick<
-  TaskView,
-  "id" | "title" | "dependsOn" | "state" | "needs" | "results"
-> &
-  Partial<Pick<TaskView, "threads">>;
+/**
+ * What a box at scan size needs of a task; the report size also lists its `threads`. `open`: its
+ * items still open for a person, as the scan review counts them (`openItems`, review-state.ts).
+ */
+export type ScanGraphTask = Pick<TaskView, "id" | "title" | "dependsOn" | "state" | "results"> & {
+  open: number;
+} & Partial<Pick<TaskView, "threads">>;
 
 export type TaskGraphProps =
   | {
@@ -68,14 +69,13 @@ export const TASK_STATUS: Record<TaskState, Status> = {
 };
 
 /**
- * The one rule for the status a task shows, from its state and its open items. Open items read
- * To check while the task is done or in To check: a done task can still carry them. A To check
- * task with every item handled reads done, unless its run is `live` (a live run's items aren't
- * read yet, so it reads To check as the scan review does).
+ * The one rule for the status a task shows, from its state and its open items (`openItems`,
+ * review-state.ts). Open items read To check while the task is done or in To check: a done task
+ * can still carry them. A To check task with every item handled reads done.
  */
-export function shownStatus(state: TaskState, open: number, live = false): Status {
+export function shownStatus(state: TaskState, open: number): Status {
   if (open > 0 && (state === "done" || state === "to-check")) return "check";
-  if (state === "to-check") return live ? "check" : "done";
+  if (state === "to-check") return "done";
   return TASK_STATUS[state];
 }
 
@@ -509,9 +509,6 @@ function StudyBox({
   );
 }
 
-/** Open check items: the ones "Looks right" can still accept, or a card with nothing to accept. */
-const openItems = (task: ScanGraphTask) => task.needs.filter((n) => !n.accepted).length;
-
 /** A box's one line at scan size: what needs you, what is going on, or its key value. */
 function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: string } {
   if (shownStatus(task.state, open) === "check" && open > 0)
@@ -560,8 +557,7 @@ function ScanBox({
   onSelect?: (taskId: string) => void;
   onAgent?: (threadId: string) => void;
 }) {
-  const open = openItems(task);
-  // A To check task whose items are all accepted reads as done.
+  const { open } = task;
   const status = shownStatus(task.state, open);
   const line = scanLine(task, open);
   const idle = task.state === "waiting" || task.state === "ready" || task.state === "skipped";
