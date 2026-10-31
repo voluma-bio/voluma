@@ -6,9 +6,15 @@ its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on ever
 
 | Role | Mounts | Network | Name |
 |---|---|---|---|
-| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
+| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist; no gateway: none | `<taskId>.worker[.n]` |
 | `check` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
 | `convert` | `evidence` read-only, `review` writable | none | the job's |
+
+`VOLUMA_GATEWAY_IPV4` selects a single-address CIDR policy instead of SNI, never both (Modal
+unions them). It must be an exclusive inbound IPv4, not a resolved shared Render/Cloudflare IP.
+Staging leaves it unset: the Host-header escape is still open. CIDR permits all ports/protocols
+to that address and still permits DNS; it does not make scans exfiltration-proof. Deployment
+choices, approval gates and probes: [gateway deploy](../../gateway/.context/deploy.md#dedicated-ip-cutover-236-awaiting-approval).
 
 The builder sets the access of each mount, and the Modal adapter refuses a network on a
 non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
@@ -193,7 +199,7 @@ thread's sandbox, with the run's abort signal and a 30-minute timeout; the runne
 volume and does none of the work. The program reads the `.npy` by position (never whole), crops it (`subVolume`, else
 the tissue plus a margin, always including the boxes), encodes lossless H.264, sends it to Meta
 through the gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the bearer; the
-sandbox's network is that host only; only a sandbox whose role is granted `segment_sam` gets the
+sandbox's network uses the gateway's SNI or dedicated IPv4; only a sandbox whose role is granted `segment_sam` gets the
 network and the token, so a check sandbox stays `network: none` with no token), decodes the masks (`sam-mask.ts`, a port of Meta's
 decoder, because `meta-sam-parser` takes minutes per response) and writes the labels on the
 full grid and the sidecar `<labels>.json`: built in `/tmp`, then `cp`ed, because an R2 mount takes
@@ -231,7 +237,7 @@ An agent in its own worktree tries a workflow change on the real system like thi
 When the runner uses the API in `.dev/env.json` (including an explicit `VOLUMA_API_URL` pointing
 there), that file alone supplies its gateway. Matching uses the origin (the HTTP adapters ignore
 the base URL's path, query and fragment) and treats `localhost` as the launcher's `127.0.0.1`;
-different ports or schemes remain different APIs. `VOLUMA_GATEWAY_URL` and `GATEWAY_TOKEN_SECRET` in the
+different ports or schemes remain different APIs. `VOLUMA_GATEWAY_URL`, `VOLUMA_GATEWAY_IPV4` and `GATEWAY_TOKEN_SECRET` in the
 shell or `.env` cannot turn SAM on or override the launcher's tunnel. No gateway URL in the file
 means SAM is off, including while the tunnel starts or after it fails. A runner pointed at another
 API still uses its configured gateway pair. Restart the runner when changing the dev launch;
@@ -419,8 +425,11 @@ check), the role files' levels are ignored and `RUNNER_THINKING` alone applies (
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
-role's set level against its model (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
-no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
+role's set level against its model (the role files load per run); both use `thinking.ts` and check
+only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
+guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
+DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
+without asking Muse for an unsupported effort. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop

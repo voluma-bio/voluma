@@ -9,7 +9,8 @@ cross-section, at least `cortex + cortex_clearance_um` from its outer edge. Thos
 (--spec, protocol.json, the entry `roi-metaphyseal`). The cortex thickness used for that edge is the
 depth at which the bone fraction of the outer layers first drops below one half (estimated in the ROI-3 slices,
 reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `cortex_search_factor` times
-that depth of the outer edge, over 1.3 mm of shaft below the plate: it can include trabeculae that join the cortex.
+that depth of the outer edge, below the local distal face and down to 1.3 mm past its deepest point along W
+(rounded up to an inclusive slice, clipped to the stack): it can include trabeculae that join the cortex.
 It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, nodes/ends (deck #19-23) are
 `morphometry.py trabecular --output roi-metaphyseal` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on cortex.npy with the distal face as --surface.
 
@@ -52,7 +53,7 @@ from envelope import close_and_fill, footprint
 from scipy import ndimage as ndi
 
 ROI_ID = 'roi-metaphyseal'  # the spec entry this script reads
-CORTEX_SPAN_MM = 1.3  # shaft length below the plate the cortex mask covers: Ct.Th is asked at up to 1 mm
+CORTEX_SPAN_MM = 1.3  # shaft length past the deepest distal-face point along W: Ct.Th is asked at up to 1 mm
 
 
 def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox):

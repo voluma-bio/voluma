@@ -29,7 +29,7 @@ catalog:
   tailwind-merge: ^3.7.0
   tailwindcss: ^4.3.1
   three: ^0.186.1
-  typescript: ^6.0.3
+  typescript: ^7.0.2
   vite: ^8.1.0
   vitest: ^5.0.5
   yaml: ^2.8.1
