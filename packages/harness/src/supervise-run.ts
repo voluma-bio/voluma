@@ -17,7 +17,7 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
-import { runLayout, type SandboxLayout } from "./layout";
+import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
 import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
@@ -25,8 +25,8 @@ import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
-import { type AgentRole, type LoopConfig, type ModelSetup, runLoop } from "./run-loop";
+import { reviewAssetsWorker } from "./review-assets";
+import { type LoopConfig, type ModelSetup, runLoop } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import { type PlanTask, taskRuntime } from "./task-runtime";
@@ -46,6 +46,8 @@ export interface SuperviseRunOptions {
   /** The outputs the user selected (every output when absent) and their notes; the first messages carry both. */
   selectedOutputs: readonly string[] | undefined;
   notes: string | undefined;
+  /** The input whose completed review conversions this run can reuse. */
+  inputId: string;
   /** The R2 prefix of the run's read-only inputs (the scan). */
   inputPrefix: string;
   /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
@@ -63,7 +65,7 @@ export interface SuperviseRunOptions {
    * The model, thinking level and call function of a thread of `role`. `recorded` is the model
    * (`provider/id`) a resumed thread started on, which it must keep.
    */
-  model(role: AgentRole, recorded: string | undefined): ModelSetup;
+  model(role: string, recorded: string | undefined): ModelSetup;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
   createSandbox: CreateSandbox;
   /** Size and lifetime of every sandbox. */
@@ -101,17 +103,19 @@ export interface Supervised {
 }
 
 /**
- * The tools each role holds: its file's list, less `segment_sam` where it cannot be used. That
- * needs the gateway and a sandbox that runs analysis: a worker's, or the main agent's when it
- * holds `bash`. The checker never holds it (it does not redo the task).
+ * Each role's layout facts and the tools it holds: its file's list, less `segment_sam` where it
+ * cannot be used. That needs the gateway and a sandbox that produces results: one with `/outputs`
+ * writable. A role that only inspects (its `/outputs` is read-only) never holds it: it does not
+ * redo the task.
  */
-function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<AgentRole, readonly string[]> {
-  const grant = (role: AgentRole) => {
-    const { tools } = def.agents[role];
-    const analyses = role === "worker" || (role === "main" && tools.includes("bash"));
-    return tools.filter((t) => t !== "segment_sam" || (gateway && analyses));
-  };
-  return { main: grant("main"), worker: grant("worker"), check: grant("check") };
+function rolesOf(def: WorkflowDefinition, gateway: boolean): RunLayoutOptions["roles"] {
+  return Object.fromEntries(
+    Object.values(def.agents).map(({ name, tools, scratch, outputs, checkedBy, subagents }) => {
+      const analyses = tools.includes("bash") && outputs === "write";
+      const held = tools.filter((t) => t !== "segment_sam" || (gateway && analyses));
+      return [name, { scratch, outputs, checkedBy, subagents, tools: held }];
+    }),
+  );
 }
 
 const ROOT_NAME = "supervisor";
@@ -123,13 +127,14 @@ export const rootThreadOf = (runId: string, log: readonly RunEvent[]) =>
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, definition, signal } = options;
   const rootThreadId = rootThreadOf(runId, recorder.events());
-  const grants = grantsOf(definition, options.gateway !== undefined);
+  const main = definition.agents.main;
   const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
   const layout = runLayout({
     runId,
+    inputId: options.inputId,
     inputPrefix: options.inputPrefix,
     skills: definition.skills,
-    grants,
+    roles: rolesOf(definition, options.gateway !== undefined),
     // From the workflow's task, so a task the main agent adds from it keeps the flag.
     copiesInputs: (id) => copyInputs.has(id),
   });
@@ -145,15 +150,18 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   const sandboxLayout = (id: string): SandboxLayout =>
     id === CONVERT ? layout.convert : layout.forThread(recordOf(id));
   const settings = { runId, ...options.sandbox };
+  // Halt lives here so convert-sandbox create can abort on it without reading the worker.
+  const conversionHalt = new AbortController();
+  const conversionAbort = AbortSignal.any([options.conversionSignal, conversionHalt.signal]);
   const session: SandboxSession = sandboxSession(
     (id) => {
       const sandbox = sandboxLayout(id);
       const gateway = sandbox.gateway ? options.gateway?.(sandbox.name) : undefined;
-      // The conversion outlives `signal` (see `conversionSignal`); its own signal also carries the worker's halt.
-      return options.createSandbox(
-        specOf(sandbox, settings, gateway),
-        id === CONVERT ? conversion.signal : signal,
-      );
+      const spec = specOf(sandbox, settings, gateway);
+      // Cache identity must follow the run's pinned image, including after a deploy.
+      if (id === CONVERT) spec.env = { ...spec.env, VOLUMA_REVIEW_RUNTIME: spec.image };
+      // The conversion outlives `signal` (see `conversionSignal`); conversionAbort also carries halt.
+      return options.createSandbox(spec, id === CONVERT ? conversionAbort : signal);
     },
     // The convert sandbox writes no event: a failure there shows as the file's `assets.failed`,
     // not as a failed sandbox on the main agent's page.
@@ -164,12 +172,14 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     // The convert sandbox's commands run with `note: false`, so its note is never read.
     (id) => (id === CONVERT ? "" : layout.forThread(recordOf(id)).restartNote),
   );
-  const conversion: ReviewAssetsWorker = reviewAssetsWorker({
+  const conversion = reviewAssetsWorker({
     runId,
+    inputId: options.inputId,
     rootThreadId,
     recorder,
     sandbox: () => session.get(CONVERT, { note: false }),
     signal: options.conversionSignal,
+    halt: conversionHalt,
     log: options.log,
   });
 
@@ -198,7 +208,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       rootThreadId,
       recorder,
       outputs: options.outputs,
-      mainWorks: layout.mainWorks,
+      mainWorks: main.tools.includes("bash") && main.outputs === "write",
       signal,
     });
     const pool = threads(
@@ -236,10 +246,9 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       selectedOutputs: options.selectedOutputs,
       notes: options.notes,
       model: options.model,
-      grants,
       config: options.config,
-      tools: (thread, names, agents) =>
-        buildTools(names, {
+      tools: (thread, agents) =>
+        buildTools(thread.tools, {
           layout: thread,
           files: options.files,
           runtime,
@@ -248,6 +257,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
             recorder,
             runtime,
             agents,
+            subagents: thread.subagents,
             workflow: definition.files,
           },
         }),

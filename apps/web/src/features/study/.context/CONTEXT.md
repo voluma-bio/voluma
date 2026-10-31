@@ -31,7 +31,9 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
   study of many never hits its 429; the old single-scan panel's machinery (4 PUTs at once, 3
   tries, Retry of the failed files, complete, cancel) lives there. Start pressed during uploads
   arms the page: it starts when the last upload completes and disarms if one fails or the last
-  scan is removed. Leaving the page aborts and cancels unfinished uploads.
+  scan is removed. Leaving the page aborts and cancels unfinished uploads. A deploy's reload
+  (`shell/deploys.ts`) waits on `holdLeave` while a scan uploads, a start is armed, or
+  `createStudy` is in flight.
 - **Pilot**: with more than two scans the default is "Run 2 first": the first scan of each of the
   first two groups, else the first two. The rest wait with no run; the study page starts them.
 - **Time and cost** shown before Start come only from the lab's newest completed run of the

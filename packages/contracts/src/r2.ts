@@ -91,6 +91,13 @@ export const reviewAssetPrefix = (runId: string) => `${runPrefix(runId)}review/`
 export const reviewAssetKey = (runId: string, sha256: string, path: string) =>
   `${reviewAssetPrefix(runId)}${sha256Schema.parse(sha256)}/${rel(path)}`;
 
+/**
+ * Completed conversions reused by runs of one input. Outside `inputPrefix`: raw inputs
+ * stay immutable and agents never mount this writable cache. The converter partitions it
+ * by its code, conversion mode and source hash; geometry remains in each run's outputs.
+ */
+export const inputReviewPrefix = (inputId: string) => `input-review/${seg(inputId)}/`;
+
 /** The id of an org's one reference-scan input (`reference-<labId>`). */
 export const referenceInputId = (labId: string) => `reference-${labId}`;
 

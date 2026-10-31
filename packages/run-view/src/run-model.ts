@@ -12,9 +12,10 @@ import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState, taskStates } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
-import { type ThreadRole, threadRole } from "@voluma/contracts/thread-role";
+import { type ThreadPlace, threadPlace } from "@voluma/contracts/thread-place";
 import { failedThreads, openThreads } from "@voluma/contracts/threads";
 import { catalog } from "@voluma/workflow/bundled";
+import { plainError } from "./run-error";
 import { type Halt, type Live, toolTitle } from "./transcript";
 
 const { outputName, taskTitle, tasks: workflowTasks } = catalog["mouse-oa"];
@@ -30,8 +31,8 @@ export type ThreadStatus = "running" | "waiting" | "paused" | "completed" | "fai
 
 export type Thread = {
   id: string;
-  /** From its first start (`threadRole`). */
-  role: ThreadRole;
+  /** From its first start (`threadPlace`). */
+  place: ThreadPlace;
   /** The role file's name or `supervisor`: a label (`agentLabel`); behaviour reads the fields below. */
   kind: string;
   /** The thread that started it, from its `thread.started`; null on the run's root. */
@@ -109,7 +110,7 @@ function threadsOf(
         else
           threads.set(e.threadId, {
             id: e.threadId,
-            role: threadRole(e.payload),
+            place: threadPlace(e.payload),
             kind: e.payload.kind,
             parentId: e.payload.parentThreadId,
             taskId: e.payload.task,
@@ -209,9 +210,9 @@ export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   );
 }
 
-export const isMain = (t: Pick<Thread, "role">) => t.role === "main";
+export const isMain = (t: Pick<Thread, "place">) => t.place === "main";
 
-export const isCheck = (t: Pick<Thread, "role"> | undefined) => t?.role === "check";
+export const isCheck = (t: Pick<Thread, "place"> | undefined) => t?.place === "check";
 
 export type AgentNode = { thread: Thread; children: AgentNode[] };
 
@@ -348,29 +349,6 @@ const formatNumber = (value: number) =>
   new Intl.NumberFormat("en-US", {
     ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
   }).format(value);
-
-/**
- * A provider's raw JSON response cut down to its message; other errors keep their detail:
- * "meta API error (404): The model does not exist". A body with no message is dropped.
- */
-export const plainError = (error: string) => {
-  const brace = error.search(/\{\s*\\?"/);
-  const head = brace < 0 ? error : error.slice(0, brace);
-  const title = head.split("\n")[0]?.replace(/[:\s]+$/, "") || "Error";
-  if (brace < 0) return error;
-  try {
-    const body = error.slice(brace);
-    // Some recorded providers escaped the whole JSON body inside their error text.
-    const json = JSON.parse(/^\{\s*\\"/.test(body) ? JSON.parse(`"${body}"`) : body);
-    const message = json?.message ?? json?.error?.message ?? json?.error;
-    if (typeof message === "string" && message) return `${title}: ${message}`;
-    return title;
-  } catch (e) {
-    if (!(e instanceof SyntaxError)) throw e;
-  }
-  // A multiline validation error may contain JSON objects inside a list, not a provider body.
-  return head.includes("\n") ? error : title;
-};
 
 /**
  * A task's values: each measurement and score of the current attempt (files, volumes,

@@ -7,7 +7,9 @@
  * call `getMe` themselves. With no session, the gate asks the server for a guest
  * (`POST /api/auth/guest`); a server with guests off refuses, and the sign-in screen
  * shows. A 401 drops the authenticated tree; returning to the tab rechecks identity,
- * since another tab can replace the cookie without a 401.
+ * since another tab can replace the cookie without a 401. A recheck that can't reach the API
+ * (a deploy restarting it) keeps the signed-in app: only a first load shows the unreachable
+ * screen, and that screen retries by itself.
  */
 
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -33,8 +35,11 @@ export function SignedIn() {
   const [session, setSession] = useState<Session>({ state: "loading" });
   const request = useRef(0);
   const pendingGuest = useRef<Promise<Me | null> | null>(null);
+  // One retry at a time after an unreachable API, started only once the last attempt answered.
+  const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const load = useCallback(async () => {
+    clearTimeout(retry.current);
     const current = ++request.current;
     try {
       // A superseded guest response still writes its cookie. Wait even if it fails,
@@ -54,11 +59,19 @@ export function SignedIn() {
     } catch (error) {
       if (current !== request.current) return;
       // TypeError: no network. SyntaxError: a captive portal or proxy answered with non-JSON.
-      if (error instanceof TypeError || error instanceof SyntaxError)
-        setSession({ state: "unreachable", cause: "offline" });
-      else if (error instanceof ApiError && error.status >= 500)
-        setSession({ state: "unreachable", cause: "down" });
-      // Schema mismatches and unexpected statuses belong on the router's error screen.
+      const cause =
+        error instanceof TypeError || error instanceof SyntaxError
+          ? "offline"
+          : error instanceof ApiError && error.status >= 500
+            ? "down"
+            : undefined;
+      if (cause) {
+        setSession((now) => (now.state === "signed-in" ? now : { state: "unreachable", cause }));
+        // Until the API answers: then a kept session also picks up an identity another tab changed.
+        retry.current = setTimeout(() => void load(), 5000);
+      }
+      // A schema mismatch reaches here only when no newer app is deployed (shell/deploys.ts):
+      // it and unexpected statuses belong on the router's error screen.
       else
         setSession(() => {
           throw error;
@@ -84,6 +97,7 @@ export function SignedIn() {
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       ++request.current;
+      clearTimeout(retry.current);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);

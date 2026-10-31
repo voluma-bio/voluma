@@ -10,7 +10,7 @@
  * They never wait for a thread inside the section.
  */
 import type { By } from "@voluma/contracts/events";
-import { transitiveDependents } from "@voluma/contracts/fold";
+import { redoRefusal, transitiveDependents } from "@voluma/contracts/fold";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { fileRefInputSchema } from "@voluma/contracts/output";
 import { replyInputSchema } from "@voluma/contracts/task-tools";
@@ -49,10 +49,12 @@ export interface Agents {
   /** Whether the task has used its fix rounds, by the loop's limit. */
   fixLimitReached(log: ThreadLog, taskId: string): boolean;
   /**
-   * Picks the task's next worker id, appends its `thread.started` under `startedEventId`, then
+   * Picks the task's next id for that role, appends its `thread.started` under `startedEventId`, then
    * starts it with the main agent's brief; returns the id. Call inside `section`.
    */
-  startWorker(o: {
+  startAgent(o: {
+    /** The role file the agent runs on. */
+    role: string;
     taskId: string;
     brief: string;
     mainThreadId: string;
@@ -74,6 +76,8 @@ export interface MainDeps {
   recorder: Recorder;
   runtime: TaskRuntime;
   agents: Agents;
+  /** The roles the calling thread's role may start (its file's `subagents`). */
+  subagents: readonly string[];
   /** The workflow's tasks, which `change_plan` adds from. */
   workflow: WorkflowFiles;
 }
@@ -82,7 +86,7 @@ const nonEmpty = z.string().min(1);
 const AGENT: By = { kind: "agent" };
 
 export function mainTools(deps: MainDeps) {
-  const { recorder, runtime, agents, rootThreadId, workflow } = deps;
+  const { recorder, runtime, agents, rootThreadId, workflow, subagents } = deps;
   const log = () => threadLog(recorder.events());
 
   /** The main agent calls while the run is going; `work` tools also wait for the researcher's go in a correction. */
@@ -112,9 +116,9 @@ export function mainTools(deps: MainDeps) {
 
   const workerOf = (d: ThreadLog, ref: string) => {
     const r = threadByRef(d.threads, ref);
-    if (r?.role !== "worker") {
+    if (r?.place !== "worker") {
       throw new Refusal(
-        r?.role === "check"
+        r?.place === "check"
           ? `${ref} is a checker: answer its question with \`answer\`.`
           : `${ref} is not a worker of this run.`,
       );
@@ -122,49 +126,75 @@ export function mainTools(deps: MainDeps) {
     return r;
   };
 
+  /** Starts `role` on a task: the checks both start tools share. `tool` names the effect, so a replay finds it. */
+  async function startTask(
+    role: string,
+    tool: "start_worker" | "start_agent",
+    { taskId, brief }: { taskId: string; brief: string },
+    ctx: ToolContext,
+  ) {
+    const f = runtime.view();
+    const d = log();
+    const task = f.plan.tasks.find((t) => t.id === taskId);
+    if (!task) throw new Refusal(`${taskId} is not a task of this run's plan.`);
+    const t = runtime.taskOf(taskId);
+    if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
+    const waiting = task.dependsOn.filter((id) => !runtime.taskOf(id)?.satisfied);
+    if (waiting.length > 0) {
+      throw new Refusal(
+        `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet (not done, or rejected by its check until you send feedback or accept it).`,
+      );
+    }
+    const live = startedFor(d, taskId, "worker").find((r) => {
+      const s = agents.state(d, r.id);
+      return s !== "stopped" && s !== undefined;
+    });
+    if (live) {
+      throw new Refusal(
+        `${taskId} has a worker, ${live.name} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first${d.threads.get(live.id)?.end?.status === "failed" ? ` (a worker that failed keeps its history; for a fresh one, \`stop_worker\` then \`${tool}\`)` : ""}.`,
+      );
+    }
+    if (t?.status === "under-review") throw new Refusal(`${taskId} is under review.`);
+    if (agents.fixLimitReached(d, taskId)) {
+      throw new Refusal(`${taskId} has used its fix rounds; it stays as it is for the researcher.`);
+    }
+    const threadId = await agents.startAgent({
+      role,
+      taskId,
+      brief,
+      mainThreadId: ctx.threadId,
+      spawnedBy: ctx.toolCallId,
+      startedEventId: effectId(tool, ctx.threadId, ctx.toolCallId),
+    });
+    const name = log().threads.get(threadId)?.name ?? "";
+    return { message: `Worker ${name} started on ${taskId}.` };
+  }
+
+  const TASK_START =
+    "`brief` is your message to it: what matters for this task beyond the task text, what earlier tasks settled, where their files are. Refused when a task it builds on has no usable result, when the task already has a live worker, is under review, or has used its fix rounds.";
+
+  // Registered for threads that began with it in their tool list: a main agent resumes with the
+  // tools it stored, so it stays while any live thread holds it.
   const start_worker: Tool<z.ZodObject<{ taskId: typeof taskIdSchema; brief: z.ZodString }>> = {
     name: "start_worker",
-    description:
-      "Start a worker on a task of the plan. `brief` is your message to it: what matters for this task beyond the task text, what earlier tasks settled, where their files are. Refused when a task it builds on has no usable result, when the task already has a live worker, is under review, or has used its fix rounds.",
+    description: `Start a worker on a task of the plan. ${TASK_START}`,
     input: z.object({ taskId: taskIdSchema, brief: nonEmpty }),
     sequential: true,
-    execute: inSection(async ({ taskId, brief }, ctx) => {
-      const f = runtime.view();
-      const d = log();
-      const task = f.plan.tasks.find((t) => t.id === taskId);
-      if (!task) throw new Refusal(`${taskId} is not a task of this run's plan.`);
-      const t = runtime.taskOf(taskId);
-      if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
-      const waiting = task.dependsOn.filter((id) => !runtime.taskOf(id)?.satisfied);
-      if (waiting.length > 0) {
-        throw new Refusal(
-          `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet (not done, or rejected by its check until you send feedback or accept it).`,
-        );
+    execute: inSection((input, ctx) => startTask("worker", "start_worker", input, ctx), true),
+  };
+
+  const start_agent: Tool<
+    z.ZodObject<{ role: z.ZodString; task: typeof taskIdSchema; brief: z.ZodString }>
+  > = {
+    name: "start_agent",
+    description: `Start an agent of one of your roles (${subagents.join(", ")}) on a task of the plan. ${TASK_START}`,
+    input: z.object({ role: nonEmpty, task: taskIdSchema, brief: nonEmpty }),
+    sequential: true,
+    execute: inSection(({ role, task, brief }, ctx) => {
+      if (!subagents.includes(role)) {
+        throw new Refusal(`You can start these roles: ${subagents.join(", ")}. Not "${role}".`);
       }
-      const live = startedFor(d, taskId, "worker").find((r) => {
-        const s = agents.state(d, r.id);
-        return s !== "stopped" && s !== undefined;
-      });
-      if (live) {
-        throw new Refusal(
-          `${taskId} has a worker, ${live.name} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first${d.threads.get(live.id)?.end?.status === "failed" ? " (a worker that failed keeps its history; for a fresh one, `stop_worker` then `start_worker`)" : ""}.`,
-        );
-      }
-      if (t?.status === "under-review") throw new Refusal(`${taskId} is under review.`);
-      if (agents.fixLimitReached(d, taskId)) {
-        throw new Refusal(
-          `${taskId} has used its fix rounds; it stays as it is for the researcher.`,
-        );
-      }
-      const threadId = await agents.startWorker({
-        taskId,
-        brief,
-        mainThreadId: ctx.threadId,
-        spawnedBy: ctx.toolCallId,
-        startedEventId: effectId("start_worker", ctx.threadId, ctx.toolCallId),
-      });
-      const name = log().threads.get(threadId)?.name ?? "";
-      return { message: `Worker ${name} started on ${taskId}.` };
+      return startTask(role, "start_agent", { taskId: task, brief }, ctx);
     }, true),
   };
 
@@ -304,9 +334,9 @@ export function mainTools(deps: MainDeps) {
           const named = (x: ThreadRecord, a: { id: string }) =>
             a.id === input.askId || askRef(x.name, x.id, a.id) === input.askId;
           const r = [...d.threads.values()].find(
-            (x) => x.role === "check" && x.asks.some((a) => named(x, a)),
+            (x) => x.place === "check" && x.asks.some((a) => named(x, a)),
           );
-          if (r?.role !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
+          if (r?.place !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
           const ask = r.asks.find((a) => named(r, a));
           if (!ask) throw new Refusal(`No checker asked ${input.askId}.`);
           if (ask.answer) {
@@ -490,8 +520,8 @@ export function mainTools(deps: MainDeps) {
       );
       const d = log();
       for (const taskId of skipped) {
-        for (const role of ["worker", "check"] as const) {
-          for (const r of startedFor(d, taskId, role)) {
+        for (const place of ["worker", "check"] as const) {
+          for (const r of startedFor(d, taskId, place)) {
             const s = agents.state(d, r.id);
             if (s === "running" || s === "cut-off")
               await runtime.stop(r.id, `${eventId}:skip:${r.id}`);
@@ -507,14 +537,18 @@ export function mainTools(deps: MainDeps) {
   const reply: Tool<typeof replyInputSchema> = {
     name: "reply",
     description:
-      "Answer the researcher who wrote to the run, in plain words. It starts no work: after a go you act with your other tools. You may call it more than once.",
+      "Answer the researcher who wrote to the run, in plain words. It starts no work: after a go you act with your other tools. You may call it more than once. With `offer` you propose redoing one task and wait for their go.",
     input: replyInputSchema,
     sequential: true,
-    execute: inSection(async ({ text }, ctx) => {
+    execute: inSection(async ({ text, offer }, ctx) => {
+      if (offer) {
+        const cannot = redoRefusal(runtime.view(), offer.taskId);
+        if (cannot) throw new Refusal(cannot.message);
+      }
       await recorder.append(
         ctx.threadId,
         "reply",
-        { text },
+        { text, ...(offer && { offer }) },
         effectId("reply", ctx.threadId, ctx.toolCallId),
       );
       return { message: "Sent to the researcher." };
@@ -533,13 +567,13 @@ export function mainTools(deps: MainDeps) {
           const view = runtime.view();
           const d = log();
           const running = [...d.threads.values()].filter(
-            (r) => r.role !== "main" && agents.state(d, r.id) === "running",
+            (r) => r.place !== "main" && agents.state(d, r.id) === "running",
           );
           const problems = [
             ...(d.undelivered.some((n) => n.kind === "person") ? [UNDELIVERED] : []),
             ...(d.unanswered ? [UNANSWERED] : []),
             ...(d.go && !d.go.redone ? [goNotActedOn(d.go.taskId)] : []),
-            ...running.map((r) => `${r.name} (${r.role}, ${r.taskId}) is still running.`),
+            ...running.map((r) => `${r.name} (${r.place}, ${r.taskId}) is still running.`),
             ...unfinished(view).map((t) =>
               t.status === "pending"
                 ? `${t.id} has not run: start a worker on it, or skip it with a reason.`
@@ -573,6 +607,7 @@ export function mainTools(deps: MainDeps) {
 
   return {
     start_worker,
+    start_agent,
     message,
     wait,
     stop_worker,

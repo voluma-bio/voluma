@@ -21,6 +21,8 @@ export type ConversationItem =
       seq: number;
       at: string;
       text: string;
+      /** The redo it proposes: the person accepts with a `go` on this task. */
+      offer?: { taskId: string };
     };
 
 /** The person's messages and the agent's replies, in log order; every other event is skipped. */
@@ -40,7 +42,15 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         go: go === true,
       });
     } else if (e.type === "reply") {
-      items.push({ from: "agent", id: e.id, seq: e.seq, at: e.createdAt, text: e.payload.text });
+      const { text, offer } = e.payload;
+      items.push({
+        from: "agent",
+        id: e.id,
+        seq: e.seq,
+        at: e.createdAt,
+        text,
+        ...(offer && { offer }),
+      });
     }
   }
   return items.sort((a, b) => a.seq - b.seq);

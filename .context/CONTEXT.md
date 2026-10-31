@@ -142,7 +142,7 @@ and check threads.
   A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
   cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
 - **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates:
-  it starts workers (`start_worker`), steers them or sends feedback on a rejected task
+  it starts workers (`start_agent`), steers them or sends feedback on a rejected task
   (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan
   (`change_plan`, recorded as `plan.changed` before it applies) and ends the run
   (`finish_run`). Its tools are `tools/main-tools.ts`; each writes under an id derived from the
@@ -168,8 +168,9 @@ and check threads.
   `runClient`, which also stops the run on a lost lease and redacts what it sends. `lease.ts` heartbeats every 15 s with the
   usage since the last acknowledged one (model dollars from Pi's per-reply cost, sandbox
   seconds from the session's ready/stopped states) and stops the run on `stop`, on a
-  `LeaseLost` from events, history or heartbeat, or 45 s after the last acknowledged
-  heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
+  `LeaseLost` from events, history or heartbeat, or 120 s after the last acknowledged
+  heartbeat was sent. One timer schedules the next heartbeat: 15 s after an answer, 2 s after a failure (each attempt cut at
+  5 s), so the lease is renewed soon after the API answers again. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our model key; a `visitor` run uses the claim's Meta key, in that run's scope
   only. Every sandbox runs on our Modal token. A guest may start only `visitor` runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
   (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are what its role file lists (`workflows/core/agents/`), built from the registry (`packages/harness/src/tools/registry.ts`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.

@@ -48,6 +48,7 @@ import {
 } from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
 import type { ObjectStore } from "@voluma/object-store";
+import type { AgentDefinition } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -63,7 +64,7 @@ import { storeEvidence } from "./store-evidence.ts";
 import { storeFiles } from "./store-files.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking } from "./thinking.ts";
-import { type ModelRole, usageMeter } from "./usage.ts";
+import { usageMeter } from "./usage.ts";
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -179,7 +180,16 @@ async function claimBody(
   const client = runClient(
     config.api,
     { runId, leaseToken },
-    { redact, onLeaseLost: () => stop("lease-lost") },
+    {
+      redact,
+      onLeaseLost: () => stop("lease-lost"),
+      runStopped: halt.signal,
+      // Heartbeats answered during the failure window prove the API is up: the run is refused
+      // those writes, not cut off from it, so the stop counts as a strike and a route that fails
+      // for good ends the run instead of looping.
+      onUnreachable: (firstFailureAt) =>
+        stop((lease?.acknowledgedAt() ?? 0) > firstFailureAt ? "refused" : "self-stop"),
+    },
   );
   let lease: ReturnType<typeof holdLease> | undefined;
   let events: Recorder | undefined;
@@ -227,31 +237,37 @@ async function claimBody(
     // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
     // models only: the main thread keeps its configured model when that is one, else the
     // visitor model.
-    const roleModel = (role: ModelRole) => {
-      const alias = definition.agents[role].model;
+    const roleModel = ({ name, model: alias }: AgentDefinition) => {
       const model = ctx.aliases[alias];
-      if (!model) throw new Error(roleModelUnset(role, alias));
-      return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
+      if (!model) {
+        log(
+          `the ${name} role's model "${alias}" is unset: set RUNNER_MODEL_${alias.toUpperCase()}`,
+        );
+        throw new Error(roleModelUnset(alias));
+      }
+      return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").
-    const roleThinking = (role: ModelRole, model: Model<Api>) => {
+    const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
       if (visitor) return "off";
-      const level = config.modelForced
-        ? config.thinking
-        : (definition.agents[role].thinking ?? config.thinking);
-      assertThinking(level, [model], `the ${role} role's`);
+      const level = config.modelForced ? config.thinking : (thinking ?? config.thinking);
+      assertThinking(level, [model], `the ${name} role's`);
       return level ?? "off";
     };
-    const workerModel = roleModel("worker");
-    const checkModel = roleModel("check");
-    const mainModel = roleModel("main");
-    const thinking = {
-      worker: roleThinking("worker", workerModel),
-      check: roleThinking("check", checkModel),
-      main: roleThinking("main", mainModel),
+    const roles = Object.values(definition.agents);
+    const setups = new Map(
+      roles.map((r) => {
+        const model = roleModel(r);
+        return [r.name, { model, thinkingLevel: roleThinking(r, model) }] as const;
+      }),
+    );
+    const setupOf = (name: string) => {
+      const setup = setups.get(name);
+      if (!setup) throw new Error(`${name} is not a role of this run`);
+      return setup;
     };
-    log(`models: worker ${workerModel.id}, check ${checkModel.id}, main ${mainModel.id}`);
-    log(`thinking: worker ${thinking.worker}, check ${thinking.check}, main ${thinking.main}`);
+    log(`models: ${roles.map((r) => `${r.name} ${setupOf(r.name).model.id}`).join(", ")}`);
+    log(`thinking: ${roles.map((r) => `${r.name} ${setupOf(r.name).thinkingLevel}`).join(", ")}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
@@ -295,11 +311,9 @@ async function claimBody(
         },
       },
       runId,
-      (reason) => stop(reason === "lease-lost" ? "lease-lost" : "self-stop"),
-      undefined,
+      () => stop("lease-lost"),
       stored,
       live,
-      halt.signal,
     );
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.
@@ -321,7 +335,7 @@ async function claimBody(
       },
     };
     // A thread keeps the model it started on (the log records it).
-    const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
+    const threadModel = (fallback: Model<Api>, recorded: string | undefined) => {
       if (recorded) {
         // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only. Any other
         // thread (a run made on another model, reopened for a correction) gets the role's model:
@@ -330,12 +344,12 @@ async function claimBody(
         const [provider = "", ...id] = recorded.split("/");
         const allowed = visitor
           ? isVisitorSafe({ provider, id: id.join("/") })
-          : [workerModel, checkModel, mainModel].some((m) => `${m.provider}/${m.id}` === recorded);
-        return (allowed && models.getModel(provider, id.join("/"))) || primary;
+          : [...setups.values()].some(({ model: m }) => `${m.provider}/${m.id}` === recorded);
+        return (allowed && models.getModel(provider, id.join("/"))) || fallback;
       }
-      return primary;
+      return fallback;
     };
-    const callModel = (role: ModelRole) =>
+    const callModel = (role: string) =>
       retryTransient(
         (m, context, options) =>
           models.streamSimple(m, context, {
@@ -355,7 +369,7 @@ async function claimBody(
         },
       );
     const streamFor =
-      (role: ModelRole): ModelSetup["streamFn"] =>
+      (role: string): ModelSetup["streamFn"] =>
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
@@ -366,13 +380,13 @@ async function claimBody(
         );
         return stream;
       };
-    const primary = { main: mainModel, worker: workerModel, check: checkModel };
     supervised = superviseRun({
       runId,
       definition,
       plan: computed.tasks,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
+      inputId: run.input.id,
       inputPrefix: inputPrefixOf(run),
       previousClaim: claim.previousClaim?.reason,
       providerError: providerFailure,
@@ -383,8 +397,8 @@ async function claimBody(
       files: storeFiles(objects),
       outputs: r2Outputs(config.r2),
       model: (role, recorded) => ({
-        model: threadModel(primary[role], recorded),
-        thinkingLevel: thinking[role],
+        model: threadModel(setupOf(role).model, recorded),
+        thinkingLevel: setupOf(role).thinkingLevel,
         streamFn: streamFor(role),
       }),
       createSandbox,

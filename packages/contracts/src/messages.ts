@@ -111,7 +111,8 @@ export const MAX_MESSAGE_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 /** The body limit for the messages route: the base64 snapshot plus the text and marks. */
 export const MESSAGE_BODY_BYTES = 3 * 1024 * 1024;
 
-const MAX_MARKS = 20;
+/** The most marks one message carries. */
+export const MAX_MARKS = 20;
 const MAX_TEXT = 10_000;
 
 /**
@@ -164,10 +165,18 @@ const messageBase = {
   text: z.string().max(MAX_TEXT).optional(),
   marks: z.array(markSchema).max(MAX_MARKS).optional(),
   taskId: taskIdSchema.optional(),
+  /** A To check item's id, as the run view lists it (needs `taskId`; the route checks it is one of that task's). */
+  itemId: z.string().min(1).optional(),
   go: z.literal(true).optional(),
 };
 
-type MessageRules = { text?: string; marks?: unknown[]; taskId?: string; go?: true };
+type MessageRules = {
+  text?: string;
+  marks?: unknown[];
+  taskId?: string;
+  itemId?: string;
+  go?: true;
+};
 
 /** `text` unless `go`; `taskId` with `go` or with marks. */
 function messageRules<T extends z.ZodType<MessageRules>>(schema: T) {
@@ -179,6 +188,10 @@ function messageRules<T extends z.ZodType<MessageRules>>(schema: T) {
     .refine((m) => m.go !== true || m.taskId !== undefined, {
       path: ["taskId"],
       message: "go needs taskId",
+    })
+    .refine((m) => m.itemId === undefined || m.taskId !== undefined, {
+      path: ["taskId"],
+      message: "itemId needs taskId",
     })
     .refine((m) => (m.marks ?? []).length === 0 || m.taskId !== undefined, {
       path: ["taskId"],
@@ -222,7 +235,11 @@ export const correctionEndedSchema = z.object({
 export type CorrectionEnded = z.infer<typeof correctionEndedSchema>;
 
 /** The payload of a `reply` event: the main agent's answer to the person. */
-export const replySchema = z.object({ text: z.string().min(1) });
+export const replySchema = z.object({
+  text: z.string().min(1),
+  /** The redo the main agent proposes (`reply`'s `offer`); the person accepts it with a `go` on the same task. */
+  offer: z.object({ taskId: taskIdSchema }).optional(),
+});
 export type Reply = z.infer<typeof replySchema>;
 
 /** The request body: a `personMessageSchema` with the snapshot as base64 bytes, and the caller's retry id. */

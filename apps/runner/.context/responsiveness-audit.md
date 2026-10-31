@@ -21,7 +21,7 @@ refactor. No second storage interface, compactor or history format was added.
 
 The opt-in [probe](../src/responsiveness-probe.ts) starts a separate local HTTP
 process: peer CPU and memory do not count as the runner's. It uses the real
-HTTP client, Pi provider SDK, retry wrapper, lease (15 s heartbeat, 45 s
+HTTP client, Pi provider SDK, retry wrapper, lease (15 s heartbeat, 120 s
 self-stop), thread resume, image-history wrapper, filesystem object store,
 workflow loader and bash output collector. A 10 ms timer records maximum
 **lateness**, excluding its intended interval. Wall time includes IO; it is

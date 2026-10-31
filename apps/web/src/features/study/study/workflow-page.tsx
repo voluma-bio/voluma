@@ -22,7 +22,7 @@ export function WorkflowPage() {
         title={`Workflow, across ${plural(detail.scans.length, "scan")}`}
         subtitle={workflow.name}
       />
-      <div className="overflow-x-auto border-b border-border px-6 py-6">
+      <div className="border-b border-border px-6 py-6">
         <TaskGraph
           size="study"
           tasks={graph}
@@ -33,7 +33,6 @@ export function WorkflowPage() {
               preventScrollReset: true,
             })
           }
-          className="min-w-[48rem]"
         />
       </div>
       {selected && (
