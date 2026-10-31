@@ -7,13 +7,20 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import { runQuery } from "@voluma/api-client/query";
-import type { Run } from "@voluma/contracts/run";
+import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { formatDuration, KeysForm, plainError, scanLabel, useNow } from "@voluma/run-view";
+import {
+  formatDuration,
+  KeysForm,
+  loadKeys,
+  plainError,
+  scanLabel,
+  useNow,
+} from "@voluma/run-view";
 import { Button, Facts, Popover, ShellHeading, type Status, StatusMark } from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
@@ -172,33 +179,11 @@ function StopRun({ run }: { run: Run }) {
 
 /** The run's own problems, over the views: waiting for its starter's keys, failed, or out of touch. */
 export function RunAlert({ run, userId, stale }: { run: Run; userId: string; stale: boolean }) {
-  const client = useQueryClient();
-  const resend = useMutation({
-    mutationFn: (keys: Parameters<typeof resendKeys>[1]) => resendKeys(run.id, keys),
-    onSuccess: (next) => client.setQueryData(runQuery(run.id).queryKey, next),
-  });
   const { state } = run;
   const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
   if (state.status === "awaiting-keys")
     return run.startedBy === userId ? (
-      <section className={`${bar} grid gap-2 bg-check-tint text-check-strong`}>
-        <p>The run is waiting for your keys: the server restarted and no longer has them.</p>
-        <div className="max-w-sm">
-          <KeysForm
-            userId={userId}
-            submitLabel="Continue the run"
-            busy={resend.isPending}
-            onSubmit={(keys) => resend.mutate(keys)}
-          />
-        </div>
-        {resend.isError && (
-          <p role="alert" className="text-destructive">
-            {resend.error instanceof ApiError && resend.error.status === 429
-              ? "Too many runs are waiting right now. Try again shortly."
-              : "Couldn't send the keys. Try again."}
-          </p>
-        )}
-      </section>
+      <AwaitingKeys run={run} userId={userId} bar={bar} />
     ) : (
       <p className={`${bar} bg-check-tint text-check-strong`}>
         The run is waiting for the keys of the person who started it.
@@ -217,6 +202,53 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
       </p>
     );
   return null;
+}
+
+/**
+ * The starter's own run waiting for keys. Mounted once per wait, it sends the key stored in this
+ * browser by itself, once; the form shows when there is no stored key or that send fails.
+ */
+function AwaitingKeys({ run, userId, bar }: { run: Run; userId: string; bar: string }) {
+  const client = useQueryClient();
+  const resend = useMutation({
+    mutationFn: (keys: VisitorKeys) => resendKeys(run.id, keys),
+    onSuccess: (next) => client.setQueryData(runQuery(run.id).queryKey, next),
+  });
+  const [stored] = useState(() => loadKeys(userId));
+  // A ref, not state: StrictMode runs the effect twice and the key must go once.
+  const sent = useRef(false);
+  const { mutate } = resend;
+  useEffect(() => {
+    if (!stored || sent.current) return;
+    sent.current = true;
+    mutate(stored);
+  }, [stored, mutate]);
+  if (stored && !resend.isError)
+    return (
+      <p role="status" className={`${bar} bg-muted text-muted-foreground`}>
+        The server restarted. Reconnecting with your saved key…
+      </p>
+    );
+  return (
+    <section className={`${bar} grid gap-2 bg-check-tint text-check-strong`}>
+      <p>The run is waiting for your keys: the server restarted and no longer has them.</p>
+      <div className="max-w-sm">
+        <KeysForm
+          userId={userId}
+          submitLabel="Continue the run"
+          busy={resend.isPending}
+          onSubmit={(keys) => resend.mutate(keys)}
+        />
+      </div>
+      {resend.isError && (
+        <p role="alert" className="text-destructive">
+          {resend.error instanceof ApiError && resend.error.status === 429
+            ? "Too many runs are waiting right now. Try again shortly."
+            : "Couldn't send the keys. Try again."}
+        </p>
+      )}
+    </section>
+  );
 }
 
 /** Why the run failed: the run's error without the provider's raw response. */

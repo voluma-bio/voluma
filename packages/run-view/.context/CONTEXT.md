@@ -103,8 +103,10 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   way a guest runs (the API refuses a guest start without it, 403); a member may keep one too. A key
   in this browser is sent with every start, and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
-  `voluma.visitor-keys.<userId>`; a run in `awaiting-keys` shows the form on its page
-  (`resendKeys`) only to the user who started it.
+  `voluma.visitor-keys.<userId>`. A run in `awaiting-keys` is handled on its page
+  (`features/scan/scan-header.tsx`) for the user who started it only: with a key stored, the page
+  sends it (`resendKeys`) once per wait by itself; without one, or when that send fails, it shows
+  the form. Other users see that the run waits for its starter.
 - **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
   `formatDuration`, `plural`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
