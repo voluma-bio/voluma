@@ -147,11 +147,12 @@ value on the next Blueprint sync, so change those in the yaml.
 
 A rollback restores the old code, not the old schema: migrations have already run and
 aren't reversed. It is safe only if the migrations since that deploy followed the
-expand-then-contract rule. Otherwise fix forward.
-Gate: merge #333 (the run-keyed contract migration, 0016) only after #332's commit is live on
-staging (check the API's deployed commit); the API before #332 can't run on the 0016 schema. A rollback through the API leaves autodeploy on, so the next
+expand-then-contract rule. Otherwise fix forward. A rollback through the API leaves autodeploy on, so the next
 merge would deploy over it: the `PATCH` above turns it off (not yet run here). Turn it back on
 (`{"autoDeploy":"yes"}`, or the dashboard's Settings, Build & Deploy) once the fix is merged.
+
+Gate: merge #333 (the run-keyed contract migration, 0016) only after #332's commit is live on
+staging (check the API's deployed commit); the API before #332 can't run on the 0016 schema.
 
 The runner service (`pnpm --filter @voluma/runner start`) claims whatever is queued, so
 pointing a local one at staging (`VOLUMA_API_URL`) takes a visitor's run and their keys. Run
