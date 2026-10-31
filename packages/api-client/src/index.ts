@@ -37,6 +37,11 @@ import {
   type VisitorKeys,
 } from "@voluma/contracts/run";
 import {
+  type UpdateUserSettingsRequest,
+  type UserSettings,
+  userSettingsSchema,
+} from "@voluma/contracts/settings";
+import {
   type CreateReviewSnapshotRequest,
   createReviewSnapshotRequestSchema,
   listReviewSnapshotsResponseSchema,
@@ -119,6 +124,18 @@ export async function getMe(): Promise<Me | null> {
   const res = await request("/auth/me");
   if (res.status === 401) return null;
   return meResponseSchema.parse(await json(res));
+}
+
+/** The current user's personal settings; defaults until they save their first preference. */
+export async function getUserSettings(): Promise<UserSettings> {
+  return userSettingsSchema.parse(await json(await request("/user/settings")));
+}
+
+/** Saves only the supplied preferences for the current user, never another identity. */
+export async function updateUserSettings(patch: UpdateUserSettingsRequest): Promise<UserSettings> {
+  return userSettingsSchema.parse(
+    await json(await request("/user/settings", { method: "POST", body: patch })),
+  );
 }
 
 /** The caller's guest identity, made on first call; null when the server lets no guests in (404). */

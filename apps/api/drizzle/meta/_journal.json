@@ -127,6 +127,13 @@
       "when": 1793416989899,
       "tag": "0017_run_keyed_rows_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793424930913,
+      "tag": "0018_white_sleeper",
+      "breakpoints": true
     }
   ]
 }

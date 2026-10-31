@@ -10,7 +10,8 @@ apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
-                /api/review/ (review data, corrections) with app.route. A
+                /api/review/ (review data, corrections), and domains/user at /api/user/
+                (personal settings) with app.route. A
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
@@ -268,6 +269,24 @@ evicted the entry, a copy works until its access token expires (5 min on staging
 refused at its next refresh. `returnTo` is sanitized, limited to printable ASCII and 512
 characters, and dropped if it doesn't fit, which keeps a PKCE verifier cookie near 1.2 KB;
 `/login` evicts stale verifier cookies.
+
+## User settings
+
+`GET /api/user/settings` and `POST /api/user/settings` read and update only the
+session user's preferences, including guests. `domains/user` owns the
+`user_settings` table, keyed by `userId` alone: a preference follows a member
+across organizations and is never shared with lab mates. Guest preferences belong
+to that guest cookie's identity; signing in does not transfer them to a member.
+No profile data, credentials or arbitrary settings keys are stored here.
+
+The contract is `@voluma/contracts/settings`: explicit typed fields, defaults
+without a database write on GET, and strict nonempty partial updates. A save
+atomically upserts just the supplied fields. The client exports
+`getUserSettings`, `updateUserSettings`, `userSettingsQuery(userId)` and
+`useUpdateUserSettings(userId)`; the id scopes the query cache, never the API
+request. The shell's existing identity-keyed QueryClient keeps accounts separate.
+`theme` (`light` by default, or `dark`) is the first preference. The settings
+screen and application of this preference to the app are not implemented yet.
 
 ## Deployment
 

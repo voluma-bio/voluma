@@ -44,6 +44,8 @@ import { pgRunRecords } from "./domains/run/pg-run-records";
 import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
 import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
+import { createUser } from "./domains/user";
+import { pgUserSettings } from "./domains/user/pg-settings";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -203,6 +205,7 @@ app.use("/api/*", ...auth.guards);
 app.route("/api/auth", auth.sessionRoutes);
 app.use("/api/*", ...auth.session);
 app.route("/api/auth", auth.userRoutes);
+app.route("/api/user", createUser({ settings: pgUserSettings(db) }));
 app.route(
   "/api/run",
   createRun({
