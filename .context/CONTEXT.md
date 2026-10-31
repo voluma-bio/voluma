@@ -297,8 +297,8 @@ Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended r
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how Storybook shows both themes side by side. The app is light on home and study
-pages and dark in the 3D review. Tailwind's default palette is removed.
+how Storybook shows both themes side by side. The app uses light chrome on home, study
+and scan review; the 3D and slice image wells stay dark. Tailwind's default palette is removed.
 
 The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
 `primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
@@ -315,7 +315,7 @@ the CSS stays the one source.
 
 ## Scan review
 
-One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (dark),
+One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (light chrome, dark image wells),
 with the selection in the URL (`task`, `item`, `agent`); the old `/runs/:id/live` and
 `/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
 conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and

@@ -8,8 +8,9 @@ where it is used.
 
 ## Two themes, one token set
 
-- **Light** for home and study pages; **dark** for the 3D scan review. The whole app switches,
-  the frame included; nothing else differs between the two ("Imaging pro" in the redesign).
+- **Light** for home, study and scan review, including navigation, reports, controls and pane
+  headings. Only the 3D and slice image wells stay dark so anatomy remains bright against them.
+  The dark theme remains available for shared components in Storybook.
 - Components use semantic token utilities (`bg-card`, `text-muted-foreground`,
   `border-border`), never raw colours. The names are shadcn/ui's, with our palette as the values;
   `accent` is shadcn's hover fill and `primary` the ink-filled main action. A colour a screen needs goes into

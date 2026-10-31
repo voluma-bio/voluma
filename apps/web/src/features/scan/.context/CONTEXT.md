@@ -1,6 +1,6 @@
 # Scan review
 
-One screen, `/scans/:runId` (dark theme): one scan's run, live while it goes and for review once
+One screen, `/scans/:runId` (light shell, dark image wells): one scan's run, live while it goes and for review once
 it ends. The grid viewer fills the main area; To check, Report and Agents dock on the left, View
 and The AI on the right (`ShellPanel`s, shortcuts t, r, a, v, i). `/runs/:id/live` and
 `/runs/:runId` redirect here with their search kept. Links to a run use `runHref`
