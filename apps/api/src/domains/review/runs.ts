@@ -75,13 +75,19 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
   });
 
   app.post("/runs/:runId/checks/:checkId/accept", async (c) => {
-    const { baseRevisionId, taskId } = await parseJson(c, acceptCheckRequestSchema);
+    const { baseRevisionId, taskId, resultRevisionId } = await parseJson(
+      c,
+      acceptCheckRequestSchema,
+    );
     const { runId, checkId } = c.req.param();
     const record = await runs.decide(readerOf(c.var.user), runId, (record) => {
       currentReview(record, baseRevisionId);
       const task = record.results.revisions.at(-1)?.tasks.find((task) => task.id === taskId);
-      const check = task?.checks.find((check) => check.id === checkId);
-      if (!task || !check) throw new HTTPException(404, { message: "Check not found." });
+      if (!task) throw new HTTPException(404, { message: "Check not found." });
+      if (task.resultRevisionId !== resultRevisionId)
+        throw new HTTPException(409, { message: "This task's result changed. Look again." });
+      const check = task.checks.find((check) => check.id === checkId);
+      if (!check) throw new HTTPException(404, { message: "Check not found." });
       if (check.status === "accepted") return null;
       return {
         type: "check.accepted",
@@ -90,7 +96,7 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
           revisionId: baseRevisionId,
           taskId,
           checkId,
-          resultRevisionId: task.resultRevisionId,
+          resultRevisionId,
         },
       };
     });

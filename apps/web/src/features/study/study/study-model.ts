@@ -205,6 +205,7 @@ export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): Sca
       (item): NeedItem => ({
         id: item.checkId,
         taskId: item.taskId,
+        resultRevisionId: item.resultRevisionId,
         title: item.title,
         text: item.detail,
         accepted: false,

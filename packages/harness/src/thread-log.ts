@@ -431,8 +431,14 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "message":
         if (record && e.payload.role === "user") record.inputPending = undefined;
-        if (record && e.payload.role === "assistant") record.reply = e.payload.text;
-        if (record && e.payload.role === "user" && e.payload.sender.kind === "runtime") {
+        if (record && e.payload.role === "assistant" && !e.payload.compaction)
+          record.reply = e.payload.text;
+        if (
+          record &&
+          e.payload.role === "user" &&
+          e.payload.sender.kind === "runtime" &&
+          !e.payload.sender.notice
+        ) {
           const afterCutOff = resumedCutOff.delete(e.threadId);
           const first = !briefed.has(e.threadId);
           if (!first && !afterCutOff) record.nudges++;
