@@ -142,14 +142,16 @@ export function AgentsPanel({
         threadId={selected.id}
         className="min-h-0 flex-1 px-4 pt-3"
         actions={
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={follow}
-              onChange={(e) => onAgent(e.target.checked ? null : selected.id)}
-            />
-            Follow live
-          </label>
+          !ended && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={follow}
+                onChange={(e) => onAgent(e.target.checked ? null : selected.id)}
+              />
+              Follow live
+            </label>
+          )
         }
       />
     </div>

@@ -25,6 +25,7 @@ import {
   useRunStore,
 } from "@voluma/run-view";
 import {
+  Button,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -72,24 +73,28 @@ function Scan({ runId }: { runId: string }) {
     // Queue place and state changes aren't events; the stream is the source for the rest.
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
   });
+  // Laid out as the study page's own loading and not-found states.
+  const page = "mx-auto w-full max-w-2xl px-6 py-8";
   if (run.isPending)
     return (
-      <div className="p-8">
+      <div className={page}>
         <LoadingState label="Loading the scan" rows={4} />
       </div>
     );
   if (!run.data) {
     const missing = run.error instanceof ApiError && run.error.status === 404;
     return (
-      <div className="p-8">
+      <div className={page}>
         <ErrorState
-          title={missing ? "This scan's run isn't here" : "Couldn't load the scan"}
+          title={missing ? "This scan isn't here" : "Couldn't load the scan"}
           onRetry={missing ? undefined : () => void run.refetch()}
         >
-          {missing ? "It may have been removed, or you can't open it. " : "Check your connection. "}
-          <Link to="/" className="text-primary-text hover:underline">
-            Go to Home
-          </Link>
+          {missing
+            ? "It may have been removed, or it belongs to another lab."
+            : "Check your connection, then try again."}{" "}
+          <Button asChild variant="link">
+            <Link to="/">Go to Home</Link>
+          </Button>
         </ErrorState>
       </div>
     );
@@ -177,7 +182,7 @@ function useAccepting(run: Run, revision: Revision | undefined) {
     readOnly,
     accept: readOnly
       ? undefined
-      : (item: NeedItem) => {
+      : (item: NeedItem, onAccepted?: () => void) => {
           const task = revision?.tasks.find((t) => t.id === item.taskId);
           if (
             task?.resultRevisionId !== item.resultRevisionId ||
@@ -186,11 +191,10 @@ function useAccepting(run: Run, revision: Revision | undefined) {
             setError({ id: item.id, text: "This changed since you opened it. Look again." });
             return;
           }
-          mutation.mutate({
-            checkId: item.id,
-            taskId: item.taskId,
-            resultRevisionId: item.resultRevisionId,
-          });
+          mutation.mutate(
+            { checkId: item.id, taskId: item.taskId, resultRevisionId: item.resultRevisionId },
+            { onSuccess: onAccepted },
+          );
         },
     pending: mutation.isPending ? mutation.variables?.checkId : undefined,
     error,

@@ -108,9 +108,12 @@ export function HomePage() {
 
 function Dashboard({ views }: { views: StudyView[] }) {
   const needs = views.flatMap(needsYou);
-  const running = views.flatMap((v) =>
+  // A run waiting for keys is in Needs you; one waiting in line is only counted here.
+  const live = views.flatMap((v) =>
     v.study.newestRuns.filter(isLive).map((run) => ({ run, study: v.one ? null : v.study })),
   );
+  const running = live.filter(({ run }) => run.state.status === "running");
+  const waiting = live.filter(({ run }) => run.state.status === "queued").length;
   return (
     <>
       <div className="grid grid-cols-2 gap-px border-b border-border bg-border max-[860px]:grid-cols-1">
@@ -131,6 +134,7 @@ function Dashboard({ views }: { views: StudyView[] }) {
         <Box
           title="Running"
           count={running.length > 0 && <Count tone="running">{running.length}</Count>}
+          foot={waiting > 0 && `${waiting} waiting to start`}
         >
           {running.length > 0 ? (
             <List columns="auto" label="Running">
@@ -174,8 +178,8 @@ function needsYou(v: StudyView): React.ReactNode[] {
   if (failures.length > 0)
     parts.push(
       one
-        ? "The run stopped before it finished."
-        : `${plural(failures.length, "scan")} stopped: ${failures.map((r) => r.inputName).join(", ")}.`,
+        ? "The run failed before it finished."
+        : `${plural(failures.length, "scan")} failed: ${failures.map((r) => r.inputName).join(", ")}.`,
     );
   if (keys.length > 0)
     parts.push(
@@ -187,8 +191,8 @@ function needsYou(v: StudyView): React.ReactNode[] {
   const cell =
     study.toCheck > 0 ? (
       <StatusMark status="check" label={`${study.toCheck} to check`} />
-    ) : failures.length > 0 ? (
-      <StatusMark status="stopped" />
+    ) : failures[0] ? (
+      <StatusMark {...runStatus(failures[0])} />
     ) : (
       <StatusMark status="paused" label="Needs your keys" />
     );

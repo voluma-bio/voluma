@@ -50,7 +50,8 @@ export function ReportPanel({
       </div>
     );
   return (
-    <div className="grid gap-5 p-4">
+    // One track no wider than the panel, so the graph fits it rather than widening it.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 p-4">
       <section aria-label="Tasks">
         <h3 className="mb-3 text-sm font-semibold">Tasks</h3>
         <TaskGraph
@@ -126,8 +127,8 @@ function TaskDetail({
           {task.check && (
             <span>
               {task.check.verdict === "passed"
-                ? "Second AI check agreed"
-                : "Second AI check sent it back"}
+                ? "Second check agreed"
+                : "Second check sent it back"}
             </span>
           )}
         </p>

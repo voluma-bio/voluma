@@ -91,9 +91,10 @@ export type RunStateFacts =
 
 /**
  * Where the run stands, as far as its tasks' states need it: `stopped` once it has ended,
- * `paused` while it waits for a runner or keys, none while it runs.
+ * `waiting` while it waits in line for a runner, `paused` while it waits for its starter's keys,
+ * none while it runs.
  */
-type RunHalt = "stopped" | "paused" | undefined;
+type RunHalt = "stopped" | "waiting" | "paused" | undefined;
 
 /**
  * Every plan task's state, the one rule the scan review and the study both show. It reads fold
@@ -122,7 +123,12 @@ export function taskStates(
   const run: RunNow = {
     running: new Set(state.status === "running" ? open : []),
     failed: state.status === "ended" && state.outcome === "failed" ? failed : new Set(),
-    halt: state.status === "ended" ? "stopped" : state.status === "running" ? undefined : "paused",
+    halt: {
+      ended: "stopped" as const,
+      queued: "waiting" as const,
+      "awaiting-keys": "paused" as const,
+      running: undefined,
+    }[state.status],
   };
   const byId = new Map(revision.tasks.map((t) => [t.id, t]));
   return new Map(
