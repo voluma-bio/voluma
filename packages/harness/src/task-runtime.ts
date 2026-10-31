@@ -347,14 +347,14 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     if (c.kind === "main") {
       if (workers.length > 0) {
         throw new Refusal(
-          `${taskId} has a worker (${workers[0]?.id}); it is not yours to write to.`,
+          `${taskId} has a worker (${workers[0]?.name}); it is not yours to write to.`,
         );
       }
     } else {
       // Its own `thread.started` may not be stored yet: a thread not in the log is the newest.
       const latest = workers.at(-1);
       if (latest && latest.id !== c.threadId && d.threads.has(c.threadId)) {
-        throw new Refusal(`${taskId} is held by a newer worker (${latest.id}); stop here.`);
+        throw new Refusal(`${taskId} is held by a newer worker (${latest.name}); stop here.`);
       }
     }
     const waiting = known(taskId).dependsOn.filter((d) => !taskOf(d)?.satisfied);

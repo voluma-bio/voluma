@@ -46,10 +46,6 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
-- **Run-keyed rows, contract step.** After the expand migration (0016) and the API that reads by
-  `run_id` are live: opaque thread ids from the runner (`uuid5(runId, name)`); then one migration
-  that sets `pi_messages.run_id` NOT NULL, moves the primary keys to `events(run_id, id)` and
-  `pi_messages(run_id, thread_id, idx)`, drops the `pi_messages_fill_run_id` trigger and the unused
-  `threads` table; `seed:example` then copies a run verbatim (no id rewriting) and `EventIdTaken`
-  goes. A copied run's history rows hold R2 image keys under the source run's `runs/<runId>/scratch/…`
-  (fine for a read-only example; give a copy its own keys before an example can be rerun).
+- **Copied runs read the source's scratch images.** `seed:example` copies `pi_messages` verbatim, and
+  history rows hold R2 image keys under the source run's `runs/<runId>/scratch/…`. Fine for a read-only
+  example; give a copy its own keys (or resolve them per run) before an example can be rerun or reopened.

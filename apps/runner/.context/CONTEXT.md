@@ -37,7 +37,7 @@ the review-asset converter, all through the same session. `RunLayout.forThread(r
   `(path) => boolean` that `forThread(thread, cited)` takes; callers pass
   `(p) => runtime.cites(taskId, p)`, answered from the fold (`FoldedTask.citedScratch`).
   The same `keyOf` check validates the evidence a checker names. The main agent
-  (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
+  (name `main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
   no sandbox today.
 - Every thread spills a truncated bash output to `/scratch/<name>/.tool-output/<id>`
   (`toolOutputKey(runId, threadName, toolCallId)`), a worker too.
