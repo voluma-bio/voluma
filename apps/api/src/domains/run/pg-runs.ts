@@ -225,6 +225,7 @@ function derive(log: RunEvent[]): Derived {
       if (check.status === "open") {
         toCheck.push({
           taskId: task.id,
+          resultRevisionId: task.resultRevisionId,
           checkId: check.id,
           title: check.title,
           detail: check.detail,

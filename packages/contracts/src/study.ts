@@ -121,6 +121,8 @@ export type StudyValue = z.infer<typeof studyValueSchema>;
 export const toCheckItemSchema = z.object({
   runId: runIdSchema,
   taskId: taskIdSchema,
+  /** The task result shown with this check, passed unchanged when accepting it. */
+  resultRevisionId: z.string().min(1),
   checkId: z.string().min(1),
   title: z.string(),
   /** The text the review shows under the title: why the check was raised. */

@@ -115,7 +115,13 @@ function CheckRow({
         <Button
           size="sm"
           disabled={readOnly || !revision || accept.isPending || accept.isSuccess}
-          onClick={() => accept.mutate({ checkId: item.checkId, taskId: item.taskId })}
+          onClick={() =>
+            accept.mutate({
+              checkId: item.checkId,
+              taskId: item.taskId,
+              resultRevisionId: item.resultRevisionId,
+            })
+          }
         >
           {accept.isPending ? "Saving…" : accept.isSuccess ? "Accepted" : "Looks right"}
         </Button>

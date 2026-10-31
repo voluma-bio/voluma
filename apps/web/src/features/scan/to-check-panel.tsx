@@ -24,7 +24,7 @@ export function ToCheckPanel({
 }: {
   runId: string;
   scan: string;
-  /** Every item of the scan in task order, with what was accepted here. */
+  /** Every item of the scan in task order, reconciled with authoritative human decisions. */
   items: NeedItem[];
   tasks: TaskView[];
   /** The open item: one of the task in view's, none when that task has none. */

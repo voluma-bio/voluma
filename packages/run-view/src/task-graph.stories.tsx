@@ -70,7 +70,15 @@ function thread(
 }
 
 function need(taskId: string, title: string): NeedItem {
-  return { id: `${taskId}/1`, taskId, title, text: "", accepted: false, acceptable: true };
+  return {
+    id: `${taskId}/1`,
+    taskId,
+    resultRevisionId: "story-revision",
+    title,
+    text: "",
+    accepted: false,
+    acceptable: true,
+  };
 }
 
 function scanTasks(
