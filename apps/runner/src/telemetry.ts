@@ -18,8 +18,8 @@ export interface RunScope {
   /** Tool calls emitted and not yet resulted, by toolCallId -> "thread tool". */
   inFlight: Map<string, string>;
   /**
-   * Fails the run with this error; set once the run can report. Returns false when the run's
-   * report is already fixed, so the error changes nothing.
+   * Fails the run with this error; set once the run can report. Returns false when it
+   * changes nothing: the run is already cut off or its result settled.
    */
   fail?(error: unknown): boolean;
 }

@@ -39,6 +39,7 @@ import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
+import { errorText } from "@voluma/harness/error-text";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { NO_WORKFLOW_DIR, roleModelUnset } from "@voluma/harness/messages";
 import { usageOf } from "@voluma/harness/model-usage";
@@ -60,7 +61,12 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
+import {
+  claimSandboxes,
+  endOtherClaims,
+  terminateClaim,
+  withTransientRetry,
+} from "./modal-sandbox.ts";
 import { retryTransient } from "./model-retry.ts";
 import { providerFailure } from "./provider-error.ts";
 import { r2Outputs } from "./r2-outputs.ts";
@@ -110,23 +116,17 @@ export const inputPrefixOf = (run: Claim["run"]) =>
 
 type Stopped = StopReason | "shutdown";
 
-/** Which report a cut-off reason, a clean end or a failure becomes; undefined: say nothing more. */
-export function reportFor(
-  stopped: Stopped | undefined,
-  error?: string,
-): ReportRequest["report"] | undefined {
-  if (stopped === "stop" || stopped === "lease-lost") return undefined;
-  if (
-    stopped === "self-stop" ||
-    stopped === "loop-stalled" ||
-    stopped === "refused" ||
-    stopped === "shutdown"
-  )
-    return { kind: "released", reason: stopped };
-  return error === undefined
+/** The report of a claim that was cut off; undefined: say nothing more (the server or lease ended it). */
+function cutOffReport(stopped: Stopped): ReportRequest["report"] | undefined {
+  return stopped === "stop" || stopped === "lease-lost"
+    ? undefined
+    : { kind: "released", reason: stopped };
+}
+
+const endedReport = (error?: string): ReportRequest["report"] =>
+  error === undefined
     ? { kind: "ended", outcome: "completed" }
     : { kind: "ended", outcome: "failed", error };
-}
 
 /** Runs the claim inside its `RunScope`, so an uncaught error in its work fails this run alone. */
 export function runClaim(ctx: RunnerContext, claim: Claim, shutdown: AbortSignal): Promise<void> {
@@ -198,7 +198,8 @@ async function claimBody(
   // the next step; after, `Supervised.fail` ends the run with it.
   let uncaught: string | undefined;
   scope.fail = (e) => {
-    const message = redact(e instanceof Error ? e.message : String(e));
+    if (cutOff.signal.aborted) return false; // released or stopped: nothing is reported as failed
+    const message = redact(errorText(e));
     if (supervised) {
       if (!supervised.fail(message)) return false;
     } else uncaught ??= message;
@@ -321,13 +322,15 @@ async function claimBody(
       // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
       const workflowDir = run.workflows[0]?.path;
       if (!workflowDir) throw new Error(NO_WORKFLOW_DIR);
-      const definition = await loadWorkflow(workflowDir, {
-        store: objects,
-        prefix: workflowSnapshotPrefix(runId),
-        root: REPO_ROOT,
-        commit: config.commit,
-        knownTools: TOOL_NAMES,
-      });
+      const definition = await withTransientRetry(signal, log, () =>
+        loadWorkflow(workflowDir, {
+          store: objects,
+          prefix: workflowSnapshotPrefix(runId),
+          root: REPO_ROOT,
+          commit: config.commit,
+          knownTools: TOOL_NAMES,
+        }),
+      );
       // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
       // models only: the main thread keeps its configured model when that is one, else the
       // visitor model.
@@ -390,7 +393,12 @@ async function claimBody(
     if (uncaught !== undefined) throw new Error(uncaught);
     supervised = superviseRun({
       runId,
-      prepare,
+      prepare: (signal) =>
+        prepare(signal).catch((e) => {
+          // The report keeps only `errorText`; the stack shows where it came from.
+          log(redact(e instanceof Error && e.stack ? e.stack : String(e)));
+          throw e;
+        }),
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
       inputId: run.input.id,
@@ -425,16 +433,23 @@ async function claimBody(
     if (outcome.kind === "ended" && outcome.error !== undefined)
       log(`failed: ${redact(outcome.error)}`);
   } catch (e) {
-    error = redact(e instanceof Error ? e.message : String(e));
+    error = redact(errorText(e));
     log(`failed: ${error}`);
+    log(redact(e instanceof Error && e.stack ? e.stack : String(e)));
   } finally {
     // The harness decided how the claim ended, drained included; a stop landing now changes nothing.
     // Without an outcome the claim failed before the supervisor ran (or was stopped then).
     const report =
       outcome?.kind === "ended"
-        ? reportFor(undefined, outcome.error === undefined ? undefined : redact(outcome.error))
-        : reportFor(stopped, uncaught ?? error);
-    if (report?.kind === "ended") await closeSandboxes(CLOSE_BUDGET_MS.ended);
+        ? endedReport(outcome.error === undefined ? undefined : redact(outcome.error))
+        : stopped
+          ? cutOffReport(stopped)
+          : endedReport(uncaught ?? error);
+    // A shutdown that lands after the harness ended the run still has the shutdown budget (`main.ts`) to fit in.
+    if (report?.kind === "ended")
+      await closeSandboxes(
+        stopped === "shutdown" ? CLOSE_BUDGET_MS.stopped : CLOSE_BUDGET_MS.ended,
+      );
     shutdown.removeEventListener("abort", onShutdown);
     lease?.halt();
     const wrapUp = (async () => {

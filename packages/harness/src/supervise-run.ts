@@ -19,6 +19,7 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
+import { errorText } from "./error-text";
 import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
 import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
@@ -27,7 +28,7 @@ import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { reviewAssetsWorker } from "./review-assets";
+import { NotPreparedError, reviewAssetsWorker } from "./review-assets";
 import { type LoopConfig, type ModelSetup, runLoop } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
@@ -201,7 +202,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     inputId: options.inputId,
     rootThreadId,
     recorder,
-    sandbox: async () => (await world).session.get(CONVERT, { note: false }),
+    sandbox: async () => {
+      const ready = await world.catch((e) => {
+        throw new NotPreparedError(errorText(e), { cause: e });
+      });
+      return ready.session.get(CONVERT, { note: false });
+    },
     signal: cutOff,
     log: options.log,
   });
@@ -292,8 +298,6 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     });
   };
 
-  const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
   const result = (async (): Promise<Outcome> => {
     // A thread stuck in a slow call (creating a sandbox takes a minute) must not hold the end of
     // the run: WIND_DOWN_MS after the loop's signal fires, the result settles anyway.
@@ -318,12 +322,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       if (cutOff.aborted) return { kind: "cut-off" };
       if (!(await conversion.drain(options.drainMs))) return { kind: "cut-off" };
       // An error nobody caught (`fail`) is what ended the run, whatever the stopped loop threw.
-      const reason = failure ?? (error === undefined ? undefined : messageOf(error));
+      const reason = failure ?? (error === undefined ? undefined : errorText(error));
       return reason === undefined ? { kind: "ended" } : { kind: "ended", error: reason };
     } catch (e) {
       // A store that gave up during the drain stops the run (the host's cut-off) before this.
       if (cutOff.aborted) return { kind: "cut-off" };
-      return { kind: "ended", error: messageOf(e) };
+      return { kind: "ended", error: errorText(e) };
     } finally {
       settled = true;
     }
@@ -333,7 +337,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     result,
     fail(error) {
       if (settled) return false;
-      failure ??= messageOf(error);
+      failure ??= errorText(error);
       ending.abort();
       return true;
     },

@@ -24,6 +24,7 @@
 import { ASSET_ERROR_MAX, type RunEvent } from "@voluma/contracts/events";
 import { inputReviewPrefix } from "@voluma/contracts/r2";
 import { type ReviewAssetsManifest, reviewAssetsManifestSchema } from "@voluma/contracts/review";
+import { errorText } from "./error-text";
 import { EVIDENCE, REVIEW, WORKFLOW } from "./layout";
 import { type Sandbox, SandboxEndedError } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
@@ -67,11 +68,18 @@ export function convertJob(event: RunEvent): Job | undefined {
   }
 }
 
+/**
+ * What `ReviewAssetsOptions.sandbox` rejects with when the run's setup failed, so no sandbox will
+ * ever exist. The worker halts and leaves its files pending; `drain` records them with this error.
+ */
+export class NotPreparedError extends Error {}
+
 export interface ReviewAssetsWorker {
   /**
    * For a run that has ended: waits until every output has an `assets.*` event, up to
    * `timeoutMs`, then stops the worker and stores `assets.failed` for each output still without
-   * one ("timed out", or "the run ended before the file was converted"). Returns false, having
+   * one ("timed out", the setup's error, or "the run ended before the file was converted"). Every
+   * permanent record of an ended run is made here. Returns false, having
    * recorded nothing, when `options.signal` fires first; the check and the recording happen in
    * one synchronous step, so a cut-off never lands between them.
    */
@@ -88,7 +96,10 @@ export interface ReviewAssetsOptions {
   /** The run's root thread, which the `assets.*` events are written on. */
   rootThreadId: string;
   recorder: Recorder;
-  /** The convert sandbox (`SandboxSession.get`), created on first use and replaced when it has ended. */
+  /**
+   * The convert sandbox (`SandboxSession.get`), created on first use and replaced when it has
+   * ended. Rejects with `NotPreparedError` when the run's setup failed.
+   */
   sandbox(): Promise<Sandbox>;
   /** The host's cut-off. */
   signal: AbortSignal;
@@ -107,6 +118,8 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   const known = new Map<string, Job>(); // queued once
   const queue: Job[] = [];
   let running: Job | undefined;
+  let loopEnded = false;
+  let setupFailure: string | undefined;
 
   /** Reads the events stored since the last scan. */
   function scan() {
@@ -229,8 +242,14 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
         `review assets: ${job.sha256.slice(0, 8)} ${"manifest" in result ? "ready" : "failed"} in ${seconds}s`,
       );
     } catch (e) {
+      if (e instanceof NotPreparedError) {
+        // No file can convert: stop and leave them pending, for `drain` to record behind its cut-off check.
+        setupFailure = e.message;
+        halt.abort();
+        return;
+      }
       if (signal.aborted) return; // stopped: the next claim finds the file again
-      const failure = e instanceof Error ? e.message : String(e);
+      const failure = errorText(e);
       log(`review assets: ${job.sha256} failed: ${failure}`);
       record(job, { error: `the convert sandbox failed: ${failure}` });
     }
@@ -256,15 +275,16 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
         running = undefined;
       }
     }
+    loopEnded = true;
   })();
-  loop.catch((e) => log(`review assets: worker stopped: ${e}`));
+  loop.catch((e) => log(`review assets: worker stopped: ${errorText(e)}`));
 
   return {
     async drain(timeoutMs) {
       const deadline = Date.now() + timeoutMs;
       while (!options.signal.aborted && Date.now() < deadline) {
         scan();
-        if (!running && pending().length === 0) break;
+        if (loopEnded || (!running && pending().length === 0)) break;
         await sleep(250);
       }
       if (options.signal.aborted) return false;
@@ -272,6 +292,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       halt.abort();
       // A call that ignores the abort (creating a sandbox) must not hold the end of the run.
       await Promise.race([loop.catch(() => {}), new Promise((r) => setTimeout(r, HALT_GRACE_MS))]);
+      if (options.signal.aborted) return false;
       // Everything queued so far is stored before the last scan, so what is still without an
       // event is final: an ended run is never claimed again.
       await recorder.flush();
@@ -279,7 +300,11 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       if (options.signal.aborted) return false; // cut off in the meantime: the run is resumed, not ended
       for (const job of pending())
         record(job, {
-          error: timedOut ? "timed out" : "the run ended before the file was converted",
+          error: setupFailure
+            ? `the convert sandbox failed: ${setupFailure}`
+            : timedOut
+              ? "timed out"
+              : "the run ended before the file was converted",
         });
       await recorder.flush();
       return true;

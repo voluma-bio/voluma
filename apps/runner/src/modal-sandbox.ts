@@ -33,6 +33,7 @@
 import { randomUUID } from "node:crypto";
 import { isIPv4 } from "node:net";
 import { setTimeout } from "node:timers/promises";
+import { errorText } from "@voluma/harness/error-text";
 import {
   type CreateSandbox,
   type ExecChunk,
@@ -181,7 +182,33 @@ const TRANSIENT_SOCKET = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EP
 function isTransient(e: unknown): boolean {
   const code = (e as { code?: unknown } | null)?.code;
   if (typeof code === "number") return TRANSIENT_GRPC.has(code);
-  return typeof code === "string" && TRANSIENT_SOCKET.has(code);
+  if (typeof code === "string" && TRANSIENT_SOCKET.has(code)) return true;
+  // A connect that failed on every address is an AggregateError; a store client wraps the socket error.
+  const { errors, cause } = (e ?? {}) as { errors?: unknown; cause?: unknown };
+  return (
+    (Array.isArray(errors) && errors.some(isTransient)) ||
+    (cause !== undefined && isTransient(cause))
+  );
+}
+
+const RETRY_ATTEMPTS = 4;
+
+/** Runs `attempt`, retrying a transient failure (`isTransient`) a few times before it throws. */
+export async function withTransientRetry<T>(
+  signal: AbortSignal,
+  log: (line: string) => void,
+  attempt: () => Promise<T>,
+): Promise<T> {
+  for (let n = 1, wait = RETRY_MS.first; ; n++, wait *= 2) {
+    try {
+      return await attempt();
+    } catch (e) {
+      signal.throwIfAborted();
+      if (n === RETRY_ATTEMPTS || !isTransient(e)) throw e;
+      log(`failed (${errorText(e)}), retrying in ${wait / 1000} s`);
+      await setTimeout(wait, undefined, { signal });
+    }
+  }
 }
 
 const GRPC_NOT_FOUND = 5;

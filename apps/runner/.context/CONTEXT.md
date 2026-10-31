@@ -159,16 +159,16 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
 - **Drain.** A normal end (completed or failed) waits for the queue inside `superviseRun`'s
   `result` (`DRAIN_MS`, 10 minutes, the lease heartbeating meanwhile), before the sandboxes close.
   Then every output still without an `assets.*` event is recorded `assets.failed` ("timed out",
-  "the run ended before the file was converted", or, when `prepare` failed, the convert sandbox
-  failure naming it), so an ended run leaves no file "preparing" whatever step failed.
+  "the run ended before the file was converted", or, when `prepare` failed, the setup error), so an ended run leaves no file "preparing" whatever step failed.
   The worker starts at claim but its sandbox waits on `prepare` (workflow load, role-model
-  checks, ending an earlier claim's sandboxes), so that path is the same drain. Events go
+  checks, ending an earlier claim's sandboxes). A failed `prepare` halts the worker with the files
+  pending, and the drain records them behind its cut-off check like any other, so every permanent
+  asset record goes through that one check. `prepare` retries transient store errors a few times. Events go
   through `emit` (retried) and count as done once stored. This is **permanent for the run**: the next claim
   skips it and review shows the object without assets. A cut-off at any point before the failed
   events are queued (the drain checks and queues them in one synchronous step) makes `result` say
   `cut-off`: the run is reported `released` (nothing, for a server stop or a lost lease), so the next claim resumes the queue.
-  A cut-off run does not drain. A thread stuck past the 5 s wind-down after a failure can still
-  append an output the drain's last scan missed.
+  A cut-off run does not drain.
 - **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of
   float32) is the long pole. Add sandboxes if the drain times out in practice.
 
