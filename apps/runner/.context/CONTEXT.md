@@ -373,30 +373,40 @@ but the run's end (a thread in that state counts as running, so the loop's `stuc
 
 **After the headers nothing retries.** A stream that drops, an error sent inside the stream (Meta's `server_error`
 and `response.failed`, Anthropic's `overloaded_error`) or undici's `terminated` reaches the thread as it is. The
-texts differ by provider, so `model-fetch.ts` also reports the first 2xx answer, and `run.ts` keeps the threads
-whose latest call got one: a failure of such a call is *interrupted*, whatever its text.
+texts differ by provider, so the thread records the fact instead of the runner guessing from text: Pi emits a reply's
+`message_start` as a live partial only once the headers are in (a call that failed before them gets `message_start`
+with the final error message), and `start-thread.ts` writes `interrupted: true` on the failed `thread.ended` when
+the reply that ended the thread had started. A compaction summary call reports the same for its own call
+(`onProviderStreamEvent` fires only for body events). A refusal, a length stop and a context overflow are never
+interrupted, and neither is a failure before any call (stored history). The field is optional: an API from before it
+strips it, and that one end then reads as not interrupted (a fresh main, as before).
 
-What survives goes to the run loop (`packages/harness/src/run-loop.ts`, `checkFatal`), which asks
-`provider-error.ts` (the unit test there pins the texts):
-- *fatal* (any other 4xx: auth, `404 model_not_found`, an empty account): fails the run at once, on any thread.
-- *transient* (the set Pi retries, before the headers): fails the run when it ended the main agent.
-- *interrupted* (after the headers): the main agent is resumed once, the same thread with its history as it was plus
-  one runtime message ("The model provider failed during your last reply; continue."). A second one fails the run.
-  The count is the log's: starts of that thread after a `failed` end.
-- A worker or check that ended `failed` on a transient or interrupted error is a failed thread like any other: main
-  gets the inbox notice and decides, nothing resumes it automatically. For a worker, `message` resumes it or
-  `stop_worker` then `start_agent` replaces it. A check stays the task's check while `under-review`: `message` on it
-  resumes it with its transcript and sandbox, and `stop_worker` on it stops it, after which `startChecks` starts a
-  fresh check (a check stopped without a reason, which only main does). If main does neither (it is told, idle, and
-  nothing else runs), the task goes `to-check` with the reason "The second AI check could not finish: its AI provider
-  failed (<error>)". A live check that asked a question is still `answer`'s.
+What survives goes to the run loop (`packages/harness/src/run-loop.ts`), which asks `provider-error.ts` for the
+text's class (the unit test there pins the texts) and reads `interrupted` from the end:
+- *fatal* (any other 4xx: auth, `404 model_not_found`, an empty account): fails the run at once, on any thread
+  (`checkFatal`).
+- Main's other failures are all in `mainFailed`:
+  - *transient* (the set Pi retries, before the headers): fails the run.
+  - *interrupted*: the same thread is resumed with its history as it was plus one runtime message ("The model
+    provider failed during your last reply; continue."), unless the end before it on that thread was an interrupted
+    failure too and the thread has made no reply (a message or tool call) since its latest start: then the run fails. It is read from the log, so a restart or a
+    correction days later does not change it.
+  - anything else (a context overflow, a length stop, a refusal): a fresh `main.<n>` with the restart brief, once.
+- A worker or check that ended `failed` is a failed thread like any other: main gets the inbox notice and decides,
+  nothing resumes it automatically. For a worker, `message` resumes it or `stop_worker` then `start_agent` replaces
+  it. A check that failed with no verdict stays the task's check while `under-review` (`checkAwaitsMain`, whatever
+  the error): `message` on it resumes it with its transcript and sandbox, and `stop_worker` stops it and starts a
+  fresh check at once (`agents.replaceCheck`; a task may have its attempts' checks plus two replacements, then it is
+  left to check). If main does neither (it is told, idle, and nothing else runs), the task goes `to-check` with the
+  reason "The second AI check could not finish: <error>", which says "its AI provider failed" when it was one. A live
+  check that asked a question is still `answer`'s.
 
 The run's error reads "the AI stopped on an error from its provider: <message>", or "<task title>: the AI stopped
-on an error from its provider: <message>". Only threads this process started count, so a failure an earlier claim
+on an error from its provider: <message>". Only threads this process started count for a fatal or transient failure, so one an earlier claim
 recorded (a reopened run's old workers) never fails the new claim. A context overflow (400/413 "prompt is too
 long", `context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`) is not a provider error (only with
 status 400/413 or none; a 5xx body never counts): it fails that thread only. A main that failed that way is never
-resumed: `main()` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that
+resumed: `mainFailed` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that
 fails too fails the run with its error. Nothing releases the run to wait. `provider-error.ts` reads the status in the
 text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's `<status> {...}`, `<status> <html>` or
 `<status> status code (no body)`; Pi's `Server requested Ns retry delay` is transient by itself) and, for an

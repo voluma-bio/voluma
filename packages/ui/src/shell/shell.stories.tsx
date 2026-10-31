@@ -6,7 +6,7 @@ import { AppShell, ShellHeading, ShellLink, ShellPanel } from "./shell";
 /**
  * **What:** the one frame every screen sits in: a header line, an icon strip at each edge, up to
  * two docked panels per side, the main area between. **Why:** moving between the study and a
- * scan keeps the frame still; only the content and the colour change (light study, dark review).
+ * scan keeps the frame still; only the content changes.
  * Panels push the main area, never cover it. **Where:** every signed-in screen (`SignedIn`).
  *
  * Try: click a strip button to open its panel, again to close; Shift-click stacks a second panel;

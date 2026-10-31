@@ -39,7 +39,7 @@ import {
   answerText,
   CHECK_STOPPED,
   changedTasks,
-  checkProviderFailed,
+  checkFailed,
   checkReason,
   cutOffText,
   deliveryText,
@@ -65,6 +65,7 @@ import type { Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
 import { threadIdOf } from "./thread-id";
 import {
+  checkAwaitsMain,
   fixLimitReached,
   openAsk,
   type Role,
@@ -107,7 +108,8 @@ export const LOOP_DEFAULTS: LoopConfig = {
   stuckLimit: 2,
 };
 
-export type ProviderFailure = "fatal" | "transient" | "interrupted";
+/** The host's reading of a provider error's text (`RunLoopOptions.providerError`). */
+export type ProviderError = "fatal" | "transient";
 
 export interface RunLoopOptions {
   runId: string;
@@ -130,17 +132,18 @@ export interface RunLoopOptions {
   /** Builds the tools a thread's role names; the main agent's tools act through `agents`. */
   tools(thread: ThreadLayout, agents: Agents): Tool[];
   /**
-   * What a failed thread's error means (the host knows its texts, and whether the model's reply
-   * had started): `"fatal"` is a provider error no later call can fix (auth, model not found, an
-   * empty account) and fails the run at once; `"transient"` is one the model client already
-   * retried, before any reply (a rate limit, a 5xx, a timeout), and fails the run on the main
-   * agent; `"interrupted"` is one after the reply started, which nothing retried, and the main
-   * agent is resumed once. On any other thread both leave a failed thread for main to act on.
-   * `undefined` is not the provider's (a context overflow).
+   * What a failed thread's error text means (the host knows its texts): `"fatal"` is a provider
+   * error no later call can fix (auth, model not found, an empty account) and fails the run at
+   * once; `"transient"` is one the model client already retried, before any reply (a rate limit,
+   * a 5xx, a timeout), and fails the run on the main agent. `undefined`: not the provider's (a
+   * context overflow), or a stream error, which the thread records as `interrupted` on its end.
    */
-  providerError?(error: string, threadId: string): ProviderFailure | undefined;
+  providerError?(error: string): ProviderError | undefined;
   signal?: AbortSignal;
 }
+
+/** How many more checks than the attempts' own the main agent may start by replacing a failed one (`stop_worker`). */
+const CHECK_REPLACEMENTS = 2;
 
 /** How long the main agent gets to end its turn after the run ended. */
 const MAIN_GRACE_MS = 15_000;
@@ -413,6 +416,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       if (!r) throw new Error(`no thread ${id} to resume`);
       await resume(r, text, sender);
     },
+    replaceCheck: async (taskId) => {
+      const d = derive();
+      // The attempts' own checks, then CHECK_REPLACEMENTS more; past that the task is left to check.
+      const limit = config.maxFixRounds + 1 + CHECK_REPLACEMENTS;
+      if (startedFor(d, taskId, "check").length >= limit) return false;
+      await startCheck(d, taskId);
+      return true;
+    },
     changed: nudge,
   };
 
@@ -494,15 +505,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
-  /**
-   * A task `under-review` whose attempt has no check thread, or whose check the main agent stopped
-   * (`stop_worker`, which gives a stop no reason) before a verdict: start one.
-   */
+  /** A task `under-review` whose attempt has no check thread: start one. */
   async function startChecks(d: ThreadLog, view: Folded): Promise<boolean> {
     for (const t of view.tasks) {
       if (t.status !== "under-review" || !t.attemptId) continue;
       const c = t.threads.check ? d.threads.get(t.threads.check) : undefined;
-      if (!c || (c.end?.status === "cancelled" && !c.end.summary && !t.checker?.verdict)) {
+      if (!c) {
         await startCheck(d, t.id);
         return true;
       }
@@ -538,20 +546,28 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const state = stateOf(c);
       const verdict = t.checker?.verdict;
       const waiting = openAsk(c) !== undefined;
+      // A check stopped with no verdict that no fresh check replaced: `stop_worker` past the
+      // replacement limit, or a stop the loop itself made.
       if (state === "stopped" && !verdict) {
         await writeResult(d, t, c, CHECK_STOPPED);
         return true;
       }
       // A cut-off check without a verdict never gets here: `resumeCutOff` resumes it first.
       if (state === "running" || waiting) continue;
-      // A check that failed on a provider error is main's to resume or replace; it is left to check
-      // only when main has been told, is idle, and nothing else is running.
-      const error = c.end?.status === "failed" ? c.end.error : undefined;
-      if (!verdict && error !== undefined && o.providerError?.(error, c.id)) {
+      // A failed check is main's to resume or replace; it is left to check only when main has
+      // been told, is idle, and nothing else is running.
+      if (checkAwaitsMain(d, c)) {
         const m = d.main ? d.threads.get(d.main) : undefined;
         const told = !d.undelivered.some((n) => n.threadId === c.id);
-        if (!told || (m && stateOf(m) !== "idle") || anyRunning(d)) continue;
-        await writeResult(d, t, c, checkProviderFailed(error));
+        // A failed main is `mainFailed`'s first: it may resume the check itself.
+        if (!told || (m && (stateOf(m) !== "idle" || m.end?.status === "failed")) || anyRunning(d))
+          continue;
+        await writeResult(
+          d,
+          t,
+          c,
+          checkFailed(c.end?.error ?? "it failed", failureOf(c) !== undefined),
+        );
         return true;
       }
       // Idle, or stopped/cut off with a verdict: the check is over.
@@ -582,32 +598,48 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
-  /**
-   * The provider failure that ended a main agent this process ran, if any. Only such a thread
-   * counts: a failure an earlier claim recorded (a reopened run's) must not fail the new claim.
-   */
-  function providerFailureOf(r: ThreadRecord): ProviderFailure | undefined {
-    const error = r.end?.status === "failed" ? (r.end.error ?? "") : undefined;
-    return error !== undefined && threads.started(r.id)
-      ? o.providerError?.(error, r.id)
-      : undefined;
+  /** How a failed thread's error reads: the host's reading of its text, and `interrupted` from the thread's own end. */
+  function failureOf(r: ThreadRecord): ProviderError | "interrupted" | undefined {
+    if (r.end?.status !== "failed") return;
+    const kind = o.providerError?.(r.end.error ?? "");
+    return kind === "fatal" || !r.end.interrupted ? kind : "interrupted";
   }
 
   /**
-   * Fails the run for a provider error on a thread this process ran: any fatal one; on the main
-   * agent, a transient one and a second interrupted one (`main` resumes it for the first). A worker
-   * or check that failed on one stays a failed thread and main decides, as for any worker failure.
+   * Fails the run for a fatal provider error on a thread this process ran: a failure an earlier
+   * claim recorded (a reopened run's) must not fail the new claim. Main's other failures are
+   * `mainFailed`'s; a worker or check that failed stays a failed thread and main decides.
    */
   function checkFatal(d: ThreadLog) {
     for (const r of d.threads.values()) {
-      const kind = providerFailureOf(r);
-      if (
-        kind === "fatal" ||
-        (r.place === "main" &&
-          (kind === "transient" || (kind === "interrupted" && r.failedResumes >= 1)))
-      )
+      if (failureOf(r) === "fatal" && threads.started(r.id)) {
         throw new Error(fatalText(r, r.end?.error ?? "", taskName));
+      }
     }
+  }
+
+  /**
+   * A failed main agent, idle. The rules for the failure's kind:
+   * - a transient provider error (Pi's retries ran out before any reply) fails the run;
+   * - an interrupted reply resumes the same main, history as it was, unless its previous end was
+   *   an interrupted failure too and it has made no reply since its latest start: then the run fails;
+   * - anything else (a context overflow, a length stop, a refusal) keeps the history that failed,
+   *   so a fresh main takes over, once; if that one fails too, so does the run.
+   */
+  async function mainFailed(d: ThreadLog, m: ThreadRecord) {
+    const fail = () => {
+      throw new Error(fatalText(m, m.end?.error ?? "", taskName));
+    };
+    const kind = failureOf(m);
+    if (kind === "transient" && threads.started(m.id)) fail();
+    if (kind === "interrupted") {
+      if (!m.replied && m.endBefore?.status === "failed" && m.endBefore.interrupted) fail();
+      await resume(m, PROVIDER_FAILED_RESUME, RUNTIME);
+      return;
+    }
+    const mains = [...d.threads.values()].filter((r) => r.place === "main");
+    if (mains.at(-2)?.end?.status === "failed") fail();
+    await startMain(d);
   }
 
   /** The delivery message and the last event it covers. */
@@ -620,7 +652,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       ? reviewing(fold(events), opening, true)
       : "";
     return {
-      text: `${deliveryText(d.undelivered, agentsList(d, stateOf), changed)}${intro}`,
+      text: `${deliveryText(d, d.undelivered, agentsList(d, stateOf), changed)}${intro}`,
       covers: events.at(-1)?.id,
     };
   }
@@ -657,19 +689,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       await startMain(d);
       return true;
     }
-    // A provider failure after the reply started (nothing retries one) resumes the same main, with
-    // its history as it was, once; `checkFatal` fails the run on a second.
-    if (m && providerFailureOf(m) === "interrupted" && stateOf(m) === "idle") {
-      await resume(m, PROVIDER_FAILED_RESUME, RUNTIME);
-      return true;
-    }
-    // A failed main (a context overflow) keeps the history that failed, so it is never resumed: a
-    // fresh one takes over, once. If that one fails too, so does the run.
     if (m?.end?.status === "failed" && stateOf(m) === "idle") {
-      const mains = [...d.threads.values()].filter((r) => r.place === "main");
-      if (mains.at(-2)?.end?.status === "failed")
-        throw new Error(fatalText(m, m.end.error ?? "", taskName));
-      await startMain(d);
+      await mainFailed(d, m);
       return true;
     }
     if (!m || stateOf(m) !== "idle") return false;

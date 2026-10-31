@@ -259,6 +259,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       status: z.enum(["completed", "failed", "cancelled"]),
       error: z.string().optional(),
       /**
+       * A `failed` end whose model reply had started when the provider's error came (a dropped
+       * stream, an error sent inside the stream): the provider's retries end at the response
+       * headers, so nothing retried it. Absent otherwise, and on ends written before the field.
+       */
+      interrupted: z.literal(true).optional(),
+      /**
        * The root's, from `finish_run`: one or two plain sentences for the researcher. On a
        * `cancelled` end of a worker or check: why the run loop stopped it, which the main agent is told.
        */

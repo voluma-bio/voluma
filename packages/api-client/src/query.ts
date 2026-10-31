@@ -103,12 +103,11 @@ export function useAcceptCheck(
       } catch (e) {
         const status = e instanceof ApiError ? e.status : undefined;
         if (status === 409) void invalidateRun(client, runId);
+        // 403 and 409 carry the server's own wording; anything else (network, 5xx) gets a generic line.
         throw new Error(
-          status === 403
-            ? "You can view this run but not change it."
-            : status === 409
-              ? "This changed since you opened it. Look again."
-              : "Couldn't save. Try again.",
+          (status === 403 || status === 409) && e instanceof ApiError && e.serverMessage
+            ? e.serverMessage
+            : "Couldn't save. Try again.",
         );
       }
     },

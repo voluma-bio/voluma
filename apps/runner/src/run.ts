@@ -361,22 +361,18 @@ async function claimBody(
       }
       return fallback;
     };
-    // The threads whose latest model call got its response headers: a failure of that call came
-    // after the reply started, so Pi did not retry it (`provider-error.ts`).
-    const replyStarted = new Set<string>();
     const streamFor =
       (role: string): ModelSetup["streamFn"] =>
       (m, context, options) => {
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
         const threadId = options?.sessionId as string;
-        replyStarted.delete(threadId);
         const stream = models.streamSimple(m, context, {
           ...options,
           apiKey: keyFor(m.provider),
           maxRetries: MODEL_RETRIES,
           maxRetryDelayMs: MODEL_MAX_RETRY_DELAY_MS,
           timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
-          fetch: loggedFetch(role, log, options?.signal, () => replyStarted.add(threadId)),
+          fetch: loggedFetch(role, log, options?.signal),
           // All registered providers await this before normalizing each event. An async
           // iterator alone can drain buffered deltas entirely through microtasks, starving
           // lease timers.
@@ -405,7 +401,7 @@ async function claimBody(
       inputId: run.input.id,
       inputPrefix: inputPrefixOf(run),
       previousClaim: claim.previousClaim?.reason,
-      providerError: (error, threadId) => providerFailure(error, replyStarted.has(threadId)),
+      providerError: providerFailure,
       workflows: run.workflows,
       recorder: events,
       history: client,

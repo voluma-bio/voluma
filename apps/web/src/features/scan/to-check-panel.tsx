@@ -20,6 +20,7 @@ export function ToCheckPanel({
   inView,
   onPick,
   accepting,
+  wrongReason,
   onWrong,
   live,
 }: {
@@ -34,6 +35,8 @@ export function ToCheckPanel({
   inView: string | undefined;
   onPick: (item: NeedItem) => void;
   accepting: Accepting;
+  /** Why Something's wrong is off (the run read's `cannotMessage`). */
+  wrongReason: string | undefined;
   onWrong: (item: NeedItem) => void;
   live: boolean;
 }) {
@@ -60,15 +63,17 @@ export function ToCheckPanel({
   // handled item picked from Report still reads as one of them.
   const queue = items.filter((n) => !n.accepted || n === current);
   const at = current ? queue.indexOf(current) : -1;
-  const after = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].filter(
-    (n) => !n.accepted && n !== current,
-  );
-  const next = after[0];
-  // Where "Looks right" moves: the same task's next open item, else the scan's.
-  const then = after.find((n) => n.taskId === current?.taskId) ?? next;
+  const waiting = (n: NeedItem) => !n.accepted && n !== current;
+  // Next, as the arrows go: none after the last.
+  const next = queue.slice(at + 1).find(waiting);
+  // Where "Looks right" moves: the same task's next open item, else the scan's, round to the
+  // first still open.
+  const after = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].filter(waiting);
+  const then = after.find((n) => n.taskId === current?.taskId) ?? after[0];
   const task = current && tasks.find((t) => t.id === current.taskId);
   return (
-    <div className="grid gap-3 p-3">
+    // One column no wider than the panel: an auto column would grow to the longest truncated title.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 p-3">
       <div className="flex items-center gap-2">
         <p className="flex-1 text-xs text-muted-foreground">
           {current
@@ -104,7 +109,8 @@ export function ToCheckPanel({
               <Disclosure label="What the second AI check found">
                 <p className="whitespace-pre-wrap">{current.found}</p>
               </Disclosure>
-            ) : task?.check?.summary ? (
+            ) : task?.check?.summary && task.check.id !== current.id ? (
+              // An item that is the check's own verdict already reads its sentence.
               `Second AI check: ${task.check.summary}`
             ) : undefined
           }
@@ -134,6 +140,7 @@ export function ToCheckPanel({
           focusAccept={current.id === arrived}
           readOnly={accepting.readOnly}
           onWrong={() => onWrong(current)}
+          wrongReason={wrongReason}
           error={accepting.error?.id === current.id ? accepting.error.text : undefined}
         />
       )}
@@ -211,14 +218,15 @@ export function Evidence({ runId, name, sha256 }: { runId: string; name: string;
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`Open ${file} full size`}
-        className="block cursor-zoom-in overflow-hidden rounded-md bg-muted inset-ring inset-ring-border"
+        className="block min-h-16 min-w-16 w-fit max-w-full cursor-zoom-in overflow-hidden rounded-md inset-ring inset-ring-border"
       >
+        {/* The frame is the image's own size: no empty card around a narrow or short image. */}
         <img
           src={url}
           alt=""
           loading="lazy"
           onError={() => setFailed(true)}
-          className="max-h-40 w-full object-contain"
+          className="block max-h-40 w-auto max-w-full"
         />
       </button>
       <Lightbox open={open} onClose={() => setOpen(false)} caption={file}>

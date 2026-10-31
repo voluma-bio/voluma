@@ -28,6 +28,7 @@ import {
   markReviewedRequestSchema,
   type ReviewDecisionResponse,
 } from "@voluma/contracts/review";
+import { acceptRefusal } from "@voluma/contracts/run";
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -46,12 +47,11 @@ function imageType(head: Uint8Array): string | null {
 }
 
 function currentReview(record: RunRecord, baseRevisionId: string) {
-  if (record.run.example) throw new HTTPException(403, { message: "Example runs are read-only." });
+  const refusal = acceptRefusal(record.run);
+  if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
   const review = record.run.review;
-  if (!review || review.revisionId !== baseRevisionId)
-    throw new HTTPException(409, {
-      message: "Results changed or are not completed. Reload the run.",
-    });
+  if (review?.revisionId !== baseRevisionId)
+    throw new HTTPException(409, { message: "Results changed. Reload the run." });
   return review;
 }
 
@@ -108,7 +108,7 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     const { baseRevisionId } = await parseJson(c, markReviewedRequestSchema);
     const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
       const review = currentReview(record, baseRevisionId);
-      if (review.remainingToCheck !== 0)
+      if (review.acceptable !== 0)
         throw new HTTPException(409, {
           message: "Accept every To check item before marking reviewed.",
         });

@@ -4,16 +4,12 @@
  * answer, or no answer: a timeout, a dropped connection) with the role and the attempt's number.
  * Whether another attempt follows is Pi's call (a 400 or a 401 is not retried), so a line does not
  * say; the thread's failure after the last one is logged by the run.
- *
- * It also reports the first 2xx answer: the response headers are in, so the reply has started and
- * Pi will not retry anything after it (`onReply`).
  */
 export function loggedFetch(
   role: string,
   log: (line: string) => void,
   /** The call's signal: an attempt it cut short (the thread was stopped) is not a provider failure. */
   stop: AbortSignal | undefined,
-  onReply: () => void,
 ): typeof globalThis.fetch {
   let attempt = 0;
   return async (input, init) => {
@@ -21,8 +17,8 @@ export function loggedFetch(
     const failed = (what: string) => log(`${role} model call attempt ${n} failed: ${what}`);
     try {
       const response = await fetch(input, init);
-      if (response.ok) onReply();
-      else failed(`HTTP ${response.status} ${response.statusText}${retryAfter(response)}`);
+      if (!response.ok)
+        failed(`HTTP ${response.status} ${response.statusText}${retryAfter(response)}`);
       return response;
     } catch (error) {
       if (!stop?.aborted) {

@@ -33,6 +33,7 @@ import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
 import {
   askRef,
+  checkAwaitsMain,
   startedFor,
   type ThreadLog,
   type ThreadRecord,
@@ -67,6 +68,8 @@ export interface Agents {
   steer(threadId: string, text: string, sender: UserSender): boolean;
   /** Resolves once the thread is not running here. Never call it inside `section`. */
   settled(threadId: string): Promise<void>;
+  /** Starts a fresh check of an under-review task; false once the task has had its limit of checks. Call inside `section`. */
+  replaceCheck(taskId: string): Promise<boolean>;
   /** Resumes a thread that is not running, with a message; its start is stored first. Call inside `section`. */
   resume(threadId: string, text: string, sender: UserSender): Promise<void>;
   /** The run changed: the loop takes its next step. */
@@ -124,16 +127,11 @@ export function mainTools(deps: MainDeps) {
     const r = threadByRef(d.threads, ref);
     if (r?.place === "worker") return r;
     if (r?.place === "check") {
-      const t = runtime.taskOf(r.taskId);
-      const failed =
-        r.end?.status === "failed" &&
-        agents.state(d, r.id) === "idle" &&
-        t?.status === "under-review" &&
-        t.threads.check === r.id &&
-        !t.checker?.verdict;
-      if (failed) return r;
+      if (checkAwaitsMain(d, r) && agents.state(d, r.id) === "idle") return r;
       throw new Refusal(
-        `${ref} is a checker: answer its question with \`answer\`. Only a check that failed can be messaged or stopped.`,
+        r.end?.status === "failed"
+          ? `${ref} failed, but its task no longer waits on this check (its verdict is in, or the task moved on): there is nothing to resume or replace.`
+          : `${ref} is a checker: answer its question with \`answer\`. Only a check that failed can be messaged or stopped.`,
       );
     }
     throw new Refusal(`${ref} is not a worker of this run.`);
@@ -324,7 +322,11 @@ export function mainTools(deps: MainDeps) {
         );
       }
       if (w.place === "check") {
-        return { message: `${w.name} stopped; a fresh check of ${w.taskId} starts.` };
+        return {
+          message: (await agents.replaceCheck(w.taskId))
+            ? `${w.name} stopped; a fresh check of ${w.taskId} starts.`
+            : `${w.name} stopped; ${w.taskId} has had its checks and is left to check for the researcher.`,
+        };
       }
       return { message: `${w.name} stopped.${working ? ` ${w.taskId} is pending again.` : ""}` };
     }, true),
