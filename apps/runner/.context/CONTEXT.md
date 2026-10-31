@@ -336,7 +336,7 @@ reply since its last compaction (resumed after a crash) is judged by a chars/4 e
 before each request: bytes and count against the model's
 `inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; when a model declares none, 32 MiB and 100 images, or its provider's documented count: 50 for Meta). Budget:
 min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 1.5 x reserve
-(reserve = min(64k, model `maxTokens`, budget/3); wrap-up room = reserve / 2; 304k on Meta, 104k on a 200k Claude, 352k on a 32k-output model), or images over 40% of a limit, a runtime
+(reserve = min(64k, model `maxTokens`, budget/3); notice room = reserve / 2; 304k on Meta, 104k on a 200k Claude, 352k on a 32k-output model), or images over 40% of a limit, a runtime
 user message tells the thread (once per compaction) to finish the step and write down what it needs. Compact: when a reply reported input over budget - reserve, the next request is the compaction request
 (336k, 136k, 368k), or images over 70% of a limit; its own model summarizes it on a warm branch (same messages, system message and tools, summary instruction
 appended). A thread already past it when the runner restarts compacts on its next request. Cold summary (`[system, previous summary,
@@ -346,7 +346,7 @@ recovery leaves the refusal as the thread's failure (a transient error of the su
 length is retried once with twice the room (the thread's reasoning setting stays, so the cache holds; both calls' usage is recorded); one that also called a tool is accepted by its text.
 A compaction that would leave the thread due again (the last turn alone is over a limit) waits until images are near a limit. A summary that fails for any reason other than an overflow fails the thread with the provider's own error text (so `provider-error.ts` classifies it); an overflow of the warm summary request recovers through the cold summary. The
 context goes to a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
-it, a failed summary's usage too (an event with `compaction: true` and no text). The event carries `compaction: true`: the run page shows it as a collapsed "History summarized" row (the notices read "Context notice") and leaves it out of a thread's `said` and `reply`. The wrap-up and overflow notices go through the thread's inbox with sender `{kind: "runtime", notice: true}`, which `thread-log` does not count as a nudge. One overflow test (`context-overflow.ts`: a 400, a 413 or no
+it, a failed summary's usage too (an event with `compaction: true` and no text). The event carries `compaction: true`: the run page shows it as a collapsed "History summarized" row (the notices read "Context notice") and leaves it out of a thread's `said` and `reply`. The context and overflow notices go through the thread's inbox with sender `{kind: "runtime", notice: true}`, which `thread-log` does not count as a nudge. One overflow test (`context-overflow.ts`: a 400, a 413 or no
 status, Pi's patterns and Anthropic's "input length and `max_tokens` exceed context limit") serves both this and the runner's classifier.
 The result is a marker row `{role: "compaction", summary, keptFrom}` appended to `pi_messages`; every earlier row
 stays. `keptFrom` indexes the thread's messages (rows that are not markers); `foldHistory` rebuilds them and the
