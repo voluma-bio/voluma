@@ -10,7 +10,7 @@
  * They never wait for a thread inside the section.
  */
 import type { By } from "@voluma/contracts/events";
-import { transitiveDependents } from "@voluma/contracts/fold";
+import { redoRefusal, transitiveDependents } from "@voluma/contracts/fold";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { fileRefInputSchema } from "@voluma/contracts/output";
 import { replyInputSchema } from "@voluma/contracts/task-tools";
@@ -537,14 +537,18 @@ export function mainTools(deps: MainDeps) {
   const reply: Tool<typeof replyInputSchema> = {
     name: "reply",
     description:
-      "Answer the researcher who wrote to the run, in plain words. It starts no work: after a go you act with your other tools. You may call it more than once.",
+      "Answer the researcher who wrote to the run, in plain words. It starts no work: after a go you act with your other tools. You may call it more than once. With `offer` you propose redoing one task and wait for their go.",
     input: replyInputSchema,
     sequential: true,
-    execute: inSection(async ({ text }, ctx) => {
+    execute: inSection(async ({ text, offer }, ctx) => {
+      if (offer) {
+        const cannot = redoRefusal(runtime.view(), offer.taskId);
+        if (cannot) throw new Refusal(cannot.message);
+      }
       await recorder.append(
         ctx.threadId,
         "reply",
-        { text },
+        { text, ...(offer && { offer }) },
         effectId("reply", ctx.threadId, ctx.toolCallId),
       );
       return { message: "Sent to the researcher." };
