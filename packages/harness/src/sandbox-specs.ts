@@ -75,12 +75,12 @@ function gatewayHost(gatewayUrl: string): string {
 }
 
 /** A checker: reads everything in `readOnly`, writes only its own `scratch` prefix. */
-export function checkerSandboxSpec(
+export function checkSandboxSpec(
   options: Common & { readOnly: SandboxMount[]; scratch: SandboxMount },
 ): SandboxSpec {
   return {
     ...base(options),
-    role: "checker",
+    role: "check",
     mounts: [
       ...withAccess(options.readOnly, "read-only"),
       ...withAccess([options.scratch], "read-write"),

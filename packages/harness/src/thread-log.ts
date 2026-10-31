@@ -22,6 +22,7 @@ import {
 import type { Mark } from "@voluma/contracts/messages";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
+import { threadName } from "@voluma/contracts/threads";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
 import { callKey, effectId } from "./tools/effects";
@@ -49,8 +50,16 @@ export type ThreadState = "running" | "idle" | "stopped" | "cut-off";
 export type TaskThread = ThreadFields & { role: Role; taskId: string };
 export type ThreadRecord = TaskThread | (ThreadFields & { role: "main"; taskId?: undefined });
 
+/** Who a thread is: what its layout and start need, whether it is a logged record or a thread about to start. */
+export type ThreadIdentity = { id: string; name: string } & (
+  | { role: "main"; taskId?: undefined }
+  | { role: Role; taskId: string }
+);
+
 interface ThreadFields {
   id: string;
+  /** The id without the run id (`main.2`, `segmentation.worker`): its sandbox's name and its folder under `/scratch`. */
+  name: string;
   /** How its latest invocation ended; undefined while the log shows it started and not ended. */
   end: PayloadOf<"thread.ended"> | undefined;
   /** Messages the runtime sent it to get it moving again (its brief, the first, is not one). */
@@ -351,6 +360,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (record && !record.end && !record.inputPending) resumedCutOff.add(e.threadId);
         const fields: ThreadFields = {
           id: e.threadId,
+          name: threadName(e.runId, e.threadId),
           end: undefined,
           nudges: record?.nudges ?? 0,
           brief: record?.brief ?? briefOf(e.payload, value.calls),

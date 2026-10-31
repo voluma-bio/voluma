@@ -283,7 +283,7 @@ if __name__ == '__main__':
     ap.add_argument('--second-bone-frac', type=float, default=0.25, help='smallest second bone piece, as a fraction '
                     'of the largest; smaller pieces are reference object candidates')
     ap.add_argument('--margin-mm', type=float, default=0.126, help='mm of margin around the bones in the oriented stack')
-    ap.add_argument('--window', metavar='lo,hi', help='display window in HU for the keyframe sheet (default: automatic)')
+    ap.add_argument('--window', type=render_slices.vl.window_arg, metavar='lo,hi', help='display window in HU for the keyframe sheet (default: automatic)')
     a = ap.parse_args()
     g = sidecar.grid(a.header)
     sp = g['spacing_zyx_mm']
@@ -302,7 +302,7 @@ if __name__ == '__main__':
     sidecar.write(out / 'oriented.npy', grid_id=frame['grid_id'], spacing_zyx_mm=sp, inputs=[a.src, a.header],
                   params=params)
     k = frame['keyframe']
-    render_slices.render(stack[k], out / 'keyframe.jpg', render_slices.vl.parse_window(a.window) if a.window else None,
+    render_slices.render(stack[k], out / 'keyframe.jpg', a.window,
                          title=f'keyframe {k} of {len(stack)}')
     sidecar.emit(frame=str(out / 'frame.json'), oriented=str(out / 'oriented.npy'), keyframe_image=str(out / 'keyframe.jpg'),
                  keyframe=k, slices=len(stack), bend_deg=None if frame['bend_deg'] is None else round(frame['bend_deg'], 1),

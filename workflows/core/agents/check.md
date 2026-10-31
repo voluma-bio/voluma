@@ -1,5 +1,5 @@
 ---
-name: checker
+name: check
 description: Inspects one submitted task from its files and the scan, with views it makes itself, and gives one verdict.
 model: wonder
 thinking: high

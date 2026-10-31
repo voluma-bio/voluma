@@ -143,7 +143,7 @@ def add_layers(s, a):
         if val is not None:
             s[key] = val
     if a.window:
-        s['window'] = list(vl.parse_window(a.window))
+        s['window'] = list(a.window)
 
 
 def require_isotropic(sp, why):
@@ -695,7 +695,7 @@ def parse_args(argv):
     ap.add_argument('--out', required=True, help='the image to write (.jpg); the view.json goes beside it')
     ap.add_argument('--from', type=sl.existing, dest='from_', help='an earlier .view.json: take its state and apply the changes below')
     ap.add_argument('--hu', type=sl.existing, help='the scan, hu.npy (first call; later calls take it from --from)')
-    ap.add_argument('--window', help='display window lo,hi in HU (default: automatic from the middle slice); a negative low end as is: --window -500,6000')
+    ap.add_argument('--window', type=vl.window_arg, help='display window lo,hi in HU (default: automatic from the middle slice); a negative low end as is: --window -500,6000')
     ap.add_argument('--labels', type=sl.existing, help='label volume .npy: outlines on slices, colours in 3D (bone is ivory without it, and while the labels layer is hidden)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     ap.add_argument('--objects', action='append', type=sl.existing, metavar='record.json', help='the result record (<name>.json) of a script that placed objects (masks, surfaces, points, lines): each id in its `objects` is a layer --show / --hide toggles; an id used twice is refused (repeatable)')
@@ -721,10 +721,6 @@ def parse_args(argv):
                       *[(f'--{o}', i.partition('=')[2]) for o in ('mask', 'face') for i in getattr(a, o) or [] if '=' in i]]:
         if path:
             need_file(path, f'{opt}')
-    if a.window:
-        lo, hi = numbers(a.window, 2, '--window')
-        if lo >= hi:
-            sl.fail(f'--window {a.window!r}: the low end must be below the high end')
     if a.rotate:
         a.rotate = numbers(a.rotate, 2, '--rotate (azimuth,elevation in degrees)')
     if a.zoom is not None and not a.zoom > 0:

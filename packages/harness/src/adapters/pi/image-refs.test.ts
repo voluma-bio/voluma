@@ -28,7 +28,12 @@ function world() {
       rows.push(m);
     },
   };
-  return { objects, reads, rows, wrapped: withImageRefs(history, files, "r1") };
+  return {
+    objects,
+    reads,
+    rows,
+    wrapped: withImageRefs(history, files, "r1", (id) => id.replace("r1.", "")),
+  };
 }
 
 const result = (n: number, data = "AAAA") =>

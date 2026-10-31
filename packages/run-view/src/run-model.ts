@@ -12,6 +12,7 @@ import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState, taskStates } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
+import { type ThreadRole, threadRole } from "@voluma/contracts/thread-role";
 import { failedThreads, openThreads } from "@voluma/contracts/threads";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
@@ -28,7 +29,10 @@ export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "canc
 
 export type Thread = {
   id: string;
-  kind: "supervisor" | "main" | "worker" | "check" | "chat";
+  /** From its first start (`threadRole`). */
+  role: ThreadRole;
+  /** The role file's name or `supervisor`: a label (`agentLabel`); behaviour reads the fields below. */
+  kind: string;
   /** The thread that started it, from its `thread.started`; null on the run's root. */
   parentId: string | null;
   taskId?: string;
@@ -101,6 +105,7 @@ function threadsOf(
         else
           threads.set(e.threadId, {
             id: e.threadId,
+            role: threadRole(e.payload),
             kind: e.payload.kind,
             parentId: e.payload.parentThreadId,
             taskId: e.payload.task,
@@ -155,7 +160,7 @@ function threadsOf(
     if (c) {
       t.endedSeconds = c.endedSeconds;
       t.openSince = c.openSince;
-      if (t.kind === "worker" || t.kind === "check") t.spend = c.spend;
+      if (t.taskId) t.spend = c.spend;
     }
   }
   return { threads: [...threads.values()], lastAt };
@@ -199,6 +204,10 @@ export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   );
 }
 
+export const isMain = (t: Pick<Thread, "role">) => t.role === "main";
+
+export const isCheck = (t: Pick<Thread, "role"> | undefined) => t?.role === "check";
+
 export type AgentNode = { thread: Thread; children: AgentNode[] };
 
 /**
@@ -208,7 +217,7 @@ export type AgentNode = { thread: Thread; children: AgentNode[] };
  */
 export function agentTree(threads: Thread[]): AgentNode[] {
   const nodes = new Map(
-    threads.filter((t) => t.kind !== "supervisor").map((t) => [t.id, { thread: t, children: [] }]),
+    threads.filter((t) => t.parentId !== null).map((t) => [t.id, { thread: t, children: [] }]),
   );
   const roots: AgentNode[] = [];
   for (const node of nodes.values()) {
@@ -240,8 +249,6 @@ export function agentLabel(t: Thread, threads: Thread[], { short = false } = {})
       if (!tries || tries.length < 2) return short ? "Second check" : "Second AI check";
       return short ? `Check ${n}` : `Second AI check of try ${n}`;
     }
-    case "chat":
-      return "Chat";
     default:
       return "Agent";
   }

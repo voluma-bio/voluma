@@ -13,7 +13,7 @@ import { useDisclosure } from "./chat/disclosure-store";
 import { InfoButton, type InfoSection } from "./chat/info-button";
 import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
-import { agentTitle, type Thread, workedSeconds } from "./run-model";
+import { agentTitle, isCheck, type Thread, workedSeconds } from "./run-model";
 import { formatDuration, formatUsd } from "./run-status";
 import { useThreads } from "./run-store";
 import { useNow } from "./use-now";
@@ -85,8 +85,8 @@ const MARK: Record<Thread["status"], string> = {
   cancelled: "bg-muted text-muted-foreground",
 };
 
-function AgentMark({ thread }: { thread: Thread }) {
-  const Icon = thread.kind === "check" ? ShieldCheck : Bot;
+export function AgentMark({ thread }: { thread: Thread }) {
+  const Icon = isCheck(thread) ? ShieldCheck : Bot;
   return (
     <span
       className={`relative grid size-6 shrink-0 place-items-center rounded-full ${MARK[thread.status]}`}

@@ -54,6 +54,7 @@ function thread(
 ): Thread {
   return {
     id,
+    role: kind,
     kind,
     parentId: "main",
     taskId,
