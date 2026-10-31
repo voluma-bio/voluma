@@ -354,8 +354,7 @@ async function claimBody(
       inputPrefix: inputPrefixOf(run),
       previousClaim: claim.previousClaim?.reason,
       providerError: providerFailure,
-      // The commit the files came from: the snapshot's, which a resume keeps.
-      workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
+      workflows: run.workflows,
       recorder: events,
       history: client,
       evidence: storeEvidence(objects),

@@ -13,7 +13,7 @@
  */
 import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
-import type { RecordedPin } from "@voluma/contracts/workflow";
+import type { WorkflowPin } from "@voluma/contracts/workflow";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
 import { runLayout, type SandboxLayout } from "./layout";
@@ -48,8 +48,8 @@ export interface SuperviseRunOptions {
   inputPrefix: string;
   /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
   previousClaim?: ClaimEndReason;
-  /** The workflow packages the run starts from, as recorded on the root's first event. */
-  workflows: RecordedPin[];
+  /** The workflow packages the run starts from; the root's first event records each at the snapshot's commit. */
+  workflows: WorkflowPin[];
   recorder: Recorder;
   history: History;
   evidence: Evidence;
@@ -106,15 +106,12 @@ export interface Supervised {
  * holds `bash`. The checker never holds it (it does not redo the task).
  */
 function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<AgentRole, readonly string[]> {
-  const grants = {} as Record<AgentRole, readonly string[]>;
-  for (const [role, { tools }] of Object.entries(def.agents) as [
-    AgentRole,
-    { tools: string[] },
-  ][]) {
+  const grant = (role: AgentRole) => {
+    const { tools } = def.agents[role];
     const analyses = role === "worker" || (role === "main" && tools.includes("bash"));
-    grants[role] = tools.filter((t) => t !== "segment_sam" || (gateway && analyses));
-  }
-  return grants;
+    return tools.filter((t) => t !== "segment_sam" || (gateway && analyses));
+  };
+  return { main: grant("main"), worker: grant("worker"), check: grant("check") };
 }
 
 /** The run's root thread. Ids are minted here and in `run-loop.ts` and read nowhere else. */
@@ -129,10 +126,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     runId,
     inputPrefix: options.inputPrefix,
     skills: definition.skills,
-    mainWorks: grants.main.includes("bash"),
-    gatewayRoles: new Set(
-      (Object.keys(grants) as AgentRole[]).filter((r) => grants[r].includes("segment_sam")),
-    ),
+    grants,
     // From the workflow's task, so a task the main agent adds from it keeps the flag.
     copiesInputs: (id) => copyInputs.has(id),
   });
@@ -152,26 +146,26 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     (id) => {
       const sandbox = sandboxLayout(id);
       const gateway = sandbox.gateway ? options.gateway?.(sandbox.name) : undefined;
-      // The conversion outlives `signal` (see `conversionSignal`).
+      // The conversion outlives `signal` (see `conversionSignal`); its own signal also carries the worker's halt.
       return options.createSandbox(
         specOf(sandbox, settings, gateway),
-        id === CONVERT ? options.conversionSignal : signal,
+        id === CONVERT ? conversion.signal : signal,
       );
     },
-    (id, state, detail) =>
-      recorder.emit(id === CONVERT ? rootThreadId : id, "sandbox", {
-        name: sandboxLayout(id).name,
-        state,
-        detail,
-      }),
-    (id) => sandboxLayout(id).restartNote,
+    // The convert sandbox writes no event: a failure there shows as the file's `assets.failed`,
+    // not as a failed sandbox on the main agent's page.
+    (id, state, detail) => {
+      if (id !== CONVERT)
+        recorder.emit(id, "sandbox", { name: sandboxLayout(id).name, state, detail });
+    },
+    // The convert sandbox's commands run with `note: false`, so its note is never read.
+    (id) => (id === CONVERT ? "" : layout.forThread(recordOf(id)).restartNote),
   );
   const conversion: ReviewAssetsWorker = reviewAssetsWorker({
     runId,
     rootThreadId,
     recorder,
     sandbox: () => session.get(CONVERT, { note: false }),
-    release: () => session.release(CONVERT),
     signal: options.conversionSignal,
     log: options.log,
   });
@@ -184,7 +178,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     recorder.emit(rootThreadId, "thread.started", {
       parentThreadId: null,
       kind: "supervisor",
-      workflows: options.workflows,
+      workflows: options.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
     });
     // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
     // `claim.started` has one again, and says that instead.

@@ -123,12 +123,12 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
 - **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
   whole log), minus files with an `assets.*` event; new events are polled once a second.
   One file at a time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session: created at the first file, replaced when the provider ended it, metered by the runner's `createSandbox` like the others). A failed conversion is recorded and the worker moves on; a sandbox that
-  dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
+  dies or cannot be created fails the file (the sandbox session replaces an ended sandbox on the next call, and runs a command the provider refused once more). `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
   (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
-  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
+  the converter imports `sidecar` through; the sandbox gets `RunLayout.convert`'s `PYTHONPATH` alone).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a

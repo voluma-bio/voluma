@@ -8,9 +8,9 @@
  * log), minus the files that already have an `assets.*` event; new
  * outputs join as the recorder stores them (polled, one cheap scan of the new events). One file at a
  * time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session, which
- * creates it at the first file and replaces one the provider ended). A conversion that
- * fails is recorded and the worker moves on; one whose sandbox dies (or cannot be created) is
- * run once more on a new sandbox. Identity never comes from the converter's output: the
+ * creates it at the first file and replaces one the provider ended, running a command it
+ * refused once more). A conversion that fails, or whose sandbox dies or cannot be created, is
+ * recorded and the worker moves on. Identity never comes from the converter's output: the
  * `sourceSha256` is the queue item's, and a converter that prints another one has failed.
  *
  * `signal` ends the worker (a stop, a lost lease, shutdown); it records nothing then, and the
@@ -71,6 +71,11 @@ export interface ReviewAssetsWorker {
    * it returns at once, recording nothing.
    */
   drain(timeoutMs: number): Promise<void>;
+  /**
+   * Ends with the host's `signal` or when the worker is halted (`drain`, `close`). The sandbox
+   * session's creation takes it, so a creation in flight stops with the worker.
+   */
+  readonly signal: AbortSignal;
   /** Stops the worker, ending a conversion in flight; the session closes the sandbox. */
   close(): Promise<void>;
 }
@@ -82,8 +87,6 @@ export interface ReviewAssetsOptions {
   recorder: Recorder;
   /** The convert sandbox (`SandboxSession.get`), created on first use and replaced when it has ended. */
   sandbox(): Promise<Sandbox>;
-  /** Destroys the convert sandbox (`SandboxSession.release`); the next `sandbox()` makes a new one. */
-  release(): Promise<void>;
   signal: AbortSignal;
   log(line: string): void;
 }
@@ -144,9 +147,6 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     }
   }
 
-  const dropSandbox = () =>
-    options.release().catch((e) => log(`review assets: closing the sandbox failed: ${e}`));
-
   /** One conversion's result, or a throw when the sandbox failed. */
   async function convert(
     job: Job,
@@ -192,24 +192,19 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   async function work(job: Job) {
     log(`review assets: converting ${job.sha256.slice(0, 8)} (${job.flags})`);
     const started = Date.now();
-    let failure = "";
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const result = await convert(job);
-        record(job, result);
-        const seconds = Math.round((Date.now() - started) / 1000);
-        log(
-          `review assets: ${job.sha256.slice(0, 8)} ${"manifest" in result ? "ready" : "failed"} in ${seconds}s`,
-        );
-        return;
-      } catch (e) {
-        if (signal.aborted) return; // stopped: the next claim finds the file again
-        failure = e instanceof Error ? e.message : String(e);
-        log(`review assets: ${job.sha256} attempt ${attempt} failed: ${failure}`);
-        await dropSandbox();
-      }
+    try {
+      const result = await convert(job);
+      record(job, result);
+      const seconds = Math.round((Date.now() - started) / 1000);
+      log(
+        `review assets: ${job.sha256.slice(0, 8)} ${"manifest" in result ? "ready" : "failed"} in ${seconds}s`,
+      );
+    } catch (e) {
+      if (signal.aborted) return; // stopped: the next claim finds the file again
+      const failure = e instanceof Error ? e.message : String(e);
+      log(`review assets: ${job.sha256} failed: ${failure}`);
+      record(job, { error: `the convert sandbox failed: ${failure}` });
     }
-    record(job, { error: `the convert sandbox failed twice: ${failure}` });
   }
 
   const nextJob = () => {
@@ -236,6 +231,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   loop.catch((e) => log(`review assets: worker stopped: ${e}`));
 
   return {
+    signal,
     async drain(timeoutMs) {
       const deadline = Date.now() + timeoutMs;
       while (!signal.aborted && Date.now() < deadline) {

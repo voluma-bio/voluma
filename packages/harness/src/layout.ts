@@ -74,10 +74,9 @@ export interface ThreadLayout {
 }
 
 /** What a sandbox is created from (`specOf`): a thread's layout, or the run's convert sandbox. */
-export type SandboxLayout = Pick<
-  ThreadLayout,
-  "name" | "mounts" | "env" | "gateway" | "restartNote"
-> & { /** The command workdir; absent: the image's. */ dir?: string };
+export type SandboxLayout = Pick<ThreadLayout, "name" | "mounts" | "env" | "gateway"> & {
+  /** The command workdir; absent: the image's. */ dir?: string;
+};
 
 type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "restartNote"> & {
   hostOnly: SandboxMount[];
@@ -108,13 +107,12 @@ export interface RunLayoutOptions {
    * module (module names are unique across skills, a test enforces it).
    */
   skills: readonly Skill[];
-  /** The main agent's role holds `bash`: it does tasks itself, so its `/outputs` is writable. */
-  mainWorks?: boolean;
   /**
-   * The roles that hold `segment_sam`: their sandboxes reach the gateway (every sandbox has
+   * The tools each role holds. The main agent holding `bash` does tasks itself, so its `/outputs`
+   * is writable. The roles holding `segment_sam` reach the gateway (every sandbox has
    * `voluma-sam` on its PATH, so one whose role cannot call it gets no network).
    */
-  gatewayRoles?: ReadonlySet<ThreadLayout["role"]>;
+  grants: Record<ThreadLayout["role"], readonly string[]>;
   /**
    * Says a task's threads get `/inputs` copied to local disk, which the workflow declares
    * (`copyInputs`): reading the DICOM straight from a cold mount is slow (measured on Modal:
@@ -131,10 +129,10 @@ export function runLayout({
   runId,
   inputPrefix,
   skills,
-  mainWorks = false,
-  gatewayRoles = new Set(),
+  grants,
   copiesInputs = () => false,
 }: RunLayoutOptions): RunLayout {
+  const mainWorks = grants.main.includes("bash");
   const scratch = scratchPrefix(runId);
   const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
   const inputs = (copy: boolean): SandboxMount => ({
@@ -213,7 +211,6 @@ export function runLayout({
     ],
     env: { PYTHONPATH: pythonPath },
     gateway: false,
-    restartNote: "The sandbox was restarted.",
   };
 
   return {
@@ -235,7 +232,7 @@ export function runLayout({
         role,
         name,
         copiesInputs: copy,
-        gateway: gatewayRoles.has(role),
+        gateway: grants[role].includes("segment_sam"),
         dir,
         env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>

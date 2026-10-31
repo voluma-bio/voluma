@@ -348,9 +348,7 @@ export function world(o: WorldOptions) {
       selectedOutputs: undefined,
       notes: undefined,
       inputPrefix: "inputs/",
-      workflows: [
-        { repo: "voluma-bio/voluma", path: "workflows/mouse-oa", commit: "a".repeat(40) },
-      ],
+      workflows: [{ repo: "voluma-bio/voluma", path: "workflows/mouse-oa" }],
       recorder: rec,
       history: {
         load: async (t) => {

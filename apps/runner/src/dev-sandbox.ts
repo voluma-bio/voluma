@@ -138,7 +138,7 @@ try {
     inputPrefix: inputPrefixOf(run),
     skills: [], // no workflow is loaded here, so no PYTHONPATH
     copiesInputs: () => true,
-    gatewayRoles: new Set(["worker"]),
+    grants: { main: [], worker: ["segment_sam"], check: [] },
   }).forThread(devThread);
   meter.sandboxUp();
   counted = true;
