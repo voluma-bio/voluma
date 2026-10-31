@@ -31,6 +31,7 @@ export function ViewPanel({
     })),
     // Surfaces draw as meshes in 3D, so they hide and fade the same way.
     ...(revision?.surfaces ?? []).map((s) => ({ id: s.id, name: s.name })),
+    ...(revision?.annotations ?? []).map((a) => ({ id: a.id, name: a.name })),
   ];
   if (all.length === 0)
     return (

@@ -33,6 +33,7 @@ export function TaskViewer({
   /** The selected item's place: each new object moves the crosshair there once. */
   focus?: Focus;
 }) {
+  const [labels, setLabels] = useState(false);
   const grid = useMemo(
     () =>
       taskGrid({
@@ -40,13 +41,14 @@ export function TaskViewer({
         task,
         assets,
         display,
+        labels,
         focus,
         // The zarr reader resolves level paths against this, so it is absolute.
         assetBase: (sha256) =>
           new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href,
         token: tokenColor,
       }),
-    [runId, revision, task, assets, display, focus],
+    [runId, revision, task, assets, display, labels, focus],
   );
   // A focused label has no extent in the run's data: find its middle on the grid. Keyed by
   // what it reads, since `grid` is rebuilt on every display change.
@@ -90,6 +92,11 @@ export function TaskViewer({
       title={grid.name}
       focus={target}
       notes={grid.notes}
-    />
+    >
+      <label className="flex items-center gap-1.5">
+        <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} />
+        Labels
+      </label>
+    </GridViewer>
   );
 }
