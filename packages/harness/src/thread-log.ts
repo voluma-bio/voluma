@@ -22,6 +22,7 @@ import {
 import type { Mark } from "@voluma/contracts/messages";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
+import { threadPlace } from "@voluma/contracts/thread-place";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
 import { callKey, effectId } from "./tools/effects";
@@ -46,24 +47,26 @@ export interface AskRecord {
 export type ThreadState = "running" | "idle" | "stopped" | "cut-off";
 
 /** A worker, check or main thread as the log shows it. */
-export type TaskThread = ThreadFields & { role: Role; taskId: string };
-export type ThreadRecord = TaskThread | (ThreadFields & { role: "main"; taskId?: undefined });
+export type TaskThread = ThreadFields & { place: Role; taskId: string };
+export type ThreadRecord = TaskThread | (ThreadFields & { place: "main"; taskId?: undefined });
 
 /** Who a thread is: what its layout and start need, whether it is a logged record or a thread about to start. */
-export type ThreadIdentity = { id: string; name: string } & (
-  | { role: "main"; taskId?: undefined }
-  | { role: Role; taskId: string }
+export type ThreadIdentity = { id: string; role: string; name: string } & (
+  | { place: "main"; taskId?: undefined }
+  | { place: Role; taskId: string }
 );
 
 interface ThreadFields {
   id: string;
+  /** The role file the thread runs on (`thread.started`'s `kind`): the facts that decide its sandbox, tools and checker. */
+  role: string;
   /** The id without the run id (`main.2`, `segmentation.worker`): its sandbox's name and its folder under `/scratch`. */
   name: string;
   /** How its latest invocation ended; undefined while the log shows it started and not ended. */
   end: PayloadOf<"thread.ended"> | undefined;
   /** Messages the runtime sent it to get it moving again (its brief, the first, is not one). */
   nudges: number;
-  /** The main agent's `start_worker` brief, for a worker. */
+  /** The main agent's `start_agent` brief, for a worker. */
   brief: string;
   /** The latest checkpoint summary it wrote. */
   lastSummary: string | undefined;
@@ -148,14 +151,15 @@ type NoticeBody = Notice extends infer N
 
 /** A call of the main agent that a rebuilt result reads back (`calls`). */
 export type MainCall =
-  | { name: "start_worker"; brief: string }
+  | { name: "start_worker" | "start_agent"; brief: string }
   | { name: "message"; threadId: string; text: string };
 
 /** The stored input of a main-agent call; undefined for other tools or an input of another shape. */
 function mainCall(name: string, input: unknown): MainCall | undefined {
   if (typeof input !== "object" || input === null) return undefined;
   const i = input as Record<string, unknown>;
-  if (name === "start_worker" && typeof i.brief === "string") return { name, brief: i.brief };
+  if ((name === "start_worker" || name === "start_agent") && typeof i.brief === "string")
+    return { name, brief: i.brief };
   if (name === "message" && typeof i.threadId === "string" && typeof i.text === "string") {
     return { name, threadId: i.threadId, text: i.text };
   }
@@ -204,7 +208,7 @@ export interface ThreadLog {
   answeredScratch: Map<string, Set<string>>;
   /** Every stored event by id: what it is, where it sits in the log, its thread, and the task of an attempt. */
   written: Map<string, { at: number; type: RunEvent["type"]; threadId: string; taskId?: string }>;
-  /** The main agent's `start_worker` and `message` calls, by `callKey`. */
+  /** The main agent's `start_agent` and `message` calls, by `callKey`. */
   calls: Map<string, MainCall>;
   /** Messages one thread sent another, as the target's user messages show them. */
   relayed: { from: string; to: string; text: string }[];
@@ -231,13 +235,13 @@ export const fixLimitReached = (d: ThreadLog, taskId: string, max: number, pendi
   (d.fixRounds.get(taskId) ?? 0) + pending >= max &&
   d.view.tasks.find((t) => t.id === taskId)?.status !== "stale";
 
-/** The brief the main agent gave a worker, read back from its `start_worker` call. */
+/** The brief the main agent gave a worker, read back from its `start_agent` call. */
 function briefOf(started: PayloadOf<"thread.started">, calls: ThreadLog["calls"]): string {
   const call =
     started.spawnedBy && started.parentThreadId
       ? calls.get(callKey(started.parentThreadId, started.spawnedBy))
       : undefined;
-  return call?.name === "start_worker" ? call.brief : "";
+  return call?.name === "start_worker" || call?.name === "start_agent" ? call.brief : "";
 }
 
 /** The state of a thread; undefined for an id the log has not seen start. */
@@ -390,13 +394,15 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           value.root = { id: e.threadId, ended: value.root.ended, endedThisClaim: false };
           break;
         }
-        const known =
-          kind === "main" ? kind : (kind === "worker" || kind === "check") && task && kind;
-        if (!known) break;
+        // What the thread is (its place in the run) comes from the fields of its start; `kind`
+        // is the role file it runs on (`agent`), which says what it holds and may do.
+        const known = threadPlace(e.payload);
+        if (known === "root") break;
         // A cut-off start that was given an input is resumed with that input, not a cut-off line.
         if (record && !record.end && !record.inputPending) resumedCutOff.add(e.threadId);
         const fields: ThreadFields = {
           id: e.threadId,
+          role: kind,
           name: threadNameOf(e),
           end: undefined,
           nudges: record?.nudges ?? 0,
@@ -416,8 +422,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         value.threads.set(
           e.threadId,
           known === "main"
-            ? { ...fields, role: known }
-            : { ...fields, role: known, taskId: task as string },
+            ? { ...fields, place: known }
+            : { ...fields, place: known, taskId: task as string },
         );
         if (known === "main") value.main = e.threadId;
         break;
@@ -432,13 +438,13 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (!record) break;
         const first = !record.end;
         record.end = e.payload;
-        if (first && record.role !== "main") {
+        if (first && record.place !== "main") {
           const base = { eventId: e.id, threadId: e.threadId, taskId: record.taskId };
           if (e.payload.status === "failed") {
             notice({ ...base, kind: "failed", error: e.payload.error ?? "it failed" }, at);
           } else if (
             e.payload.status === "completed" &&
-            record.role === "worker" &&
+            record.place === "worker" &&
             !record.submitted
           ) {
             notice({ ...base, kind: "worker-idle", reply: record.reply }, at);
@@ -486,7 +492,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           if (!first && !afterCutOff) record.nudges++;
           briefed.add(e.threadId);
           const { covers } = e.payload.sender;
-          if (record.role === "main" && covers !== undefined) {
+          if (record.place === "main" && covers !== undefined) {
             value.cursor = covers;
             // A thread's first message is its brief, not a delivery: it does not count toward liveness.
             deliveries.push({ at: value.written.get(covers)?.at ?? -1, first });
@@ -505,7 +511,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       case "checkpoint": {
         const { verdict, summary, text } = e.payload;
         if (record && summary) record.lastSummary = summary;
-        if (verdict && record?.role === "check") {
+        if (verdict && record?.place === "check") {
           verdicts.set(e.payload.attemptId, { verdict, ...(summary && { summary }), text });
         }
         break;
@@ -516,7 +522,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (status === "stale") value.fixRounds.set(taskId, 0);
         if (status === "under-review" && by.kind === "agent" && record) {
           record.submitted = true;
-          if (record.role !== "main") notice({ ...base, kind: "submitted" }, at);
+          if (record.place !== "main") notice({ ...base, kind: "submitted" }, at);
         } else if (by.kind === "rule" && by.rule === "stale") {
           notice({ ...base, kind: "stale", reason }, at);
         } else if (
@@ -608,7 +614,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   return value;
 }
 
-export const startedFor = (d: ThreadLog, taskId: string, role: Role) =>
+export const startedFor = (d: ThreadLog, taskId: string, place: Role) =>
   [...d.threads.values()].filter(
-    (r): r is TaskThread => r.role !== "main" && r.taskId === taskId && r.role === role,
+    (r): r is TaskThread => r.place !== "main" && r.taskId === taskId && r.place === place,
   );

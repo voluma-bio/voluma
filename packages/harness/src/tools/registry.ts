@@ -36,6 +36,7 @@ export const TOOL_NAMES = [
   "read_file",
   "ask",
   "start_worker",
+  "start_agent",
   "message",
   "wait",
   "stop_worker",

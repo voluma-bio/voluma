@@ -36,6 +36,16 @@ export interface AgentDefinition {
   thinking?: ModelThinkingLevel;
   /** Every tool the role holds, base tools included (names in the harness's tool registry). */
   tools: string[];
+  /**
+   * Holding `bash` gives the role's threads a sandbox. `scratch` says what it writes: `own` (only
+   * `/scratch/<name>/`; the rest of `/scratch` is read host-side) or `all` (all of `/scratch`).
+   * Unset: `own`.
+   */
+  scratch: "own" | "all";
+  /** The access to the run's `/outputs`, for the sandbox and host-side tools. Unset: `read`. */
+  outputs: "read" | "write";
+  /** The role that checks a task this role submits; each exists. Unset: its submissions are not checked. */
+  checkedBy?: string;
   /** The roles this role may start; each exists. `start_worker` starts `worker`, so a role holding it lists it. */
   subagents: string[];
   /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
@@ -57,13 +67,9 @@ export interface WorkflowDefinition {
   toolIndex: ToolIndexEntry[];
   /**
    * The role files of `workflows/core/agents/`, the same for every workflow. The loader requires
-   * `main`, `worker` and `check`.
+   * `main`, the role the run's first thread runs on.
    */
-  agents: {
-    main: AgentDefinition;
-    worker: AgentDefinition;
-    check: AgentDefinition;
-  };
+  agents: Record<string, AgentDefinition> & { main: AgentDefinition };
 }
 
 /** A file that could not be read into a definition; names where. */

@@ -7,8 +7,6 @@ import type { ModelUsage } from "@voluma/contracts/events";
 import type { Usage } from "@voluma/contracts/runner";
 import { type CacheState, cacheStep } from "@voluma/contracts/spend";
 
-export type ModelRole = "main" | "worker" | "check";
-
 export function usageMeter() {
   let modelCostUsd = 0;
   let sandboxSeconds = 0;
@@ -24,14 +22,14 @@ export function usageMeter() {
   // Everything accumulated over the run, for the log; `take` only drains the heartbeat's share.
   let totalCostUsd = 0;
   const tokens = new Map<
-    ModelRole,
+    string,
     { calls: number; input: number; cacheRead: number; misses: number }
   >();
   // Cache state per thread: a miss is judged against the same thread's previous call.
   const cache = new Map<string, CacheState>();
   return {
     /** One model call's usage: its cost goes to the heartbeat, its tokens and cache miss to the per-role totals. */
-    addModelCall(role: ModelRole, threadId: string, used: ModelUsage | undefined) {
+    addModelCall(role: string, threadId: string, used: ModelUsage | undefined) {
       if (!used) return;
       this.addModelCost(used.costUsd);
       const { miss, next } = cacheStep(cache.get(threadId), used);

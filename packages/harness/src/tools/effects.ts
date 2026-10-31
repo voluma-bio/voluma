@@ -14,6 +14,7 @@ const SUFFIX = {
   submit_task: "",
   ask: ":ask",
   start_worker: ":start_worker",
+  start_agent: ":start_agent",
   message: ":message:open",
   stop_worker: ":stop_worker:end",
   /** The task going back to pending when a stopped worker was working on it. */

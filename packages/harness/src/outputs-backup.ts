@@ -7,7 +7,7 @@
  *
  * Only a go can lead to a write while the main agent holds no `bash` (`main.md`): its work tools,
  * and so every worker and check it starts, wait for a go (`main-tools.ts`). So a span is backed
- * up when its message is a go, or when the main role holds `bash` (`mainWorks`), which could write on
+ * up when its message is a go, or when the main role holds `bash` and `outputs: write` (`mainWorks`), which could write on
  * a message alone.
  *
  * At the start of a claim, before any thread or sandbox exists:
@@ -38,7 +38,7 @@ export async function keepOutputs(o: {
   rootThreadId: string;
   recorder: Recorder;
   outputs: Outputs;
-  /** The main role holds `bash`, so it can write `/outputs` with no go. */
+  /** The main role holds `bash` and `outputs: write`, so it can write `/outputs` with no go. */
   mainWorks: boolean;
   signal: AbortSignal;
 }): Promise<void> {
