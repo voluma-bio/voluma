@@ -9,18 +9,18 @@
  * message about it). The answer is a message like any other, so it opens a conversation.
  * When the AI is done with a message the chat says how it ended (`outcome`): what it did, or that
  * it failed or was stopped and the earlier results stand. Until then it says the AI is working.
- * Who may write, and when, is the API's rule (`messages.ts`); the box says why it is off.
+ * Who may write, and when, is the API's rule (`messages.ts`); the run read carries it as
+ * `cannotMessage` and the box shows it as its reason for being off.
  */
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
-import type { Me } from "@voluma/contracts/auth";
 import { type ConversationItem, conversation } from "@voluma/contracts/conversation";
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
   MESSAGE_BODY_BYTES,
   type SendRunMessageRequest,
 } from "@voluma/contracts/messages";
-import type { Run } from "@voluma/contracts/run";
+import type { RunRead } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
 import { ArrowRight, RotateCcw, Send, X } from "lucide-react";
@@ -48,19 +48,6 @@ function useDraft(key: string) {
     }
   }, [key, text]);
   return [text, setText] as const;
-}
-
-/** Why this person can't write to the run's AI now, or nothing when they can. */
-function closedBecause(run: Run, me: Me): string | undefined {
-  if (run.example) return "Example runs can't be changed.";
-  if (run.startedBy !== me.userId)
-    return "Only the person who started this run can write to its AI.";
-  if (run.credentials === "visitor") return "A run on your own keys can't be reopened.";
-  if (me.kind === "visitor") return "Guests can't reopen runs on Voluma's keys.";
-  if (run.state.status !== "ended") return "The AI is working. You can write once it finishes.";
-  if (run.state.outcome !== "completed")
-    return "This run didn't finish, so its AI can't be reopened.";
-  return undefined;
 }
 
 /** The API's refusal in its own words when it gave some; the text stays in the box. */
@@ -103,7 +90,6 @@ async function base64(blob: Blob): Promise<string> {
  */
 export function useMessage({
   run,
-  me,
   tasks,
   task,
   about,
@@ -113,8 +99,7 @@ export function useMessage({
   itemId,
   onSent,
 }: {
-  run: Run;
-  me: Me;
+  run: RunRead;
   tasks: TaskView[];
   /** The task in view. */
   task: TaskView | undefined;
@@ -179,7 +164,7 @@ export function useMessage({
       inFlight.current = false;
     },
   });
-  const closed = closedBecause(run, me);
+  const closed = run.cannotMessage ?? undefined;
   /**
    * Sends the words. An answer to an offer carries only the words and the offer's task (with `go`
    * when it redoes it; the words are then optional), no picture and no marks.
@@ -277,7 +262,7 @@ export function AiPanel({
     leaveAnswer,
   },
 }: {
-  run: Run;
+  run: RunRead;
   scan: string;
   tasks: TaskView[];
   /** The task in view: a redo of it needs no link to it. */
