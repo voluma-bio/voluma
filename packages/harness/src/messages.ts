@@ -33,7 +33,6 @@ const PLAIN_REASON: Record<ClaimEndReason, string> = {
   "loop-stalled": "the runner was too busy to answer the server",
   refused: "the server refused the runner's heartbeat",
   "lease-expired": "the server lost contact with the runner",
-  "provider-outage": "the model provider was unavailable",
 };
 
 /** What the main agent is told when it calls a tool that waits for the researcher's go. */
@@ -211,8 +210,6 @@ export function noticeLine(n: Notice, d: ThreadLog): string {
     case "check-result": {
       const detail = [n.summary, n.text].filter(Boolean).join("\n  ");
       switch (n.rule) {
-        case "check-limit":
-          return `- The check of ${n.taskId} ran out of time; ${n.taskId} is left to check for the researcher.`;
         case "fix-limit":
           return `- The check of ${n.taskId} found problems again and ${n.taskId} used its fix rounds; it is left to check for the researcher.\n  ${detail}`;
         default:

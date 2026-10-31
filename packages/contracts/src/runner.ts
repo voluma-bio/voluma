@@ -133,16 +133,8 @@ export const runnerIdSchema = z.string().min(1);
 export const releaseReasonSchema = z.enum(["shutdown", "self-stop", "loop-stalled", "refused"]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
-/**
- * Why a claim ended: a release reason, or the API swept its expired lease. `provider-outage` is
- * read only: claims ended that way before provider errors failed the run, and their events and
- * `runs.last_claim_end` still carry it.
- */
-export const claimEndReasonSchema = z.enum([
-  ...releaseReasonSchema.options,
-  "lease-expired",
-  "provider-outage",
-]);
+/** Why a claim ended: a release reason, or the API swept its expired lease. */
+export const claimEndReasonSchema = z.enum([...releaseReasonSchema.options, "lease-expired"]);
 export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({

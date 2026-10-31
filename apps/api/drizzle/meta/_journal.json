@@ -141,6 +141,13 @@
       "when": 1793471734542,
       "tag": "0019_legacy_event_values",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793482875642,
+      "tag": "0020_legacy_event_values_again",
+      "breakpoints": true
     }
   ]
 }
