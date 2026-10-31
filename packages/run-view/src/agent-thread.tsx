@@ -7,7 +7,7 @@
  */
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
 import { Elapsed, ThreadSpendInfo, threadWord } from "./agents";
-import { agentLabel, agentTitle, isMain } from "./run-model";
+import { agentLabel, agentTitle, isMain, plainError } from "./run-model";
 import { useThread, useThreadRows, useThreads } from "./run-store";
 import { TranscriptView } from "./transcript-view";
 
@@ -69,7 +69,13 @@ export function AgentThread({
           <ThreadSpendInfo thread={thread} />
           {actions && <div className="ml-auto flex shrink-0 items-center">{actions}</div>}
         </div>
-        {answer && <p className="truncate text-meta text-muted-foreground">{answer}</p>}
+        {answer && (
+          <p
+            className={`text-meta text-muted-foreground ${!running && thread.error ? "break-words whitespace-pre-wrap" : "truncate"}`}
+          >
+            {!running && thread.error ? plainError(thread.error) : answer}
+          </p>
+        )}
       </header>
       <div
         ref={viewport}
