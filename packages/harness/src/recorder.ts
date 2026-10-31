@@ -24,7 +24,9 @@
  * `onStop("lease-lost")` once (the creator aborts the run) and drops every event still queued.
  * A store still unavailable after the retries is the same stop with reason "unreachable":
  * the run is not at fault, so the creator releases it for another claim to resume, and
- * `failure()` stays empty.
+ * `failure()` stays empty. The retries also end at the first failed attempt once `runStopped`
+ * aborts (the run is being released anyway), so a hanging API cannot hold the run past its
+ * stop; events queued before the abort are still delivered while the store answers.
  *
  * An event the store refuses, and an `emit` of an invalid event (our code broke the
  * contract), is lost: `failure()` holds the error, and the supervisor fails the run on it
@@ -67,6 +69,13 @@ export interface Recorder {
   failure(): unknown;
 }
 
+/** A delivery refused because the recorder already stopped; not a failure of its event. */
+class RecorderStopped extends Error {
+  constructor() {
+    super("the run has stopped");
+  }
+}
+
 const ATTEMPTS = 5;
 const RETRY_DELAY_MS = 2_000;
 
@@ -78,6 +87,7 @@ export function recorder(
   retryDelayMs = RETRY_DELAY_MS,
   stored: readonly RunEvent[] = [],
   live?: LiveBatcher,
+  runStopped?: AbortSignal,
 ): Recorder {
   let queue: Promise<unknown> = Promise.resolve();
   let stopped = false; // the creator has been told to stop: nothing more is delivered
@@ -96,7 +106,7 @@ export function recorder(
   async function deliver(event: EventInput): Promise<void> {
     try {
       for (let attempt = 1; ; attempt++) {
-        if (stopped) throw new LeaseLost("the run has stopped");
+        if (stopped) throw new RecorderStopped();
         try {
           await eventLog.append(event);
           held.push({ ...event, seq: held.length + 1 });
@@ -105,7 +115,7 @@ export function recorder(
         } catch (error) {
           if (error instanceof LeaseLost) stop("lease-lost");
           if (!(error instanceof EventLogUnavailable)) throw error;
-          if (attempt >= ATTEMPTS) {
+          if (attempt >= ATTEMPTS || runStopped?.aborted) {
             stop("unreachable");
             throw error;
           }
@@ -157,7 +167,13 @@ export function recorder(
         return;
       }
       enqueue(parsed.data).catch((error) => {
-        if (!(error instanceof LeaseLost || error instanceof EventLogUnavailable)) {
+        if (
+          !(
+            error instanceof LeaseLost ||
+            error instanceof EventLogUnavailable ||
+            error instanceof RecorderStopped
+          )
+        ) {
           console.error(`recorder: gave up on ${type} ${id}: ${String(error)}`);
           failure ??= error;
         }
