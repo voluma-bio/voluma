@@ -9,6 +9,10 @@
  * is gone or no longer matches its sha256 comes back as a short text note. Only the images
  * the next request would carry are fetched, those in the messages since the latest compaction
  * (`compaction.ts`); the ones it summarized away become that note.
+ *
+ * Any read error but `FileNotFound` (the one classification the Files port makes) is retried
+ * with a short backoff, since a transient R2 error must not fail the history load and stop the
+ * thread; after the last attempt it propagates.
  */
 import { createHash } from "node:crypto";
 import { historyImageKey } from "@voluma/contracts/r2";
@@ -19,6 +23,9 @@ import { parseMarker } from "./compaction";
 // view_image returns at most 1 MiB per image. Its stored object is on writable scratch,
 // so check the stream before buffering it: a sandbox can replace it with a larger file.
 const MAX_IMAGE_BYTES = 1024 * 1024;
+
+const READ_ATTEMPTS = 3;
+const READ_BACKOFF_MS = 500; // doubles: 0.5 s, then 1 s
 
 type Block = { type: string; [key: string]: unknown };
 type Row = { content?: unknown; [key: string]: unknown };
@@ -49,17 +56,22 @@ export function withImageRefs(
       sha256: string;
       mimeType: string;
     };
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for await (const chunk of files.read(key, signal)) {
-        size += chunk.length;
-        if (size > MAX_IMAGE_BYTES) return note("its file exceeds the image size limit");
-        chunks.push(chunk);
+    let chunks: Uint8Array[] = [];
+    for (let attempt = 1; ; attempt++) {
+      chunks = [];
+      let size = 0;
+      try {
+        for await (const chunk of files.read(key, signal)) {
+          size += chunk.length;
+          if (size > MAX_IMAGE_BYTES) return note("its file exceeds the image size limit");
+          chunks.push(chunk);
+        }
+        break;
+      } catch (error) {
+        if (error instanceof FileNotFound) return note("its file was deleted");
+        if (attempt >= READ_ATTEMPTS || signal.aborted) throw error;
+        await new Promise((resolve) => setTimeout(resolve, READ_BACKOFF_MS * 2 ** (attempt - 1)));
       }
-    } catch (error) {
-      if (error instanceof FileNotFound) return note("its file was deleted");
-      throw error;
     }
     const bytes = Buffer.concat(chunks);
     if (createHash("sha256").update(bytes).digest("hex") !== sha256)
