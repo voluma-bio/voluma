@@ -34,6 +34,7 @@ import { Refusal, type TaskRuntime } from "../task-runtime";
 import {
   askRef,
   checkAwaitsMain,
+  inCharge,
   startedFor,
   type ThreadLog,
   type ThreadRecord,
@@ -368,8 +369,10 @@ export function mainTools(deps: MainDeps) {
           }
           const t = runtime.taskOf(r.taskId);
           if (r.place === "worker") {
-            if (agents.state(d, r.id) === "stopped") {
-              throw new Refusal(`${r.name}, which asked ${input.askId}, was stopped.`);
+            if (!inCharge(d, r)) {
+              throw new Refusal(
+                `${r.name}, which asked ${input.askId}, is no longer in charge of ${r.taskId} (submitted, stopped or replaced). Its question is closed: send what it needs with \`message\` or \`change_plan\`.`,
+              );
             }
           } else if (
             agents.state(d, r.id) === "stopped" ||
@@ -411,19 +414,12 @@ export function mainTools(deps: MainDeps) {
           );
           return r;
         });
-        // A check is resumed by the loop; a worker is working, so the answer joins its inbox, or
-        // resumes it if its turn just ended.
+        // The loop delivers the answer to whatever resumes a thread; a running worker gets it now.
         if (r.place === "worker") {
-          const text = answerText({ text: input.text, files: [] }, r.taskId);
-          const sender: UserSender = { kind: "thread", threadId: ctx.threadId };
-          if (!agents.steer(r.id, text, sender)) {
-            await agents.settled(r.id);
-            await recorder.flush();
-            await runtime.section(async () => {
-              main(ctx);
-              if (agents.state(log(), r.id) === "idle") await agents.resume(r.id, text, sender);
-            });
-          }
+          agents.steer(r.id, answerText({ text: input.text, files: [] }, r.taskId), {
+            kind: "thread",
+            threadId: ctx.threadId,
+          });
         }
         agents.changed();
         return {
@@ -578,12 +574,14 @@ export function mainTools(deps: MainDeps) {
           }
         }
       }
-      // Running workers still read the plan they started with: tell each what changed, in one line.
-      const changes = planChangedText(input, added, adHoc);
+      // A running worker still reads the plan it started with: tell it what changed for its task.
+      // One not running, or cut off before it reads this, is not told.
       for (const r of d.threads.values()) {
-        if (r.place !== "worker" || skipped.has(r.taskId) || agents.state(d, r.id) !== "running")
-          continue;
-        agents.steer(r.id, changes, { kind: "thread", threadId: ctx.threadId });
+        if (r.place !== "worker" || skipped.has(r.taskId) || !inCharge(d, r)) continue;
+        agents.steer(r.id, planChangedText(input, added, adHoc, r.taskId), {
+          kind: "thread",
+          threadId: ctx.threadId,
+        });
       }
       return {
         message: `The plan changed.${skipped.size > 0 ? ` Skipped: ${[...skipped].join(", ")}.` : ""}`,

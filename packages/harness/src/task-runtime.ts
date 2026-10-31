@@ -583,7 +583,9 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         if ((c.kind !== "check" && c.kind !== "worker") || !c.taskId) {
           throw new Refusal("Only a worker or a check thread asks.");
         }
-        if (c.batchSize > 1) throw new Refusal("Call ask alone, not with other tools.");
+        if (c.kind === "check" && c.batchSize > 1) {
+          throw new Refusal("Call ask alone, not with other tools.");
+        }
         const asks = log().threads.get(c.threadId)?.asks ?? [];
         if (c.kind === "check") {
           writeTarget(c, c.taskId, { verdict: false, what: "asks" });

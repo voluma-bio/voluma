@@ -171,7 +171,7 @@ function planBlock(
   const names = new Map(workflow.outputs.map((o) => [o.id, o.name]));
   const intro =
     own?.reader === "worker"
-      ? "Every task of the run, so you know what builds on yours and who uses your outputs. The main agent can change it; you are told when it does.\n\n"
+      ? "Every task of the run, so you know what builds on yours and who uses your outputs. The main agent can change it; if it changes your task or the plan while you work, you are told.\n\n"
       : own
         ? "Every task of the run, so you can judge whether this task's outputs serve the tasks that build on it.\n\n"
         : "";

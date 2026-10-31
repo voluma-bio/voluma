@@ -87,28 +87,35 @@ export function answerText(
   return `The main agent answers: ${answer.text}${files ? `\nFiles for you: ${files} (root "scratch" is /scratch/<path>, "outputs" is /outputs/${taskId}/<path>).` : ""}`;
 }
 
-/** What a running worker is told when the main agent changes the plan: the changes by task, not the plan again. */
+/**
+ * What a running worker is told when the main agent changes the plan: what changed for its own
+ * task (the lines and text added), the tasks added or skipped, and why.
+ */
 export function planChangedText(
   change: {
     reason: string;
-    doneWhen?: { taskId: string }[];
-    instructions?: { taskId: string }[];
+    doneWhen?: { taskId: string; lines: string[] }[];
+    instructions?: { taskId: string; text: string }[];
     skip?: { taskId: string }[];
   },
-  added: readonly { id: string }[],
-  adHoc: readonly { id: string }[],
+  added: readonly { id: string; title?: string }[],
+  adHoc: readonly { id: string; title?: string }[],
+  ownTaskId: string,
 ): string {
+  const lines = (change.doneWhen ?? [])
+    .filter((x) => x.taskId === ownTaskId)
+    .flatMap((x) => x.lines);
+  const text = (change.instructions ?? []).filter((x) => x.taskId === ownTaskId).map((x) => x.text);
+  const tasks = [...added, ...adHoc].map((t) => (t.title ? `${t.id} (${t.title})` : t.id));
+  const skipped = (change.skip ?? []).map((t) => t.taskId);
   const parts = [
-    [...added, ...adHoc].length > 0 && `added ${[...added, ...adHoc].map((t) => t.id).join(", ")}`,
-    change.skip && `skipped ${change.skip.map((t) => t.taskId).join(", ")}`,
-    (change.doneWhen || change.instructions) &&
-      `done-when or instructions changed on ${[
-        ...new Set(
-          [...(change.doneWhen ?? []), ...(change.instructions ?? [])].map((t) => t.taskId),
-        ),
-      ].join(", ")}`,
+    lines.length > 0 &&
+      `New done-when lines for your task:\n${lines.map((l) => `- ${l}`).join("\n")}`,
+    text.length > 0 && `Added to your instructions:\n${text.join("\n\n")}`,
+    tasks.length > 0 && `Added tasks: ${tasks.join(", ")}.`,
+    skipped.length > 0 && `Skipped tasks: ${skipped.join(", ")}.`,
   ].filter(Boolean);
-  return `The main agent changed the plan (${parts.join("; ")}): ${change.reason}`;
+  return `The main agent changed the plan: ${change.reason}${parts.length > 0 ? `\n\n${parts.join("\n\n")}` : ""}`;
 }
 
 export const verdictNudge = (taskId: string) =>
@@ -331,8 +338,8 @@ export function agentsList(
   const lines = [...d.threads.values()].flatMap((r) => {
     if (r.place === "main") return [];
     const state = stateOf(r);
-    if (r.place === "check" && state !== "running" && !openAsk(r)) return [];
-    const label = openAsk(r)
+    if (r.place === "check" && state !== "running" && !openAsk(d, r)) return [];
+    const label = openAsk(d, r)
       ? r.place === "worker"
         ? `${state}, asked you a question`
         : "waiting for your answer"
@@ -358,7 +365,7 @@ function carriedNotices(d: ThreadLog, view: Folded): Notice[] {
   const rejected = new Set(view.tasks.flatMap((t) => (t.rejected ? [t.id] : [])));
   const openAsks = new Set(
     [...d.threads.values()].flatMap((r) => {
-      const ask = openAsk(r);
+      const ask = openAsk(d, r);
       return ask ? [ask.id] : [];
     }),
   );

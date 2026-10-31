@@ -21,3 +21,7 @@ migration (keep its `CASE WHEN type = 'thread.started'` guard: on staging, a pla
 the json of other rows first), parse every staging run with the new `runEventSchema`, make `name` required in
 `events.ts`, and delete `threadNameOf` in `packages/harness/src/thread-log.ts`. Archived
 `run.json` dumps from before step 1 need the docs-repo `convert-t1b.ts` once before import.
+
+## `checkThreadId` → `threadId` on the `answer` event (PR #384)
+
+A worker's `ask` is answered through the same `answer` event, so `checkThreadId` now holds a worker's id too. Rename it to `threadId` by expand/contract (see the stored-event rule in the root `AGENTS.md`), and fix the doc comments in `events.ts` that still say "a check thread asked" / "answered a check thread's `ask`".

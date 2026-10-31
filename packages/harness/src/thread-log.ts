@@ -274,10 +274,33 @@ function threadNameOf(e: Extract<RunEvent, { type: "thread.started" }>): string 
   return e.payload.name ?? e.threadId.slice(e.runId.length + 1);
 }
 
-/** The question a worker or check thread has open: its latest ask, when unanswered. */
-export const openAsk = (r: ThreadRecord): AskRecord | undefined => {
+/**
+ * The thread is still the one in charge of its work. A worker is, whatever its task's status
+ * (main may have resumed it on a finished task), unless a newer worker holds the task, it handed
+ * the task over in this invocation, or the task is under review, stale or skipped. A check is
+ * while its task is under review by it with no verdict.
+ */
+export function inCharge(d: ThreadLog, r: ThreadRecord): boolean {
+  if (r.place === "main") return d.main === r.id;
+  const t = d.view.tasks.find((x) => x.id === r.taskId);
+  if (r.place === "check")
+    return t?.status === "under-review" && t.threads.check === r.id && !t.checker;
+  const latest = startedFor(d, r.taskId, "worker")
+    .filter((w) => w.end?.status !== "cancelled")
+    .at(-1);
+  return (
+    latest?.id === r.id &&
+    !r.submitted &&
+    !t?.skipped &&
+    t?.status !== "under-review" &&
+    t?.status !== "stale"
+  );
+}
+
+/** The question a worker or check thread has open: its latest ask, when unanswered and, for a worker, while it is in charge. */
+export const openAsk = (d: ThreadLog, r: ThreadRecord): AskRecord | undefined => {
   const last = r.asks.at(-1);
-  return last && !last.answer ? last : undefined;
+  return last && !last.answer && (r.place !== "worker" || inCharge(d, r)) ? last : undefined;
 };
 
 // The log only grows, so its length says whether the derivation is current.
