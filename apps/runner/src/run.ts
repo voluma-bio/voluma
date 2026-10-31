@@ -30,12 +30,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import {
-  inputPrefix,
-  referencePrefix,
-  scratchKey,
-  workflowSnapshotPrefix,
-} from "@voluma/contracts/r2";
+import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { type RunLayout, runLayout, type ThreadLayout } from "@voluma/harness/layout";
@@ -60,6 +55,7 @@ import {
   superviseRun,
 } from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
+import type { ObjectStore } from "@voluma/object-store";
 import type { Skill } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
@@ -81,12 +77,11 @@ import {
   workerPrompt,
 } from "./prompts.ts";
 import { providerFailure } from "./provider-error.ts";
-import { r2Evidence } from "./r2-evidence.ts";
-import { r2Files } from "./r2-files.ts";
 import { r2Outputs } from "./r2-outputs.ts";
-import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
+import { storeEvidence } from "./store-evidence.ts";
+import { storeFiles } from "./store-files.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking } from "./thinking.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
@@ -113,6 +108,8 @@ export interface RunnerContext {
   /** The model behind each alias the config sets (`config.models`), resolved at startup. */
   aliases: Record<string, Model<Api>>;
   visitorModel: Model<Api>;
+  /** The run's bucket. */
+  objects: ObjectStore;
   log(line: string): void;
 }
 
@@ -159,7 +156,7 @@ async function claimBody(
   shutdown: AbortSignal,
   scope: RunScope,
 ): Promise<void> {
-  const { config, models } = ctx;
+  const { config, models, objects } = ctx;
   const { run, leaseToken, keys } = claim;
   const runId = run.id;
   const claimId = randomUUID();
@@ -251,7 +248,7 @@ async function claimBody(
     const workflowDir = run.workflows[0]?.path;
     if (!workflowDir) throw new Error("the run pins no workflow directory");
     const definition = await loadWorkflow(workflowDir, {
-      store: r2Workflows(config.r2),
+      store: objects,
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
       commit: config.commit,
@@ -452,7 +449,7 @@ async function claimBody(
         systemPrompt: systemPrompt(definition, thread),
         tools: grant(modelRole),
       });
-    const files = r2Files(config.r2);
+    const files = storeFiles(objects);
     const supervised = superviseRun({
       runId,
       plan: computed.tasks,
@@ -467,7 +464,7 @@ async function claimBody(
       sandbox: (id, options) => opened.get(id, options),
       releaseSandbox: (id) =>
         opened.release(id).catch((e) => log(`releasing ${nameOf(id)} failed: ${e}`)),
-      evidence: r2Evidence(config.r2),
+      evidence: storeEvidence(objects),
       files,
       outputs: r2Outputs(config.r2),
       earlierClaimsEnded: (signal) => awaitOtherClaimsGone(config.modal, runId, claimId, signal),

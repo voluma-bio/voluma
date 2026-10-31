@@ -59,9 +59,9 @@ function thread(
     parentId: "main",
     taskId,
     attempts: [],
-    startedAt: at(minutes[0]),
-    endedAt: minutes[1] === undefined ? undefined : at(minutes[1]),
-    workedBefore: 0,
+    // An ended thread's minutes are all in its ended spans; an open one's clock runs from its start.
+    endedSeconds: minutes[1] === undefined ? 0 : (minutes[1] - minutes[0]) * 60,
+    openSince: minutes[1] === undefined ? at(minutes[0]) : null,
     status,
     toolCalls: 0,
     toolErrors: 0,
@@ -211,8 +211,14 @@ const study: StudyGraphTask[] = PLAN.map(([id, title, dependsOn]) => ({
   scans: spread(STUDY[id] ?? {}),
 }));
 
-/** The study dashboard: each box is one task across the study's 20 scans. */
+/** The study dashboard: each box is one task across the study's 20 scans, and opens it. */
 export const Study: Story = {
+  args: { size: "study", tasks: study, taskLink: (id) => `#workflow?task=${id}` },
+  decorators: [(Story) => <div className="w-[720px]">{Story()}</div>],
+};
+
+/** The Workflow page: a box picks the task in place, and its edges light up. */
+export const StudyPicked: Story = {
   args: { size: "study", tasks: study, selected: "iioc", onSelect: () => {} },
   decorators: [(Story) => <div className="w-[720px]">{Story()}</div>],
 };

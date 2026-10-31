@@ -159,12 +159,9 @@ function useAccepting(run: Run, revision: Revision | undefined) {
   const [error, setError] = useState<{ id: string; text: string }>();
   const mutation = useAcceptCheck(run.id, revision?.id, {
     onMutate: ({ checkId }) => setError((e) => (e?.id === checkId ? undefined : e)),
+    // `useAcceptCheck` already words the failure (read-only, changed since, couldn't save).
     onSettled: (_res, e, { checkId }) => {
-      if (e)
-        setError({
-          id: checkId,
-          text: e.message,
-        });
+      if (e) setError({ id: checkId, text: e.message });
     },
   });
   const readOnly = run.example
@@ -220,7 +217,9 @@ function ScanReview({
     staleTime: Number.POSITIVE_INFINITY,
   });
   const store = useRunStore();
+  const [reopened, setReopened] = useState(0);
   useRunStream(run.id, {
+    reopened,
     revisionId: run.review?.revisionId,
     going: run.state.status !== "ended",
     onClosed: refetchRun,
@@ -478,6 +477,7 @@ function ScanReview({
             about={about}
             onSent={() => {
               setAbout(undefined);
+              setReopened((n) => n + 1);
               refetchRun();
             }}
           />

@@ -1,18 +1,20 @@
 /**
  * Postgres adapter for the browser's reads of studies (`@voluma/contracts/study`): Home's
  * list, which carries each scan's newest run in brief, and one study with its scans, runs,
- * headline values and open checks. Reads apply the caller's `ReadScope` as `pg-runs.ts` does, and
- * derive through its `ResultsLoader`, so a run is derived once for both. Writes are the queue's.
+ * values, open checks and each scan's task states. Reads apply the caller's `ReadScope` as
+ * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
+ * scans' values, checks and states are read from each fold here. Writes are the queue's.
  */
+import { taskStates } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
   StudyDetail,
   StudyRunSummary,
   StudyScan,
+  StudyScanDetail,
   StudySummary,
 } from "@voluma/contracts/study";
-import { workflowById } from "@voluma/workflow/bundled";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
@@ -46,6 +48,41 @@ function newestOf(results: RunResult[]) {
     if (completed(result.run) && !newestCompleted.has(id)) newestCompleted.set(id, result);
   }
   return { newest, newestCompleted };
+}
+
+/** A completed run's measurement values and open checks, from its latest revision. */
+function resultOf({ run, results }: RunResult) {
+  const values: StudyScanDetail["values"] = {};
+  const toCheck: StudyScanDetail["toCheck"] = [];
+  for (const task of results.revisions.at(-1)?.tasks ?? []) {
+    for (const m of task.measurements) {
+      // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
+      values[m.id.slice(task.id.length + 1)] = {
+        value: m.value,
+        unit: m.unit,
+        confidence: m.confidence,
+      };
+    }
+    for (const check of task.checks) {
+      if (check.status === "open")
+        toCheck.push({
+          runId: run.id,
+          taskId: task.id,
+          resultRevisionId: task.resultRevisionId,
+          checkId: check.id,
+          title: check.title,
+          detail: check.detail,
+        });
+    }
+  }
+  return { values, toCheck };
+}
+
+/** Every task of a run's latest plan in its state, a correction in progress's own; none before a plan. */
+function taskStateOf({ run, results, correcting, open, failed }: RunResult) {
+  const revision = correcting ?? results.revisions.at(-1);
+  if (!revision) return {};
+  return Object.fromEntries(taskStates(revision, { state: run.state, open, failed }));
 }
 
 function summarize(study: Study, scanCount: number, results: RunResult[]): StudySummary {
@@ -104,7 +141,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           for (const result of await results(
             tx,
             and(readableRuns(reader), inArray(runs.studyId, ids)),
-            { skipUnreadable: true },
+            { skipUnreadable: true, stopped: "none" },
           )) {
             const group = byStudy.get(result.run.studyId) ?? [];
             group.push(result);
@@ -136,22 +173,18 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             .orderBy(asc(studyScans.position));
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
             skipUnreadable: true,
+            stopped: "newest",
           });
-          const { newestCompleted } = newestOf(found);
+          const { newest, newestCompleted } = newestOf(found);
           const runsOf = new Map<string, Run[]>();
           for (const { run } of found) {
             runsOf.set(run.input.id, [...(runsOf.get(run.input.id) ?? []), run]);
           }
-          const headline = workflowById(row.workflowId)?.headline ?? [];
           return {
             study: toStudy(row),
             scans: scans.map(({ scan, input }) => {
               const result = newestCompleted.get(scan.inputId);
-              const values: StudyDetail["scans"][number]["values"] = {};
-              for (const { id } of headline) {
-                const value = result?.values[id];
-                if (value) values[id] = value;
-              }
+              const newestRun = newest.get(scan.inputId);
               return {
                 scan: {
                   inputId: scan.inputId,
@@ -162,10 +195,8 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 input: toInput(input),
                 runs: runsOf.get(scan.inputId) ?? [],
                 resultRunId: result?.run.id ?? null,
-                values,
-                toCheck: result
-                  ? result.toCheck.map((item) => ({ ...item, runId: result.run.id }))
-                  : [],
+                ...(result ? resultOf(result) : { values: {}, toCheck: [] }),
+                taskState: newestRun ? taskStateOf(newestRun) : {},
               };
             }),
           };

@@ -14,7 +14,7 @@ export function sandboxGateway(
   claim: { runId: string; leaseToken: string; visitorMetaKey?: string },
   sandbox: string,
   redact: Redact,
-): { url: string; token: string } | undefined {
+): { url: string; token: string; ipv4?: string } | undefined {
   const { gateway } = config;
   const secret = gateway?.secrets[0];
   if (!gateway || !secret) return undefined;
@@ -30,5 +30,5 @@ export function sandboxGateway(
     secret,
   );
   redact.add(token);
-  return { url: gateway.url, token };
+  return { url: gateway.url, token, ipv4: gateway.ipv4 };
 }

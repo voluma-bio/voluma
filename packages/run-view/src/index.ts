@@ -20,18 +20,21 @@ export {
   type NeedItem,
   plainError,
   runView,
+  type TaskState,
   type TaskView,
   type Thread,
+  workedSeconds,
 } from "./run-model";
 export {
   formatDuration,
   formatUsd,
+  itemHref,
+  liveStatus,
   plural,
   type RunStatus,
   runHref,
   runStatus,
   scanLabel,
-  shortDate,
   studyStatus,
 } from "./run-status";
 export {
@@ -41,6 +44,14 @@ export {
   useRunStore,
   useThreads,
 } from "./run-store";
+export {
+  groupNames,
+  groupOf,
+  isLive,
+  kneeOf,
+  StudyPanel,
+  scanStatus,
+} from "./study-panel";
 export {
   type GraphTask,
   type ScanGraphTask,

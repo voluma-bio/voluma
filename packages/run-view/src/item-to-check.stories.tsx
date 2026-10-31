@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Readout } from "@voluma/ui";
+import { Button, Readout } from "@voluma/ui";
+import { Box } from "lucide-react";
 import { ItemToCheck } from "./item-to-check";
 
 /**
@@ -15,7 +16,7 @@ const meta = {
   component: ItemToCheck,
   decorators: [(Story) => <div className="w-[368px]">{Story()}</div>],
   args: {
-    task: "Segmentation",
+    context: "Segmentation",
     title: "Medial osteophyte boundary",
     text: "The osteophyte merges with the medial femoral condyle; the label edge is the AI's best call.",
     found: "A second AI check agreed with the values and left this call to you.",
@@ -42,12 +43,25 @@ export const ReadOnly: Story = {
 /** A task left To check with nothing to accept: only Something's wrong. */
 export const NothingToAccept: Story = {
   args: {
-    task: "Tibial cortical thickness",
+    context: "Tibial cortical thickness",
     title: "Sent back by the second AI",
     text: "The cortex is thinner than the scan supports at the medial edge.",
     found: undefined,
     value: undefined,
     state: "info",
+  },
+};
+/** On the study's To check page, by issue: the scan above the title, and a way into the scan review. */
+export const OnTheStudyPage: Story = {
+  args: {
+    context: "OA7-2, right knee",
+    onWrong: undefined,
+    actions: (
+      <Button variant="ghost">
+        <Box aria-hidden />
+        Review OA7-2 in 3D
+      </Button>
+    ),
   },
 };
 export const Failed: Story = { args: { error: "This changed since you opened it. Look again." } };

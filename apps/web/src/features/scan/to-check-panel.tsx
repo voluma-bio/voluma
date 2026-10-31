@@ -85,7 +85,7 @@ export function ToCheckPanel({
         <ItemToCheck
           key={current.id}
           className="inset-ring-select"
-          task={titleOf(current.taskId)}
+          context={titleOf(current.taskId)}
           title={current.title}
           text={current.text}
           found={

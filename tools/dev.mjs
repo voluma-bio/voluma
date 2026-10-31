@@ -37,6 +37,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
@@ -140,18 +141,35 @@ if (migrate.status !== 0) {
 
 console.log(`\nweb  ${appUrl}\napi  ${env.apiUrl}\ndb   ${dbName}\n`);
 const children = [
-  spawn("node", ["--env-file-if-exists", envFile, "--import", "tsx", "--watch", "src/index.ts"], {
-    cwd: resolve(root, "apps/api"),
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl.href,
-      VOLUMA_API_TOKEN: env.apiToken,
-      APP_URL: appUrl,
-      PORT: String(apiPort),
-      HOST: "127.0.0.1",
+  // tsx ignores node_modules: pnpm's shared hardlinks must not restart other worktrees.
+  // Explicit includes also reload source that has not been imported yet, on Linux and macOS.
+  spawn(
+    "node",
+    [
+      createRequire(resolve(root, "apps/api/package.json")).resolve("tsx/cli"),
+      "watch",
+      "--clear-screen=false",
+      "--include",
+      "src/**",
+      "--include",
+      "../../packages/*/src/**",
+      "--env-file-if-exists",
+      envFile,
+      "src/index.ts",
+    ],
+    {
+      cwd: resolve(root, "apps/api"),
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl.href,
+        VOLUMA_API_TOKEN: env.apiToken,
+        APP_URL: appUrl,
+        PORT: String(apiPort),
+        HOST: "127.0.0.1",
+      },
     },
-  }),
+  ),
   spawn(
     "pnpm",
     ["--filter", "@voluma/web", "exec", "vite", "--port", String(webPort), "--strictPort"],

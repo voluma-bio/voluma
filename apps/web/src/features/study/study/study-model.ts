@@ -1,5 +1,5 @@
 /**
- * What the study page derives from one `StudyDetail`: each scan's status, the tab counts, the
+ * What the study pages derive from one `StudyDetail`: each scan's task states, the
  * headline series by group, the far-from-group flag and the To check kinds. Pure functions, so
  * every tab reads the same numbers.
  *
@@ -16,63 +16,28 @@
  * "reported in µm"; converting would guess what the agent meant.
  *
  * To check kinds: items group by task and check title, in workflow task order, then title.
+ *
+ * Task states: a scan's tasks are where its newest run is (`taskState`), the state the scan
+ * review shows, derived once on the server. A workflow task outside that run's plan reads
+ * Skipped; with no plan yet, Waiting. A task To check with no open item left reads Done, since
+ * its checks were accepted.
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import { runHref, runStatus } from "@voluma/run-view";
+import {
+  groupNames,
+  groupOf,
+  isLive,
+  itemHref,
+  type NeedItem,
+  runHref,
+  type ScanGraphTask,
+  type StudyGraphTask,
+  TASK_STATUS,
+  type TaskState,
+} from "@voluma/run-view";
 import type { Status } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
-
-/** Where "Open in 3D" lands: a To check item, or a run's task (a scan far from its group). */
-export type CheckStop = ToCheckItem | Pick<ToCheckItem, "runId" | "taskId">;
-
-/** Opens the check panel on `queue` at `start`; the one mount point of every "Open in 3D". */
-export type OpenChecks = (queue: CheckStop[], start: number) => void;
-
-/**
- * A scan's status: its newest run's chip (`@voluma/run-view`), with "N of M tasks" while it runs;
- * "Not started" without a run. Its values may come from an older completed run.
- */
-export function scanStatus({ runs }: StudyScanDetail): {
-  label: string;
-  status: Status;
-  progress?: string;
-} {
-  const run = runs[0];
-  if (!run) return { label: "Not started", status: "waiting" };
-  const status = runStatus(run);
-  return run.tasks
-    ? { ...status, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
-    : status;
-}
-
-/** A run the API or the runner is still moving: the page refetches while one is in view. */
-export const isLive = (scan: StudyScanDetail) =>
-  scan.runs[0] !== undefined && scan.runs[0].state.status !== "ended";
-
-export type StudyCounts = {
-  scans: number;
-  /** Scans with a completed result. */
-  done: number;
-  running: number;
-  /** Queued or needing keys. */
-  waiting: number;
-  notStarted: number;
-  toCheck: number;
-};
-
-export function studyCounts(detail: StudyDetail): StudyCounts {
-  const status = (s: StudyScanDetail) => s.runs[0]?.state.status;
-  return {
-    scans: detail.scans.length,
-    done: detail.scans.filter((s) => s.resultRunId !== null).length,
-    running: detail.scans.filter((s) => status(s) === "running").length,
-    waiting: detail.scans.filter((s) => status(s) === "queued" || status(s) === "awaiting-keys")
-      .length,
-    notStarted: detail.scans.filter((s) => s.runs.length === 0).length,
-    toCheck: detail.scans.reduce((n, s) => n + s.toCheck.length, 0),
-  };
-}
 
 /**
  * What every run of the study has spent so far: the runner's own model calls (heartbeats) plus
@@ -85,17 +50,6 @@ export const studySpend = (detail: StudyDetail) =>
       (usd, run) => usd + (run.usage?.modelCostUsd ?? 0) + (run.providerCalls?.costUsd ?? 0),
       0,
     );
-
-/** The row a scan sits on: its group, or one shared row when no scan of the study has one. */
-export const NO_GROUP = "No group";
-export const groupOf = (scan: StudyScanDetail, grouped: boolean) =>
-  scan.scan.group ?? (grouped ? NO_GROUP : "All scans");
-
-/** Groups in the order their first scan appears in the study. */
-export function groupNames(detail: StudyDetail): string[] {
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
-  return [...new Set(detail.scans.map((s) => groupOf(s, grouped)))];
-}
 
 /** An output's declared unit; "" for one without. */
 export const unitOf = (output: OutputEntry) =>
@@ -200,36 +154,102 @@ export function checkKinds(detail: StudyDetail, workflow: BundledWorkflow): Chec
   return [...kinds.values()].sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
 }
 
-/** A scan's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */
-export function kneeOf(scan: StudyScanDetail): string | null {
-  const knee = scan.scan.attributes.knee;
-  return typeof knee === "string" && knee ? knee : null;
-}
-
-/** A scan's knee and group, as its row's second line. */
-export const scanMeta = (scan: StudyScanDetail) =>
-  [kneeOf(scan), scan.scan.group].filter((x): x is string => x !== null);
-
-/** Where a scan links: its newest run's scan review. */
+/** Where a scan links: its newest run's review (the scan review shows a live run too). */
 export const scanHref = ({ runs: [run] }: StudyScanDetail) =>
   run ? runHref({ runId: run.id }) : null;
 
+/** One task of one scan: where its newest run is; outside that run's plan, skipped. */
+export function taskState(scan: StudyScanDetail, taskId: string): TaskState {
+  const states = scan.taskState;
+  return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
+}
+
+/** Open checks of the scan's result for one task, counted only while that result is its newest run. */
+function openOn(scan: StudyScanDetail, taskId: string): ToCheckItem[] {
+  if (scan.resultRunId === null || scan.runs[0]?.id !== scan.resultRunId) return [];
+  return scan.toCheck.filter((item) => item.taskId === taskId);
+}
+
 /**
- * Why a scan's run failed, in the researcher's words; the raw error stays on the run page. The
- * harness starts a task's failure with its id (`<taskId>: its worker failed on a model provider
- * error…`, `supervisor.ts`), which names the task by its title here.
+ * A cell of the scan-by-task grid: one task of one scan, and its open checks. A task in To check
+ * with every item handled reads done; on a live run the study read has no items yet (they belong
+ * to the completed result), so it reads To check as the scan review does.
  */
-export function failureText(
-  subject: string,
-  error: string | undefined,
-  workflow: BundledWorkflow,
-): { what: string; why?: string } {
-  const taskId = error?.match(/^([\w-]+): /)?.[1];
-  const what =
-    taskId && workflow.tasks.some((t) => t.id === taskId)
-      ? `${subject}'s run stopped during ${workflow.taskTitle(taskId)}.`
-      : `${subject}'s run stopped before it finished.`;
-  return error?.includes("failed on a model provider error")
-    ? { what, why: "The AI couldn't reach its provider." }
-    : { what };
+export function cellOf(scan: StudyScanDetail, taskId: string): { status: Status; open: number } {
+  const state = taskState(scan, taskId);
+  const open = openOn(scan, taskId).length;
+  if (state === "to-check") {
+    const live = isLive(scan.runs[0]);
+    return { status: open > 0 || live ? "check" : "done", open };
+  }
+  return { status: TASK_STATUS[state], open };
+}
+
+/** The workflow at study size: each task with its state on every scan, in study order. */
+export const studyGraph = (detail: StudyDetail, workflow: BundledWorkflow): StudyGraphTask[] =>
+  workflow.tasks.map((t) => ({
+    id: t.id,
+    title: workflow.taskTitle(t.id),
+    dependsOn: t.dependsOn,
+    scans: detail.scans.map((s) => cellOf(s, t.id).status),
+  }));
+
+/** One scan's tasks at summary size: state, open checks and values, from the study read. */
+export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): ScanGraphTask[] {
+  return workflow.tasks.map((t) => ({
+    id: t.id,
+    title: workflow.taskTitle(t.id),
+    dependsOn: t.dependsOn,
+    state: taskState(scan, t.id),
+    needs: openOn(scan, t.id).map(
+      (item): NeedItem => ({
+        id: item.checkId,
+        taskId: item.taskId,
+        resultRevisionId: item.resultRevisionId,
+        title: item.title,
+        text: item.detail,
+        accepted: false,
+        acceptable: true,
+      }),
+    ),
+    results: workflow.outputs
+      .filter((o) => o.task === t.id && o.kind === "measurement")
+      .flatMap((o) => {
+        const v = scanValue(scan, o);
+        return v === null
+          ? []
+          : [{ id: o.id, title: o.name, value: formatValue(v), unit: unitOf(o) }];
+      }),
+  }));
+}
+
+/** Where a stopped scan stopped: "Stopped during Segmentation", from the task its run stopped or failed in. */
+export function stoppedLine(scan: StudyScanDetail, workflow: BundledWorkflow): string | null {
+  const run = scan.runs[0];
+  if (run?.state.status !== "ended" || run.state.outcome === "completed") return null;
+  const id = Object.entries(scan.taskState).find(([, s]) => s === "stopped" || s === "failed")?.[0];
+  return id ? `Stopped during ${workflow.taskTitle(id)}` : null;
+}
+
+/** What waits on a scan, by check title: "Patella partly outside the field, Medial osteophyte boundary". */
+export const checkTitles = (items: readonly ToCheckItem[]) =>
+  [...new Set(items.map((i) => i.title))].join(", ");
+
+/** The scans with open checks, most first: the order every queue reads them in. */
+export const byMostToCheck = (scans: readonly StudyScanDetail[]) =>
+  scans.filter((s) => s.toCheck.length > 0).sort((a, b) => b.toCheck.length - a.toCheck.length);
+
+/** Where "Review" on a scan leads: its first open item, else the scan. */
+export const reviewHref = (scan: StudyScanDetail) => {
+  const [item] = scan.toCheck;
+  return item ? itemHref(item) : scanHref(scan);
+};
+
+/** A measurement as the grid and the summary graph read it: about three significant figures. */
+export const formatValue = (v: number) => v.toFixed(digitsFor([v]));
+
+/** The output a task's grid column shows: its headline measurement, else its first. */
+export function keyOutput(workflow: BundledWorkflow, taskId: string): OutputEntry | undefined {
+  const measures = workflow.outputs.filter((o) => o.task === taskId && o.kind === "measurement");
+  return measures.find((o) => workflow.headline.includes(o)) ?? measures[0];
 }

@@ -36,11 +36,11 @@ Without `item` or `task`, the task in view is the first open item's, else the pl
 ## The stream reconnects without losing what it has
 
 Every connection appends to the same events and resumes with `subscribe(..., after = last seq)`.
-It reconnects when the run resumes or its completed revision changes, including a correction
+It reconnects after a successful message, when the run resumes or its completed revision changes, including a correction
 completed in another tab, and, with a backoff (1 s to 30 s),
 when the browser gives up on the stream while the run still goes (an EventSource closes for good
 on a non-200 answer, as during a deploy). An ended run's stream closes after its backlog and stays
-closed until the run or its completed revision changes; the
+closed until a message is sent or the run or its completed revision changes; the
 end is applied only then (`haltOf(state, closed)`), so a reload never shows a finished thread as
 stopped.
 
