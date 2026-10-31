@@ -328,10 +328,11 @@ async function claimBody(
         },
       },
       runId,
-      () => stop("lease-lost"),
+      (reason) => stop(reason === "lease-lost" ? "lease-lost" : "self-stop"),
       undefined,
       stored,
       live,
+      halt.signal,
     );
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.

@@ -59,7 +59,7 @@ export function KeysForm({
   return (
     <form onSubmit={submit} className="grid gap-3">
       <label className="grid gap-1 text-meta font-medium">
-        Meta Model API key
+        Meta API key
         <input
           type="password"
           autoComplete="off"

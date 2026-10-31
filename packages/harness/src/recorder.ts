@@ -11,19 +11,26 @@
  * API, and a failed delivery is retried in the background (the only place events are
  * retried; the client makes one attempt). A retrying `emit` holds back every later event,
  * because nothing should be decided past a gap in the record. `append` is the runtime's: it
- * waits its turn in the queue, makes one attempt and resolves once the store has
- * acknowledged the event, so it never sleeps inside the runtime's critical section; it throws
- * if the event is invalid or the store refuses it, and the id can be written again.
+ * waits its turn in the queue and resolves once the store has acknowledged the event; it
+ * throws if the event is invalid or the store refuses it, and the id can be written again.
+ * Both retry under one policy, and only an unavailable store (`EventLogUnavailable`) is
+ * retried: a refusal fails at once. A retry after a lost response is safe because the store
+ * ignores an event id it already holds.
  * Live frames are not events (see `@voluma/contracts/stream`): `live` hands them to a batcher
  * (`live.ts`) that never waits, and they do not join the queue, the view or `flush`. The creator of the recorder `flush()`es when its threads end so the
  * record is complete before the process exits.
  *
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
- * `onLeaseLost` once (the creator aborts the run) and drops every event still queued.
+ * `onStop("lease-lost")` once (the creator aborts the run) and drops every event still queued.
+ * A store still unavailable after the retries is the same stop with reason "unreachable":
+ * the run is not at fault, so the creator releases it for another claim to resume, and
+ * `failure()` stays empty. The retries also end at the first failed attempt once `runStopped`
+ * aborts (the run is being released anyway), so a hanging API cannot hold the run past its
+ * stop; events queued before the abort are still delivered while the store answers.
  *
- * A durable event that exhausts its retries is lost, and an `emit` of an invalid event is
- * refused (our code broke the contract): `failure()` holds the error, and the supervisor
- * fails the run on it rather than carry on from a record the store lacks.
+ * An event the store refuses, and an `emit` of an invalid event (our code broke the
+ * contract), is lost: `failure()` holds the error, and the supervisor fails the run on it
+ * rather than carry on from a record the store lacks.
  */
 import {
   type EventInput,
@@ -33,7 +40,7 @@ import {
 } from "@voluma/contracts/events";
 import type { LiveFrame } from "@voluma/contracts/stream";
 import type { LiveBatcher, LiveBody } from "./live";
-import type { EventLog } from "./ports/event-log";
+import { type EventLog, EventLogUnavailable } from "./ports/event-log";
 import { LeaseLost } from "./ports/lease-lost";
 
 export type PayloadOf<T extends EventType> = Extract<EventInput, { type: T }>["payload"];
@@ -44,7 +51,7 @@ export interface Recorder {
   /** Sends a live frame, best effort: it returns at once and may be dropped. */
   live(frame: LiveBody): void;
   /**
-   * Stores the event after everything queued before it, with one attempt, and adds it to the
+   * Stores the event after everything queued before it, with retries, and adds it to the
    * view once stored; an id already held or queued is a no-op. Throws if the event is invalid
    * or the store refuses it, leaving the view as it was.
    */
@@ -62,6 +69,13 @@ export interface Recorder {
   failure(): unknown;
 }
 
+/** A delivery refused because the recorder already stopped; not a failure of its event. */
+class RecorderStopped extends Error {
+  constructor() {
+    super("the run has stopped");
+  }
+}
+
 const ATTEMPTS = 5;
 const RETRY_DELAY_MS = 2_000;
 
@@ -69,37 +83,42 @@ const RETRY_DELAY_MS = 2_000;
 export function recorder(
   eventLog: EventLog,
   runId: string,
-  onLeaseLost: () => void,
+  onStop: (reason: "lease-lost" | "unreachable") => void,
   retryDelayMs = RETRY_DELAY_MS,
   stored: readonly RunEvent[] = [],
   live?: LiveBatcher,
+  runStopped?: AbortSignal,
 ): Recorder {
   let queue: Promise<unknown> = Promise.resolve();
-  let leaseLost = false;
+  let stopped = false; // the creator has been told to stop: nothing more is delivered
   const held: RunEvent[] = [...stored];
   const ids = new Set(held.map((e) => e.id)); // held, and queued for delivery
   const storedIds = new Set(ids);
   let failure: unknown;
 
-  function loseLease() {
-    if (leaseLost) return;
-    leaseLost = true;
-    onLeaseLost();
+  function stop(reason: "lease-lost" | "unreachable") {
+    if (stopped) return;
+    stopped = true;
+    onStop(reason);
   }
 
-  /** Stores the event (up to `attempts` tries) and adds it to the view, or throws. */
-  async function deliver(event: EventInput, attempts: number): Promise<void> {
+  /** Stores the event (up to ATTEMPTS tries) and adds it to the view, or throws. */
+  async function deliver(event: EventInput): Promise<void> {
     try {
       for (let attempt = 1; ; attempt++) {
-        if (leaseLost) throw new LeaseLost("the run's lease is lost");
+        if (stopped) throw new RecorderStopped();
         try {
           await eventLog.append(event);
           held.push({ ...event, seq: held.length + 1 });
           storedIds.add(event.id);
           return;
         } catch (error) {
-          if (error instanceof LeaseLost) loseLease();
-          if (error instanceof LeaseLost || attempt >= attempts) throw error;
+          if (error instanceof LeaseLost) stop("lease-lost");
+          if (!(error instanceof EventLogUnavailable)) throw error;
+          if (attempt >= ATTEMPTS || runStopped?.aborted) {
+            stop("unreachable");
+            throw error;
+          }
           await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
         }
       }
@@ -109,9 +128,9 @@ export function recorder(
     }
   }
 
-  const enqueue = (event: EventInput, attempts: number): Promise<void> => {
+  const enqueue = (event: EventInput): Promise<void> => {
     ids.add(event.id);
-    const result = queue.then(() => deliver(event, attempts));
+    const result = queue.then(() => deliver(event));
     queue = result.catch(() => {});
     return result;
   };
@@ -147,8 +166,14 @@ export function recorder(
         failure ??= error;
         return;
       }
-      enqueue(parsed.data, ATTEMPTS).catch((error) => {
-        if (!(error instanceof LeaseLost)) {
+      enqueue(parsed.data).catch((error) => {
+        if (
+          !(
+            error instanceof LeaseLost ||
+            error instanceof EventLogUnavailable ||
+            error instanceof RecorderStopped
+          )
+        ) {
           console.error(`recorder: gave up on ${type} ${id}: ${String(error)}`);
           failure ??= error;
         }
@@ -165,7 +190,7 @@ export function recorder(
       if (!parsed.success) {
         throw new Error(`the ${type} event ${id} is invalid: ${parsed.error.message}`);
       }
-      await enqueue(parsed.data, 1);
+      await enqueue(parsed.data);
     },
     flush: async () => {
       await queue;
