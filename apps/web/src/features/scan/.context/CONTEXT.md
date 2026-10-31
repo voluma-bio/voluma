@@ -74,6 +74,8 @@ stopped.
   its local identity also pins the image hash, grid id, shape and affine. A redo that replaces
   the image cannot inherit its old marks just because it reuses a block id. The viewer draws
   and sends only marks matching that identity; other marks stay listed for inspection/deletion.
+  The focus handed to a newly mounted viewer is keyed the same way: it starts at that grid's
+  target or centre, never the previous grid's voxel while an effect catches up.
   Marks lists them; a row moves the views to the mark,
   opening its task first when it is on another grid ("on <task>"). At `MAX_MARKS` the tools are
   held off with the reason. A message to the AI carries the marks on the views shown when those

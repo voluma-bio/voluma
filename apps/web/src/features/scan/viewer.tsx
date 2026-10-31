@@ -116,12 +116,12 @@ export function TaskViewer({
     [gridKey, task.id, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
-  const [aim, setAim] = useState(target);
-  useEffect(() => setAim(target), [target]);
+  const [aim, setAim] = useState({ gridKey, target });
+  useEffect(() => setAim({ gridKey, target }), [gridKey, target]);
   useEffect(() => {
     if (!jump) return;
     if (jump.gridKey === gridKey) {
-      setAim({ at: jump.at });
+      setAim({ gridKey, target: { at: jump.at } });
       onJumped();
     } else if (jump.taskId === task.id) onJumped();
   }, [jump, gridKey, task.id, onJumped]);
@@ -151,7 +151,8 @@ export function TaskViewer({
       key={gridKey}
       scene={grid.scene}
       title={grid.name}
-      focus={aim}
+      // A new grid mounts before effects run; never initialize it with the previous grid's voxel.
+      focus={aim.gridKey === gridKey ? aim.target : target}
       notes={grid.notes}
       tool={tool}
       marks={shown}
