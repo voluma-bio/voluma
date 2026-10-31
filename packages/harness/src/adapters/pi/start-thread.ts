@@ -5,7 +5,8 @@
  * record, queued in the background). A thread with stored
  * history resumes from it unchanged, system message included, so the prompt cache
  * stays valid: the model keeps seeing the prompt and tool definitions the thread started
- * with, and calls run on the current tools. Notices are new text, never edits.
+ * with, and calls run on the current tools; a tool whose input changed is declared by an appended
+ * message, never edited in place. Notices are new text, never edits.
  *
  * `startThread` returns at once with a handle. While the thread runs, `send` puts a message
  * in the thread's inbox, and so does the thread's own runtime (compaction's notices). Nothing
@@ -31,7 +32,6 @@ import {
   type Api,
   getCurrentTools,
   type Model,
-  type Tool as ToolDeclaration,
   type ToolResultMessage,
   Type,
 } from "@earendil-works/pi-ai";
@@ -78,8 +78,9 @@ export type StartThreadOptions = ThreadIdentity & {
   /** `models.streamSimple.bind(models)` from pi-ai. */
   streamFn: StreamFn;
   /**
-   * A new thread stores both. A resumed thread keeps the stored prompt and tool definitions;
-   * it is refused only if the input schema of a tool it was given changed.
+   * A new thread stores both. A resumed thread keeps the stored prompt and the definitions of
+   * unchanged tools; changed and new tools are declared to it by an appended message
+   * (`resumedTools`).
    */
   systemPrompt: string;
   tools: Tool[];
@@ -280,9 +281,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         );
       }
       if (stored.length > 0) {
-        // The model keeps the tool definitions it started with (the system message in `stored`
-        // declares them; Pi would otherwise append the difference to the current tools).
-        agent.state.tools = storedTools(getCurrentTools(stored), agentTools);
+        agent.state.tools = resumedTools(stored, agentTools);
       }
       const repairs = interruptedToolResults(stored, options.interrupted);
       const hasUser = stored.some((m) => m.role === "user");
@@ -496,8 +495,7 @@ function overflowRetryable(messages: AgentMessage[]): boolean {
 class ThreadFailure extends Error {}
 
 /**
- * The stored thread cannot be resumed as it is (a deploy changed the input of one of its tools,
- * or its model changed): `ran` is false and `stale` true. The caller starts the work again on a new thread.
+ * The stored thread cannot be resumed as it is (a tool it called is gone, or its model changed): `ran` is false and `stale` true. The caller starts the work again on a new thread.
  */
 class ThreadStale extends ThreadFailure {}
 
@@ -592,36 +590,33 @@ function withoutDescriptions(schema: unknown, named = false): unknown {
 }
 
 /**
- * The tools a resumed thread offers: the definitions it started with, run by the current tool
- * of the same name. A tool whose input schema changed since is refused as stale: Pi checks a
- * call against the stored schema and `execute` then parses it with the current one, so a call
- * could pass one and fail the other for the rest of the thread. A description change resumes,
- * the tool's or a field's (`.describe()`); a changed default or any other keyword is refused.
- * A tool since removed answers a call with an error; a tool added since is not offered.
- * (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
+ * The tools a resumed thread offers. An unchanged tool keeps the definition the thread started
+ * with, so the request stays byte-identical; a description change (the tool's or a field's,
+ * `.describe()`) counts as unchanged. A tool whose input schema changed, or that is new, is
+ * offered as it is now: Pi declares the difference as a system message appended to the
+ * transcript (stored with the history, so a later resume finds it declared), earlier calls stay
+ * valid history, and new calls use the current schema. A tool removed since is declared removed
+ * the same way, unless the thread has called it: its history would hold calls to a tool that no
+ * longer exists. (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
  */
-function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTool[] {
-  return declared.map((d) => {
-    const now = current.find((t) => t.name === d.name);
-    if (
-      now &&
-      JSON.stringify(withoutDescriptions(now.parameters)) !==
-        JSON.stringify(withoutDescriptions(d.parameters))
-    ) {
-      throw new ThreadStale(`the input of its tool ${d.name} changed since it started`);
-    }
-    return {
-      label: d.name,
-      execute: async () => ({
-        content: [{ type: "text" as const, text: `The tool ${d.name} is no longer available.` }],
-        details: {},
-        isError: true,
-      }),
-      ...now,
-      name: d.name,
-      description: d.description,
-      parameters: d.parameters,
-    };
+function resumedTools(stored: AgentMessage[], current: AgentTool[]): AgentTool[] {
+  const declared = getCurrentTools(stored);
+  const called = new Set(
+    stored.flatMap((m) =>
+      m.role === "assistant"
+        ? m.content.flatMap((b) => (b.type === "toolCall" ? [b.name] : []))
+        : [],
+    ),
+  );
+  const gone = declared.find((d) => called.has(d.name) && !current.some((t) => t.name === d.name));
+  if (gone) throw new ThreadStale(`its tool ${gone.name}, which it has called, no longer exists`);
+  return current.map((now) => {
+    const d = declared.find((t) => t.name === now.name);
+    const same =
+      d &&
+      JSON.stringify(withoutDescriptions(now.parameters)) ===
+        JSON.stringify(withoutDescriptions(d.parameters));
+    return same ? { ...now, description: d.description, parameters: d.parameters } : now;
   });
 }
 

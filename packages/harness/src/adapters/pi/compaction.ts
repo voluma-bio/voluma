@@ -125,11 +125,16 @@ const summaryMessage = (summary: string): AgentMessage => ({
   timestamp: 0,
 });
 
-/** What a request carries: the system message, the summary, and the messages kept verbatim. */
+/**
+ * What a request carries: the system message, the tool declarations appended since (system
+ * messages in the part the summary replaced; the model still needs them), the summary, and the
+ * messages kept verbatim.
+ */
 export function compactedView(messages: AgentMessage[], compaction?: Compaction): AgentMessage[] {
   if (!compaction) return messages;
   return [
     messages[0] as AgentMessage,
+    ...messages.slice(1, compaction.keptFrom).filter((m) => m.role === "system"),
     summaryMessage(compaction.summary),
     ...messages.slice(compaction.keptFrom),
   ];
