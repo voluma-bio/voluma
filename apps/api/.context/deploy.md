@@ -16,7 +16,7 @@ file, and Render applies it when the Blueprint syncs (not on a service deploy). 
 |---|---|
 | `voluma-api` | Web service, auto-deployed from `main`. `https://voluma-api.onrender.com` until a custom domain (`app.voluma.bio`) exists |
 | `voluma-gateway` | Web service: the provider gateway. Notes: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md) |
-| `voluma-runner` | Background worker, always on until 2026-11-04, then suspended between runs (its deploy.md). Claims runs over the private network. Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
+| `voluma-runner` | Background worker, always on until 2026-11-04, then suspended between runs (its deploy.md). Claims runs through the API's public URL (why: runner deploy.md, `VOLUMA_API_URL`). Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
 
 Things `render.yaml` holds that are easy to miss:
 
