@@ -25,7 +25,6 @@ import { ProcessDisclosure } from "./chat/process-disclosure";
 import { ReplyInfo } from "./info";
 import { plainError } from "./run-error";
 import type { Thread } from "./run-model";
-import { formatUsd } from "./run-status";
 import type { Row, Step, ToolStep } from "./transcript";
 
 export function TranscriptView({
