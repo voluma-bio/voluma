@@ -240,7 +240,9 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       if (!finished.has(job.sha256)) return job;
   };
 
-  const loop = (async () => {
+  // A resume can already have queued outputs. Return the worker before asking for its
+  // sandbox: the session's creation callback reads this worker's combined signal.
+  const loop = Promise.resolve().then(async () => {
     while (!signal.aborted) {
       scan();
       const job = nextJob();
@@ -255,7 +257,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
         running = undefined;
       }
     }
-  })();
+  });
   loop.catch((e) => log(`review assets: worker stopped: ${e}`));
 
   return {
