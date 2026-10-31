@@ -33,7 +33,14 @@ import {
   usage,
 } from "./admission";
 import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
-import { decideMessage, endCorrection, GUEST_KEYS_MESSAGE, openCorrection } from "./corrections";
+import {
+  decideMessage,
+  endCorrection,
+  GUEST_KEYS_MESSAGE,
+  messageRefusal,
+  messageTargetOf,
+  openCorrection,
+} from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
@@ -439,6 +446,21 @@ export function pgRunQueue(
       });
       notifier.notify(runId);
       return result;
+    },
+
+    /** Why `caller` can't message `run` now, or null (`messageRefusal`); the run read reports it. */
+    async cannotMessage(
+      reader: Reader,
+      caller: { userId: string; guest: boolean },
+      run: Run,
+    ): Promise<string | null> {
+      const refusal = await messageRefusal(
+        db,
+        messageContext(reader).pinsOf,
+        caller,
+        messageTargetOf(run),
+      );
+      return refusal?.message ?? null;
     },
 
     /** Whether `reader` may send this message now, without storing anything (`decideMessage`). */

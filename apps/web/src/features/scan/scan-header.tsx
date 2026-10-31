@@ -7,7 +7,7 @@
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import { runQuery } from "@voluma/api-client/query";
-import type { Run, VisitorKeys } from "@voluma/contracts/run";
+import type { Run, RunRead, VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
 import {
   formatDuration,
@@ -314,7 +314,7 @@ function failureMessage(error: unknown, retrying: boolean) {
 }
 
 /** Shows a run the API returned; first cancels a poll in flight, whose older read would land after it. */
-async function showRun(client: QueryClient, next: Run) {
+async function showRun(client: QueryClient, next: RunRead) {
   const { queryKey } = runQuery(next.id);
   await client.cancelQueries({ queryKey });
   client.setQueryData(queryKey, next);
