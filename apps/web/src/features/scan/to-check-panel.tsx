@@ -72,7 +72,8 @@ export function ToCheckPanel({
   const then = after.find((n) => n.taskId === current?.taskId) ?? after[0];
   const task = current && tasks.find((t) => t.id === current.taskId);
   return (
-    <div className="grid gap-3 p-3">
+    // One column no wider than the panel: an auto column would grow to the longest truncated title.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 p-3">
       <div className="flex items-center gap-2">
         <p className="flex-1 text-xs text-muted-foreground">
           {current
@@ -108,7 +109,8 @@ export function ToCheckPanel({
               <Disclosure label="What the second AI check found">
                 <p className="whitespace-pre-wrap">{current.found}</p>
               </Disclosure>
-            ) : task?.check?.summary ? (
+            ) : task?.check?.summary && task.check.id !== current.id ? (
+              // An item that is the check's own verdict already reads its sentence.
               `Second AI check: ${task.check.summary}`
             ) : undefined
           }

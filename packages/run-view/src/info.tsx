@@ -1,10 +1,11 @@
 /**
- * What an agent or a task took, tried and cost, behind an info button (`@voluma/ui`'s
+ * What an agent, a task or one reply took, tried and cost, behind an info button (`@voluma/ui`'s
  * `InfoButton`): the numbers someone asks for when a run looks slow or dear, kept off the review
  * itself. A running thread's clock ticks only while its popover is open.
  */
+import type { ModelUsage } from "@voluma/contracts/events";
 import { cacheHitShare, type Spend } from "@voluma/contracts/spend";
-import { type FactSection, FactSections, InfoButton } from "@voluma/ui";
+import { type FactSection, FactSections, Facts, InfoButton } from "@voluma/ui";
 import { type TaskView, type Thread, workedSeconds } from "./run-model";
 import { formatDuration, formatUsd, plural } from "./run-status";
 import { useNow } from "./use-now";
@@ -94,6 +95,24 @@ export function TaskInfo({ task }: { task: TaskView }) {
   return (
     <InfoButton label="Task details">
       <TaskFacts task={task} />
+    </InfoButton>
+  );
+}
+
+/** One model reply's tokens, the share read from cache, whether it missed the cache, and its cost. */
+export function ReplyInfo({ usage: u, miss = false }: { usage: ModelUsage; miss?: boolean }) {
+  const read = u.input + u.cacheRead;
+  const items: FactSection["items"] = [
+    ["Input tokens", count(read)],
+    ["Output tokens", count(u.output)],
+    ["Cache hit", read > 0 ? `${Math.round((100 * u.cacheRead) / read)}%` : "none"],
+    ...(miss ? ([["Cache", "miss"]] as FactSection["items"]) : []),
+    ["Cache writes", count(u.cacheWrite)],
+    ["Cost", formatUsd(u.costUsd)],
+  ];
+  return (
+    <InfoButton label="Reply details">
+      <Facts items={items} />
     </InfoButton>
   );
 }

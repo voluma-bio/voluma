@@ -14,10 +14,13 @@ import type { Status } from "@voluma/ui";
 /** "1 run", "3 runs"; `many` for an irregular plural. */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00; none is $0. */
+/**
+ * US dollars: cents; a tenth of a cent under a dollar, so a short run doesn't read $0.00; a
+ * hundredth of a cent under a cent, so one cached reply doesn't read $0.000. None is $0.
+ */
 export function formatUsd(usd: number): string {
   if (usd === 0) return "$0";
-  return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
+  return `$${usd.toFixed(usd < 0.01 ? 4 : usd < 1 ? 3 : 2)}`;
 }
 
 /**

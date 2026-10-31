@@ -60,13 +60,12 @@ export const Closed: Story = {};
 export const Open: Story = { args: { open: true } };
 
 /**
- * The (i) beside a thing; click it. Its first section is untitled (the button names it), the
+ * The (i) beside a thing, shown open. Its first section is untitled (the button names it), the
  * model's use sits under the model's name.
  */
 export const Info: Story = {
-  args: { trigger: <span />, children: null },
   render: () => (
-    <InfoButton label="Agent details">
+    <InfoButton label="Agent details" open>
       <FactSections
         sections={[
           {

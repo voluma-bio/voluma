@@ -117,17 +117,20 @@ export type InfoButtonProps = {
   label: string;
   children: ReactNode;
   align?: PopoverProps["align"];
+  /** Held open, as in a story; left out, the button opens and closes it. */
+  open?: boolean;
 };
 
 /**
  * The quiet (i) beside a thing: what it took, cost and counted, which the reader asks for
  * rather than scans for. Holds `FactSections` or `Facts`.
  */
-export function InfoButton({ label, children, align = "start" }: InfoButtonProps) {
+export function InfoButton({ label, children, align = "start", open }: InfoButtonProps) {
   return (
     <Popover
       label={label}
       align={align}
+      open={open}
       className="w-80 p-3"
       trigger={
         <IconButton size="sm" label={label} className="text-fg-subtle hover:text-foreground">

@@ -3,8 +3,8 @@
  * assistant turn, in the page's own scroll. Prose stays visible; process folds stay closed until
  * the reader opens them; a running thread ends in a live line naming what it is doing.
  */
-import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
-import { Facts, type FactsProps, InfoButton, StatusMark } from "@voluma/ui";
+import type { RunEvent } from "@voluma/contracts/events";
+import { StatusMark } from "@voluma/ui";
 import {
   Brain,
   Cog,
@@ -22,6 +22,7 @@ import { AgentCard } from "./agents";
 import { ActivityRow } from "./chat/activity-row";
 import { Markdown, StreamingText } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
+import { ReplyInfo } from "./info";
 import { plainError } from "./run-error";
 import type { Thread } from "./run-model";
 import { formatUsd } from "./run-status";
@@ -78,9 +79,7 @@ function RowView({ row, threads }: { row: Row; threads?: Map<string, Thread> }) 
             // Wide, in the gutter left of the reply on hover or focus; narrow, there is no gutter,
             // so it sits under the reply, always shown.
             <div className="flex justify-end min-[1100px]:absolute min-[1100px]:top-0 min-[1100px]:-left-8 min-[1100px]:opacity-0 min-[1100px]:transition-opacity min-[1100px]:group-hover:opacity-100 min-[1100px]:focus-within:opacity-100">
-              <InfoButton label="Reply details">
-                <Facts items={usageItems(row.usage, row.cacheMiss)} />
-              </InfoButton>
+              <ReplyInfo usage={row.usage} miss={row.cacheMiss} />
             </div>
           )}
         </div>
@@ -259,19 +258,4 @@ function OutputRow({ event }: { event: Extract<RunEvent, { type: "output" }> }) 
       {value && <span className="shrink-0 font-mono text-meta tabular-nums">{value}</span>}
     </p>
   );
-}
-
-const count = (n: number) => n.toLocaleString();
-
-/** One model call's usage: tokens, the share read from cache, whether it missed the cache, cost. */
-function usageItems(u: ModelUsage, miss = false): FactsProps["items"] {
-  const read = u.input + u.cacheRead;
-  return [
-    ["Input tokens", count(read)],
-    ["Output tokens", count(u.output)],
-    ["Cache hit", read > 0 ? `${Math.round((100 * u.cacheRead) / read)}%` : "none"],
-    ...(miss ? ([["Cache", "miss"]] as FactsProps["items"]) : []),
-    ["Cache writes", count(u.cacheWrite)],
-    ["Cost", formatUsd(u.costUsd)],
-  ];
 }

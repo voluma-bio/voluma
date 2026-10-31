@@ -170,19 +170,22 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
         for (const pin of e.payload.workflows ?? []) seen.add(pin.commit);
     return [...seen];
   }, [events]);
-  const startedAt = state.status === "queued" ? null : state.startedAt;
   const cost = formatUsd(runCost(run));
   const unknown = providerCalls.unknownCostCalls;
   const researcher: FactSection["items"] = [
-    [live ? "Running for" : "Took", work ? formatDuration(work.seconds) : "Not started"],
+    // Live, the sum includes earlier work: a correction adds to the run's total.
+    [live ? "Worked so far" : "Took", work ? formatDuration(work.seconds) : "Not started"],
+    ...(work?.redos ? [["Redos", String(work.redos)] as [string, string]] : []),
     ["Workflow", workflow],
     // A request of unknown cost adds nothing to the sum, so the sum is a floor.
     [live ? "Spent so far" : "Cost", unknown > 0 ? `At least ${cost}` : cost],
   ];
   const support: FactSection["items"] = [
-    ["Started", startedAt ? clock(startedAt) : "Not started"],
+    ["Started", work ? clock(work.startedAt) : "Not started"],
     ...(state.status === "ended" ? [["Ended", clock(state.endedAt)] as [string, string]] : []),
-    ...(work?.corrections ? [["Corrections", String(work.corrections)] as [string, string]] : []),
+    ...(work?.reopens
+      ? [["Messages after it finished", String(work.reopens)] as [string, string]]
+      : []),
     ["Sandbox time", formatDuration(run.usage.sandboxSeconds)],
     ["Run id", <CopyId key="id" id={run.id} />],
     [
