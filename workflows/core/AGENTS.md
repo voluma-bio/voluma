@@ -35,7 +35,7 @@ holds rules, not experiment logs.
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the
   threshold, never gated by a label; BV/TV is in %.
 - `convert/review_assets.py` is not a skill the run agent sees: the harness runs it in a `convert` sandbox to turn a reported file into
-  review assets (OME-Zarr levels, meshes; the header says how). Its `import sidecar` resolves through the same `PYTHONPATH` (the runner gives the convert sandbox `RunLayout.pythonPath` as its only env); labels and masks downsample by mode, tie to the foreground: a one-voxel sheet survives every level, a one-voxel rod does not. The scan is the intake task's `hu.npy`, converted with `--as image --int16`. Integer coordinates are voxel centres: level k voxel i is centred at source i·2^k + (2^k−1)/2 (the OME translation).
+  review assets (OME-Zarr levels, meshes; the header says how). Its `import sidecar` resolves through the same `PYTHONPATH` (the runner supplies `RunLayout.pythonPath` and `VOLUMA_REVIEW_RUNTIME`, the pinned sandbox image, for cache identity); labels and masks downsample by mode, tie to the foreground: a one-voxel sheet survives every level, a one-voxel rod does not. The scan is the intake task's `hu.npy`, converted with `--as image --int16`. Integer coordinates are voxel centres: level k voxel i is centred at source i·2^k + (2^k−1)/2 (the OME translation).
 - Python dependencies: `requirements.in` / `requirements.txt` in this directory (compiled with `uv`; the sandbox image installs
   it). 3D renders need pyvista on an off-screen VTK. Keep recipe numbers (box padding, trim rule) in one
   script each, so a recipe change touches one file.

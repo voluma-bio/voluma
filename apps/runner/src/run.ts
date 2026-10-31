@@ -502,7 +502,10 @@ async function claimBody(
               lifetimeSeconds: config.sandbox.lifetimeSeconds,
               idleSeconds: config.sandbox.idleSeconds,
               // The converter imports `sidecar` through the run's PYTHONPATH.
-              env: { PYTHONPATH: layout.pythonPath },
+              env: {
+                PYTHONPATH: layout.pythonPath,
+                VOLUMA_REVIEW_RUNTIME: config.sandbox.image,
+              },
               ...convertMounts(runId, run.input.id),
             }),
             signal,
