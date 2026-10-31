@@ -2,9 +2,13 @@
  * Holds one run's lease (`@voluma/contracts/runner`): a heartbeat every HEARTBEAT_SECONDS
  * carrying the usage since the last acknowledged one. It calls `onStop` for the three ways
  * the run stops that the runner learns here: the server ended it (`stop`), the lease is gone
- * (`LeaseLost`), or no heartbeat has been acknowledged for LEASE_SECONDS - HEARTBEAT_SECONDS,
+ * (`LeaseLost`), or no heartbeat has been acknowledged for SELF_STOP_SECONDS,
  * counted from when the last acknowledged one was sent (the claim, before the first). That is
- * before the server's expiry whatever the network delay, and needs no shared clock.
+ * before the server's expiry whatever the network delay, and needs no shared clock. One timer
+ * schedules the next heartbeat after each one finishes: HEARTBEAT_SECONDS after an answer,
+ * HEARTBEAT_RETRY_SECONDS after a failure, so the lease is renewed soon after the API answers
+ * again. A cut-off that starts just after a heartbeat therefore survives about 43 s, and one that
+ * starts just before the next about 28 s.
  *
  * Not every missed window is lost contact. If the runner's own event loop was blocked for most of
  * it while this was the only live run, the run starved its heartbeats: that stop is
@@ -14,7 +18,7 @@
  * costs one strike, a body that is refused every time ends the run at the limit. Only a window in
  * which no call got an answer is a plain `self-stop`.
  */
-import { HEARTBEAT_SECONDS, LEASE_SECONDS, type ReleaseReason } from "@voluma/contracts/runner";
+import { HEARTBEAT_SECONDS, type ReleaseReason, SELF_STOP_SECONDS } from "@voluma/contracts/runner";
 import { HttpError } from "@voluma/harness/adapters/http/request";
 import type { RunClient } from "@voluma/harness/adapters/http/run-client";
 import { LeaseLost } from "@voluma/harness/ports/lease-lost";
@@ -26,7 +30,8 @@ export type StopReason =
   | "lease-lost"
   | Extract<ReleaseReason, "self-stop" | "loop-stalled" | "refused">;
 
-const SELF_STOP_MS = (LEASE_SECONDS - HEARTBEAT_SECONDS) * 1000;
+const SELF_STOP_MS = SELF_STOP_SECONDS * 1000;
+const HEARTBEAT_RETRY_SECONDS = 2;
 
 export function holdLease(options: {
   client: Pick<RunClient, "heartbeat">;
@@ -38,6 +43,9 @@ export function holdLease(options: {
 }) {
   const { client, meter, onStop, onRoundTrip, log } = options;
   let inFlight: Promise<void> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let halted = false;
+  let acknowledgedAt = 0;
   // The window counts from the send of the last acknowledged heartbeat (the claim, before the first).
   const arm = (sentAt: number, stalledAtSend: number) =>
     setTimeout(
@@ -47,13 +55,15 @@ export function holdLease(options: {
     );
   let deadline = arm(Date.now(), soloStalledMs());
 
-  async function beat(): Promise<void> {
+  /** Resolves true when the heartbeat failed in a way a retry can fix. */
+  async function beat(): Promise<boolean> {
     const sentAt = Date.now();
     const stalledAtSend = soloStalledMs();
     const usage = meter.take();
     try {
       const { stop } = await client.heartbeat(usage);
       onRoundTrip(Date.now() - sentAt);
+      acknowledgedAt = Date.now();
       clearTimeout(deadline);
       deadline = arm(sentAt, stalledAtSend);
       if (stop) onStop("stop");
@@ -67,20 +77,31 @@ export function holdLease(options: {
         onStop("refused");
       } else if (!(error instanceof LeaseLost)) {
         log(`heartbeat failed, will retry: ${error instanceof Error ? error.message : error}`);
+        return true;
       }
     }
+    return false;
   }
 
-  const timer = setInterval(() => {
-    inFlight ??= beat().finally(() => {
-      inFlight = undefined;
-    });
-  }, HEARTBEAT_SECONDS * 1000);
+  function schedule(seconds: number) {
+    if (!halted) timer = setTimeout(tick, seconds * 1000);
+  }
+  function tick() {
+    inFlight = beat()
+      .then((failed) => schedule(failed ? HEARTBEAT_RETRY_SECONDS : HEARTBEAT_SECONDS))
+      .finally(() => {
+        inFlight = undefined;
+      });
+  }
+  schedule(HEARTBEAT_SECONDS);
 
   return {
+    /** When the last heartbeat was acknowledged (0: none yet). */
+    acknowledgedAt: () => acknowledgedAt,
     /** Stops the timers at once, so a run being closed can't also stop with a late `self-stop`. */
     halt() {
-      clearInterval(timer);
+      halted = true;
+      clearTimeout(timer);
       clearTimeout(deadline);
     },
     /** Sends the usage since the last acknowledged heartbeat, after the one in flight. */
