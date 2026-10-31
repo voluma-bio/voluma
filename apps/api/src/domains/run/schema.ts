@@ -1,6 +1,6 @@
 /**
- * Run domain tables (Drizzle). `threads` is unused: nothing writes or reads it, and a later
- * migration drops it (its writer went with the run-keyed rows).
+ * Run domain tables (Drizzle). `events` and `pi_messages` are keyed by run: ids are
+ * unique within a run only, so a copy of a run keeps every id verbatim under a new `run_id`.
  *
  * Neither table uses `jsonb`. `pi_messages.message` is `text`: history is read back
  * byte for byte (the retry compare and the model's prompt cache depend on it), and
@@ -13,10 +13,6 @@
  * usage: the claim, the sweep and every ingest write judge them in one transaction by the
  * database's `now()` (pg-queue.ts). `inputs` and `runs` have no foreign keys to the
  * event tables: events are written under the run lock and must never fail on a projection.
- *
- * `threads.parent_thread_id` has no foreign key: `threads` is derived from the event
- * log, which is the record, so a projection must never fail the append (a missing
- * parent row would roll the event back).
  */
 
 import { referenceInputId } from "@voluma/contracts/r2";
@@ -31,33 +27,17 @@ import {
   text,
   timestamp,
   unique,
-  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
 const timestamptz = () => timestamp({ withTimezone: true });
 
-export const threads = pgTable(
-  "threads",
-  {
-    id: text().primaryKey(),
-    runId: text().notNull(),
-    parentThreadId: text(),
-    kind: text().notNull(),
-    task: text(),
-    status: text().notNull(),
-    createdAt: timestamptz().notNull(),
-    endedAt: timestamptz(),
-  },
-  (t) => [index("threads_run").on(t.runId)],
-);
-
 /** `id` comes from the client so a retried POST is a no-op; `seq` is the stream cursor. */
 export const events = pgTable(
   "events",
   {
-    id: text().primaryKey(),
     runId: text().notNull(),
+    id: text().notNull(),
     threadId: text().notNull(),
     seq: integer().notNull(),
     type: text().notNull(),
@@ -65,31 +45,21 @@ export const events = pgTable(
     createdAt: timestamptz().notNull(),
   },
   (t) => [
+    primaryKey({ columns: [t.runId, t.id] }),
     unique("events_run_seq").on(t.runId, t.seq),
-    index("events_thread").on(t.threadId, t.seq),
-    // The key the code uses, `(run_id, id)`; `id` stays the primary key until the contract step.
-    uniqueIndex("events_run_id_id").on(t.runId, t.id),
+    index("events_thread").on(t.runId, t.threadId, t.seq),
   ],
 );
 
-/**
- * `run_id` is null only on rows an older API wrote; the trigger `pi_messages_fill_run_id` (in
- * migration 0014, not declared here) fills it from the thread id's `<runId>.` prefix. The code reads
- * and writes by `(run_id, thread_id, idx)`; `(thread_id, idx)` stays the primary key until the
- * contract step (`NOT NULL`, the primary key moved to the run-keyed index).
- */
 export const piMessages = pgTable(
   "pi_messages",
   {
-    runId: text(),
+    runId: text().notNull(),
     threadId: text().notNull(),
     idx: integer().notNull(),
     message: text().notNull(),
   },
-  (t) => [
-    primaryKey({ columns: [t.threadId, t.idx] }),
-    uniqueIndex("pi_messages_run_thread_idx").on(t.runId, t.threadId, t.idx),
-  ],
+  (t) => [primaryKey({ columns: [t.runId, t.threadId, t.idx] })],
 );
 
 /**

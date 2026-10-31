@@ -51,7 +51,7 @@ import {
 import {
   type RoleOf,
   type RoleSetup,
-  rootThreadIdOf,
+  rootThreadOf,
   superviseRun,
 } from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
@@ -485,7 +485,7 @@ async function claimBody(
     });
     convert = reviewAssetsWorker({
       runId,
-      rootThreadId: rootThreadIdOf(runId),
+      rootThreadId: rootThreadOf(runId, events.events()),
       recorder: events,
       signal: halt.signal,
       log,

@@ -56,6 +56,7 @@ import {
 } from "./messages";
 import type { Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
+import { threadIdOf } from "./thread-id";
 import {
   fixLimitReached,
   openAsk,
@@ -317,9 +318,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         ? [...d.threads.values()].filter((r) => r.role === "main").length
         : startedFor(d, of.taskId, of.role).length) + 1;
     const nameOf = (n: number) => (n === 1 ? base : `${base}.${n}`);
-    while (threads.stale(`${runId}.${nameOf(n)}`)) n++;
-    const named = { id: `${runId}.${nameOf(n)}`, name: nameOf(n) };
-    return { ...named, ...of };
+    while (threads.stale(threadIdOf(runId, nameOf(n)))) n++;
+    return { id: threadIdOf(runId, nameOf(n)), name: nameOf(n), ...of };
   }
 
   const startMain = (d: ThreadLog) => {

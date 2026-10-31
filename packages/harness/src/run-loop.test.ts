@@ -14,6 +14,7 @@ import {
   hang,
   measurement,
   openAskIds,
+  RUN,
   type Script,
   sleep,
   type Turn,
@@ -21,8 +22,9 @@ import {
   worker,
   world,
 } from "./run-world";
+import { threadIdOf } from "./thread-id";
 
-const R = "r1.";
+const tid = (name: string) => threadIdOf(RUN, name);
 const T1 = [task("t1"), task("t2", ["t1"])];
 
 const started = (t: Turn, taskId: string) =>
@@ -46,7 +48,7 @@ const chain =
   };
 
 const of = (events: readonly RunEvent[], type: RunEvent["type"], thread?: string) =>
-  events.filter((e) => e.type === type && (thread === undefined || e.threadId === `${R}${thread}`));
+  events.filter((e) => e.type === type && (thread === undefined || e.threadId === tid(thread)));
 const taskEvents = (events: readonly RunEvent[], taskId: string) =>
   events.flatMap((e) =>
     e.type === "task" && e.payload.taskId === taskId
@@ -81,18 +83,18 @@ describe("run loop", () => {
       plan: T1,
       main: chain(["t1", "t2"]),
       // The worker is running when the user cancels.
-      cancelAfter: (e) => e.type === "thread.started" && e.threadId === `${R}t1.worker`,
+      cancelAfter: (e) => e.type === "thread.started" && e.threadId === tid("t1.worker"),
     });
     await w.run();
     expect(
-      w.stored.some((e) => e.type === "thread.started" && e.threadId === `${R}t1.worker`),
+      w.stored.some((e) => e.type === "thread.started" && e.threadId === tid("t1.worker")),
     ).toBe(true);
     expect(openThreads(w.stored)).toEqual([]);
     for (const thread of ["supervisor", "main", "t1.worker"]) {
       expect(ended(w.stored, thread)).toEqual(["cancelled"]);
     }
     // The root's end is the last event: nothing is written after it.
-    expect(w.stored.at(-1)?.threadId).toBe(`${R}supervisor`);
+    expect(w.stored.at(-1)?.threadId).toBe(tid("supervisor"));
     expect(duplicates(w.stored)).toEqual([]);
   });
 
@@ -100,7 +102,7 @@ describe("run loop", () => {
     const feedback: Script = (t) => {
       const m = /The check of (t\d) found problems/.exec(t.lastUser);
       return t.fresh && m
-        ? call("message", { threadId: `${R}${m[1]}.worker`, text: "Redo the placement." })
+        ? call("message", { threadId: tid(`${m[1]}.worker`), text: "Redo the placement." })
         : undefined;
     };
     const w = world({
@@ -164,7 +166,7 @@ describe("run loop", () => {
     };
     const feedback: Script = (t) =>
       t.fresh && /The check of t1 found problems/.test(t.lastUser)
-        ? call("message", { threadId: `${R}t1.worker`, text: "Redo it." })
+        ? call("message", { threadId: tid("t1.worker"), text: "Redo it." })
         : undefined;
     const w = world({
       plan,
@@ -204,7 +206,7 @@ describe("run loop", () => {
     const worker: Script = (t) => {
       const steps = [report("m1"), report("m2"), submit];
       // The first worker: both outputs and a submit, then (after feedback) only m1 and no submit.
-      if (t.thread.endsWith("t1.worker"))
+      if (t.name === "t1.worker")
         return t.users.length === 1 ? steps[t.steps] : t.steps === 0 ? report("m1") : "Stopped.";
       // The replacement: m1 only, refused naming m2, then m2.
       return [report("m1"), submit, report("m2"), submit][t.steps] ?? "Done.";
@@ -212,9 +214,9 @@ describe("run loop", () => {
     const main: Script = (t) => {
       const did = (name: string) => t.calls.some((c) => c.name === name);
       if (t.fresh && /The check of t1 found problems/.test(t.lastUser))
-        return call("message", { threadId: `${R}t1.worker`, text: "Redo it." });
+        return call("message", { threadId: tid("t1.worker"), text: "Redo it." });
       if (t.fresh && did("message") && !did("stop_worker") && t.users.length > 2)
-        return call("stop_worker", { threadId: `${R}t1.worker`, reason: "Replacing it." });
+        return call("stop_worker", { threadId: tid("t1.worker"), reason: "Replacing it." });
       const starts = t.calls.filter((c) => c.name === "start_worker").length;
       if (t.fresh && did("stop_worker") && starts === 1)
         return call("start_worker", { taskId: "t1", brief: "Measure t1 again." });
@@ -240,24 +242,24 @@ describe("run loop", () => {
     const main: Script = (t) => {
       const lastResult = t.results.at(-1) ?? "";
       const sent = (to: string) =>
-        t.calls.some((c) => c.name === "message" && c.input.threadId === `${R}${to}`);
+        t.calls.some((c) => c.name === "message" && c.input.threadId === tid(to));
       if (!t.fresh) {
         if (/used its fix rounds/.test(lastResult) && !sent("t1.worker"))
           return call("message", {
-            threadId: `${R}t1.worker`,
+            threadId: tid("t1.worker"),
             text: "Redo t1 with another method.",
           });
         // t2's old worker is still there (idle): stop it, then start a new one.
         if (/has a worker/.test(lastResult))
-          return call("stop_worker", { threadId: `${R}t2.worker`, reason: "Redoing t2." });
+          return call("stop_worker", { threadId: tid("t2.worker"), reason: "Redoing t2." });
         if (/is stopped\.|stopped\./.test(lastResult))
           return call("start_worker", { taskId: "t2", brief: "Redo t2 on the corrected t1." });
         return "Waiting.";
       }
       if (/used its fix rounds/.test(t.lastUser))
-        return call("message", { threadId: `${R}t2.worker`, text: "One more try." });
+        return call("message", { threadId: tid("t2.worker"), text: "One more try." });
       if (/t2 is rejected/.test(t.lastUser))
-        return call("message", { threadId: `${R}t2.worker`, text: "Redo the placement." });
+        return call("message", { threadId: tid("t2.worker"), text: "Redo the placement." });
       // Redo t2 once t1 passes again after its correction made t2 stale.
       const redone = t.calls.some((c) => c.name === "stop_worker");
       if (told(t, /t2 is stale/) && /The check of t1 passed/.test(t.lastUser) && !redone)
@@ -329,7 +331,7 @@ describe("run loop", () => {
       expect(told2.at(-1)).toContain("Yes, the scan is isotropic.");
       const at = (id: string | undefined) => w.stored.findIndex((e) => e.id === id);
       const verdict = w.stored.findIndex(
-        (e) => e.type === "checkpoint" && e.threadId === `${R}t2.check`,
+        (e) => e.type === "checkpoint" && e.threadId === tid("t2.check"),
       );
       expect(at(ask?.id)).toBeLessThan(at(answer?.id));
       expect(at(answer?.id)).toBeLessThan(verdict);
@@ -344,7 +346,7 @@ describe("run loop", () => {
         check: asking(),
         cutAfter: (e) =>
           e.type === "message" &&
-          e.threadId === `${R}main` &&
+          e.threadId === tid("main") &&
           e.payload.role === "user" &&
           e.payload.sender.kind === "runtime" &&
           /askId/.test(e.payload.text),
@@ -361,7 +363,7 @@ describe("run loop", () => {
       // The checker was never asked to judge before it had the answer.
       const answerAt = w.stored.findIndex((e) => e.type === "answer");
       const verdictAt = w.stored.findIndex(
-        (e) => e.type === "checkpoint" && e.threadId === `${R}t2.check`,
+        (e) => e.type === "checkpoint" && e.threadId === tid("t2.check"),
       );
       expect(answerAt).toBeGreaterThan(-1);
       expect(verdictAt).toBeGreaterThan(answerAt);
@@ -376,7 +378,10 @@ describe("run loop", () => {
     const main: Script = (t) => {
       const redo = t.calls.some((c) => c.name === "message");
       if (t.fresh && passed(t, "t2") && !redo)
-        return call("message", { threadId: `${R}t1.worker`, text: "Redo t1 with another method." });
+        return call("message", {
+          threadId: tid("t1.worker"),
+          text: "Redo t1 with another method.",
+        });
       if (!t.fresh) return "Waiting.";
       return redo ? call("wait") : chain(["t1", "t2"])(t);
     };
@@ -456,7 +461,7 @@ describe("run loop", () => {
       const feedback: Script = (t) => {
         const m = /The check of (t\d) found problems/.exec(t.lastUser);
         return t.fresh && m
-          ? call("message", { threadId: `${R}${m[1]}.worker`, text: "Redo the placement." })
+          ? call("message", { threadId: tid(`${m[1]}.worker`), text: "Redo the placement." })
           : undefined;
       };
       const w = world({
@@ -489,7 +494,7 @@ describe("run loop", () => {
   // after it (the load held at 50 ms) leaves a start with no message. The next claim resumes the
   // thread with the input that start stored, not a bare "continue".
   describe("a cut right after a resume's start", () => {
-    const slow = (thread: string) => (id: string) => (id === `${R}${thread}` ? 50 : 0);
+    const slow = (thread: string) => (id: string) => (id === tid(thread) ? 50 : 0);
     const userTexts = (events: readonly RunEvent[], thread: string) =>
       of(events, "message", thread).flatMap((e) =>
         e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
@@ -514,7 +519,7 @@ describe("run loop", () => {
         main: first(answering, chain(["t1", "t2"])),
         check: asking,
         delayLoad: slow("t2.check"),
-        cutAfter: (e) => e.id === `${R}t2.check:started:2`,
+        cutAfter: (e) => e.id === `${tid("t2.check")}:started:2`,
       });
       const folded = await w.run();
       expect(w.wasCut).toBe(true);
@@ -530,7 +535,7 @@ describe("run loop", () => {
       const feedback: Script = (t) => {
         const m = /The check of (t\d) found problems/.exec(t.lastUser);
         return t.fresh && m
-          ? call("message", { threadId: `${R}${m[1]}.worker`, text: "Redo the placement." })
+          ? call("message", { threadId: tid(`${m[1]}.worker`), text: "Redo the placement." })
           : undefined;
       };
       const w = world({
@@ -538,7 +543,7 @@ describe("run loop", () => {
         main: first(feedback, chain(["t1", "t2"])),
         check: checker((id, n) => (id === "t1" && n === 1 ? "needs-review" : "passed")),
         delayLoad: slow("t1.worker"),
-        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+        cutAfter: (e) => e.id === `${tid("t1.worker")}:started:2`,
       });
       const folded = await w.run();
       expect(w.wasCut).toBe(true);
@@ -553,7 +558,7 @@ describe("run loop", () => {
     it("a plain message to an idle worker on a done task reaches it and reopens nothing", async () => {
       const note: Script = (t) =>
         t.fresh && passed(t, "t1") && !t.calls.some((c) => c.name === "message")
-          ? call("message", { threadId: `${R}t1.worker`, text: "Note: keep units in mm." })
+          ? call("message", { threadId: tid("t1.worker"), text: "Note: keep units in mm." })
           : undefined;
       const noted: Script = (t) => (/Note: keep units/.test(t.lastUser) ? "Noted." : worker(t));
       const w = world({
@@ -561,7 +566,7 @@ describe("run loop", () => {
         main: first(note, chain(["t1", "t2"])),
         worker: noted,
         delayLoad: slow("t1.worker"),
-        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+        cutAfter: (e) => e.id === `${tid("t1.worker")}:started:2`,
       });
       const folded = await w.run();
       expect(w.wasCut).toBe(true);
@@ -580,7 +585,7 @@ describe("run loop", () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
     const gated: Script = (t) =>
-      t.thread === `${R}t2.worker` && t.steps === 0 ? gate.then(() => undefined) : undefined;
+      t.name === "t2.worker" && t.steps === 0 ? gate.then(() => undefined) : undefined;
     const main: Script = (t) => {
       if (!t.fresh) return "Waiting.";
       if (t.calls.length === 0)
@@ -634,14 +639,14 @@ describe("run loop", () => {
     // Main stops t1's worker while the stop's own write is slow; the worker's report_output call
     // arrives in that window and waits for the section.
     const slowWorker: Script = async (t) => {
-      if (t.thread === `${R}t1.worker` && t.steps === 0) await sleep(40);
+      if (t.name === "t1.worker" && t.steps === 0) await sleep(40);
       return undefined;
     };
     const main: Script = (t) => {
       if (t.calls.length === 0 && t.fresh)
         return [
           call("start_worker", { taskId: "t1", brief: "t1." }),
-          call("stop_worker", { threadId: `${R}t1.worker`, reason: "Not now." }),
+          call("stop_worker", { threadId: tid("t1.worker"), reason: "Not now." }),
         ];
       if (!t.fresh) {
         const started2 = t.calls.filter((c) => c.name === "start_worker").length > 1;
@@ -657,7 +662,7 @@ describe("run loop", () => {
       worker: first(slowWorker, worker),
       delayStore: (e) =>
         e.type === "thread.ended" &&
-        e.threadId === `${R}t1.worker` &&
+        e.threadId === tid("t1.worker") &&
         e.payload.status === "cancelled"
           ? 120
           : 0,
@@ -670,9 +675,9 @@ describe("run loop", () => {
     expect(ended(w.stored, "t1.worker")).toEqual(["cancelled"]);
     // Nothing the stopped worker wrote after its stop: no output, no attempt.
     const stopAt = w.stored.findIndex(
-      (e) => e.type === "thread.ended" && e.threadId === `${R}t1.worker`,
+      (e) => e.type === "thread.ended" && e.threadId === tid("t1.worker"),
     );
-    const after = w.stored.slice(stopAt + 1).filter((e) => e.threadId === `${R}t1.worker`);
+    const after = w.stored.slice(stopAt + 1).filter((e) => e.threadId === tid("t1.worker"));
     expect(
       after.map((e) => e.type).filter((t) => !["message", "tool.call", "tool.result"].includes(t)),
     ).toEqual([]);
@@ -719,7 +724,7 @@ describe("run loop", () => {
     );
     expect(wakes).toHaveLength(2);
     const [changed] = of(w.stored, "plan.changed");
-    expect(changed?.threadId).toBe(`${R}supervisor`);
+    expect(changed?.threadId).toBe(tid("supervisor"));
     expect(changed?.type === "plan.changed" && changed.payload.skip?.map((s) => s.taskId)).toEqual([
       "t1",
       "t2",
@@ -906,8 +911,8 @@ describe("run loop", () => {
         const batch = t.calls.some((c) => c.name === "stop_worker");
         if (passed(t, "t1") && !batch)
           return [
-            call("message", { threadId: `${R}t1.worker`, text: "Look at it once more." }),
-            call("stop_worker", { threadId: `${R}t1.worker`, reason: "Not needed." }),
+            call("message", { threadId: tid("t1.worker"), text: "Look at it once more." }),
+            call("stop_worker", { threadId: tid("t1.worker"), reason: "Not needed." }),
           ];
         return batch ? call("finish_run", { summary: "Done." }) : undefined;
       });
@@ -915,7 +920,7 @@ describe("run loop", () => {
         plan: [task("t1")],
         main,
         worker: first((t) => (t.lastUser.includes("Look at it") ? "Noted." : undefined), worker),
-        delayLoad: (id) => (id === `${R}t1.worker` && ++loads > 1 ? 100 : 0),
+        delayLoad: (id) => (id === tid("t1.worker") && ++loads > 1 ? 100 : 0),
       });
       const folded = await w.run();
       expect(
@@ -925,9 +930,11 @@ describe("run loop", () => {
       // Its first turn completed; the stop is the last word on it, and nothing is stored after.
       expect(ended(w.stored, "t1.worker"), w.text()).toEqual(["completed", "cancelled"]);
       const lastEnd = w.stored
-        .map((e) => e.type === "thread.ended" && e.threadId === `${R}t1.worker`)
+        .map((e) => e.type === "thread.ended" && e.threadId === tid("t1.worker"))
         .lastIndexOf(true);
-      expect(w.stored.slice(lastEnd + 1).filter((e) => e.threadId === `${R}t1.worker`)).toEqual([]);
+      expect(w.stored.slice(lastEnd + 1).filter((e) => e.threadId === tid("t1.worker"))).toEqual(
+        [],
+      );
       expect(userTexts(w.stored, "main").some((u) => /stopped without submitting/.test(u))).toBe(
         false,
       );
@@ -938,7 +945,7 @@ describe("run loop", () => {
       const main = nudgeAfterPass((t) => {
         const sent = t.calls.some((c) => c.name === "message");
         if (passed(t, "t1") && !sent)
-          return call("message", { threadId: `${R}t1.worker`, text: "Look at it once more." });
+          return call("message", { threadId: tid("t1.worker"), text: "Look at it once more." });
         return sent && !t.results.some((r) => /run is finished/.test(r))
           ? call("finish_run", { summary: "Done." })
           : undefined;
@@ -948,7 +955,7 @@ describe("run loop", () => {
         main,
         worker: first((t) => (t.lastUser.includes("Look at it") ? "Noted." : undefined), worker),
         // Cut as the resumed worker's start is stored: it is then a cut-off thread on a done task.
-        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+        cutAfter: (e) => e.id === `${tid("t1.worker")}:started:2`,
       });
       const folded = await w.run();
       expect(w.wasCut).toBe(true);
@@ -977,7 +984,7 @@ describe("run loop", () => {
         if (!started(t, "t2") && passes("t1") === 1)
           return call("start_worker", { taskId: "t2", brief: "t2." });
         if (passes("t2") === 1 && !redo)
-          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+          return call("message", { threadId: tid("t1.worker"), text: "Redo t1." });
         if (redo && passes("t1") === 2 && passes("t2") === 1 && !refused)
           return call("finish_run", { summary: "Too early." });
         if (passes("t2") === 2) return call("finish_run", { summary: "Done." });
@@ -1079,10 +1086,10 @@ describe("run loop", () => {
 
     it("work tools are refused until a go; finish_run until main has replied", async () => {
       const probes = [
-        call("message", { threadId: `${R}t1.worker`, text: "Redo it." }),
+        call("message", { threadId: tid("t1.worker"), text: "Redo it." }),
         call("start_worker", { taskId: "t1", brief: "Again." }),
         call("change_plan", { reason: "Tighten.", doneWhen: [{ taskId: "t1", lines: ["x"] }] }),
-        call("stop_worker", { threadId: `${R}t1.worker`, reason: "No." }),
+        call("stop_worker", { threadId: tid("t1.worker"), reason: "No." }),
         call("finish_run", { summary: "Too soon." }),
         call("reply", { text: "Looking at it." }),
         call("finish_run", { summary: "Answered." }),
@@ -1109,7 +1116,7 @@ describe("run loop", () => {
         if (!talking(t)) return undefined;
         const last = t.results.at(-1) ?? "";
         if (t.fresh && /They said go on t1/.test(t.lastUser))
-          return call("message", { threadId: `${R}t1.worker`, text: "The left edge is off." });
+          return call("message", { threadId: tid("t1.worker"), text: "The left edge is off." });
         if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing t1." });
         // t1's redo made t2 stale and stopped its worker; t2 is redone by a new one.
         if (t.fresh && /The check of t1 passed/.test(t.lastUser) && count(t, "start_worker") === 2)
@@ -1154,7 +1161,7 @@ describe("run loop", () => {
       const script: Script = (t) => {
         if (!talking(t)) return undefined;
         if (t.fresh && /They said go on t1/.test(t.lastUser))
-          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+          return call("message", { threadId: tid("t1.worker"), text: "Redo t1." });
         if (wrote(t)) return call("reply", { text: "t1 is thin." });
         return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
       };
@@ -1215,7 +1222,7 @@ describe("run loop", () => {
       const first1: Script = (t) => {
         if (talking(t) || !t.fresh) return undefined;
         if (/The check of t1 found problems/.test(t.lastUser))
-          return call("message", { threadId: `${R}t1.worker`, text: "Fix it." });
+          return call("message", { threadId: tid("t1.worker"), text: "Fix it." });
         if (/used its fix rounds/.test(t.lastUser)) return call("finish_run", { summary: "Left." });
         return undefined;
       };
@@ -1223,7 +1230,7 @@ describe("run loop", () => {
         if (!talking(t)) return undefined;
         const last = t.results.at(-1) ?? "";
         if (t.fresh && /They said go on t1/.test(t.lastUser))
-          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+          return call("message", { threadId: tid("t1.worker"), text: "Redo t1." });
         if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing." });
         if (t.fresh && /The check of t1 passed/.test(t.lastUser))
           return call("finish_run", { summary: "Done." });

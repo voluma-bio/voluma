@@ -4,6 +4,7 @@
  * model) and what each role says and runs on (`RoleOf`, `Briefs`). Resume and a first run are
  * the same call; the recorder is built on the stored events by the host.
  */
+import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
@@ -19,6 +20,7 @@ import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { type Briefs, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
+import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { buildTools } from "./tools/registry";
@@ -60,12 +62,13 @@ export interface SuperviseRunOptions {
 
 const ROOT_NAME = "supervisor";
 
-/** The run's root thread. Ids are minted here and in `run-loop.ts`; the sites that still parse one are those #312 deferred (ingest `inRun`, ops `run-dump.ts`, `seed-example.ts`, `backfill.ts`). */
-export const rootThreadIdOf = (runId: string) => `${runId}.${ROOT_NAME}`;
+/** The run's root thread: the one its log already holds (an older run's id is not minted), else the id a new run mints. */
+export const rootThreadOf = (runId: string, log: readonly RunEvent[]) =>
+  threadLog(log).root.id ?? threadIdOf(runId, ROOT_NAME);
 
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, recorder, signal } = options;
-  const rootThreadId = rootThreadIdOf(runId);
+  const rootThreadId = rootThreadOf(runId, recorder.events());
   // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
   // before the API recorded reasons has none, and its resume says only "restarted".
   const resumed = recorder.events().length > 0;
