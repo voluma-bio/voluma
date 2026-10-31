@@ -20,7 +20,7 @@ import type { Run } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
 import { RotateCcw, Send } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { describe, type YourMark } from "./marks-panel";
 
 /** Why this person can't write to the run's AI now, or nothing when they can. */
@@ -29,13 +29,14 @@ function closedBecause(run: Run, me: Me): string | undefined {
   if (run.startedBy !== me.userId)
     return "Only the person who started this run can write to its AI.";
   if (run.credentials === "visitor") return "A run on your own keys can't be reopened.";
+  if (me.kind === "visitor") return "Guests can't reopen runs on Voluma's keys.";
   if (run.state.status !== "ended") return "The AI is working. You can write once it finishes.";
   if (run.state.outcome !== "completed")
     return "This run didn't finish, so its AI can't be reopened.";
   return undefined;
 }
 
-/** The API's refusal in plain words (a 409 carries the server's own); the text stays in the box. */
+/** The API's refusal in plain words (a 403 or 409 carries the server's own); the text stays in the box. */
 function refusal(error: Error): string {
   const status = error instanceof ApiError ? error.status : undefined;
   if (status === 409)
@@ -43,7 +44,8 @@ function refusal(error: Error): string {
       (error as ApiError).serverMessage ??
       "The AI is still answering, or the run can't be reopened. Try again once it finishes."
     );
-  if (status === 403) return "You can read this run but not write to its AI.";
+  if (status === 403)
+    return (error as ApiError).serverMessage ?? "You can't write to this run's AI.";
   if (status === 429) return "Too many runs are going right now. Try again shortly.";
   return "Couldn't send. Check your connection and try again.";
 }
@@ -202,6 +204,7 @@ export function AiPanel({
   useEffect(() => {
     if (about) form.current?.querySelector("textarea")?.focus();
   }, [about]);
+  const closedId = useId();
   const answering =
     run.state.status !== "ended" && items.length > 0 && items.at(-1)?.from === "person";
 
@@ -289,6 +292,7 @@ export function AiPanel({
           maxLength={10_000}
           value={text}
           disabled={closed !== undefined || send.isPending}
+          aria-describedby={closed ? closedId : undefined}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -297,7 +301,11 @@ export function AiPanel({
             }
           }}
         />
-        {closed && <p className="text-xs text-muted-foreground">{closed}</p>}
+        {closed && (
+          <p id={closedId} className="text-xs text-muted-foreground">
+            {closed}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex-1" />
           {subject && (
@@ -305,6 +313,7 @@ export function AiPanel({
               type="button"
               size="sm"
               disabled={closed !== undefined || send.isPending}
+              aria-describedby={closed ? closedId : undefined}
               onClick={() => submit(true)}
             >
               <RotateCcw aria-hidden />
@@ -316,6 +325,7 @@ export function AiPanel({
             variant="primary"
             size="sm"
             disabled={closed !== undefined || send.isPending || !text.trim()}
+            aria-describedby={closed ? closedId : undefined}
           >
             <Send aria-hidden />
             {send.isPending ? "Sending…" : "Send"}
