@@ -1,13 +1,13 @@
 /**
  * One agent's thread, anywhere: `<AgentThread threadId>` reads its rows from the run
- * store (`run-store.tsx`, one per run page), and owns its header, its live
+ * store (`run-store.tsx`, one per run), and owns its header, its live
  * line and its own scroll, which sticks to the newest line while the reader is at the bottom.
  * It fills the box its caller gives it, so moving a thread to another place is one line.
  * Shape from Meridian Flow's `ChatView` (the caller names a thread; the container reads it).
  */
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
 import { Elapsed, ThreadSpendInfo, threadWord } from "./agents";
-import { agentLabel, agentTitle } from "./run-model";
+import { agentLabel, agentTitle, isMain, plainError } from "./run-model";
 import { useThread, useThreadRows, useThreads } from "./run-store";
 import { TranscriptView } from "./transcript-view";
 
@@ -29,7 +29,6 @@ export function AgentThread({
 }) {
   const threads = useThreads();
   const thread = useThread(threadId);
-  const kind = thread?.kind;
   const rows = useThreadRows(threadId);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
   const running = thread?.status === "running";
@@ -70,7 +69,13 @@ export function AgentThread({
           <ThreadSpendInfo thread={thread} />
           {actions && <div className="ml-auto flex shrink-0 items-center">{actions}</div>}
         </div>
-        {answer && <p className="truncate text-meta text-muted-foreground">{answer}</p>}
+        {answer && (
+          <p
+            className={`text-meta text-muted-foreground ${!running && thread.error ? "break-words whitespace-pre-wrap" : "truncate"}`}
+          >
+            {!running && thread.error ? plainError(thread.error) : answer}
+          </p>
+        )}
       </header>
       <div
         ref={viewport}
@@ -89,7 +94,7 @@ export function AgentThread({
       >
         <TranscriptView
           rows={rows}
-          threads={kind === "main" ? threadById : undefined}
+          threads={thread && isMain(thread) ? threadById : undefined}
           live={running ? (thread.liveTool ?? "") : null}
           empty={
             running

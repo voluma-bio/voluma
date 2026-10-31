@@ -1,18 +1,19 @@
 /**
- * The run page's data, derived with no React from the run's events and state: the threads
+ * A run's data, derived with no React from the run's events and state: the threads
  * (main agent, workers, checks) with what each is doing now, and per plan task where it stands,
  * what the AI did, the second AI check's verdict, its To check items (open or accepted), its QC
  * image and its values. Built on `reviewState` (the shared fold plus accepted checks), so it
  * agrees with the review. Transcripts are in `transcript.ts`.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import type { FoldedTask } from "@voluma/contracts/fold";
-import { abandonedEvents, isSatisfied } from "@voluma/contracts/fold";
+import { abandonedEvents, type FoldedTask } from "@voluma/contracts/fold";
+import type { TaskState } from "@voluma/contracts/ids";
 import type { Asset } from "@voluma/contracts/review";
-import { progress, reviewState } from "@voluma/contracts/review-state";
+import { progress, reviewState, taskStates } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
-import { openThreads } from "@voluma/contracts/threads";
+import { type ThreadRole, threadRole } from "@voluma/contracts/thread-role";
+import { failedThreads, openThreads } from "@voluma/contracts/threads";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
 
@@ -28,7 +29,10 @@ export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "canc
 
 export type Thread = {
   id: string;
-  kind: "supervisor" | "main" | "worker" | "check" | "chat";
+  /** From its first start (`threadRole`). */
+  role: ThreadRole;
+  /** The role file's name or `supervisor`: a label (`agentLabel`); behaviour reads the fields below. */
+  kind: string;
   /** The thread that started it, from its `thread.started`; null on the run's root. */
   parentId: string | null;
   taskId?: string;
@@ -37,17 +41,21 @@ export type Thread = {
   /** The attempts it opened, in order (`attempt.opened` ids): a redo resumes the same thread. */
   attempts: string[];
   model?: string;
-  /** Its latest start: the clock's running part counts from here. */
-  startedAt: string;
-  /** Seconds it worked before its latest start (a resume after an end, a restart or a redo). */
-  workedBefore: number;
-  /** Where its clock stops: its end, the run's end, or its last event while paused. */
-  endedAt?: string;
+  /** Seconds it worked in its spans that ended (`spend`'s `endedSeconds`). */
+  endedSeconds: number;
+  /** When its span still open began (`spend`'s `openSince`): the clock runs from here. */
+  openSince: string | null;
+  /**
+   * Where the open span's clock stops while the runner isn't running the run (`halted`): the
+   * run's end, or the thread's last event while paused. `openSince` stays set on a thread cut
+   * off this way, since the log never ended it.
+   */
+  stoppedAt?: string;
   status: ThreadStatus;
   error?: string;
   toolCalls: number;
   toolErrors: number;
-  /** A worker's or checker's own cost and time; the run's spend has the main thread's. */
+  /** A worker's or checker's own cost and time (`spend().threads`); the run's spend has the main thread's. */
   spend?: Spend;
   /** The tool call running now, by title; else the last one it made. */
   liveTool?: string;
@@ -81,38 +89,31 @@ export function haltOf(state: RunState, closed: boolean): Halt | undefined {
  * Every thread the run has started, in start order, as the log tells it; `halted` applies what
  * the log can't say.
  */
-function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string, string> } {
+function threadsOf(
+  events: RunEvent[],
+  spent: RunSpend,
+): { threads: Thread[]; lastAt: Map<string, string> } {
   const threads = new Map<string, Thread>();
   const running = new Map<string, Map<string, string>>();
   const lastAt = new Map<string, string>();
-  const own = new Map<string, RunEvent[]>();
   for (const e of events) {
     const t = threads.get(e.threadId);
-    const before = lastAt.get(e.threadId);
     lastAt.set(e.threadId, e.createdAt);
-    const mine = own.get(e.threadId);
-    if (mine) mine.push(e);
-    else own.set(e.threadId, [e]);
     switch (e.type) {
       case "thread.started":
-        if (t) {
-          // The earlier part ran to its end or, cut off by a lost runner, to its last event.
-          const until = t.endedAt ?? before ?? t.startedAt;
-          t.workedBefore += Math.max(0, Date.parse(until) - Date.parse(t.startedAt)) / 1000;
-          t.status = "running";
-          t.startedAt = e.createdAt;
-          t.endedAt = undefined;
-        } else
+        if (t) t.status = "running";
+        else
           threads.set(e.threadId, {
             id: e.threadId,
+            role: threadRole(e.payload),
             kind: e.payload.kind,
             parentId: e.payload.parentThreadId,
             taskId: e.payload.task,
             attemptId: e.payload.attemptId,
             attempts: [],
             model: e.payload.model,
-            startedAt: e.createdAt,
-            workedBefore: 0,
+            endedSeconds: 0,
+            openSince: null,
             status: "running",
             toolCalls: 0,
             toolErrors: 0,
@@ -122,8 +123,6 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         if (t) {
           t.status = e.payload.status;
           t.error = e.payload.error;
-          // A later cancel can invalidate finished work without adding working time.
-          t.endedAt ??= e.createdAt;
           running.delete(e.threadId);
         }
         break;
@@ -150,16 +149,20 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         if (t) t.result = { text: e.payload.text, verdict: e.payload.verdict };
         break;
       case "message":
-        if (t && e.payload.role === "assistant" && e.payload.text) t.said = e.payload.text;
+        if (t && e.payload.role === "assistant" && !e.payload.compaction && e.payload.text)
+          t.said = e.payload.text;
         break;
     }
   }
+  const clock = new Map(spent.threads.map((s) => [s.threadId, s]));
   for (const t of threads.values()) {
     if (t.status === "running") t.liveTool = [...(running.get(t.id)?.values() ?? [])].at(-1);
-    // `spend` over one worker's or checker's events counts them all for its task, so that one
-    // task's spend is the thread's own.
-    if (t.kind === "worker" || t.kind === "check")
-      t.spend = spend(own.get(t.id) ?? []).tasks[0]?.spend;
+    const c = clock.get(t.id);
+    if (c) {
+      t.endedSeconds = c.endedSeconds;
+      t.openSince = c.openSince;
+      if (t.taskId) t.spend = c.spend;
+    }
   }
   return { threads: [...threads.values()], lastAt };
 }
@@ -177,11 +180,18 @@ function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thr
         ? {
             ...t,
             status: halt.outcome === "failed" ? "failed" : "cancelled",
-            endedAt: halt.at,
+            stoppedAt: halt.at,
             liveTool: undefined,
           }
-        : { ...t, status: halt.kind, endedAt: lastAt.get(t.id), liveTool: undefined },
+        : { ...t, status: halt.kind, stoppedAt: lastAt.get(t.id), liveTool: undefined },
   );
+}
+
+/** Seconds a thread has worked by `now` (ms): its ended spans, and its open one up to its stop or now. */
+export function workedSeconds(t: Thread, now: number): number {
+  if (!t.openSince) return t.endedSeconds;
+  const end = t.stoppedAt ? Date.parse(t.stoppedAt) : now;
+  return t.endedSeconds + Math.max(0, end - Date.parse(t.openSince)) / 1000;
 }
 
 /** Threads with a tool call still being written and none running say so; others are kept as is. */
@@ -195,6 +205,10 @@ export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   );
 }
 
+export const isMain = (t: Pick<Thread, "role">) => t.role === "main";
+
+export const isCheck = (t: Pick<Thread, "role"> | undefined) => t?.role === "check";
+
 export type AgentNode = { thread: Thread; children: AgentNode[] };
 
 /**
@@ -204,7 +218,7 @@ export type AgentNode = { thread: Thread; children: AgentNode[] };
  */
 export function agentTree(threads: Thread[]): AgentNode[] {
   const nodes = new Map(
-    threads.filter((t) => t.kind !== "supervisor").map((t) => [t.id, { thread: t, children: [] }]),
+    threads.filter((t) => t.parentId !== null).map((t) => [t.id, { thread: t, children: [] }]),
   );
   const roots: AgentNode[] = [];
   for (const node of nodes.values()) {
@@ -217,24 +231,25 @@ export function agentTree(threads: Thread[]): AgentNode[] {
 /**
  * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
  * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
+ * `short`, for a narrow place beside its outcome: "The AI's work", "Second check", "Check 2".
  */
-export function agentLabel(t: Thread, threads: Thread[]): string {
+export function agentLabel(t: Thread, threads: Thread[], { short = false } = {}): string {
   switch (t.kind) {
     case "main":
       return "Lead AI";
     case "worker":
-      return t.attempts.length > 1 ? `The AI's work, ${t.attempts.length} tries` : "The AI's work";
+      return t.attempts.length > 1 && !short
+        ? `The AI's work, ${t.attempts.length} tries`
+        : "The AI's work";
     case "check": {
       const attemptId = t.attemptId;
       const tries = attemptId
         ? threads.find((w) => w.attempts.includes(attemptId))?.attempts
         : undefined;
-      return tries && tries.length > 1 && attemptId
-        ? `Second AI check of try ${tries.indexOf(attemptId) + 1}`
-        : "Second AI check";
+      const n = tries && attemptId ? tries.indexOf(attemptId) + 1 : 0;
+      if (!tries || tries.length < 2) return short ? "Second check" : "Second AI check";
+      return short ? `Check ${n}` : `Second AI check of try ${n}`;
     }
-    case "chat":
-      return "Chat";
     default:
       return "Agent";
   }
@@ -244,27 +259,8 @@ export function agentLabel(t: Thread, threads: Thread[]): string {
 export const agentTitle = (t: Thread, threads: Thread[]) =>
   t.taskId ? `${taskTitle(t.taskId)}: ${agentLabel(t, threads)}` : agentLabel(t, threads);
 
-export type TaskState =
-  /** Not started, and a task it builds on has no usable result yet. */
-  | "waiting"
-  /** Not started, and every task it builds on has a usable result (`isSatisfied`). */
-  | "ready"
-  /** An AI is working on it now. */
-  | "running"
-  /** A second AI is checking the result now. */
-  | "checking"
-  /** Started, and no AI is working on it or checking it: the lead AI decides what's next. */
-  | "held"
-  | "done"
-  | "to-check"
-  /** Skipped by the plan, or builds on a skipped task. */
-  | "skipped"
-  /** Failed, or its AI failed on the error that failed the run. */
-  | "failed"
-  /** Working or being checked when the run ended. */
-  | "stopped"
-  /** Working or being checked while the run waits for a runner or keys. */
-  | "paused";
+/** Where a task stands: the one rule the study shares (`taskStates`, contracts). */
+export type { TaskState };
 
 /** One To check item, open or accepted: what the review would show for it. */
 export type NeedItem = {
@@ -349,22 +345,26 @@ const formatNumber = (value: number) =>
   }).format(value);
 
 /**
- * An error's first line with the provider's raw JSON response cut down to its message:
+ * A provider's raw JSON response cut down to its message; other errors keep their detail:
  * "meta API error (404): The model does not exist". A body with no message is dropped.
  */
 export const plainError = (error: string) => {
-  const brace = error.search(/\{\s*"/);
+  const brace = error.search(/\{\s*\\?"/);
   const head = brace < 0 ? error : error.slice(0, brace);
-  const title = head.split("\n")[0]?.replace(/[:\s]+$/, "") || error;
-  if (brace < 0) return title;
+  const title = head.split("\n")[0]?.replace(/[:\s]+$/, "") || "Error";
+  if (brace < 0) return error;
   try {
-    const json = JSON.parse(error.slice(brace));
+    const body = error.slice(brace);
+    // Some recorded providers escaped the whole JSON body inside their error text.
+    const json = JSON.parse(/^\{\s*\\"/.test(body) ? JSON.parse(`"${body}"`) : body);
     const message = json?.message ?? json?.error?.message ?? json?.error;
     if (typeof message === "string" && message) return `${title}: ${message}`;
+    return title;
   } catch (e) {
     if (!(e instanceof SyntaxError)) throw e;
   }
-  return title;
+  // A multiline validation error may contain JSON objects inside a list, not a provider body.
+  return head.includes("\n") ? error : title;
 };
 
 /**
@@ -424,28 +424,6 @@ function unexplained(t: FoldedTask, check: TaskView["check"], image: Asset | und
   return { ...base, title: "To check", text: t.reason ?? "" };
 }
 
-function stateOf(
-  t: FoldedTask | undefined,
-  blocked: boolean,
-  /** Its worker, and its check, is running now: open while the run is `running`. */
-  now: { working: boolean; checking: boolean },
-  halt: Halt | undefined,
-  /** A thread of its current attempt ended failed, and the run failed. */
-  failedOn: boolean,
-): TaskState {
-  const status = t?.status;
-  if (t?.skipped) return "skipped";
-  if (status === "done" || status === "to-check" || status === "failed") return status;
-  // A fatal provider error fails the run with no task event: the task is the one it failed on.
-  if (failedOn) return "failed";
-  const started = status === "in-progress" || status === "under-review";
-  if (halt && started) return halt.kind === "ended" ? "stopped" : halt.kind;
-  if (now.working) return "running";
-  if (status === "under-review" && now.checking) return "checking";
-  if (started) return "held";
-  return blocked ? "waiting" : "ready";
-}
-
 type RunView = {
   /** Without the tool calls still being written: `withLiveCalls` adds those per frame. */
   threads: Thread[];
@@ -459,18 +437,16 @@ type RunView = {
 /** The fold's title for a To check flag set by a `task` event; the task's name says as much. */
 const GENERIC_CHECK = "Marked to check";
 
-/** Everything the run page shows about the run, from its durable events and state. */
+/** Everything a run's screen shows about the run, from its durable events and state. */
 export function runView(
   events: RunEvent[],
   state: RunState,
   providerCalls: ProviderCalls | undefined,
   halt: Halt | undefined,
 ): RunView {
-  const logged = threadsOf(events);
-  // Open threads run only while the run does: an ended or paused run's open threads were cut off.
-  const running = new Set(state.status === "running" ? openThreads(events) : []);
-  const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   const spent = spend(events, providerCalls);
+  const logged = threadsOf(events, spent);
+  const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   // No plan until the run's first `revision.started`.
   const latest = reviewState(events, { live: true }).revisions.at(-1);
   if (!latest)
@@ -482,47 +458,33 @@ export function runView(
     };
 
   const byId = new Map(latest.tasks.map((t) => [t.id, t]));
-  const titles = new Map(latest.plan.tasks.map((p) => [p.id, p.title ?? taskTitle(p.id)]));
-  // "tibia-frame was skipped: …", as the fold writes a dependent's reason, with the task's title.
-  const skipText = (reason: string) =>
-    reason.replace(
-      /^([\w-]+) was skipped: /,
-      (_, id: string) => `${titles.get(id) ?? id} was skipped: `,
-    );
+  const titleOf = (id: string) => byId.get(id)?.title ?? taskTitle(id);
+  // A dependent of a skipped task reads as the skipped task's own reason, under its title.
+  const skipText = (t: FoldedTask) => {
+    if (!t.skipped) return undefined;
+    const from = byId.get(t.skipped.from);
+    return t.skipped.from === t.id || !from?.skipped
+      ? t.skipped.reason
+      : `${titleOf(t.skipped.from)} was skipped: ${from.skipped.reason}`;
+  };
   const loggedById = new Map(logged.threads.map((t) => [t.id, t]));
   // Checkpoints by event id: their researcher sentence, and the thread that wrote them.
   const summaries = new Map<string, string>();
   const writer = new Map<string, string>();
-  // Attempts the second AI check sent back, by task: a later attempt is a redo.
-  const verdicts = new Map<string, "passed" | "needs-review">();
-  const sentBack = new Map<string, Set<string>>();
   const abandoned = abandonedEvents(events);
   for (const e of events)
     if (abandoned.has(e.id)) continue;
     else if (e.type === "checkpoint") {
       writer.set(e.id, e.threadId);
       if (e.payload.summary) summaries.set(e.id, e.payload.summary);
-      if (e.payload.verdict && loggedById.get(e.threadId)?.kind === "check")
-        verdicts.set(e.payload.attemptId, e.payload.verdict);
-    } else if (
-      e.type === "task" &&
-      e.payload.status === "to-check" &&
-      e.payload.by.kind === "rule" &&
-      e.payload.by.rule === "check-result" &&
-      verdicts.get(e.payload.attemptId) === "needs-review"
-    ) {
-      const set = sentBack.get(e.payload.taskId) ?? new Set();
-      sentBack.set(e.payload.taskId, set.add(e.payload.attemptId));
     }
-  const runningOf = (kind: Thread["kind"]) =>
-    new Set(
-      logged.threads.flatMap((t) =>
-        t.kind === kind && running.has(t.id) && t.taskId ? [t.taskId] : [],
-      ),
-    );
-  const working = runningOf("worker");
-  const checking = runningOf("check");
-  const runFailed = halt?.kind === "ended" && halt.outcome === "failed";
+  const states = taskStates(latest, {
+    // An ended run's log may still be loading until its stream closes (`haltOf`): read it as
+    // it stood while the run ran, not as ended.
+    state: state.status === "ended" && !halt ? { status: "running" } : state,
+    open: openThreads(events),
+    failed: failedThreads(events),
+  });
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));
   const corrections = new Set(
     events.flatMap((e) =>
@@ -534,78 +496,74 @@ export function runView(
 
   const tasks = latest.plan.tasks.map((p, i): TaskView => {
     const t = byId.get(p.id);
-    const blocked = p.dependsOn.some((d) => !isSatisfied(byId.get(d)));
+    // The fold gives every plan task a row, pending ones too.
+    if (!t) throw new Error(`fold has no row for plan task ${p.id}`);
+    // `taskStates` gives every plan task a state.
+    const state = states.get(p.id) as TaskState;
     // The logged end, not `halted`'s: a thread cut off by a failed run didn't fail itself.
-    const failedThread = runFailed
-      ? [t?.threads.worker, t?.threads.check]
-          .map((id) => (id ? loggedById.get(id) : undefined))
-          .find((th) => th?.status === "failed")
-      : undefined;
-    const state = stateOf(
-      t,
-      blocked,
-      { working: working.has(p.id), checking: checking.has(p.id) },
-      halt,
-      failedThread !== undefined,
-    );
+    const failedThread =
+      state === "failed"
+        ? [t.threads.worker, t.threads.check]
+            .map((id) => (id ? loggedById.get(id) : undefined))
+            .find((th) => th?.status === "failed")
+        : undefined;
     const own = threads.filter((th) => th.taskId === p.id);
-    const assets = new Map((t?.evidence ?? []).map((a) => [a.id, a]));
+    const assets = new Map(t.evidence.map((a) => [a.id, a]));
     const imageOf = (ids: string[]) =>
       ids.map((id) => assets.get(id)).find((a): a is Asset => a !== undefined && isImage(a));
-    const fromWorker = t?.milestones.filter((m) => writer.get(m.id) === t.threads.worker) ?? [];
+    const fromWorker = t.milestones.filter((m) => writer.get(m.id) === t.threads.worker);
     const lastWorker = fromWorker.at(-1);
     const image =
       [...fromWorker]
         .reverse()
         .map((m) => imageOf(m.evidenceIds))
-        .find(Boolean) ?? [...(t?.evidence ?? [])].reverse().find(isImage);
-    const lastVerdict = t?.milestones.filter((m) => m.verdict).at(-1);
+        .find(Boolean) ?? [...t.evidence].reverse().find(isImage);
+    const lastVerdict = t.milestones.filter((m) => m.verdict).at(-1);
     const check: TaskView["check"] =
-      t?.checker && lastVerdict
+      t.checker && lastVerdict
         ? {
             verdict: t.checker.verdict,
             summary: summaries.get(lastVerdict.id),
             text: t.checker.text,
           }
         : undefined;
-    const items: NeedItem[] = (t?.checks ?? []).map((c) => ({
+    const items: NeedItem[] = t.checks.map((c) => ({
       id: c.id,
       taskId: p.id,
       title: c.title === GENERIC_CHECK ? undefined : c.title,
-      text: summaries.get(c.id) ?? (t?.skipped ? skipText(c.detail) : c.detail),
-      image: imageOf(t?.milestones.find((m) => m.id === c.id)?.evidenceIds ?? []) ?? image,
+      text: summaries.get(c.id) ?? skipText(t) ?? c.detail,
+      image: imageOf(t.milestones.find((m) => m.id === c.id)?.evidenceIds ?? []) ?? image,
       accepted: c.status === "accepted",
       acceptable: true,
     }));
     const reason =
       state === "skipped"
-        ? t?.reason && skipText(t.reason)
+        ? skipText(t)
         : state === "failed"
           ? failedThread
             ? failedThread.error && plainError(failedThread.error)
-            : t?.reason
+            : t.reason
           : undefined;
     return {
       id: p.id,
-      title: titles.get(p.id) ?? p.id,
+      title: titleOf(p.id),
       number: i + 1,
       dependsOn: p.dependsOn,
       state,
       threads: own,
       latest: own.at(-1),
-      redone: [...(sentBack.get(p.id) ?? [])].some((a) => a !== t?.attemptId),
+      redone: t.sentBack.some((a) => a !== t.attemptId),
       did: lastWorker && summaries.get(lastWorker.id),
       purpose: purpose.get(p.id),
       check,
-      rejected: Boolean(t?.rejected),
+      rejected: t.rejected,
       reason: reason ?? undefined,
-      needs:
-        t?.status === "to-check" && items.length === 0 ? [unexplained(t, check, image)] : items,
+      needs: t.status === "to-check" && items.length === 0 ? [unexplained(t, check, image)] : items,
       image,
-      results: t ? resultRows(t, state) : [],
+      results: resultRows(t, state),
       valued: p.outputs.some((o) => o.kind === "measurement" || o.kind === "score"),
-      corrected: Boolean(t && corrections.has(t.resultRevisionId)),
-      waitingOn: state === "waiting" ? p.dependsOn.filter((d) => !isSatisfied(byId.get(d))) : [],
+      corrected: corrections.has(t.resultRevisionId),
+      waitingOn: state === "waiting" ? p.dependsOn.filter((d) => !byId.get(d)?.satisfied) : [],
       spend: taskSpend.get(p.id),
     };
   });

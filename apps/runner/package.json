@@ -16,6 +16,7 @@
     "@earendil-works/pi-ai": "1.4.0",
     "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",
+    "@voluma/object-store": "workspace:*",
     "@voluma/provider-calls": "workspace:*",
     "@voluma/workflow": "workspace:*",
     "modal": "0.11.1",

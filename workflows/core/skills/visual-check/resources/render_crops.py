@@ -41,7 +41,7 @@ if __name__ == '__main__':
     ap.add_argument('--bone-hu', type=float, help='HU at or above which a voxel is bone, defining the piece for --component-at')
     ap.add_argument('--header', type=sl.existing, help='hu.json, for spacing (default: the labels sidecar)')
     ap.add_argument('--pad-mm', type=float, default=1.5, help='mm of margin around the piece')
-    ap.add_argument('--window', metavar='lo,hi', help='display window in HU (default: automatic)')
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help='display window in HU (default: automatic)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     a = ap.parse_args()
     if a.component_at is not None and a.bone_hu is None:
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     img = np.asarray(hu[sub])
     lab = np.asarray(labels[sub]).astype(np.int32)
     mm = m[sub]
-    window = vl.parse_window(a.window) if a.window else vl.auto_window(img)
+    window = a.window or vl.auto_window(img)
     cut = [lambda v: v[c[0]], lambda v: v[:, c[1]], lambda v: v[:, :, c[2]]]
     fig = vl.fig_for(3 * 600, 600)
     for i, (f, nm) in enumerate(zip(cut, ('axis 0', 'axis 1', 'axis 2'))):

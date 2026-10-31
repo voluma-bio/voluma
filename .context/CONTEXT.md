@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one `QueryClient` in `SignedIn`; no top bar); features/run and features/review own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one `QueryClient` in `SignedIn`; no top bar); features/study (Home, studies, Workflows) and features/scan (the scan review) own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
@@ -304,24 +304,23 @@ The viewer's colours (axes, bone, rulers, labels) are tokens too. Canvas and
 WebGL code reads them with `getComputedStyle` rather than copying values, so
 the CSS stays the one source.
 
-## Review integration
+## Scan review
 
-The Review UI is in `apps/web/src/features/review`; the grid viewer is in
-`packages/viewer`. There is one Review route, `/runs/:runId`, with no demo
-route. No synthetic measurements or simulated services are mounted.
+One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (dark),
+with the selection in the URL (`task`, `item`, `agent`); the old `/runs/:id/live` and
+`/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
+conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and
+files. What any screen needs to show a run is `packages/run-view`; the grid viewer is
+`packages/viewer`. No synthetic measurements or simulated services are mounted.
 
-`features/review/report/model.ts` is a presentation model, not the shared API
-contract. Reports, revision selection and command UI remain available for the
-real adapter; until it exists the workspace shows explicit empty states. Shared
-contracts and API client are unchanged from main. Report/viewer splits retain
-react-resizable-panels to preserve the verified nested maximize/restore behavior.
+Images come only from the run: each task's grid and what is drawn on it are the run's published
+blocks and converted assets. The [scan review specification][scan-spec] covers the URL, the two
+sources and reconnecting; the [run view specification][run-view-spec] the run model and
+transcripts; the [viewer specification][viewer-spec] how a task's grid is chosen, the viewer's
+geometry, loading and verification coverage.
 
-Images come only from the run: each task's grid and what is drawn on it are the
-run's published blocks and converted assets. The [Review specification][review-spec]
-describes the UI seam; the [viewer specification][viewer-spec] describes how a task's
-grid is chosen, the viewer's geometry, loading and verification coverage.
-
-[review-spec]: ../apps/web/src/features/review/.context/CONTEXT.md
+[scan-spec]: ../apps/web/src/features/scan/.context/CONTEXT.md
+[run-view-spec]: ../packages/run-view/.context/CONTEXT.md
 [viewer-spec]: ../packages/viewer/.context/CONTEXT.md
 
 ## Parallel agents
@@ -334,6 +333,10 @@ Nothing they run shares mutable state:
   `voluma-pg` on port 54432, shared by all worktrees as a server only), migrates it, and
   writes `.dev/env.json` (git-ignored) for the runner. `.env` holds nothing per worktree;
   the API token is generated per launch (`pnpm db:reset` drops the worktree's database);
+- The API reloads through `tsx watch`, which ignores `node_modules`, with explicit
+  includes for `apps/api/src/**` and `packages/*/src/**`. Do not use Node's import-graph
+  `--watch`: pnpm installs and worktree removal change shared dependency hardlinks
+  and can restart another worktree's API;
 - Nx keeps its cache in the worktree's `.nx/` and runs without a daemon;
 - sandboxes are named `<runId>.<name>` and tagged with the run id, so give each
   worktree's runs their own run ids; the event log is in the worktree's own

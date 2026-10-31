@@ -14,7 +14,6 @@ import { createHash } from "node:crypto";
 import { historyImageKey } from "@voluma/contracts/r2";
 import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
-import { parseThreadId } from "../../thread-id";
 import { parseMarker } from "./compaction";
 
 // view_image returns at most 1 MiB per image. Its stored object is on writable scratch,
@@ -31,7 +30,13 @@ const has = (row: Row, type: string) => blocksOf(row)?.some((b) => b.type === ty
 
 const GONE_NOTE = "[the images are no longer shown; call view_image again to see them]";
 
-export function withImageRefs(history: History, files: Files, runId: string): History {
+/** `nameOf` is a thread's name (`ThreadRecord.name`): the folder its images are written under. */
+export function withImageRefs(
+  history: History,
+  files: Files,
+  runId: string,
+  nameOf: (threadId: string) => string,
+): History {
   const signal = new AbortController().signal;
   const note = (why: string): Block => ({
     type: "text",
@@ -94,7 +99,7 @@ export function withImageRefs(history: History, files: Files, runId: string): Hi
       const row = JSON.parse(message) as Row;
       const blocks = blocksOf(row);
       if (!blocks || !has(row, "image")) return history.appendMessage(threadId, idx, message);
-      const { name } = parseThreadId(runId, threadId);
+      const name = nameOf(threadId);
       const content = await Promise.all(
         blocks.map(async (b) => {
           if (b.type !== "image") return b;

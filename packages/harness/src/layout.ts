@@ -27,7 +27,7 @@ import {
 } from "@voluma/contracts/r2";
 import type { Skill } from "@voluma/workflow/definition";
 import type { SandboxMount } from "./ports/sandbox";
-import { parseThreadId } from "./thread-id";
+import type { ThreadIdentity } from "./thread-log";
 
 const INPUTS = "/inputs";
 const OUTPUTS = "/outputs";
@@ -36,8 +36,8 @@ const WORKFLOW = "/workflow";
 
 export interface ThreadLayout {
   /** `main` has a sandbox only if its role holds `bash` (`runLayout`'s `mainWorks`). */
-  role: "worker" | "checker" | "main";
-  /** The thread id without the run id: the sandbox's name, and the folder of its spill and (non-workers) scratch. */
+  role: "worker" | "check" | "main";
+  /** The thread's name (`ThreadRecord.name`): the sandbox's name, and the folder of its spill and (non-workers) scratch. */
   name: string;
   /** What the thread's sandbox mounts. */
   mounts: SandboxMount[];
@@ -77,11 +77,11 @@ export interface RunLayout {
   /** The run's `PYTHONPATH`, for a sandbox outside the threads (the convert sandbox). */
   pythonPath: string;
   /**
-   * The layout of a thread id as `thread-id.ts` builds it. `cited` says whether the attempt a
-   * checker reviews cites a scratch file (the path after `/scratch/`); it gates the checker's
-   * host-side reads of the rest of the run's scratch, and without it a checker reads none.
+   * The layout of a thread. `cited` says whether the attempt a check reviews cites a scratch
+   * file (the path after `/scratch/`); it gates the check's host-side reads of the rest of the
+   * run's scratch, and without it a check reads none.
    */
-  forThread(threadId: string, cited?: (path: string) => boolean): ThreadLayout;
+  forThread(thread: ThreadIdentity, cited?: (path: string) => boolean): ThreadLayout;
 }
 
 /**
@@ -174,11 +174,8 @@ export function runLayout(
   return {
     mainWorks,
     pythonPath,
-    forThread(threadId, cited = () => false) {
-      const parsed = parseThreadId(runId, threadId);
-      const { name, kind } = parsed;
-      const copy = parsed.kind !== "main" && copiesInputs(parsed.taskId);
-      const role = kind === "worker" ? "worker" : kind === "check" ? "checker" : "main";
+    forThread({ name, role, taskId }, cited = () => false) {
+      const copy = taskId !== undefined && copiesInputs(taskId);
       const dir = `${SCRATCH}/${name}`;
       const parts =
         role === "worker"
@@ -211,7 +208,7 @@ export function runLayout(
           const relative = path.slice(mount.path.length + 1);
           if (!relativePathSchema.safeParse(relative).success)
             throw new Error(`${path} is not a valid path`);
-          if (role === "checker" && hostOnly.includes(mount)) {
+          if (role === "check" && hostOnly.includes(mount)) {
             if (!cited(relative))
               throw new Error(
                 `${path} is in the worker's folder and the worker did not cite it as evidence. A check can open the files the worker cited, and its own folder ${dir}.`,

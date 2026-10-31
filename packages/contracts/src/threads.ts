@@ -8,6 +8,18 @@
  */
 import type { EventInput, RunEvent } from "./events";
 import { corrections } from "./fold";
+import { threadRole } from "./thread-role";
+
+/**
+ * A thread's name: its id without the run id (`main.2`, `segmentation.worker`, `supervisor`), the
+ * sandbox's name and the thread's folder under `/scratch`. The one reader of a thread id's shape;
+ * everything else takes `name` from a record. Throws on an id that does not start with `<runId>.`.
+ */
+export function threadName(runId: string, threadId: string): string {
+  if (!threadId.startsWith(`${runId}.`))
+    throw new Error(`${threadId} is not a thread of run ${runId}`);
+  return threadId.slice(runId.length + 1);
+}
 
 /** Ids of the threads left open, in the order they first started; the root thread (kind `supervisor`) among them. */
 export function openThreads(events: readonly RunEvent[]): string[] {
@@ -17,6 +29,17 @@ export function openThreads(events: readonly RunEvent[]): string[] {
     else if (e.type === "thread.ended" && open.has(e.threadId)) open.set(e.threadId, false);
   }
   return [...open].flatMap(([id, isOpen]) => (isOpen ? [id] : []));
+}
+
+/** Ids of the threads whose latest `thread.ended` is `failed`. */
+export function failedThreads(events: readonly RunEvent[]): Set<string> {
+  const failed = new Set<string>();
+  for (const e of events)
+    if (e.type === "thread.ended") {
+      if (e.payload.status === "failed") failed.add(e.threadId);
+      else failed.delete(e.threadId);
+    } else if (e.type === "thread.started") failed.delete(e.threadId);
+  return failed;
 }
 
 /**
@@ -32,7 +55,7 @@ export function openThreads(events: readonly RunEvent[]): string[] {
  * reverted work stands. The next correction starts them fresh (`messages.ts`).
  */
 export function cancelEnds(runId: string, events: readonly RunEvent[], at: Date): EventInput[] {
-  const root = events.find((e) => e.type === "thread.started" && e.payload.kind === "supervisor");
+  const root = events.find((e) => e.type === "thread.started" && threadRole(e.payload) === "root");
   const isRoot = (id: string) => id === root?.threadId;
   const start = new Map<string, string>(); // thread -> its latest thread.started id
   const stopped = new Set<string>(); // threads whose latest end is `cancelled`

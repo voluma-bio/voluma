@@ -70,10 +70,10 @@
  *   and are dropped if they don't resolve (a `label` goes with its `volumeId`);
  *   one left pointing at nothing is absent. "Marked to check" has no focus.
  *   `checkResult` turns a folded task into the status `check-result` gives.
- * - Not from these events (the API adds them): `threads.chat`, revision labels; the API
+ * - Not from these events (the API adds them): revision labels; the API
  *   also sets each asset's `stage` to the task title (here the task id).
  */
-import type { RunEvent, ThreadKind } from "./events";
+import type { RunEvent } from "./events";
 import type { TaskStatus } from "./ids";
 import { type EvidenceRef, fileRefsOf, type Output } from "./output";
 import { evidenceKey } from "./r2";
@@ -90,6 +90,7 @@ import type {
   Volume,
 } from "./review";
 import { toWorld } from "./ruler";
+import { threadRole } from "./thread-role";
 import type { DeclaredOutput, PlanTask, WorkflowPlan } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
@@ -339,7 +340,7 @@ export function corrections(events: readonly RunEvent[]): {
         if (span) span.replied = true;
         break;
       case "thread.started":
-        if (e.payload.kind === "supervisor") root = e.threadId;
+        if (threadRole(e.payload) === "root") root = e.threadId;
         break;
       case "thread.ended":
         if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed")
@@ -421,9 +422,38 @@ type Attempt = {
   citedScratch: Set<string>;
 };
 
+/**
+ * Every event type `fold` (and `reviewState`'s overlay of `check.accepted` and
+ * `review.completed`) reads: a reader that loads only these gets the same result as one that
+ * loads the whole log. Add a type here when `fold` or `corrections` starts to read it.
+ */
+export const FOLD_EVENT_TYPES = [
+  "run.reopened",
+  "person.message",
+  "reply",
+  "thread.started",
+  "thread.ended",
+  "revision.started",
+  "attempt.opened",
+  "correction.ended",
+  "outputs.backed-up",
+  "outputs.restored",
+  "outputs.discarded",
+  "task",
+  "checkpoint",
+  "output",
+  "plan.changed",
+  "assets.ready",
+  "assets.failed",
+  "check.accepted",
+  "review.completed",
+] as const satisfies readonly RunEvent["type"][];
+
 /** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */
 export function fold(events: readonly RunEvent[], holdOpenCorrection = false): Folded {
-  const threadKind = new Map<string, ThreadKind>();
+  // Threads that check an attempt: the starts that name one.
+  const roles = new Set<string>(); // threads whose first start was classified
+  const checkThreads = new Set<string>();
   const threadModel = new Map<string, string>();
   const attempts = new Map<string, Attempt>();
   const current = new Map<string, Attempt>();
@@ -808,12 +838,16 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
     if (abandoned.has(e.id)) continue;
     switch (e.type) {
       case "thread.started": {
-        threadKind.set(e.threadId, e.payload.kind);
-        if (e.payload.kind === "worker" && e.payload.task) workerOf.set(e.payload.task, e.threadId);
+        if (!roles.has(e.threadId)) {
+          const role = threadRole(e.payload);
+          roles.add(e.threadId);
+          if (role === "check") checkThreads.add(e.threadId);
+          else if (role === "worker" && e.payload.task) workerOf.set(e.payload.task, e.threadId);
+        }
         if (e.payload.model) threadModel.set(e.threadId, e.payload.model);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
         // A resume re-emits `thread.started` for the same thread: only a new check thread resets the verdict.
-        if (e.payload.kind === "check" && checked && checked.checkThread !== e.threadId) {
+        if (checked && checked.checkThread !== e.threadId) {
           checked.checkThread = e.threadId;
           checked.checker = null; // the verdict shown is this check's
         }
@@ -881,7 +915,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
         const { text, summary, verdict, toCheck, evidence } = e.payload;
-        const byCheck = threadKind.get(e.threadId) === "check";
+        const byCheck = checkThreads.has(e.threadId);
         addEvidence(a, e.runId, evidence);
         a.milestones.push({
           id: e.id,

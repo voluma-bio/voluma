@@ -40,7 +40,7 @@
  * no work. The marker also gives review and the correction span a boundary when nothing depends
  * on the task, and resets the task's fix rounds.
  * The main agent reads the chat as `person.message`s and writes
- * `reply` events; the panel reads `conversation(events)` (`conversation.ts`) from the run stream
+ * `reply` events; the panel reads both from the run stream
  * (`GET /api/run/runs/:id/stream`, the frames the run page folds), which closes when the run
  * ends, so the panel reconnects after it posts.
  *

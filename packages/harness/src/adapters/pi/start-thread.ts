@@ -39,8 +39,7 @@ export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender
  */
 type ThreadIdentity =
   | { kind: "worker" | "check"; taskId: string }
-  | { kind: "main"; taskId?: undefined }
-  | { kind: "chat"; taskId?: string };
+  | { kind: "main"; taskId?: undefined };
 
 export type StartThreadOptions = ThreadIdentity & {
   threadId: string;
@@ -123,7 +122,12 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     // The summary was a model call: its usage is spend (`spend.ts` counts assistant `message`s).
     onSummary: (reply, summary) => {
       const used = usageOf(reply);
-      emit("message", { role: "assistant", text: summary, ...(used && { usage: used }) });
+      emit("message", {
+        role: "assistant",
+        text: summary,
+        compaction: true,
+        ...(used && { usage: used }),
+      });
     },
   });
 
@@ -330,7 +334,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             // Tools ran, so another turn follows: the thread can still use the notice.
             if (historyError || cutOff() || event.toolResults.length === 0) break;
             const notice = compacting.wrapUp(agent.state.messages);
-            if (notice) agent.steer(userMessage(notice, { kind: "runtime" }));
+            if (notice) agent.steer(userMessage(notice, NOTICE));
             break;
           }
           case "tool_execution_start":
@@ -358,7 +362,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         while (!historyError && !signal?.aborted) {
           if (overflowRetryable(agent.state.messages)) {
             if (!(await compacting.recover(agent.state.messages, signal))) break;
-            agent.steer(userMessage(OVERFLOW_NOTE, { kind: "runtime" }));
+            agent.steer(userMessage(OVERFLOW_NOTE, NOTICE));
           } else if (!agent.hasQueuedMessages()) break;
           await agent.continue();
         }
@@ -406,6 +410,9 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     done: run(),
   };
 }
+
+/** The sender of compaction notices: the runtime, but not a nudge. */
+const NOTICE: UserSender = { kind: "runtime", notice: true };
 
 const OVERFLOW_NOTE =
   "The last request was too large for the model, so your history was summarized. Continue the task.";

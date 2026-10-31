@@ -1,10 +1,9 @@
 # Study feature
 
 Home (`/`, `home-page.tsx`), Run on new scans (`/new`, `new-page.tsx`), Workflows
-(`/workflows`, `workflows-page.tsx`) and the study page (`/studies/:id`, `study-page/`) under
-`StudyLayout` (their query client). Every run
+(`/workflows`, `workflows-page.tsx`) and a study's pages (`/studies/:id/*`, `study/`). Every run
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
-shown as its scan and linked straight to its run.
+shown as its scan and linked straight to its scan review (`/scans/:runId`, `runHref`).
 
 - **Home's data** is `listStudies` alone: each study carries each scan's newest run in brief
   (`newestRuns`: run id, state, a live run's tasks done, a completed run's `review`) and its
@@ -13,8 +12,8 @@ shown as its scan and linked straight to its run.
   reruns, so they still ask for the researcher (a study of one too). "Across M scans" shows
   only when the newest runs hold every open check; under a rerun M is unknowable from
   `newestRuns`, so the row says just "N to check."
-  Needs you has one row per study with one action; example studies are read-only and ask nothing.
-  "Last activity" is a relative day, never a time.
+  Needs you has one row per study; example studies are read-only and ask nothing. Running
+  lists each live scan.
 - **Run on new scans** keeps no outputs checklist and no notes: a study runs every output (the
   request sends no `selectedOutputs`). Grouping dropped files into scans is `scan-files.ts` (the
   rule is its header); intake (mouse, knee, group from names and the sample sheet, no AI) is
@@ -39,9 +38,10 @@ shown as its scan and linked straight to its run.
   budget cap, so the page never says a run stops at one.
 - **Excel sample sheets**: `xlsx.ts` reads the first worksheet with `fflate` (unzip) and
   `DOMParser`, loaded only when an `.xlsx` is dropped.
-- **Shared with `features/run`** through `@voluma/run-view`: the run and study status words
+- **Shared with `features/scan`** through `@voluma/run-view`: the run and study status words
   (`runStatus`, `studyStatus`, each a word and a `StatusMark` state: Running, N to check, Checked, Reviewed, Failed,
-  Stopped, Waiting, Needs your keys, Not started), the run link, the formatters, and visitor
+  Stopped, Waiting, Needs your keys (paused), Not started), `liveStatus` ("Task N of M"
+  while running), the run and item links, the Study panel and `ItemToCheck`, the formatters, and visitor
   keys. `runStatus`, `studyStatus` and `runHref` take a run's `state` and `review`, which a full
   `Run` and a `newestRuns` entry both carry; a study of one reads as `runStatus` of its run.
   "Not started" is only a scan
@@ -49,8 +49,20 @@ shown as its scan and linked straight to its run.
   rest ("1 stopped, 1 not started"). A study reads "Reviewed" once every scan's newest run is
   completed and reviewed. The study page uses
   the same mapping; don't add another.
-- **The study page** derives everything from one `StudyDetail` in `study-page/study-model.ts`
-  (pure; its header states the far-from-group rule and the unit rule). Every "Open in 3D" calls
-  `StudyPage`'s `openChecks`, the check panel's one mount point; pass a real panel there rather
-  than adding links. Adding scans to an existing study isn't designed, so the page has no
+- **A study's pages** (Dashboard, To check, Scans, Results, Details, and the workflow expanded)
+  are pages on the left strip under `study/study-layout.tsx`, which loads the study once and
+  hands it to each page through `useStudy`. They derive everything from one `StudyDetail` in
+  `study/study-model.ts` (pure; its header states the far-from-group rule and the unit rule).
+- **Task states come from the server**: the study read's `taskState` per scan is `taskStates`
+  (`@voluma/contracts/review-state`) over the scan's newest run, the rule the scan review uses.
+  It takes the run's state and threads and derives the rest itself. During a correction both read
+  the correction's own revision (`openCorrectionRevision` on the server), while the study's values
+  and open checks stay on the last completed result. Don't re-derive a task's state here; a
+  workflow task missing from it is outside the run's plan. One exception in the matrix: a task in
+  To check on a live run has no items in the study read yet, so it reads To check, not done.
+- **Links into the scan review**: a scan opens at `runHref`; a To check item opens at
+  `itemHref` (`?task=&item=`), so the review shows exactly that item. `reviewHref` picks a
+  scan's first open item. Adding scans to an existing study isn't designed, so there is no
   "Add scans". The knee reads from `attributes.knee`, as intake stores it.
+- **"N to check" on a row is a `StatusMark`** (status check); `Count` is only a bare number
+  beside a heading.

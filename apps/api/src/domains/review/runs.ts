@@ -17,7 +17,12 @@ import {
   type SendRunMessageResponse,
   sendRunMessageRequestSchema,
 } from "@voluma/contracts/messages";
-import { messageSnapshotKey, relativePathSchema, sha256Schema } from "@voluma/contracts/r2";
+import {
+  evidenceKey,
+  messageSnapshotKey,
+  relativePathSchema,
+  sha256Schema,
+} from "@voluma/contracts/r2";
 import {
   acceptCheckRequestSchema,
   markReviewedRequestSchema,
@@ -29,6 +34,7 @@ import { z } from "zod";
 import { callerOf, parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
 import type { RunRecord } from "../../ports";
 import type { ReviewDeps } from ".";
+import { assetUrl, openFile } from "./files";
 import { reviewRun } from "./review-run";
 
 /** The image types a browser may render inline, by their leading bytes; anything else downloads. */
@@ -56,7 +62,7 @@ function decisionResponse(record: RunRecord): ReviewDecisionResponse {
   return { ...run, review: run.review };
 }
 
-export function runRoutes({ runs, files, messages }: ReviewDeps) {
+export function runRoutes({ runs, store, messages }: ReviewDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs/*", requireUser);
 
@@ -133,8 +139,8 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
 
     const checked = await messages.check(reader, caller, runId, message);
     if (!checked.duplicate && png) {
-      if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
-      await files.putSnapshot(runId, id, png);
+      if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
+      await store.put(messageSnapshotKey(runId, id), png, { contentType: "image/png" });
     }
     const { eventId, state } = await messages.send(reader, caller, runId, message);
     return c.json({ eventId, state } satisfies SendRunMessageResponse);
@@ -177,12 +183,12 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     if (!sha256Schema.safeParse(sha256).success) return c.json({ error: "not found" }, 404);
     if (!(await runs.readable(readerOf(c.var.user), runId)))
       return c.json({ error: "not found" }, 404);
-    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
     // The stored content type is whatever the sandbox's mount wrote, so the bytes decide.
     // Content-addressed: the bytes never change. A day, so a revoked reader's copy doesn't linger.
     return serveFile(
       c,
-      await files.open(runId, sha256, c.req.raw.signal),
+      await openFile(store, evidenceKey(runId, sha256), c.req.raw.signal),
       "private, max-age=86400, immutable",
     );
   });
@@ -192,11 +198,11 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     if (!z.uuid().safeParse(messageId).success) return c.json({ error: "not found" }, 404);
     if (!(await runs.readable(readerOf(c.var.user), runId)))
       return c.json({ error: "not found" }, 404);
-    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
     // Written once under the message's id, never rewritten.
     return serveFile(
       c,
-      await files.openSnapshot(runId, messageId, c.req.raw.signal),
+      await openFile(store, messageSnapshotKey(runId, messageId), c.req.raw.signal),
       "private, max-age=86400, immutable",
     );
   });
@@ -210,8 +216,8 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
       return c.json({ error: "not found" }, 404);
     if (!(await runs.readable(readerOf(c.var.user), runId)))
       return c.json({ error: "not found" }, 404);
-    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
-    const { url, validSeconds } = await files.assetUrl(runId, sha256, tail);
+    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
+    const { url, validSeconds } = await assetUrl(store, runId, sha256, tail);
     // The browser may reuse the redirect while its URL is still good (the same file asked for
     // again gets the same URL), with a margin to follow it.
     c.header("Cache-Control", `private, max-age=${Math.max(0, validSeconds - 30)}`);

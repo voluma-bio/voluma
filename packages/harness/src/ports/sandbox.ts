@@ -28,10 +28,17 @@ export interface SandboxMount {
  * What a sandbox is for. The role fixes its size, its network and the mounts it may hold:
  * the builders in `sandbox-specs.ts` are the only places that write them.
  */
-export type SandboxRole = "worker" | "checker" | "convert";
+export type SandboxRole = "worker" | "check" | "convert";
 
-/** `none`: no network at all. `hosts`: HTTPS to these hosts only; everything else is refused. */
-export type SandboxNetwork = { kind: "none" } | { kind: "hosts"; hosts: string[] };
+/**
+ * `none`: no network. `hosts`: TLS SNI allowlist, not protection against domain fronting.
+ * `ipv4`: any protocol to one dedicated address; the host must expose only the gateway.
+ * Modal permits DNS with either allowlist, but not with `none`.
+ */
+export type SandboxNetwork =
+  | { kind: "none" }
+  | { kind: "hosts"; hosts: string[] }
+  | { kind: "ipv4"; address: string };
 
 export interface SandboxSpec {
   runId: string;

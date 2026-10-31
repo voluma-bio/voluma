@@ -3,6 +3,7 @@
 Coordinates on every image the agent reads: x is the column (labelled along the top), y is the row (labelled down the
 left side), both in pixels of the slice. A box is [row0, col0, row1, col1] = [y0, x0, y1, x1], ends inclusive.
 """
+import argparse
 import hashlib
 import json
 import math
@@ -30,8 +31,17 @@ def colour(label):
     return PALETTE[(int(label) - 1) % len(PALETTE)]
 
 
-def parse_window(s):
-    lo, hi = (float(x) for x in s.split(','))
+def window_arg(s):
+    """`type=` of a `--window` option: 'lo,hi' in HU, or the path of a workflow's anatomy.json (its `window_hu`). Returns (lo, hi)."""
+    try:
+        if s.endswith('.json'):
+            lo, hi = json.loads(Path(s).read_text())['window_hu']
+        else:
+            lo, hi = (float(x) for x in s.split(','))
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise argparse.ArgumentTypeError(f'{s!r} is not "lo,hi" in HU or a json file with "window_hu": [lo, hi] ({type(e).__name__})') from e
+    if not lo < hi:
+        raise argparse.ArgumentTypeError(f'{s!r}: the low end must be below the high end')
     return lo, hi
 
 
@@ -78,6 +88,64 @@ def show_slice(ax, img, window, grid=True, step=100, title=None):
     if title:
         ax.text(w / 2, h - 10, title, color='w', ha='center', fontsize=9)
     ax.set_axis_off()
+
+
+# slice_sheet layout in pixels: left, right, top, bottom, gap between columns, gap between rows
+SHEET_PAD_PX = (70, 20, 45, 45, 80, 90)
+
+
+def slice_sheet(out, img, overlays, axis, indices, window, *, crops=None, curves=None, titles=None, axis_names=None, cols=3,
+                voxel_mm=None, max_scale=3.0):
+    """Save the cuts of the 3D array `img` at `indices` along `axis` as one JPEG sheet: `cols` panels per row, windowed grey.
+
+    overlays  [(mask3d, colour)]: each mask's outline on every cut. curves: per panel, [(columns, rows, colour, fmt)] drawn on it
+    (`fmt` optional, matplotlib's, default '-'); the pixel columns and rows of the cut. titles: one string per panel.
+    crops     per panel (row0, col0, row1, col1) of the cut in voxels, else the whole cut. Every panel is as large as the largest
+              crop (growing toward the far edge, past the array if it must) and the sheet is scaled to fit the image limit at
+              up to `max_scale` px per voxel, so a feature that is ten voxels off shows ten voxels off; with `voxel_mm` the
+              title says the scale. axis_names: names of the three array axes, for the labels.
+    """
+    idx = list(indices)
+    rows_ax, cols_ax = (d for d in range(3) if d != axis)
+    cut = lambda arr, i: np.asarray(arr[tuple(i if d == axis else slice(None) for d in range(3))])
+    full = (0, 0, img.shape[rows_ax], img.shape[cols_ax])
+    crops = crops or [full] * len(idx)
+    nr, nc = max(c[2] - c[0] for c in crops), max(c[3] - c[1] for c in crops)
+    ncols = min(cols, len(idx))
+    nrows = -(-len(idx) // ncols)
+    left, right, top, bottom, gap_x, gap_y = SHEET_PAD_PX
+    max_px = sidecar.MAX_IMAGE_PX - 10  # the saved size rounds up
+    scale = min(max_scale, (max_px - left - right - (ncols - 1) * gap_x) / (ncols * nc), (max_px - top - bottom - (nrows - 1) * gap_y) / (nrows * nr))
+    fig_w, fig_h = ncols * nc * scale + left + right + (ncols - 1) * gap_x, nrows * nr * scale + top + bottom + (nrows - 1) * gap_y
+    fig = plt.figure(figsize=(fig_w / 100, fig_h / 100), dpi=100)
+    for k, (i, (r0, c0, _, _)) in enumerate(zip(idx, crops, strict=True)):
+        r, c = divmod(k, ncols)
+        ax = fig.add_axes((
+            (left + c * (nc * scale + gap_x)) / fig_w,
+            1 - (top + (r + 1) * nr * scale + r * gap_y) / fig_h,
+            nc * scale / fig_w,
+            nr * scale / fig_h,
+        ))
+        r1, c1 = min(r0 + nr, img.shape[rows_ax]), min(c0 + nc, img.shape[cols_ax])
+        rows, cs = np.arange(r0, r1), np.arange(c0, c1)
+        ax.imshow(cut(img, i)[r0:r1, c0:c1], cmap='gray', vmin=window[0], vmax=window[1], interpolation='nearest',
+                  extent=(c0 - 0.5, c1 - 0.5, r1 - 0.5, r0 - 0.5), aspect='equal')
+        for mask, colour in overlays:
+            m = cut(mask, i)[r0:r1, c0:c1]
+            if m.any():
+                ax.contour(cs, rows, m, levels=[0.5], colors=[colour], linewidths=0.6)
+        for xs, ys, colour, *fmt in (curves[k] if curves else []):
+            ax.plot(xs, ys, fmt[0] if fmt else '-', color=colour, lw=0.6)
+        names = axis_names or ('axis 0', 'axis 1', 'axis 2')
+        ax.set(title=titles[k] if titles else f'{names[axis]} = {i}', xlabel=names[cols_ax], ylabel=names[rows_ax],
+               xlim=(c0 - 0.5, c0 + nc - 0.5), ylim=(r0 + nr - 0.5, r0 - 0.5))
+        ax.title.set_fontsize(9)
+        ax.grid(alpha=0.15)
+    if voxel_mm:
+        fig.suptitle(f'{scale:.2f} px per voxel: 0.1 mm = {0.1 / voxel_mm * scale:.0f} px', y=1 - 8 / fig_h, fontsize=10)
+    sidecar.save_image(fig, out)
+    plt.close(fig)
+    return str(out)
 
 
 def draw_mask(ax, m, c, alpha=0.18):

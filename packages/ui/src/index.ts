@@ -5,6 +5,7 @@
  */
 
 export { Box, type BoxProps } from "./box";
+export { Breadcrumb, type BreadcrumbProps, type CrumbTo } from "./breadcrumb";
 export {
   Button,
   type ButtonProps,
@@ -34,6 +35,7 @@ export {
   type MenuRadioItemProps,
   MenuSeparator,
 } from "./menu";
+export { PageHead, type PageHeadProps } from "./page-head";
 export { Facts, type FactsProps, Popover, PopoverClose, type PopoverProps } from "./popover";
 export { Progress, type ProgressProps } from "./progress";
 export { Readout, type ReadoutProps, type ReadoutValue } from "./readout";
@@ -56,6 +58,7 @@ export {
   ShellPanel,
   type ShellPanelProps,
   type ShellSide,
+  useOpenPanel,
 } from "./shell/shell";
 export {
   EmptyState,
@@ -79,13 +82,4 @@ export {
   type StripPoint,
 } from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
-export {
-  type TabItem,
-  TabList,
-  type TabListProps,
-  TabPanel,
-  type TabPanelProps,
-  Tabs,
-  type TabsProps,
-} from "./tabs";
 export { Tooltip, type TooltipProps } from "./tooltip";

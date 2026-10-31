@@ -13,7 +13,7 @@ import { useDisclosure } from "./chat/disclosure-store";
 import { InfoButton, type InfoSection } from "./chat/info-button";
 import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
-import { agentTitle, type Thread } from "./run-model";
+import { agentTitle, isCheck, type Thread, workedSeconds } from "./run-model";
 import { formatDuration, formatUsd } from "./run-status";
 import { useThreads } from "./run-store";
 import { useNow } from "./use-now";
@@ -44,12 +44,9 @@ function spendRows(s: Spend): InfoSection["rows"] {
 
 export function Elapsed({ thread }: { thread: Thread }) {
   const now = useNow(thread.status === "running");
-  const end = thread.endedAt ? new Date(thread.endedAt).getTime() : now;
   return (
     <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
-      {formatDuration(
-        thread.workedBefore + Math.max(0, end - new Date(thread.startedAt).getTime()) / 1000,
-      )}
+      {formatDuration(workedSeconds(thread, now))}
     </span>
   );
 }
@@ -89,7 +86,7 @@ const MARK: Record<Thread["status"], string> = {
 };
 
 export function AgentMark({ thread }: { thread: Thread }) {
-  const Icon = thread.kind === "check" ? ShieldCheck : Bot;
+  const Icon = isCheck(thread) ? ShieldCheck : Bot;
   return (
     <span
       className={`relative grid size-6 shrink-0 place-items-center rounded-full ${MARK[thread.status]}`}

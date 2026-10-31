@@ -30,15 +30,10 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import {
-  inputPrefix,
-  referencePrefix,
-  scratchKey,
-  workflowSnapshotPrefix,
-} from "@voluma/contracts/r2";
+import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
-import { runLayout } from "@voluma/harness/layout";
+import { type RunLayout, runLayout, type ThreadLayout } from "@voluma/harness/layout";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
@@ -49,12 +44,18 @@ import {
 } from "@voluma/harness/review-assets";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import {
-  checkerSandboxSpec,
+  checkSandboxSpec,
   convertSandboxSpec,
   workerSandboxSpec,
 } from "@voluma/harness/sandbox-specs";
-import { type RoleOf, type RoleSetup, superviseRun } from "@voluma/harness/supervise-run";
+import {
+  type RoleOf,
+  type RoleSetup,
+  rootThreadIdOf,
+  superviseRun,
+} from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
+import type { ObjectStore } from "@voluma/object-store";
 import type { Skill } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
@@ -76,12 +77,11 @@ import {
   workerPrompt,
 } from "./prompts.ts";
 import { providerFailure } from "./provider-error.ts";
-import { r2Evidence } from "./r2-evidence.ts";
-import { r2Files } from "./r2-files.ts";
 import { r2Outputs } from "./r2-outputs.ts";
-import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
+import { storeEvidence } from "./store-evidence.ts";
+import { storeFiles } from "./store-files.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking } from "./thinking.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
@@ -108,6 +108,8 @@ export interface RunnerContext {
   /** The model behind each alias the config sets (`config.models`), resolved at startup. */
   aliases: Record<string, Model<Api>>;
   visitorModel: Model<Api>;
+  /** The run's bucket. */
+  objects: ObjectStore;
   log(line: string): void;
 }
 
@@ -154,7 +156,7 @@ async function claimBody(
   shutdown: AbortSignal,
   scope: RunScope,
 ): Promise<void> {
-  const { config, models } = ctx;
+  const { config, models, objects } = ctx;
   const { run, leaseToken, keys } = claim;
   const runId = run.id;
   const claimId = randomUUID();
@@ -246,7 +248,7 @@ async function claimBody(
     const workflowDir = run.workflows[0]?.path;
     if (!workflowDir) throw new Error("the run pins no workflow directory");
     const definition = await loadWorkflow(workflowDir, {
-      store: r2Workflows(config.r2),
+      store: objects,
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
       commit: config.commit,
@@ -255,7 +257,7 @@ async function claimBody(
     // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
     // models only: the main thread keeps its configured model when that is one, else the
     // visitor model.
-    const roleModel = (role: "worker" | "checker" | "main") => {
+    const roleModel = (role: ModelRole) => {
       const alias = definition.agents[role].model;
       const model = ctx.aliases[alias];
       if (!model)
@@ -265,7 +267,7 @@ async function claimBody(
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").
-    const roleThinking = (role: "worker" | "checker" | "main", model: Model<Api>) => {
+    const roleThinking = (role: ModelRole, model: Model<Api>) => {
       if (visitor) return "off";
       const level = config.modelForced
         ? config.thinking
@@ -274,22 +276,22 @@ async function claimBody(
       return level ?? "off";
     };
     const workerModel = roleModel("worker");
-    const checkModel = roleModel("checker");
+    const checkModel = roleModel("check");
     const mainModel = roleModel("main");
     const thinking = {
       worker: roleThinking("worker", workerModel),
-      checker: roleThinking("checker", checkModel),
+      check: roleThinking("check", checkModel),
       main: roleThinking("main", mainModel),
     };
-    log(`models: worker ${workerModel.id}, checker ${checkModel.id}, main ${mainModel.id}`);
-    log(`thinking: worker ${thinking.worker}, checker ${thinking.checker}, main ${thinking.main}`);
+    log(`models: worker ${workerModel.id}, check ${checkModel.id}, main ${mainModel.id}`);
+    log(`thinking: worker ${thinking.worker}, check ${thinking.check}, main ${thinking.main}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
     // Each role gets the tools its file lists. `segment_sam` also needs the gateway, and a
     // sandbox to run in: workers have one, main only when its role holds `bash`; the checker
     // never holds it (it does not redo the task).
-    const grant = (role: "main" | "worker" | "checker") => {
+    const grant = (role: ModelRole) => {
       const { tools } = definition.agents[role];
       const sandboxed = role === "worker" || (role === "main" && tools.includes("bash"));
       return tools.filter((t) => t !== "segment_sam" || (config.gateway && sandboxed));
@@ -297,9 +299,27 @@ async function claimBody(
 
     // From the workflow's task, so a task the main agent adds from it keeps the flag.
     const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
-    const layout = layoutOf(run, definition.skills, grant("main").includes("bash"), (id) =>
+    const plain = layoutOf(run, definition.skills, grant("main").includes("bash"), (id) =>
       copyInputs.has(id),
     );
+    // The run loop lays a thread out before it uses its sandbox or writes its first line; the
+    // sandbox and the log, which know a thread only by id, look its layout up here.
+    const laidOut = new Map<string, ThreadLayout>();
+    const layout: RunLayout = {
+      ...plain,
+      forThread(thread, cited) {
+        const laid = plain.forThread(thread, cited);
+        laidOut.set(thread.id, laid);
+        return laid;
+      },
+    };
+    const laid = (threadId: string) => {
+      const found = laidOut.get(threadId);
+      if (!found) throw new Error(`${threadId} was never laid out`);
+      return found;
+    };
+    // A thread's name for a line: the root thread is never laid out.
+    const nameOf = (threadId: string) => laidOut.get(threadId)?.name ?? threadId;
     const createSandbox = claimSandboxes(config, config.modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
@@ -307,7 +327,7 @@ async function claimBody(
       {
         async append(event) {
           await client.append(event);
-          log(eventLine(event, redact));
+          log(eventLine(event, redact, nameOf));
         },
       },
       runId,
@@ -320,8 +340,7 @@ async function claimBody(
     // the queue delivers them: a stall must name the call that caused it.
     const track = (threadId: string, type: string, payload: unknown) => {
       const { toolCallId, name } = payload as { toolCallId: string; name?: string };
-      if (type === "tool.call")
-        scope.inFlight.set(toolCallId, `${threadId.slice(runId.length + 1)} ${name}`);
+      if (type === "tool.call") scope.inFlight.set(toolCallId, `${nameOf(threadId)} ${name}`);
       else if (type === "tool.result") scope.inFlight.delete(toolCallId);
     };
     events = {
@@ -337,7 +356,7 @@ async function claimBody(
     };
     session = sandboxSession(
       (threadId) => {
-        const thread = layout.forThread(threadId);
+        const thread = laid(threadId);
         const common = {
           runId,
           name: thread.name,
@@ -364,7 +383,7 @@ async function claimBody(
                     )
                   : undefined,
               })
-            : checkerSandboxSpec({
+            : checkSandboxSpec({
                 ...common,
                 readOnly: thread.mounts.filter((m) => m !== thread.scratch),
                 scratch: thread.scratch,
@@ -376,9 +395,9 @@ async function claimBody(
         // Metered from the start of creation, the sweep included: a conservative upper bound.
         if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
-        events?.emit(id, "sandbox", { name: layout.forThread(id).name, state, detail });
+        events?.emit(id, "sandbox", { name: laid(id).name, state, detail });
       },
-      (threadId) => layout.forThread(threadId).restartNote,
+      (threadId) => laid(threadId).restartNote,
     );
     const opened = session;
 
@@ -422,15 +441,15 @@ async function claimBody(
         return stream;
       };
     const role =
-      (primary: Model<Api>, modelRole: ModelRole, agent: "main" | "worker" | "checker"): RoleOf =>
+      (primary: Model<Api>, modelRole: ModelRole): RoleOf =>
       (thread, recorded) => ({
         model: threadModel(primary, recorded),
-        thinkingLevel: thinking[agent],
+        thinkingLevel: thinking[modelRole],
         streamFn: streamFor(modelRole),
         systemPrompt: systemPrompt(definition, thread),
-        tools: grant(agent),
+        tools: grant(modelRole),
       });
-    const files = r2Files(config.r2);
+    const files = storeFiles(objects);
     const supervised = superviseRun({
       runId,
       plan: computed.tasks,
@@ -444,15 +463,15 @@ async function claimBody(
       history: client,
       sandbox: (id, options) => opened.get(id, options),
       releaseSandbox: (id) =>
-        opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
-      evidence: r2Evidence(config.r2),
+        opened.release(id).catch((e) => log(`releasing ${nameOf(id)} failed: ${e}`)),
+      evidence: storeEvidence(objects),
       files,
       outputs: r2Outputs(config.r2),
       earlierClaimsEnded: (signal) => awaitOtherClaimsGone(config.modal, runId, claimId, signal),
       roles: {
-        main: role(mainModel, "main", "main"),
-        worker: role(workerModel, "worker", "worker"),
-        check: role(checkModel, "check", "checker"),
+        main: role(mainModel, "main"),
+        worker: role(workerModel, "worker"),
+        check: role(checkModel, "check"),
       },
       briefs: {
         main: (view) => mainPrompt(view, run.selectedOutputs, definition.files, run.notes),
@@ -466,6 +485,7 @@ async function claimBody(
     });
     convert = reviewAssetsWorker({
       runId,
+      rootThreadId: rootThreadIdOf(runId),
       recorder: events,
       signal: halt.signal,
       log,

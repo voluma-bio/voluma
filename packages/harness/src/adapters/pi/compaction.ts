@@ -35,6 +35,7 @@ import {
   type AssistantMessage,
   type Model,
   normalizeContext,
+  type Usage,
 } from "@earendil-works/pi-ai";
 
 /** The most room the next reply may need; the request's input plus it must fit the window. */
@@ -47,7 +48,7 @@ const MIN_TRIGGER = 1_000;
 const UNKNOWN_WINDOW_TRIGGER = 350_000;
 /** Turns a thread gets after the notice before its history is summarized. */
 const WRAP_UP_TURNS = 3;
-/** The recent turns kept verbatim, as a share of the trigger and of the request-size limit. */
+/** The recent turns kept verbatim, as a share of the trigger and of the request-size and image-count limits. */
 const KEEP_SHARE = 0.2;
 const SUMMARY_MAX_TOKENS = 16_000;
 /** For a model that declares no limits (pi-ai's data has them for Claude: 32 MiB, 100 or 600 images). */
@@ -186,17 +187,23 @@ export function inputTokens(messages: AgentMessage[], compaction?: Compaction): 
   return compactedView(messages, compaction).reduce((sum, x) => sum + estimateTokens(x), 0);
 }
 
+/** Amounts of the three things that fill a request: input tokens, image bytes, image count. */
+export interface Budget {
+  tokens: number;
+  bytes: number;
+  images: number;
+}
+
 /**
- * Where the kept messages start: walking back from the end until `keepTokens` of recent turns, or
- * `keepImageBytes` of their images, are held, the nearest user or assistant message at or after
- * that point. A tool result is never a start, so a call stays with its results (they follow the
- * assistant message). Undefined when that leaves nothing after `from` to summarize.
+ * Where the kept messages start: walking back from the end until the recent turns hold `keep` of
+ * any one dimension, the nearest user or assistant message at or after that point. A tool result
+ * is never a start, so a call stays with its results (they follow the assistant message).
+ * Undefined when that leaves nothing after `from` to summarize.
  */
 export function cutPoint(
   messages: AgentMessage[],
   from: number,
-  keepTokens: number,
-  keepImageBytes = Number.POSITIVE_INFINITY,
+  keep: Partial<Budget>,
 ): number | undefined {
   const lower = Math.max(from, 1);
   const starts: number[] = [];
@@ -204,14 +211,21 @@ export function cutPoint(
     const role = messages[i]?.role;
     if (role === "user" || role === "assistant") starts.push(i);
   }
-  let held = 0;
-  let heldImages = 0;
+  let tokens = 0;
+  let bytes = 0;
+  let images = 0;
   let at = starts.at(-1);
   for (let i = messages.length - 1; i >= lower; i--) {
     const m = messages[i] as AgentMessage;
-    held += estimateTokens(m);
-    heldImages += imageLoad([m]).bytes;
-    if (held >= keepTokens || heldImages >= keepImageBytes) {
+    const load = imageLoad([m]);
+    tokens += estimateTokens(m);
+    bytes += load.bytes;
+    images += load.count;
+    if (
+      tokens >= (keep.tokens ?? Infinity) ||
+      bytes >= (keep.bytes ?? Infinity) ||
+      images >= (keep.images ?? Infinity)
+    ) {
       at = starts.find((s) => s >= i) ?? at;
       break;
     }
@@ -281,6 +295,13 @@ export function compactor(args: {
   const window = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
   const maxBytes = model.inputLimits?.maxRequestBytes ?? FALLBACK_REQUEST_BYTES;
   const maxImages = model.inputLimits?.images?.maxPerRequest ?? FALLBACK_IMAGES_PER_REQUEST;
+  // `load` marks a thread due past these; a compaction keeps KEEP_SHARE of each, so it leaves the
+  // thread not due on every axis (a limit added to one must be added to the other).
+  const keep: Budget = {
+    tokens: trigger * KEEP_SHARE,
+    bytes: maxBytes * KEEP_SHARE,
+    images: maxImages * KEEP_SHARE,
+  };
   let compaction: Compaction | undefined;
   let turnsLeft: number | undefined;
 
@@ -300,12 +321,7 @@ export function compactor(args: {
   }
 
   /** One summary call; the error text of a failed one is the provider's, unchanged. */
-  async function summarize(
-    request: AgentMessage[],
-    maxTokens: number,
-    reasoning: boolean,
-    signal?: AbortSignal,
-  ) {
+  async function summarize(request: AgentMessage[], maxTokens: number, signal?: AbortSignal) {
     const stream = await streamFn(
       model,
       normalizeContext({
@@ -318,7 +334,7 @@ export function compactor(args: {
         signal,
         sessionId: threadId,
         maxTokens,
-        ...(reasoning && thinkingLevel && thinkingLevel !== "off" && { reasoning: thinkingLevel }),
+        ...(thinkingLevel && thinkingLevel !== "off" && { reasoning: thinkingLevel }),
       },
     );
     return stream.result();
@@ -337,7 +353,7 @@ export function compactor(args: {
     signal?: AbortSignal,
   ) {
     const from = compaction?.keptFrom ?? 1;
-    const cut = cutPoint(messages, from, trigger * KEEP_SHARE, maxBytes * KEEP_SHARE);
+    const cut = cutPoint(messages, from, keep);
     if (cut === undefined) return false;
     // Cold: only what is summarized (and the summary before it), the images left out.
     const request = cold
@@ -347,15 +363,17 @@ export function compactor(args: {
           ...messages.slice(from, cut).map(withoutImages),
         ]
       : compactedView(messages, compaction);
-    let reply = await summarize(request, SUMMARY_MAX_TOKENS, true, signal);
-    // Reasoning counts inside the output limit on some providers and can use all of it: once more,
-    // with twice the room and no reasoning.
+    let reply = await summarize(request, SUMMARY_MAX_TOKENS, signal);
+    // Reasoning counts inside the output limit on some providers and can use all of it: once more
+    // with twice the room. The thread's reasoning setting stays, as changing it would miss the cache.
     if (reply.stopReason === "length") {
-      const room = Math.min(
-        SUMMARY_MAX_TOKENS * 2,
-        model.maxTokens > 0 ? model.maxTokens : Infinity,
+      const first = reply;
+      reply = await summarize(
+        request,
+        Math.min(SUMMARY_MAX_TOKENS * 2, model.maxTokens > 0 ? model.maxTokens : Infinity),
+        signal,
       );
-      reply = await summarize(request, room, false, signal);
+      reply = { ...reply, usage: addUsage(first.usage, reply.usage) };
     }
     // A reply that also called a tool still wrote its summary; the calls are ignored.
     const summary =
@@ -416,6 +434,27 @@ export function compactor(args: {
         );
         return false;
       }
+    },
+  };
+}
+
+/** Both calls of a length retry were billed. */
+function addUsage(a: Usage, b: Usage): Usage {
+  const cost = (k: keyof Usage["cost"]) => a.cost[k] + b.cost[k];
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    ...(a.reasoning !== undefined &&
+      b.reasoning !== undefined && { reasoning: a.reasoning + b.reasoning }),
+    totalTokens: a.totalTokens + b.totalTokens,
+    cost: {
+      input: cost("input"),
+      output: cost("output"),
+      cacheRead: cost("cacheRead"),
+      cacheWrite: cost("cacheWrite"),
+      total: cost("total"),
     },
   };
 }

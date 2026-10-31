@@ -6,13 +6,19 @@ its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on ever
 
 | Role | Mounts | Network | Name |
 |---|---|---|---|
-| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
-| `checker` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
+| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist; no gateway: none | `<taskId>.worker[.n]` |
+| `check` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
 | `convert` | `evidence` read-only, `review` writable | none | the job's |
+
+`VOLUMA_GATEWAY_IPV4` selects a single-address CIDR policy instead of SNI, never both (Modal
+unions them). It must be an exclusive inbound IPv4, not a resolved shared Render/Cloudflare IP.
+Staging leaves it unset: the Host-header escape is still open. CIDR permits all ports/protocols
+to that address and still permits DNS; it does not make scans exfiltration-proof. Deployment
+choices, approval gates and probes: [gateway deploy](../../gateway/.context/deploy.md#dedicated-ip-cutover-236-awaiting-approval).
 
 The builder sets the access of each mount, and the Modal adapter refuses a network on a
 non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
-named by the thread id without the run id). `RunLayout.forThread(threadId)`
+named by the thread's `name`, its id without the run id). `RunLayout.forThread(record)` (a `ThreadRecord`, or the identity of a thread about to start)
 (`packages/harness/src/layout.ts`) gives each thread its role, mounts, tool description, restart note,
 `keyOf` and bash-spill path, so a worker and a checker each see their own files:
 
@@ -26,7 +32,7 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   attempt under review cites (`{root: "scratch"}` refs on its checkpoints and outputs, and the
   `root: "scratch"` files in an output's own payload, `fileRefsOf`), and no others: the worker's
   scripts, logs and notes stay unread. Cited means the path, not the bytes. `keyOf` asks the
-  `(path) => boolean` that `forThread(threadId, cited)` takes; callers pass
+  `(path) => boolean` that `forThread(thread, cited)` takes; callers pass
   `(p) => runtime.cites(taskId, p)`, answered from the fold (`FoldedTask.citedScratch`).
   The same `keyOf` check validates the evidence a checker names. The main agent
   (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
@@ -38,14 +44,14 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   under `$SCRATCH`.
 - The path namespace is the same for every thread: `/scratch/<name>/x.png` is the key
   `scratchKey(runId, "<name>/x.png")`, so a checkpoint's evidence `{root: "scratch", path:
-  "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter). Before
+  "<name>/x.png"}` resolves the same way (`storeEvidence`). Before
   `evidence.keep`, `taskRuntime` checks each evidence path with the calling thread's
   `keyOf(..., "read")`, so a thread cites only what it can read.
 - **Evidence is hashed in the sandbox, not the runner.** The runner holds and moves no
   scan-sized data (a run reports a ~943 MB scan and ~224 MB grid). For a path the calling
   thread's sandbox mounts, `taskRuntime` runs `sha256sum` there (`bash`-style, through
   `sandboxSession.get(id, { note: false })`, so the hash exec never consumes the restart note
-  owed to the model; the file goes in on stdin) and passes the hash to `keep` as a callback; `r2Evidence` HEADs the
+  owed to the model; the file goes in on stdin) and passes the hash to `keep` as a callback; `storeEvidence` HEADs the
   source, calls it only on an ETag it has not seen for that key in this claim, then HEADs the
   target and does the server-side `CopyObject`. It never GETs the body, except for a path the
   caller's sandbox does not mount (a checker citing the worker's scratch), which it hashes by
@@ -60,7 +66,10 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   `$SCRATCH` as the working directory and in the prompt. A checker that writes `/scratch/v1.jpg`
   locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
   citation resolves to the worker's file.
-- Thread ids are built and parsed in `packages/harness/src/thread-id.ts`.
+- Readers take a thread's `name`, `role` and `taskId` from its `ThreadRecord`, never from its id.
+  `threadName` (`packages/contracts/src/threads.ts`) is the one parser of an id; ids are minted only
+  in `run-loop.ts` (`nextThread`) and `supervise-run.ts` (`rootThreadIdOf`). The runner knows a
+  thread's layout, and so its name, by id from `run.ts`'s `laidOut` map (filled by the run loop).
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
@@ -190,7 +199,7 @@ thread's sandbox, with the run's abort signal and a 30-minute timeout; the runne
 volume and does none of the work. The program reads the `.npy` by position (never whole), crops it (`subVolume`, else
 the tissue plus a margin, always including the boxes), encodes lossless H.264, sends it to Meta
 through the gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the bearer; the
-sandbox's network is that host only; only a sandbox whose role is granted `segment_sam` gets the
+sandbox's network uses the gateway's SNI or dedicated IPv4; only a sandbox whose role is granted `segment_sam` gets the
 network and the token, so a check sandbox stays `network: none` with no token), decodes the masks (`sam-mask.ts`, a port of Meta's
 decoder, because `meta-sam-parser` takes minutes per response) and writes the labels on the
 full grid and the sidecar `<labels>.json`: built in `/tmp`, then `cp`ed, because an R2 mount takes
@@ -228,7 +237,7 @@ An agent in its own worktree tries a workflow change on the real system like thi
 When the runner uses the API in `.dev/env.json` (including an explicit `VOLUMA_API_URL` pointing
 there), that file alone supplies its gateway. Matching uses the origin (the HTTP adapters ignore
 the base URL's path, query and fragment) and treats `localhost` as the launcher's `127.0.0.1`;
-different ports or schemes remain different APIs. `VOLUMA_GATEWAY_URL` and `GATEWAY_TOKEN_SECRET` in the
+different ports or schemes remain different APIs. `VOLUMA_GATEWAY_URL`, `VOLUMA_GATEWAY_IPV4` and `GATEWAY_TOKEN_SECRET` in the
 shell or `.env` cannot turn SAM on or override the launcher's tunnel. No gateway URL in the file
 means SAM is off, including while the tunnel starts or after it fails. A runner pointed at another
 API still uses its configured gateway pair. Restart the runner when changing the dev launch;
@@ -307,15 +316,15 @@ messages to summarize]`, no kept tail, images left out): when the warm request p
 (or images over 90%), and always when the provider refused a request as too large (`recover`, called from
 `start-thread.ts`; then one retry in the same thread, started by a note stored only after the summary was; a failed
 recovery leaves the refusal as the thread's failure, and a second refusal ends it as before). A summary that stops on
-length is retried once with twice the room and no reasoning; one that also called a tool is accepted by its text.
+length is retried once with twice the room (the thread's reasoning setting stays, so the cache holds; both calls' usage is recorded); one that also called a tool is accepted by its text.
 A failed summary fails the thread with the provider's own error text (so `provider-error.ts` classifies it), the
 context in a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
-it (the run page also shows it as that thread's prose). One overflow test (`context-overflow.ts`: a 400, a 413 or no
+it. The event carries `compaction: true`: the run page shows it as a collapsed "History summarized" row and leaves it out of a thread's `said` and `reply`. The wrap-up and overflow notices are steered in with sender `{kind: "runtime", notice: true}`, which `thread-log` does not count as a nudge. One overflow test (`context-overflow.ts`: a 400, a 413 or no
 status, and Pi's patterns) serves both this and the runner's classifier.
 The result is a marker row `{role: "compaction", summary, keptFrom}` appended to `pi_messages`; every earlier row
 stays. `keptFrom` indexes the thread's messages (rows that are not markers); `foldHistory` rebuilds them and the
 latest marker (and derives where it sat), and a request carries `[system, summary message, messages from keptFrom]`
-(the last ~20% of the trigger in tokens or of the byte limit in images, starting at a user or assistant message, so a
+(the last ~20% of each limit `load` checks: the trigger in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
 call keeps its results). The system prompt is untouched (resume compares it). Each compaction logs `compaction:
 thread …` with tokens before and after. Images stay in history until a compaction; the loader fetches only those from
 `keptFrom`.
@@ -421,7 +430,7 @@ script, from its docstring's first line; the loader reads it from the snapshot).
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text).
+changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run."
 Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
@@ -436,8 +445,11 @@ check), the role files' levels are ignored and `RUNNER_THINKING` alone applies (
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
-role's set level against its model (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
-no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
+role's set level against its model (the role files load per run); both use `thinking.ts` and check
+only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
+guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
+DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
+without asking Muse for an unsupported effort. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
@@ -493,6 +505,13 @@ The API bounds restarts with one limit (`apps/api/.context/deploy.md`); the runn
 restart counter of its own.
 
 # Runner: telemetry, and what an uncaught error does
+
+The [responsiveness audit](responsiveness-audit.md) records measured history,
+snapshot, evidence, live-output and provider-response bounds, with a free local
+replay command. Provider normalization must yield through Pi's awaited stream
+hook (`model-retry.ts`): buffered tool arguments otherwise starve heartbeat timers
+even though every iterator step is async. These measurements do not bound unlimited
+stored history; context compaction does not by itself bound the resume response.
 
 `telemetry.ts` starts after startup (a failure before it still kills the process). Every line starts
 with `telemetry`; on Render search the service's logs for these:

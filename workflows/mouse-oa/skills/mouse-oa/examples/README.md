@@ -31,7 +31,7 @@ middle of the medial and the lateral compartment of the plateau.
 
 ## subchondral-plate
 
-`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches, 500 µm wide, the plate in green and the slab below it in red. The plate patch is a 500 µm wide column around the middle of each plateau compartment (medial, lateral), and the
+`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches (`plate_patch_width_um` wide), the plate in green and the slab below it in red. The plate patch is a column around the middle of each plateau compartment (medial, lateral), and the
 measured slab lies under the articular top surface, inside the plate, not down in the trabeculae: the figure shows
 where the column sits on the plateau.
 
@@ -42,15 +42,14 @@ coronal section it sits under the plate and inside the cortex, with marrow and t
 
 ## metaphyseal-roi
 
-`metaphyseal-roi/deck-roi3.jpg`: ROI-3 outlined on the opened tibia, with the 50 µm offset, the 200 µm length and the 20 µm clearance drawn, and the trabeculae it holds. ROI-3 starts 50 µm below the growth plate's distal face, runs 200 µm toward the shaft, and stays 20 µm clear of the
+`metaphyseal-roi/deck-roi3.jpg`: ROI-3 outlined on the opened tibia, with the offset, the length and the clearance drawn (the spec's `start_um`, `length_um`, `cortex_clearance_um`), and the trabeculae it holds. ROI-3 starts that offset below the growth plate's distal face, runs that length toward the shaft, and stays that clearance clear of the
 cortex all round: on a coronal section it is a band in the marrow under the plate, nowhere touching the cortical
 wall; on an axial slice it is the marrow space with a clear margin to the cortex. The cortex mask is the wall
 only, and never reaches the fibula.
 
 ## cortical
 
-`cortical/deck-cortical-levels.jpg`: the two levels drawn on the opened tibia, and the cortical ring at one of them. Two slabs on the cortex mask, 50 µm thick, centred 100 µm and 1000 µm below the growth plate's distal face and
-following it, each covering the wall all round.
+`cortical/deck-cortical-levels.jpg`: the two levels drawn on the opened tibia, and the cortical ring at one of them. Two slabs on the cortex mask (`slab_um` thick, centred `depth_um` below the growth plate's distal face, the two levels of `protocol.json`) following it, each covering the wall all round.
 
 ## femoral-geometry
 

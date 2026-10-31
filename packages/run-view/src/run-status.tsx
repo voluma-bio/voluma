@@ -1,21 +1,17 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
- * Home, the study page and the run page so they read the same: Running, N to check, Checked,
+ * Home, the study page and the scan review so they read the same: Running, N to check, Checked,
  * Failed, Stopped, Waiting (queued),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
- * reviewed, which is never inferred. Also where a run's row links, and how its cost and time read.
- * The run page's header says "N items to check" instead, because it sits beside a count of tasks.
+ * reviewed, which is never inferred. Also where a run's row links (the scan review), how a scan
+ * is named, and how its cost and time read.
  */
-import type { StudyRunSummary } from "@voluma/contracts/study";
+import type { StudyRunSummary, StudyScan } from "@voluma/contracts/study";
 import type { Status } from "@voluma/ui";
 
 /** "1 run", "3 runs"; `many` for an irregular plural. */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/** A date as "12 Mar". */
-export const shortDate = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 /** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00. */
 export function formatUsd(usd: number): string {
@@ -30,13 +26,41 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
 
-/** Where a row leads: the review (the review lane's `/runs/:runId`) once completed, else the live page. */
-export const runHref = ({ runId, state }: Pick<StudyRunSummary, "runId" | "state">) =>
-  state.status === "ended" && state.outcome === "completed"
-    ? `/runs/${runId}`
-    : `/runs/${runId}/live`;
+/** A scan as people name it: its subject and knee ("OA6-1, right knee"), the subject alone without one. */
+export function scanLabel(scan: Pick<StudyScan, "subject" | "attributes">): string {
+  const knee = scan.attributes.knee;
+  return typeof knee === "string" && knee
+    ? `${scan.subject}, ${knee.toLowerCase()} knee`
+    : scan.subject;
+}
+
+/** Where a row leads: the scan review, live while the run goes and for review once it ends. */
+export const runHref = ({ runId }: Pick<StudyRunSummary, "runId">) =>
+  `/scans/${encodeURIComponent(runId)}`;
+
+/** Where one To check item leads: its scan review, opened on that task and item (`checkId`, as `acceptCheck` takes it). */
+export const itemHref = ({
+  runId,
+  taskId,
+  checkId,
+}: {
+  runId: string;
+  taskId: string;
+  checkId: string;
+}) => `${runHref({ runId })}?${new URLSearchParams({ task: taskId, item: checkId })}`;
 
 export type RunStatus = { label: string; status: Status };
+
+/** A run's status, with "Task N of M" while it runs: what a row says about a live run. */
+export function liveStatus(run: Pick<StudyRunSummary, "state" | "review" | "tasks">): RunStatus {
+  const tasks = run.state.status === "running" ? run.tasks : null;
+  return tasks
+    ? {
+        label: `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}`,
+        status: "running",
+      }
+    : runStatus(run);
+}
 
 /** A run's status; a study's newest-run summary carries the same `state` and `review` fields. */
 export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
@@ -46,7 +70,7 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
     case "running":
       return { label: "Running", status: "running" };
     case "awaiting-keys":
-      return { label: "Needs your keys", status: "check" };
+      return { label: "Needs your keys", status: "paused" };
     case "ended":
       if (state.outcome === "completed")
         return review?.reviewedAt
@@ -92,7 +116,7 @@ export function studyStatus({
   if (failed > 0) return { label: `${failed} failed`, status: "stopped" };
   if (toCheck > 0) return { label: `${toCheck} to check`, status: "check" };
   if (count("running") > 0) return { label: "Running", status: "running" };
-  if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "check" };
+  if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "paused" };
   if (count("queued") > 0) return { label: "Waiting", status: "waiting" };
   // What is left: completed, stopped, or never run.
   const stopped = count("cancelled");

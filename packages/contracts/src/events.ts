@@ -30,11 +30,11 @@
  * readable in runEventSchema, rejected by the runner's eventInputSchema, and ignored
  * by the scientific fold. Their payloads and command rules live in review.ts.
  * `person.message`, `run.reopened` and `correction.ended` are server-authored correction events
- * on thread `<runId>.person`, handled the same way (payloads, ids and rules in messages.ts).
+ * on the fixed thread `<runId>.person` (not a thread: it never starts), handled the same way
+ * (payloads, ids and rules in messages.ts). `check.accepted` and `review.completed` are written on `<runId>.reviewer`.
  * `reply` is the main agent's side of the chat: the runner writes it from the `reply` tool on the
  * main thread. The fold ignores all four; it reads `run.reopened` and `correction.ended` only to
  * skip the task-state events of a correction that ended unfinished (`abandonedEvents`, fold.ts).
- * `conversation` (conversation.ts) reads the chat (nothing calls it yet).
  */
 import { z } from "zod";
 import {
@@ -83,8 +83,8 @@ export const modelUsageSchema = z.object({
 });
 export type ModelUsage = z.infer<typeof modelUsageSchema>;
 
-export const threadKindSchema = z.enum(["supervisor", "main", "worker", "check", "chat"]);
-export type ThreadKind = z.infer<typeof threadKindSchema>;
+/** A role file's name (`main`, `worker`, `check`) or `supervisor`. A label: readers branch on the fields a start records, not on this. */
+export const threadKindSchema = nonEmpty;
 
 /** Who made a decision: a tool call or a named runtime rule (`task-tools.ts`). */
 export const bySchema = z.discriminatedUnion("kind", [
@@ -146,6 +146,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
        * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
        */
       covers: nonEmpty.optional(),
+      /** A context-compaction notice, not a nudge: it does not count toward `nudges` (`thread-log`). */
+      notice: z.literal(true).optional(),
     }),
     z.object({ kind: z.literal("person") }),
   ]);
@@ -162,7 +164,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         /** Null on a run's root thread. */
         parentThreadId: z.string().nullable(),
         kind: threadKindSchema,
-        /** The task a worker or check thread works on; required for those, absent on the supervisor and the main agent. */
+        /** The task a worker or check thread works on; absent on the root and the main agent. */
         task: taskIdSchema.optional(),
         /** The attempt a check thread checks; set on check threads only. */
         attemptId: nonEmpty.optional(),
@@ -172,8 +174,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         workflows: z.array(recordedPinSchema).min(1).optional(),
         /**
          * The model this thread calls, as the runner names it: `provider/id`
-         * (`meta/muse-spark-1.3`). Main, worker, check and chat threads call one and
-         * should set it. The supervisor thread sets none: it runs no model (the `main` thread,
+         * (`meta/muse-spark-1.3`). Main, worker and check threads call one and
+         * should set it. The root thread sets none: it runs no model (the `main` thread,
          * its child, is the run's main agent). A thread's model is
          * fixed for its life: every `thread.started` of a thread names the same one, and
          * the harness fails a resume on a different model, as it does for a differing
@@ -192,20 +194,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         path: ["workflows"],
         message: "the root thread records the workflows it ran",
       })
-      .refine((p) => p.kind !== "supervisor" || p.model === undefined, {
+      .refine((p) => p.parentThreadId !== null || p.model === undefined, {
         path: ["model"],
-        message: "the supervisor calls no model",
+        message: "the root thread calls no model",
       })
-      .refine(
-        (p) =>
-          p.kind === "worker" || p.kind === "check"
-            ? p.task !== undefined
-            : (p.kind !== "supervisor" && p.kind !== "main") || p.task === undefined,
-        {
-          path: ["task"],
-          message: "task goes with worker and check threads, and not the supervisor or main agent",
-        },
-      )
+      // No field marks the main agent, so this one still reads the kind name.
       .refine((p) => p.kind !== "main" || p.model !== undefined, {
         path: ["model"],
         message: "the main agent calls a model, so it records which",
@@ -283,6 +276,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         reasoning: z.string().optional(),
         /** The reply's model usage; absent on a reply that never reached the model. */
         usage: modelUsageSchema.optional(),
+        /**
+         * The text is the summary that replaced the thread's earlier history, not something the
+         * thread said: views leave it out of what the thread said or replied. Its usage is spend.
+         */
+        compaction: z.literal(true).optional(),
       }),
       z.object({ role: z.literal("system"), text: z.string() }),
     ]),
@@ -547,69 +545,46 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   ]);
 };
 
-const onMainThread = (e: { type: string; runId: string; threadId: string }) =>
-  e.type !== "reply" ||
-  e.threadId === `${e.runId}.main` ||
-  e.threadId.startsWith(`${e.runId}.main.`);
-const mainThreadOnly = {
-  path: ["threadId"],
-  message: "a reply belongs to a main thread (<runId>.main or <runId>.main.<n>)",
-};
-
 /** What a runner appends: an event without `seq`, never a human review decision. */
-export const eventInputSchema = eventUnion({}).refine(onMainThread, mainThreadOnly);
+export const eventInputSchema = eventUnion({});
 export type EventInput = z.infer<typeof eventInputSchema>;
 
 const stored = { seq: z.number().int().nonnegative() };
 
 /** A stored event: runner events reuse their definitions; only reads include human decisions. */
-export const runEventSchema = z
-  .discriminatedUnion("type", [
-    eventUnion(stored),
-    z.object({
-      ...envelope,
-      ...stored,
-      type: z.literal("check.accepted"),
-      payload: checkAcceptedSchema,
-    }),
-    z.object({
-      ...envelope,
-      ...stored,
-      type: z.literal("review.completed"),
-      payload: reviewCompletedSchema,
-    }),
-    z.object({
-      ...envelope,
-      ...stored,
-      type: z.literal("person.message"),
-      payload: personMessageSchema,
-    }),
-    z.object({
-      ...envelope,
-      ...stored,
-      type: z.literal("run.reopened"),
-      payload: runReopenedSchema,
-    }),
-    z.object({
-      ...envelope,
-      ...stored,
-      type: z.literal("correction.ended"),
-      payload: correctionEndedSchema,
-    }),
-  ])
-  .refine(
-    (e) =>
-      (e.type !== "check.accepted" && e.type !== "review.completed") ||
-      e.threadId === `${e.runId}.reviewer`,
-    { path: ["threadId"], message: "human review decisions belong to <runId>.reviewer" },
-  )
-  .refine(
-    (e) =>
-      (e.type !== "person.message" && e.type !== "run.reopened" && e.type !== "correction.ended") ||
-      e.threadId === `${e.runId}.person`,
-    { path: ["threadId"], message: "correction events belong to <runId>.person" },
-  )
-  .refine(onMainThread, mainThreadOnly);
+export const runEventSchema = z.discriminatedUnion("type", [
+  eventUnion(stored),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("check.accepted"),
+    payload: checkAcceptedSchema,
+  }),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("review.completed"),
+    payload: reviewCompletedSchema,
+  }),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("person.message"),
+    payload: personMessageSchema,
+  }),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("run.reopened"),
+    payload: runReopenedSchema,
+  }),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("correction.ended"),
+    payload: correctionEndedSchema,
+  }),
+]);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
 

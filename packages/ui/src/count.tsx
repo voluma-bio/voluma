@@ -1,8 +1,8 @@
 /**
- * Count: a small mono number after a title or on a row ("To check 18"). The tone says what the
- * number counts when that matters: items to check, stopped runs, running ones.
+ * Count: a small number after a heading ("To check 18"). The tone says what the number counts
+ * when that matters: items to check, stopped runs, running ones. A row's state with its number
+ * ("5 to check") is a StatusMark, not a Count.
  */
-import type { ReactNode } from "react";
 import { cx } from "./cx";
 
 export type CountTone = "neutral" | "check" | "running" | "stopped";
@@ -15,8 +15,7 @@ const tones: Record<CountTone, string> = {
 };
 
 export type CountProps = {
-  /** A number, or a number with its word ("2 stopped"). */
-  children: ReactNode;
+  children: number;
   tone?: CountTone;
   className?: string;
 };

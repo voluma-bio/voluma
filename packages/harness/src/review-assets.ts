@@ -24,7 +24,6 @@ import { evidencePrefix, reviewAssetPrefix, workflowSnapshotPrefix } from "@volu
 import { type ReviewAssetsManifest, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { type Sandbox, SandboxEndedError, type SandboxMount } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { supervisorThreadId } from "./thread-id";
 
 const EVIDENCE = "/evidence";
 const WORKFLOW = "/workflow";
@@ -94,6 +93,8 @@ export interface ReviewAssetsWorker {
 
 export interface ReviewAssetsOptions {
   runId: string;
+  /** The run's root thread, which the `assets.*` events are written on. */
+  rootThreadId: string;
   recorder: Recorder;
   /** Creates the claim's convert sandbox (`convertSandboxSpec` with `convertMounts`). */
   createSandbox(signal: AbortSignal): Promise<Sandbox>;
@@ -103,7 +104,7 @@ export interface ReviewAssetsOptions {
 
 export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWorker {
   const { runId, recorder, log } = options;
-  const root = supervisorThreadId(runId);
+  const root = options.rootThreadId;
   const halt = new AbortController();
   const signal = AbortSignal.any([options.signal, halt.signal]);
 

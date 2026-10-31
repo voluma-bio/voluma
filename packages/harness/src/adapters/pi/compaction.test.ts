@@ -40,7 +40,7 @@ describe("cutPoint", () => {
   it("keeps about the asked tokens and never starts at a tool result", () => {
     const messages = thread();
     for (let keep = 1; keep < 1100; keep += 7) {
-      const cut = cutPoint(messages, 1, keep);
+      const cut = cutPoint(messages, 1, { tokens: keep });
       if (cut === undefined) continue;
       expect(messages[cut]?.role).not.toBe("toolResult");
       // every result kept has its call kept too
@@ -58,7 +58,7 @@ describe("cutPoint", () => {
 
   it("keeps the recent turns, roughly the asked amount", () => {
     const messages = thread();
-    const cut = cutPoint(messages, 1, 450) as number;
+    const cut = cutPoint(messages, 1, { tokens: 450 }) as number;
     const kept = messages
       .slice(cut)
       .reduce((n, m) => n + Math.ceil(JSON.stringify(m).length / 4), 0);
@@ -68,15 +68,15 @@ describe("cutPoint", () => {
   });
 
   it("returns undefined when nothing older than the cut would be summarized", () => {
-    expect(cutPoint([system, user(5)], 1, 1000)).toBeUndefined();
+    expect(cutPoint([system, user(5)], 1, { tokens: 1000 })).toBeUndefined();
     const messages = thread();
-    expect(cutPoint(messages, messages.length - 1, 1)).toBeUndefined();
+    expect(cutPoint(messages, messages.length - 1, { tokens: 1 })).toBeUndefined();
   });
 
   it("starts after the previous cut", () => {
     const messages = thread();
-    const first = cutPoint(messages, 1, 300) as number;
-    const second = cutPoint(messages, first, 100) as number;
+    const first = cutPoint(messages, 1, { tokens: 300 }) as number;
+    const second = cutPoint(messages, first, { tokens: 100 }) as number;
     expect(second).toBeGreaterThan(first);
   });
 });
@@ -151,7 +151,14 @@ describe("compactor", () => {
   const reply = (text: string, stopReason = "stop", extra: object = {}) => ({
     stopReason,
     content: [{ type: "text", text }],
-    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 },
+    },
     ...extra,
   });
   type Reply = ReturnType<typeof reply>;
@@ -160,6 +167,7 @@ describe("compactor", () => {
     const requests: { messages: AgentMessage[]; maxTokens: number }[] = [];
     const stored: string[] = [];
     const summaries: string[] = [];
+    const usages: unknown[] = [];
     const c = compactor({
       threadId: "t",
       model: model as never,
@@ -176,9 +184,12 @@ describe("compactor", () => {
         stored.push(row);
         return true;
       },
-      onSummary: (_r, summary) => summaries.push(summary),
+      onSummary: (r, summary) => {
+        summaries.push(summary);
+        usages.push(r.usage);
+      },
     });
-    return { c, requests, stored, summaries };
+    return { c, requests, stored, summaries, usages };
   }
   // The last reply reports `input` tokens.
   const thread_ = (input: number) => {
@@ -242,6 +253,36 @@ describe("compactor", () => {
     expect(await b.c.recover(thread_(150_000))).toBe(true);
     expect(b.requests.map((r) => r.maxTokens)).toEqual([16_000, 32_000]);
     expect(b.summaries).toEqual(["FULL"]);
+    // both calls were billed
+    expect(b.usages).toEqual([expect.objectContaining({ input: 2, output: 2 })]);
+    expect((b.usages[0] as { cost: { total: number } }).cost.total).toBe(1);
+  });
+
+  it("many small images: one compaction, not one per turn", async () => {
+    const turn = (i: number): AgentMessage[] => [
+      call(`i${i}`, 1000),
+      {
+        role: "toolResult",
+        toolCallId: `i${i}`,
+        toolName: "view_image",
+        content: Array.from({ length: 4 }, () => ({
+          type: "image",
+          mimeType: "image/png",
+          data: "A".repeat(100),
+        })),
+      } as never,
+    ];
+    const { c, requests } = setup(
+      Array.from({ length: 30 }, () => reply("SUM")),
+      { contextWindow: 1_000_000, maxTokens: 32_000 },
+    );
+    const messages = [system, user(10), ...Array.from({ length: 20 }, (_, i) => turn(i)).flat()];
+    await c.prepare(messages);
+    for (let i = 20; i < 23; i++) {
+      messages.push(...turn(i));
+      await c.prepare(messages);
+    }
+    expect(requests).toHaveLength(1);
   });
 
   it("the provider's error text reaches the caller unchanged", async () => {

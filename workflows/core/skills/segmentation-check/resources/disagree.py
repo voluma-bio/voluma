@@ -104,10 +104,22 @@ if __name__ == '__main__':
     ap.add_argument('--ids', help='classic label ids that count, e.g. 1,2,3 (default: all)')
     ap.add_argument('--min-mm3', type=float, default=0.005, help='mm3: regions under this volume are not numbered')
     ap.add_argument('--render', type=int, default=6, help='number of largest regions to draw a panel for')
-    ap.add_argument('--window', metavar='lo,hi', help='display window in HU (default: automatic)')
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help='display window in HU (default: automatic)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     ap.add_argument('--object-id', help='the output id the workflow declares for disagreement.npy as a labels volume: written to result.json as an objects entry for report_output')
     a = ap.parse_args()
+    try:
+        ids = [int(i) for i in a.ids.split(',')] if a.ids else None
+    except ValueError:
+        sidecar.fail('--ids must be comma-separated integer label ids, e.g. 1,2,3')
+    try:
+        frame = fr.load(a.frame) if a.frame else None
+    except (ValueError, OSError):
+        sidecar.fail(f'--frame {a.frame} must be a readable frame.json from orient_joint.py')
+    try:
+        names = vl.parse_names(a.names)
+    except (ValueError, KeyError, TypeError, OSError):
+        sidecar.fail('--names must be label names like 1=femur,2=tibia or a readable anatomy.json with labels [{id, name}]')
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels, mmap_mode='r')
     classic = np.load(a.classic, mmap_mode='r')
@@ -123,7 +135,6 @@ if __name__ == '__main__':
     vox = float(np.prod(sp))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    ids = [int(i) for i in a.ids.split(',')] if a.ids else None
     f = flagged(labels, classic, ids, np.asarray(hu) >= a.threshold_hu)
     classic_bone = int(np.isin(np.asarray(classic), ids).sum() if ids else (np.asarray(classic) > 0).sum())
     pieces, n = ndi.label(f, np.ones((3, 3, 3)))
@@ -147,9 +158,7 @@ if __name__ == '__main__':
     sidecar.write(out / 'disagreement.npy', like=str(sidecar.sidecar_path(a.labels)),
                   inputs=[a.hu, a.labels, a.classic], params={'ids': ids, 'min_mm3': a.min_mm3})
     (out / 'regions.json').write_text(json.dumps(regions, indent=1) + '\n')
-    frame = fr.load(a.frame) if a.frame else None
-    window = vl.parse_window(a.window) if a.window else vl.auto_window(np.asarray(hu[hu.shape[0] // 2]))
-    names = vl.parse_names(a.names)
+    window = a.window or vl.auto_window(np.asarray(hu[hu.shape[0] // 2]))
     panels = []
     for rg in regions[:a.render]:
         p = out / f'panel_{rg["id"]}.jpg'

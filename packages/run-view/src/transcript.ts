@@ -19,6 +19,7 @@
 
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import type { LiveFrame } from "@voluma/contracts/stream";
+import { threadRole } from "@voluma/contracts/thread-role";
 import { catalog } from "@voluma/workflow/bundled";
 import { plural } from "./run-status";
 
@@ -358,7 +359,7 @@ function rowBuilder() {
 const SHOWN_AS_ROWS = new Set(["checkpoint", "report_output"]);
 
 /**
- * The transcript of the threads in `ids` (one worker, checker or chat thread; or every main
+ * The transcript of the threads in `ids` (one worker or check thread; or every main
  * thread of the run): what it was told, its prose, its folded process, its milestones, then
  * whatever of its reply is still streaming. A tool call still running when its thread ended,
  * or when the runner stopped (`halt`), shows as stopped. `orchestration` adds what the main
@@ -382,10 +383,10 @@ function rowsOf(
   let root: string | undefined;
   for (const e of events) {
     if (orchestration) {
-      if (e.type === "thread.started" && e.payload.kind === "supervisor") root = e.threadId;
+      if (e.type === "thread.started" && threadRole(e.payload) === "root") root = e.threadId;
       if (
         e.type === "thread.started" &&
-        (e.payload.kind === "worker" || e.payload.kind === "check") &&
+        ["worker", "check"].includes(threadRole(e.payload)) &&
         !seen.has(e.threadId)
       ) {
         seen.add(e.threadId);
@@ -423,7 +424,9 @@ function rowsOf(
         if (p.role === "assistant") {
           if (p.reasoning)
             b.step({ kind: "reasoning", id: `${e.id}:reasoning`, text: p.reasoning });
-          if (p.text)
+          if (p.compaction)
+            b.row({ kind: "brief", id: e.id, label: "History summarized", text: p.text });
+          else if (p.text)
             b.row({ kind: "prose", id: e.id, text: p.text, streaming: false, usage: p.usage });
         } else if (p.role === "system") {
           b.row({ kind: "brief", id: e.id, label: "System prompt", text: p.text });
@@ -435,7 +438,7 @@ function rowsOf(
               : p.sender.kind === "person"
                 ? "Message from a person"
                 : briefed
-                  ? "Update from the run"
+                  ? "Update from Voluma"
                   : "Task brief";
           if (p.sender.kind === "runtime") briefed = true;
           b.row({ kind: "brief", id: e.id, label, text: p.text });
@@ -517,7 +520,7 @@ function rowsOf(
   return b.done();
 }
 
-/** One worker, checker or chat thread's transcript. */
+/** One worker or check thread's transcript. */
 export const threadRows = (
   events: RunEvent[],
   threadId: string,
@@ -529,7 +532,7 @@ export const threadRows = (
 export function mainRows(events: RunEvent[], live: Live = noLive, halt?: Halt): Row[] {
   const mains = new Set(
     events.flatMap((e) =>
-      e.type === "thread.started" && e.payload.kind === "main" ? [e.threadId] : [],
+      e.type === "thread.started" && threadRole(e.payload) === "main" ? [e.threadId] : [],
     ),
   );
   return rowsOf(events, mains, live, halt, true);
