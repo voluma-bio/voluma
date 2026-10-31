@@ -424,9 +424,11 @@ function rowsOf(
         if (p.role === "assistant") {
           if (p.reasoning)
             b.step({ kind: "reasoning", id: `${e.id}:reasoning`, text: p.reasoning });
-          if (p.compaction)
-            b.row({ kind: "brief", id: e.id, label: "History summarized", text: p.text });
-          else if (p.text)
+          // A summary that failed has no text; its message only carries the spend.
+          if (p.compaction) {
+            if (p.text)
+              b.row({ kind: "brief", id: e.id, label: "History summarized", text: p.text });
+          } else if (p.text)
             b.row({ kind: "prose", id: e.id, text: p.text, streaming: false, usage: p.usage });
         } else if (p.role === "system") {
           b.row({ kind: "brief", id: e.id, label: "System prompt", text: p.text });
@@ -437,10 +439,12 @@ function rowsOf(
               ? "Message from another thread"
               : p.sender.kind === "person"
                 ? "Message from a person"
-                : briefed
-                  ? "Update from Voluma"
-                  : "Task brief";
-          if (p.sender.kind === "runtime") briefed = true;
+                : p.sender.notice
+                  ? "Context notice"
+                  : briefed
+                    ? "Update from Voluma"
+                    : "Task brief";
+          if (p.sender.kind === "runtime" && !p.sender.notice) briefed = true;
           b.row({ kind: "brief", id: e.id, label, text: p.text });
         }
         break;

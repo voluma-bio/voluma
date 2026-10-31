@@ -53,3 +53,30 @@ export function isContextOverflowError(message: string | undefined): boolean {
     isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage)
   );
 }
+
+export const CONNECTION =
+  /^Connection error\.?$|^Request timed out\.?$|^Anthropic stream ended before message_stop/;
+
+/**
+ * An account out of money: Anthropic's spend cap and empty balance are `400 invalid_request_error`
+ * and OpenAI's is `429 insufficient_quota`, told apart from a bad request or a rate limit only by
+ * the message.
+ */
+export const OUT_OF_MONEY =
+  /You have reached your specified API usage limits|Your credit balance is too low|insufficient_quota/;
+
+/**
+ * The provider errors a later call can succeed after: a timeout, a rate limit, a server or
+ * connection error. The runner retries these (`model-retry.ts`), and a summary that fails this way
+ * is not the thread's own failure (`adapters/pi/compaction.ts`).
+ */
+export function isTransientProviderError(message: string | undefined): boolean {
+  const m = message ?? "";
+  const status = statusOf(m);
+  return (
+    CONNECTION.test(m) ||
+    status === 408 ||
+    (status === 429 && !OUT_OF_MONEY.test(m)) ||
+    (status ?? 0) >= 500
+  );
+}

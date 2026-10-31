@@ -29,6 +29,7 @@
  * Left out: Pi's split-turn summary and file-operation lists, meridian-flow's important-file
  * re-reads.
  */
+
 import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
   type Api,
@@ -37,6 +38,7 @@ import {
   normalizeContext,
   type Usage,
 } from "@earendil-works/pi-ai";
+import { isTransientProviderError } from "../../context-overflow";
 
 /** The most room the next reply may need; the request's input plus it must fit the window. */
 const MAX_OUTPUT_RESERVE = 64_000;
@@ -284,7 +286,10 @@ export function compactor(args: {
   streamFn: StreamFn;
   /** Stores the marker row; false when the thread can no longer store anything. */
   store(row: string): Promise<boolean>;
-  /** The summary's reply, once stored: the caller records it as the model call it was (its usage is spend). */
+  /**
+   * The summary's reply: the caller records it as the model call it was (its usage is spend). Once
+   * the summary was stored `summary` is its text; a summary that failed is recorded with `""`.
+   */
   onSummary(reply: AssistantMessage, summary: string): void;
   /** Overrides the trigger cap (a test or a local trial). */
   cap?: number;
@@ -306,9 +311,9 @@ export function compactor(args: {
   let turnsLeft: number | undefined;
 
   /** How full the next request is: tokens, and the images' bytes and count against the model's limits. */
-  function load(messages: AgentMessage[]) {
-    const tokens = inputTokens(messages, compaction);
-    const images = imageLoad(compactedView(messages, compaction));
+  function load(messages: AgentMessage[], at = compaction) {
+    const tokens = inputTokens(messages, at);
+    const images = imageLoad(compactedView(messages, at));
     const imageShare = Math.max(images.bytes / maxBytes, images.count / maxImages);
     return {
       tokens,
@@ -350,11 +355,18 @@ export function compactor(args: {
     messages: AgentMessage[],
     tokensBefore: number,
     cold: boolean,
+    /** The request is about to fail: summarize even when that leaves the thread due again. */
+    urgent: boolean,
     signal?: AbortSignal,
   ) {
     const from = compaction?.keptFrom ?? 1;
     const cut = cutPoint(messages, from, keep);
     if (cut === undefined) return false;
+    // The last turn is never cut: when it alone keeps the thread due, a summary gains nothing and
+    // every later request would pay for another.
+    if (!urgent && load(messages, { summary: "", keptFrom: cut, at: messages.length }).due) {
+      return false;
+    }
     // Cold: only what is summarized (and the summary before it), the images left out.
     const request = cold
       ? [
@@ -379,6 +391,7 @@ export function compactor(args: {
     const summary =
       reply.stopReason === "stop" || reply.stopReason === "toolUse" ? textOf(reply) : "";
     if (!summary) {
+      args.onSummary(reply, "");
       console.error(
         `compaction: thread ${threadId}: the summary failed (stop reason ${reply.stopReason}, ` +
           `${cold ? "cold" : "warm"} request of ~${tokensBefore} tokens)`,
@@ -408,7 +421,7 @@ export function compactor(args: {
       const now = load(messages);
       if (now.due) {
         if (turnsLeft !== undefined && turnsLeft > 0 && !now.tight) turnsLeft--;
-        else await compact(messages, now.tokens, now.cold, signal);
+        else await compact(messages, now.tokens, now.cold, now.tight, signal);
       }
       return compactedView(messages, compaction);
     },
@@ -427,8 +440,10 @@ export function compactor(args: {
 
     async recover(messages, signal) {
       try {
-        return await compact(messages, inputTokens(messages, compaction), true, signal);
+        return await compact(messages, inputTokens(messages, compaction), true, true, signal);
       } catch (error) {
+        // A transient failure of the summary is the provider's, not the thread's: the run retries it.
+        if (isTransientProviderError(errorText(error))) throw error;
         console.error(
           `compaction: thread ${threadId}: recovering from an overflow failed: ${error}`,
         );
@@ -437,6 +452,8 @@ export function compactor(args: {
     },
   };
 }
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Both calls of a length retry were billed. */
 function addUsage(a: Usage, b: Usage): Usage {

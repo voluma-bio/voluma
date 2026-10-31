@@ -285,6 +285,22 @@ describe("compactor", () => {
     expect(requests).toHaveLength(1);
   });
 
+  it("a last turn that alone is due: summarize when tight, not on every request", async () => {
+    // Each turn is 450k tokens, over the 400k trigger, in a 1M window: two turns still fit.
+    const turn = (i: number): AgentMessage[] => [call(`b${i}`, 10), result(`b${i}`, 450_000)];
+    const { c, requests } = setup(
+      Array.from({ length: 30 }, () => reply("SUM")),
+      { contextWindow: 1_000_000, maxTokens: 32_000 },
+    );
+    const messages = [system, user(10)];
+    for (let i = 0; i < 8; i++) {
+      messages.push(...turn(i));
+      await c.prepare(messages);
+    }
+    // turns 3, 5, 7 (three turns do not fit); without the check, every turn from the second
+    expect(requests).toHaveLength(3);
+  });
+
   it("the provider's error text reaches the caller unchanged", async () => {
     const { c } = setup([reply("", "error", { errorMessage: "529 overloaded" })], {
       contextWindow: 1_000_000,
