@@ -122,7 +122,6 @@ function RowView({ row, threads }: { row: Row; threads?: Map<string, Thread> }) 
 const TOOL_ICON: Record<string, LucideIcon> = {
   bash: Terminal,
   view_image: Image,
-  start_worker: ListChecks,
   start_agent: ListChecks,
   submit_task: ListChecks,
   checkpoint: Flag,

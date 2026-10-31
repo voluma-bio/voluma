@@ -285,7 +285,6 @@ export function world(o: WorldOptions) {
         "main",
         [
           "start_agent",
-          "start_worker",
           "message",
           "wait",
           "stop_worker",

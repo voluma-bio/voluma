@@ -17,7 +17,7 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
 import { errorText } from "./error-text";
 import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
@@ -136,13 +136,27 @@ function rolesOf(def: WorkflowDefinition, gateway: boolean): RunLayoutOptions["r
 
 const ROOT_NAME = "supervisor";
 
-/** The run's root thread: the one its log already holds (an older run's id is not minted), else the id a new run mints. */
-export const rootThreadOf = (runId: string, log: readonly RunEvent[]) =>
-  threadLog(log).root.id ?? threadIdOf(runId, ROOT_NAME);
+/**
+ * The image a run began on, read from its root's `thread.started`; undefined for a run with no
+ * log yet. A log whose root is not the one this version mints (`<runId>.supervisor`, an id from
+ * before ids were derived), or whose root records no image, was made by an older Voluma: resuming
+ * it would mint a second root or change its dependencies, so it is refused.
+ */
+export function pinnedImageOf(runId: string, log: readonly RunEvent[]): string | undefined {
+  if (threadLog(log).root.id === undefined) return undefined;
+  const root = threadIdOf(runId, ROOT_NAME);
+  const image = log.find(
+    (e) => e.type === "thread.started" && e.threadId === root && e.payload.sandboxImage,
+  );
+  if (image?.type !== "thread.started" || !image.payload.sandboxImage) {
+    throw new Error(OLDER_VERSION_MESSAGE);
+  }
+  return image.payload.sandboxImage;
+}
 
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, signal: cutOff } = options;
-  const rootThreadId = rootThreadOf(runId, recorder.events());
+  const rootThreadId = threadIdOf(runId, ROOT_NAME);
   const CONVERT = `${runId}.convert`;
   // Ends the run's own threads: after `fail`, and once the loop has settled.
   const ending = new AbortController();

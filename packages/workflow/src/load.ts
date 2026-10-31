@@ -19,6 +19,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import {
   type AgentDefinition,
+  OLDER_VERSION_MESSAGE,
   type Skill,
   THINKING_LEVELS,
   type ToolIndexEntry,
@@ -98,17 +99,15 @@ function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
 
 const frontmatter = (file: string, text: string) => parseFile(file, text, frontmatterSchema).data;
 
-/**
- * What the worker file said before it declared `scratch`, `outputs` and `checkedBy`: a run's
- * snapshot from then has no such keys and must build the same sandboxes (`main` and `check` match
- * the defaults). Delete with the last such snapshot.
- */
-const WORKER_BEFORE_FRONTMATTER = { scratch: "all", outputs: "write", checkedBy: "check" } as const;
-
 /** `skills` still unresolved: `parseAgent` leaves the default to the caller, who knows the skills. */
 type ParsedAgent = Omit<AgentDefinition, "skills"> & { skills?: string[] };
 
-function parseAgent(path: string, text: string, knownTools: readonly string[]): ParsedAgent {
+function parseAgent(
+  path: string,
+  text: string,
+  knownTools: readonly string[],
+  existing: boolean,
+): ParsedAgent {
   const { data, body } = parseFile(path, text, agentSchema);
   const name = path.slice(path.lastIndexOf("/") + 1, -".md".length);
   if (data.name !== name) {
@@ -116,13 +115,14 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
   }
   const unknown = data.tools.find((t) => !knownTools.includes(t));
   if (unknown) {
+    // In a snapshot an earlier run wrote, a tool the harness has since dropped means the run is
+    // from an older version; in one just cut from the checkout it is a typo.
+    if (existing) throw new Error(OLDER_VERSION_MESSAGE);
     throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the harness`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
-  const declared = data.scratch ?? data.outputs ?? data.checkedBy;
-  const given = name === "worker" && !declared ? WORKER_BEFORE_FRONTMATTER : data;
-  const scratch = given.scratch ?? "own";
-  const outputs = given.outputs ?? "read";
+  const scratch = data.scratch ?? "own";
+  const outputs = data.outputs ?? "read";
   const hasBash = data.tools.includes("bash");
   if (
     !hasBash &&
@@ -141,7 +141,7 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
     tools: data.tools,
     scratch,
     outputs,
-    checkedBy: given.checkedBy,
+    checkedBy: data.checkedBy,
     subagents: data.subagents,
     skills: data.skills,
     body,
@@ -171,8 +171,9 @@ async function* walk(root: string, rel: string): AsyncGenerator<string> {
   }
 }
 
+/** Writes the snapshot unless the run has one; true when it was already there. */
 async function snapshot(dir: string, { store, prefix, root, commit }: LoadOptions) {
-  if (await store.head(`${prefix}${DONE}`)) return;
+  if (await store.head(`${prefix}${DONE}`)) return true;
   // No marker: an earlier attempt was cut off. Its files may be ones this checkout no longer
   // has, so start from an empty prefix instead of copying over them.
   await deletePrefix(store, prefix);
@@ -195,12 +196,13 @@ async function snapshot(dir: string, { store, prefix, root, commit }: LoadOption
     if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${AGENTS_DIR}/${name}`);
   }
   await store.put(`${prefix}${DONE}`, new TextEncoder().encode(commit));
+  return false;
 }
 
 /** Snapshots `dir` (`workflows/<name>`) unless the run already has one, then reads the snapshot. */
 export async function loadWorkflow(dir: string, options: LoadOptions): Promise<WorkflowDefinition> {
   workflowDirSchema.parse(dir);
-  await snapshot(dir, options);
+  const existing = await snapshot(dir, options);
   const { store, prefix } = options;
   const texts = new Map<string, string>();
   for (const { key } of (await store.list(prefix)).objects) {
@@ -214,12 +216,11 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       texts.set(path, await getText(store, key));
   }
 
-  // A snapshot cut before `checker.md` became `check.md` (R2 snapshots are write-once): refused
-  // before its role files parse, since an old one may not match the current format.
+  // A snapshot cut before `checker.md` became `check.md` (R2 snapshots are write-once) is refused
+  // before its role files parse, since an old one may not match the current format. One whose role
+  // files name a dropped tool is refused in `parseAgent`.
   if (texts.has(`${AGENTS_DIR}/checker.md`) && !texts.has(`${AGENTS_DIR}/check.md`))
-    throw new Error(
-      "This run was made by an older version of Voluma and can't be resumed; start a new run.",
-    );
+    throw new Error(OLDER_VERSION_MESSAGE);
 
   // The workflow's own skill (named for its directory) first, then its others, then core's, each
   // group sorted: the order must not depend on how the store lists keys.
@@ -299,7 +300,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   const found: Record<string, ParsedAgent> = {};
   for (const [path, text] of texts) {
     if (!path.startsWith(`${AGENTS_DIR}/`)) continue;
-    const agent = parseAgent(path, text, options.knownTools);
+    const agent = parseAgent(path, text, options.knownTools, existing);
     found[agent.name] = agent;
   }
   const skillNames = skills.map((s) => s.name);
@@ -316,12 +317,6 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     }
     if (agent.tools.includes("start_agent") && agent.subagents.length === 0) {
       throw new WorkflowParseError(path, "a role with start_agent lists the roles it may start");
-    }
-    if (agent.tools.includes("start_worker") && !agent.subagents.includes("worker")) {
-      throw new WorkflowParseError(
-        path,
-        `a role with start_worker lists "worker" in its subagents`,
-      );
     }
     const unknown = agent.skills?.find((n) => !skillNames.includes(n));
     if (unknown)

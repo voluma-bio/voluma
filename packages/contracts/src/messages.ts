@@ -9,7 +9,7 @@
  * `run.reopened`, then `person.message`, resets `lastClaimEnd` and `stalledClaims` (so
  * `previousClaim` never reports a reason from before the reopen), and moves the run to
  * `queued` through admission. The main agent is resumed with the message (a new
- * `main.<n>` thread when its stored history cannot resume: a run from before corrections, a
+ * `main.<n>` thread when its stored history cannot resume: a
  * changed system prompt or tool list, or a recorded model the runner no longer allows; it never
  * fails the run for that), answers with `reply` (a `reply` event) and calls `finish_run`. On a
  * go it does the new attempt first, then `finish_run`. There is no waiting state.
@@ -34,7 +34,7 @@
  * Go. `go` requires `taskId`. When the loop's log shows the span's go the main agent has not been
  * told of, it writes `revision.started {reason: "correction", taskId}` (id `<person.message id>:go`)
  * and then tells main; that marker, not the message, opens the gate. Code refuses `message`,
- * `start_worker`, `change_plan` and `stop_worker` until the span holds a marker. A go of a span
+ * `start_agent`, `change_plan` and `stop_worker` until the span holds a marker. A go of a span
  * that ended (`correction.ended`) before main acted is void: later messages tell main so and start
  * no work. The marker also gives review and the correction span a boundary when nothing depends
  * on the task, and resets the task's fix rounds.
