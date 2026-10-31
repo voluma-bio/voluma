@@ -67,9 +67,9 @@ export function checkReason(t: FoldedTask, status: "done" | "to-check"): string 
     : "The second AI check passed it, but items are still open for a person.";
 }
 
-/** Why a task is left to check when its check failed on a provider error and the main agent did not act on it. */
-export const checkProviderFailed = (error: string) =>
-  `The second AI check could not finish: its AI provider failed (${clip(error, REPLY_MAX)}).`;
+/** Why a task is left to check when its check failed and the main agent did not act on it. */
+export const checkFailed = (error: string, provider: boolean) =>
+  `The second AI check could not finish: ${provider ? "its AI provider failed " : ""}(${clip(error, REPLY_MAX)}).`;
 
 /** What the main agent is told when the provider failed after its reply started; its history is as it was. */
 export const PROVIDER_FAILED_RESUME = "The model provider failed during your last reply; continue.";

@@ -74,8 +74,8 @@ interface ThreadFields {
   pendingFeedback: { text: string; from: string } | undefined;
   /** How many times the log shows it started: the first run and each resume. */
   starts: number;
-  /** How many of those starts resumed it after an invocation that ended `failed`. */
-  failedResumes: number;
+  /** How the invocation before its latest ended: the end its latest start resumed it after. */
+  endBefore: PayloadOf<"thread.ended"> | undefined;
   /** The model it started on (`provider/id`); a resume keeps it. Absent: not recorded. */
   model: string | undefined;
   /** Tool calls the log shows without a result, by tool call id; after a cut-off, what it was cut off in. */
@@ -412,7 +412,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           lastSummary: record?.lastSummary,
           pendingFeedback: record?.pendingFeedback,
           starts: (record?.starts ?? 0) + 1,
-          failedResumes: (record?.failedResumes ?? 0) + (record?.end?.status === "failed" ? 1 : 0),
+          endBefore: record?.end ?? record?.endBefore,
           model: record?.model ?? e.payload.model,
           openCalls: record?.openCalls ?? new Map(),
           asks: record?.asks ?? [],
@@ -624,6 +624,16 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   memo.set(events, { length: events.length, value });
   return value;
 }
+
+/**
+ * A check that failed with no verdict while still its task's check: the main agent resumes it
+ * (`message`) or replaces it (`stop_worker`), or the task is left to check (`run-loop.ts`).
+ */
+export const checkAwaitsMain = (d: ThreadLog, r: ThreadRecord): boolean => {
+  if (r.place !== "check" || r.end?.status !== "failed") return false;
+  const t = d.view.tasks.find((task) => task.id === r.taskId);
+  return t?.status === "under-review" && t.threads.check === r.id && !t.checker?.verdict;
+};
 
 export const startedFor = (d: ThreadLog, taskId: string, place: Role) =>
   [...d.threads.values()].filter(

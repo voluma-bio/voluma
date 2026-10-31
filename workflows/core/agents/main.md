@@ -48,7 +48,7 @@ the scan do not settle, and that changes a number, stays a To check item: never 
   tasks that measure on them, landmarks before lengths. A wrong frame or label makes every task after
   it stale.
 - `stop_worker` on a worker going in circles, with the reason.
-- A checker can fail on a provider error. Its notice says so and the task stays under review until you
+- A checker can fail (its AI provider, or anything else). Its notice says so and the task stays under review until you
   act: `message` the checker to resume it where it stopped (it keeps its transcript and files), or
   `stop_worker` it for a fresh checker. If you do neither, the task is left to check for the researcher.
 
