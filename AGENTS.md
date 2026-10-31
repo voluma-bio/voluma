@@ -77,10 +77,12 @@ there reaches every caller at once. Two shapes work:
 
 Either way the PR body names what breaks and which callers moved.
 
-A response only the browser reads changes in one step, no expand/contract: an
-open tab whose response fails its schema reloads once into the deployed code
-(`apps/web/src/main.tsx`). Runner-facing responses and stored events keep the
-two-step rule below.
+A response only the browser reads changes in one step, no expand/contract: when
+a response fails its schema, an open tab checks whether `/` names a newer entry
+bundle and, once the person stops editing, reloads into it (a failed write goes
+Home instead); with no newer bundle the error shows
+(`apps/web/src/shell/deploys.ts`). Runner-facing responses and stored events keep
+the two-step rule below.
 
 A change that could stop a stored event from parsing (a new required field or
 a narrowed shape anywhere in a payload, recorded plans included) converts the

@@ -84,10 +84,14 @@ Merge to `main`: Render builds, runs the migration, starts the new instance alon
 one, moves traffic once `/health` answers, then sends the old one SIGTERM (SIGKILL after the
 30 s shutdown delay). A deploy that fails its health check leaves the old one serving.
 
-**An open browser tab keeps the old web app.** When a chunk it loads is gone, or an API response
-fails the schema it was built with (`ContractError`, `@voluma/api-client`), it reloads once into
-the deployed code (`apps/web/src/main.tsx`); a second failure in the same bundle shows the
-page's error screen rather than looping.
+**An open browser tab keeps the old web app** (`apps/web/src/shell/deploys.ts`). When a chunk it
+loads is gone, it reloads at once. When an API response fails the schema it was built with
+(`ContractError`, `@voluma/api-client`), it fetches `/` and compares the entry bundle there with
+the one it runs, looking again for about 30 s while traffic moves to the new instance. A
+different bundle means a deploy: the tab reloads once the person stops editing (no held pointer,
+no focused field with text, or the tab hidden), or goes Home if the failed call was a write, so
+they see what it made. The same bundle means the app's own bug, and the error shows. A tab
+reloads toward a given bundle at most once, so a failing deploy can't loop.
 
 **The migration runs while the previous code still serves**, and stays applied if the new
 instance then fails its health check. So every migration must work with the code that is

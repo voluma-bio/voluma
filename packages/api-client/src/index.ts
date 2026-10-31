@@ -2,8 +2,8 @@
  * Typed client for apps/api over the contracts. Web features call the API only
  * through here. Requests are same-origin; a 401 on any call except `getMe`
  * emits "signed out" so the shell can show the sign-in screen. A response that
- * fails its schema throws `ContractError` and emits it, so the app can reload
- * into the deployed code.
+ * fails its schema is a `ContractError`, handed to the app's `onContractError`
+ * handler so the app can move to the deployed code.
  */
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
@@ -85,13 +85,18 @@ async function request(
   }: { method?: "GET" | "POST"; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const post = method !== "GET";
-  return fetch(`/api${path}`, {
+  const res = await fetch(`/api${path}`, {
     method,
     headers: post ? { "content-type": "application/json" } : undefined,
     body: post ? JSON.stringify(body ?? {}) : undefined,
     signal,
   });
+  if (post) writes.add(res);
+  return res;
 }
+
+/** Responses to non-GET requests, so a `ContractError` can say whether its call changed something. */
+const writes = new WeakSet<Response>();
 
 function checkResponse(res: Response, serverMessage?: string): Response {
   if (res.status === 401) {
@@ -118,11 +123,13 @@ async function json(res: Response): Promise<unknown> {
 
 /**
  * A response that doesn't match the contract this bundle was built against: the API was most
- * likely deployed with a changed shape while this tab kept the old code. `url` names the call.
+ * likely deployed with a changed shape while this tab kept the old code. `url` names the call;
+ * `write` is true for a non-GET call, which may have changed something before its answer failed.
  */
 export class ContractError extends Error {
   constructor(
     readonly url: string,
+    readonly write: boolean,
     cause: unknown,
   ) {
     super(`${url}: the response doesn't match this app's contract`, { cause });
@@ -130,27 +137,45 @@ export class ContractError extends Error {
   }
 }
 
-const contractErrorListeners = new Set<(error: ContractError) => void>();
+/** Resolves true when the page is leaving for the deployed app, false to let the error surface. */
+type ContractErrorHandler = (error: ContractError) => Promise<boolean>;
+let contractErrorHandler: ContractErrorHandler = async () => false;
 
-/** Listen for every `ContractError`, whichever call threw it. Returns the unsubscribe function. */
-export function onContractError(listener: (error: ContractError) => void): () => void {
-  contractErrorListeners.add(listener);
-  return () => contractErrorListeners.delete(listener);
+/**
+ * Decide what every `ContractError` does; one handler for the app. While it decides, the failed
+ * call stays pending. When it answers that the page is leaving, the call never settles, so no
+ * error renders on the way out; otherwise the call throws the `ContractError`.
+ */
+export function onContractError(handler: ContractErrorHandler): void {
+  contractErrorHandler = handler;
 }
 
-/** Every response body is parsed here, so a mismatch always throws `ContractError` and tells the listeners. */
-function matches<T>(schema: { parse(data: unknown): T }, data: unknown, url: string): T {
+type Schema<T> = { parse(data: unknown): T };
+
+/** Every response body is parsed here, so each mismatch is a `ContractError`. */
+function matches<T>(
+  schema: Schema<T>,
+  data: unknown,
+  url: string,
+  write: boolean,
+): { ok: true; value: T } | { ok: false; error: ContractError } {
   try {
-    return schema.parse(data);
+    return { ok: true, value: schema.parse(data) };
   } catch (cause) {
-    const error = new ContractError(url, cause);
-    for (const listener of contractErrorListeners) listener(error);
-    throw error;
+    return { ok: false, error: new ContractError(url, write, cause) };
   }
 }
 
-async function read<T>(schema: { parse(data: unknown): T }, res: Response): Promise<T> {
-  return matches(schema, await json(res), res.url);
+/** `data`, read from `res`, as `schema` says; a mismatch goes to the app's handler. */
+async function parse<T>(schema: Schema<T>, data: unknown, res: Response): Promise<T> {
+  const parsed = matches(schema, data, res.url, writes.has(res));
+  if (parsed.ok) return parsed.value;
+  if (await contractErrorHandler(parsed.error)) return new Promise<never>(() => {});
+  throw parsed.error;
+}
+
+async function read<T>(schema: Schema<T>, res: Response): Promise<T> {
+  return parse(schema, await json(res), res);
 }
 
 /** The signed-in user, or null when signed out. Being signed out on load is not an event. */
@@ -369,7 +394,7 @@ export async function completeUpload(inputId: string): Promise<Input> {
     method: "POST",
   });
   if (res.status === 409) {
-    const { missing } = matches(completeUploadConflictSchema, await res.json(), res.url);
+    const { missing } = await parse(completeUploadConflictSchema, await res.json(), res);
     throw new UploadIncompleteError(missing, res.url);
   }
   return read(inputSchema, res);
@@ -441,22 +466,26 @@ export function subscribe(
   const source = new EventSource(
     `/api/run/runs/${encodeURIComponent(runId)}/stream?after=${after}`,
   );
-  source.onmessage = (e) => {
+  // Messages are handled in order as they arrive, so a mismatch can't wait for the handler: it
+  // is reported to `onError` at once, and the handler decides about leaving in the background.
+  const deliver = <T>(schema: Schema<T>, data: string, handle: (value: T) => void) => {
     try {
-      handlers.onEvent(matches(runEventSchema, JSON.parse(e.data), source.url));
+      const parsed = matches(schema, JSON.parse(data), source.url, false);
+      if (!parsed.ok) {
+        void contractErrorHandler(parsed.error);
+        throw parsed.error;
+      }
+      handle(parsed.value);
     } catch (error) {
       handlers.onError?.(error);
     }
   };
+  source.onmessage = (e) => deliver(runEventSchema, e.data, handlers.onEvent);
   if (handlers.onLive) {
     const onLive = handlers.onLive;
-    source.addEventListener(LIVE_EVENT, (e) => {
-      try {
-        onLive(matches(liveFrameSchema, JSON.parse((e as MessageEvent<string>).data), source.url));
-      } catch (error) {
-        handlers.onError?.(error);
-      }
-    });
+    source.addEventListener(LIVE_EVENT, (e) =>
+      deliver(liveFrameSchema, (e as MessageEvent<string>).data, onLive),
+    );
   }
   // The run ended and every event has been sent; closing here skips the reconnect.
   source.addEventListener(END_EVENT, () => {
