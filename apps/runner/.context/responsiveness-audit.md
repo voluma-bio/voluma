@@ -157,11 +157,21 @@ these local timing measurements. SAM's accepted real-run proof is unchanged.
 ## Verification
 
 `pnpm check` passed: Biome plus typecheck/test targets for all 16 projects,
-including all four new mutation/batching regressions and 167 Python tests.
+including the mutation/batching regressions and 167 Python tests.
 The integrated full probe passed with seven acknowledged heartbeats and zero
 lease failures; the five-pair comparison and read-only OA6-1RK replay also
 passed. Local Markdown links and `git diff --check` passed. There is no UI,
 event-contract or stored-history format change.
+
+Before delivery, `origin/main` at `2d4c8e14` (#320 and #321) was merged into
+the branch and combined `pnpm check` passed. A new full replay measured
+63,951 ms wall / 80 ms maximum timer lateness for 1 MiB tool arguments,
+426 / 94 ms for the 16 MiB text delta, and 6,607 / 18 ms for two concurrent
+256 KiB replies; five heartbeats were acknowledged with zero lease failures.
+Fresh independent review approved the bounded fixes with no blocking findings.
+Its coverage note led to an additional stalled-post variant: a near-full
+in-flight text budget stays charged until acknowledgement, then later output
+can be sent. This adds no production behavior.
 
 ## Reproduce without paid calls
 

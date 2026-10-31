@@ -28,29 +28,38 @@ test("a chunk cannot overrun the text budget, and a later reply still arrives", 
   expect(batcher.stats().dropped).toBe(2);
 });
 
-test("distinct streams cannot grow the queue while a post is stalled", async () => {
-  let unblock: (() => void) | undefined;
-  let started: (() => void) | undefined;
-  const posting = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  const blocked = new Promise<void>((resolve) => {
-    unblock = resolve;
-  });
-  const sent: LiveFrame[][] = [];
-  const batcher = liveBatcher(async (frames) => {
-    sent.push(frames);
-    if (sent.length === 1) {
-      started?.();
-      await blocked;
-    }
-  });
-  batcher.push(frame("first"));
-  const flushed = batcher.flush();
-  await posting;
-  for (let i = 0; i < 10_000; i++) batcher.push(frame("x", `reply-${i}`));
-  unblock?.();
-  await flushed;
-  expect(sent.map((batch) => batch.length)).toEqual([1, 1000]);
-  expect(batcher.stats().dropped).toBe(9000);
-});
+test.each([
+  { inFlightChars: 5, bufferedFrames: 1000 },
+  { inFlightChars: 256 * 1024 - 1, bufferedFrames: 1 },
+])(
+  "queue budgets hold with $inFlightChars characters in flight",
+  async ({ inFlightChars, bufferedFrames }) => {
+    let unblock: (() => void) | undefined;
+    let started: (() => void) | undefined;
+    const posting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const sent: LiveFrame[][] = [];
+    const batcher = liveBatcher(async (frames) => {
+      sent.push(frames);
+      if (sent.length === 1) {
+        started?.();
+        await blocked;
+      }
+    });
+    batcher.push(frame("x".repeat(inFlightChars)));
+    const flushed = batcher.flush();
+    await posting;
+    for (let i = 0; i < 10_000; i++) batcher.push(frame("x", `reply-${i}`));
+    unblock?.();
+    await flushed;
+    expect(sent.map((batch) => batch.length)).toEqual([1, bufferedFrames]);
+    expect(batcher.stats().dropped).toBe(10_000 - bufferedFrames);
+    batcher.push(frame("after acknowledgement", "next"));
+    await batcher.flush();
+    expect(sent.at(-1)?.[0]?.text).toBe("after acknowledgement");
+  },
+);
