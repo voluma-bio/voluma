@@ -146,6 +146,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
        * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
        */
       covers: nonEmpty.optional(),
+      /** A context-compaction notice, not a nudge: it does not count toward `nudges` (`thread-log`). */
+      notice: z.literal(true).optional(),
     }),
     z.object({ kind: z.literal("person") }),
   ]);
@@ -280,6 +282,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         reasoning: z.string().optional(),
         /** The reply's model usage; absent on a reply that never reached the model. */
         usage: modelUsageSchema.optional(),
+        /**
+         * The text is the summary that replaced the thread's earlier history, not something the
+         * thread said: views leave it out of what the thread said or replied. Its usage is spend.
+         */
+        compaction: z.literal(true).optional(),
       }),
       z.object({ role: z.literal("system"), text: z.string() }),
     ]),

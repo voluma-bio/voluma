@@ -31,6 +31,12 @@ Merging to `main` deploys to Render staging each service whose build filter (`re
 (which serves the web app), the runner and the gateway, together and in no fixed order; see
 [apps/api/.context/deploy.md](apps/api/.context/deploy.md).
 
+Merges never wait for runs. A live run carries on through any number of these deploys: no
+failure, no lost agent context, no human click. A change that would break a live run during the
+deploy overlap (a column dropped while the old code still reads it, a narrowed stored event or
+runner-facing response) ships in two PRs, expand first; anything that still breaks a live run is a
+bug, not a reason to hold merges.
+
 Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.
 
 ## Boundaries
@@ -73,7 +79,7 @@ Either way the PR body names what breaks and which callers moved.
 A change that could stop a stored event from parsing (a new required field or
 a narrowed shape anywhere in a payload, recorded plans included) converts the
 stored events in an SQL migration in `apps/api/drizzle`, applied on deploy, and
-ships in two steps. Step 1: the field optional (or the shape still wide), an
+ships in two steps, expand then contract, so a live run survives the deploy overlap. Step 1: the field optional (or the shape still wide), an
 idempotent migration, and the code reading the old shape in one function marked
 for deletion. Step 2, after step 1 is live: a PR that re-runs the migration, makes
 the field required and deletes the fallback. Note step 2 in the package's

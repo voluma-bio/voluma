@@ -22,9 +22,10 @@ evidence, so the checker and the researcher see what you saw.
 | What is this small thing, and which label is it under? | crop sheet: three orthogonal cuts through the piece | `render_crops.py` |
 | Which of two segmentations is right here? | disagreement panel | `disagree.py` (`segmentation-check`) |
 
-Pass the workflow's `anatomy.json` as `--names` so the legend names every label, and as `--window` for its display
-window. Open up to four images in one `view_image` call; only the images of your last two calls stay visible,
-so to compare before and after a fix, open both in one call.
+Pass the workflow's `anatomy.json` as `--names` so the legend names every label, and its display window as
+`--window`. Open up to four images in one `view_image` call; your history is summarized now and then, and an image
+that was summarized away shows only as its text line: call `view_image` again to see it. To compare before and
+after a fix, open both in one call.
 
 ## What your eyes are good for
 

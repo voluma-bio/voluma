@@ -38,6 +38,17 @@ export type GridMesh = {
   color: string;
   /** 0 hides the mesh but keeps it loaded. */
   opacity: number;
+  /** A surface sheet also intersects each slice as a trace. */
+  trace?: boolean;
+};
+
+/** Published annotations, mapped from world mm into this grid's source voxels. */
+export type GridAnnotation = {
+  id: string;
+  name: string;
+  points: readonly Zyx[];
+  color: string;
+  opacity: number;
 };
 
 export type GridScene = {
@@ -48,6 +59,7 @@ export type GridScene = {
   image: ZarrSource;
   overlays: Overlay[];
   meshes: GridMesh[];
+  annotations: GridAnnotation[];
 };
 
 /** The array axis a slice pane holds constant, and the axes of its rows and columns. */

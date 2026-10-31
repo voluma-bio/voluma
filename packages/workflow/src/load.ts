@@ -14,7 +14,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
-import { getText, type ObjectStore } from "@voluma/object-store";
+import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import {
@@ -146,6 +146,9 @@ async function* walk(root: string, rel: string): AsyncGenerator<string> {
 
 async function snapshot(dir: string, { store, prefix, root, commit }: LoadOptions) {
   if (await store.head(`${prefix}${DONE}`)) return;
+  // No marker: an earlier attempt was cut off. Its files may be ones this checkout no longer
+  // has, so start from an empty prefix instead of copying over them.
+  await deletePrefix(store, prefix);
   const put = async (path: string) =>
     store.put(`${prefix}${path}`, await readFile(join(root, path)));
   for (const d of [CORE, dir]) {

@@ -11,7 +11,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { ReviewDecisionResponse } from "@voluma/contracts/review";
+import type { AcceptCheckRequest, ReviewDecisionResponse } from "@voluma/contracts/review";
 import {
   ApiError,
   acceptCheck,
@@ -46,15 +46,18 @@ export function invalidateRun(client: QueryClient, runId: string) {
   ]);
 }
 
-export type AcceptVars = { checkId: string; taskId: string };
+export type AcceptVars = Pick<AcceptCheckRequest, "taskId" | "resultRevisionId"> & {
+  checkId: string;
+};
 
 /**
  * "Looks right": accepting one open check on a run's current result. One mutation and one error
  * rule for every place that offers it (the run page, the study's To check list, the task report),
  * so a failure reads the same wherever it happens. Callers show `mutation.error.message`.
  *
- * `revisionId` is the result the check belongs to; without one the mutation can't run (the
- * callers disable their button). A 409 means the result changed since the page loaded: the run,
+ * `revisionId` is the displayed review's revision; each mutation also names the displayed task
+ * result. Without a review revision the mutation can't run (callers disable their button).
+ * A 409 means the result changed since the page loaded: the run,
  * review and study reads are refetched in the background to show the new one. After a success
  * the mutation stays pending until they land.
  */
@@ -69,10 +72,14 @@ export function useAcceptCheck(
   const client = useQueryClient();
   return useMutation<ReviewDecisionResponse, Error, AcceptVars>({
     ...options,
-    mutationFn: async ({ checkId, taskId }) => {
+    mutationFn: async ({ checkId, taskId, resultRevisionId }) => {
       if (!revisionId) throw new Error("no completed result");
       try {
-        return await acceptCheck(runId, checkId, { baseRevisionId: revisionId, taskId });
+        return await acceptCheck(runId, checkId, {
+          baseRevisionId: revisionId,
+          taskId,
+          resultRevisionId,
+        });
       } catch (e) {
         const status = e instanceof ApiError ? e.status : undefined;
         if (status === 409) void invalidateRun(client, runId);
@@ -86,6 +93,8 @@ export function useAcceptCheck(
       }
     },
     onSuccess: async (...args) => {
+      await client.cancelQueries({ queryKey: reviewRunQuery(runId).queryKey });
+      client.setQueryData(reviewRunQuery(runId).queryKey, args[0]);
       await Promise.all([options.onSuccess?.(...args), invalidateRun(client, runId)]);
     },
   });

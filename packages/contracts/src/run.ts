@@ -199,12 +199,14 @@ export const selectedOutputsSchema = z
   .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
 
 /**
- * The provider gateway's per-call rows summed for one run. `costUsd` is the sum of known
- * costs. A call cut off before its usage arrived has an unknown cost (the provider may have
- * billed it): it adds nothing to `costUsd` and is counted in `unknownCostCalls`, so a screen
- * shows "cost unknown", not $0. A call still open counts nowhere. `costUsd`, `calls` and
- * `unknownCostCalls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
- * by that sandbox's name (`<taskId>.worker[.n]`, as in its `sandbox` event).
+ * Gateway requests summed for one run, not SAM operations. `calls` counts every non-open
+ * request, including uploads, responses, deletes, retries, failures and cuts. One successful
+ * SAM operation normally makes three requests. Open requests count nowhere. `costUsd` sums
+ * every known cost, regardless of route or status. Null costs add no dollars and increment
+ * `unknownCostCalls`, so a screen shows "cost unknown", not $0. `bySandbox` covers requests
+ * whose token was minted for a sandbox, by its name (`<taskId>.worker[.n]`, as in its `sandbox`
+ * event). The serialized names stay `providerCalls`, `calls` and `unknownCostCalls`; label
+ * these counts "gateway requests" in UI and operator output, not "SAM calls" or "operations".
  */
 export const providerCallsSchema = z.object({
   costUsd: z.number().nonnegative(),
@@ -267,7 +269,7 @@ export const runSchema = z
       modelCostUsd: z.number().nonnegative(),
       sandboxSeconds: z.number().nonnegative(),
     }),
-    /** What the run's provider calls cost, from the gateway. */
+    /** Gateway request counts and known costs, not SAM-operation counts. */
     providerCalls: providerCallsSchema,
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
@@ -283,7 +285,7 @@ export type Run = z.infer<typeof runSchema>;
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
 const keyField = z.string().min(1).max(512);
 /**
- * A visitor's own credentials: a Meta Model API key. Their sandboxes run on Voluma's Modal
+ * A visitor's own credentials: a Meta API key. Their sandboxes run on Voluma's Modal
  * account. Sent only in requests, never returned; see the header.
  */
 export const visitorKeysSchema = z.object({ metaApiKey: keyField });

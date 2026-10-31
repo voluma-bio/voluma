@@ -16,7 +16,7 @@ file, and Render applies it when the Blueprint syncs (not on a service deploy). 
 |---|---|
 | `voluma-api` | Web service, auto-deployed from `main`. `https://voluma-api.onrender.com` until a custom domain (`app.voluma.bio`) exists |
 | `voluma-gateway` | Web service: the provider gateway. Notes: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md) |
-| `voluma-runner` | Background worker, always on until 2026-11-04, then suspended between runs (its deploy.md). Claims runs over the private network. Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
+| `voluma-runner` | Background worker, always on until 2026-11-04, then suspended between runs (its deploy.md). Claims runs through the API's public URL (why: runner deploy.md, `VOLUMA_API_URL`). Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
 
 Things `render.yaml` holds that are easy to miss:
 
@@ -89,7 +89,7 @@ instance then fails its health check. So every migration must work with the code
 deployed now: expand first, contract in a later PR. The rule is in
 [../AGENTS.md](../AGENTS.md).
 
-**Migrations 0008 (studies) and 0013 (drops `runs.forked_from`) are the exceptions** (decisions.md). 0008 adds `runs.study_id NOT NULL` and drops `runs.workflow_id` in one step, because there are no users and the nullable form would make the old code's run list throw. 0013 drops a column the old code selects, so it fails the same way until traffic moves: merge it only while no run is live. During the overlap every run read and write on the old process fails, because `workflow_id` is gone from the table (claim, heartbeat, list, get, start); runner heartbeats retry (`apps/runner/src/lease.ts`). If the new deploy fails `/health`, the whole run API is down until a fix deploys.
+**Migrations 0008 (studies) and 0013 (drops `runs.forked_from`) are the exceptions** (decisions.md). 0008 adds `runs.study_id NOT NULL` and drops `runs.workflow_id` in one step, because there are no users and the nullable form would make the old code's run list throw. 0013 drops a column the old code selects, so it failed the same way until traffic moved: run claims returned 500 for 8 minutes. No migration may do this again: merges never wait for runs, so a drop ships in a later PR than the code that stops reading it (AGENTS.md). During the overlap every run read and write on the old process fails, because `workflow_id` is gone from the table (claim, heartbeat, list, get, start); runner heartbeats retry (`apps/runner/src/lease.ts`). If the new deploy fails `/health`, the whole run API is down until a fix deploys.
 
 ## What a restart or outage does to runs
 
