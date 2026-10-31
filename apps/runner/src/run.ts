@@ -239,7 +239,12 @@ async function claimBody(
     // visitor model.
     const roleModel = ({ name, model: alias }: AgentDefinition) => {
       const model = ctx.aliases[alias];
-      if (!model) throw new Error(roleModelUnset(name, alias));
+      if (!model) {
+        log(
+          `the ${name} role's model "${alias}" is unset: set RUNNER_MODEL_${alias.toUpperCase()}`,
+        );
+        throw new Error(roleModelUnset(alias));
+      }
       return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").

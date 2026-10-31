@@ -3,9 +3,9 @@
  * (`conversation`), and a box to write to it (`sendRunMessage`). A message is about the task in
  * view, or the item's task after Something's wrong; "The AI sees" names what goes with it: the
  * scan, the task, a picture of the views as they show (`snapshot`) and your marks. A
- * message reopens a finished run for one answer; "Redo" asks the AI to do the task again with
- * what was said. Who may write, and when, is the API's rule (`messages.ts`); the box says why it
- * is off.
+ * message reopens a finished run for one answer: the AI talks it through and, when a redo would
+ * help, offers one (`reply.offer`); "Yes, redo <task>" under its latest reply accepts it (`go`).
+ * Who may write, and when, is the API's rule (`messages.ts`); the box says why it is off.
  */
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
@@ -36,18 +36,29 @@ function closedBecause(run: Run, me: Me): string | undefined {
   return undefined;
 }
 
-/** The API's refusal in plain words (a 403 or 409 carries the server's own); the text stays in the box. */
+/** The API's refusal in its own words when it gave some; the text stays in the box. */
 function refusal(error: Error): string {
-  const status = error instanceof ApiError ? error.status : undefined;
-  if (status === 409)
-    return (
-      (error as ApiError).serverMessage ??
-      "The AI is still answering, or the run can't be reopened. Try again once it finishes."
-    );
-  if (status === 403)
-    return (error as ApiError).serverMessage ?? "You can't write to this run's AI.";
-  if (status === 429) return "Too many runs are going right now. Try again shortly.";
-  return "Couldn't send. Check your connection and try again.";
+  if (!(error instanceof ApiError)) return "Couldn't send. Check your connection and try again.";
+  if (error.serverMessage) return error.serverMessage;
+  if (error.status === 409)
+    return "The AI is still answering, or the run can't be reopened. Try again once it finishes.";
+  if (error.status === 403) return "You can't write to this run's AI.";
+  if (error.status === 429) return "Too many runs are going right now. Try again shortly.";
+  return "Couldn't send. Try again.";
+}
+
+/**
+ * A go the server turned down (409: the plan no longer lets that task be redone), in the task's own
+ * name; the server's text names it by id.
+ */
+function redoRefused(
+  error: Error,
+  tasks: TaskView[],
+  redo: string | undefined,
+): string | undefined {
+  if (redo === undefined || !(error instanceof ApiError) || error.status !== 409) return undefined;
+  const title = tasks.find((t) => t.id === redo)?.title ?? "That task";
+  return `${title} can't be redone now. Ask the AI what changed.`;
 }
 
 /** PNG bytes as plain base64, as the message takes them. */
@@ -72,6 +83,7 @@ export function useMessage({
   marks,
   snapshot,
   viewKey,
+  itemId,
   onSent,
 }: {
   run: Run;
@@ -90,6 +102,8 @@ export function useMessage({
   snapshot: ((maxBytes: number) => Promise<Blob | null | undefined>) | undefined;
   /** Identity of the image/grid being captured, independent of the current camera. */
   viewKey: string | undefined;
+  /** The To check item open on the subject task, so the AI knows which one you mean. */
+  itemId: string | undefined;
   /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
   onSent: (marks: string[]) => void;
 }) {
@@ -100,8 +114,14 @@ export function useMessage({
     fingerprint: string;
     note: string;
     marks: string[];
+    /** The reply whose offer this accepts. */
+    offer?: string;
+    /** The task a go asks to redo. */
+    redo?: string;
     prepared: Promise<{ body: SendRunMessageRequest; unseen: boolean }>;
   }>(undefined);
+  // The offer accepted: its button stays gone while the reopened run catches up.
+  const [accepted, setAccepted] = useState<string>();
   const inFlight = useRef(false);
   // A message without the picture it meant to carry says so once sent.
   const [unseen, setUnseen] = useState(false);
@@ -109,12 +129,13 @@ export function useMessage({
     mutationFn: async (attempt: NonNullable<typeof tried.current>) => {
       const { body, unseen } = await attempt.prepared;
       await sendRunMessage(run.id, body);
-      return { note: attempt.note, marks: attempt.marks, unseen };
+      return { note: attempt.note, marks: attempt.marks, offer: attempt.offer, unseen };
     },
     onSuccess: (sent) => {
       // Words typed while it was sending stay.
       if (sent.note) setText((now) => (now.trim() === sent.note ? "" : now));
       setUnseen(sent.unseen);
+      if (sent.offer) setAccepted(sent.offer);
       tried.current = undefined;
       onSent(sent.marks);
     },
@@ -123,20 +144,25 @@ export function useMessage({
     },
   });
   const closed = closedBecause(run, me);
-  const submit = (go: boolean) => {
+  /** Sends the words, or with `offer` accepts the AI's offer to redo a task (a `go`, nothing else). */
+  const submit = (offer?: { replyId: string; taskId: string }) => {
+    const go = offer !== undefined;
     if (closed !== undefined || inFlight.current || (!go && !text.trim())) return;
-    if (go && !subject) return;
     inFlight.current = true;
-    const note = text.trim();
+    const note = go ? "" : text.trim();
     const carried = !go && subject ? marks : [];
-    const fields = {
-      ...(note && { text: note }),
-      ...(subject && { taskId: subject.id }),
-      ...(go && { go: true as const }),
-      ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
-    };
+    const fields = go
+      ? { taskId: offer.taskId, go: true as const }
+      : {
+          text: note,
+          ...(subject && { taskId: subject.id }),
+          ...(subject && itemId && { itemId }),
+          ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
+        };
+    // A go is told apart by the offer it accepts: a later offer for the same task is a new message.
     const fingerprint = JSON.stringify({
       ...fields,
+      offer: offer?.replyId,
       marks: carried,
       viewKey: !go && snapshot ? viewKey : undefined,
     });
@@ -159,6 +185,8 @@ export function useMessage({
         fingerprint,
         note,
         marks: carried.map((m) => m.id),
+        offer: offer?.replyId,
+        redo: offer?.taskId,
         prepared: picture.then(async (png) => ({
           body: {
             ...body,
@@ -175,7 +203,7 @@ export function useMessage({
     }
     send.mutate(tried.current);
   };
-  return { subject, text, setText, send, unseen, submit, closed };
+  return { subject, text, setText, send, unseen, submit, closed, accepted };
 }
 
 export function AiPanel({
@@ -185,7 +213,7 @@ export function AiPanel({
   about,
   marks,
   views,
-  message: { subject, text, setText, send, unseen, submit, closed },
+  message: { subject, text, setText, send, unseen, submit, closed, accepted },
 }: {
   run: Run;
   scan: string;
@@ -265,6 +293,27 @@ export function AiPanel({
                 <li key={m.id} className="grid gap-1">
                   <span className="text-xs text-muted-foreground">The AI</span>
                   <Markdown text={m.text} className="text-sm" />
+                  {m.offer &&
+                    m === items.at(-1) &&
+                    closed === undefined &&
+                    m.id !== accepted &&
+                    (() => {
+                      const offered = tasks.find((t) => t.id === m.offer?.taskId);
+                      return (
+                        offered && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="justify-self-start"
+                            disabled={send.isPending}
+                            onClick={() => submit({ replyId: m.id, taskId: offered.id })}
+                          >
+                            <RotateCcw aria-hidden />
+                            Yes, redo {offered.title}
+                          </Button>
+                        )
+                      );
+                    })()}
                 </li>
               ),
             )}
@@ -281,13 +330,13 @@ export function AiPanel({
         className="grid gap-2 border-t border-border p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          submit(false);
+          submit();
         }}
       >
         <TextAreaField
           label="Message to the AI"
           hideLabel
-          placeholder="Ask about what you're looking at, or say what should change"
+          placeholder="What's wrong and why? What does the AI need to do to get it right?"
           rows={3}
           maxLength={10_000}
           value={text}
@@ -297,7 +346,7 @@ export function AiPanel({
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              if (!e.repeat && !e.nativeEvent.isComposing) submit(false);
+              if (!e.repeat && !e.nativeEvent.isComposing) submit();
             }
           }}
         />
@@ -308,18 +357,6 @@ export function AiPanel({
         )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex-1" />
-          {subject && (
-            <Button
-              type="button"
-              size="sm"
-              disabled={closed !== undefined || send.isPending}
-              aria-describedby={closed ? closedId : undefined}
-              onClick={() => submit(true)}
-            >
-              <RotateCcw aria-hidden />
-              Redo {subject.title}
-            </Button>
-          )}
           <Button
             type="submit"
             variant="primary"
@@ -338,7 +375,7 @@ export function AiPanel({
         )}
         {send.isError && (
           <p role="alert" className="text-sm text-destructive">
-            {refusal(send.error)}
+            {redoRefused(send.error, tasks, send.variables?.redo) ?? refusal(send.error)}
           </p>
         )}
       </form>

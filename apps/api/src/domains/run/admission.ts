@@ -17,11 +17,21 @@ export type Limits = {
 
 export type Refusal = "concurrent" | "per-caller" | "visitor-active";
 
-/** One message per refusal: the API's answer and a failed run's stored error (a `concurrent` claim just leaves the run queued). */
+/** One message per refusal: the API's answer when a start, resume or reopen is refused. */
 export const refusalMessage: Record<Refusal, string> = {
   concurrent: "The organization's runs-at-once limit was reached.",
   "per-caller": "You already have a run in progress.",
   "visitor-active": "Too many runs with your own keys are active.",
+};
+
+/**
+ * The same refusal as a run's stored error when a claim fails the run (a `concurrent` claim just
+ * leaves it queued): a clause read after "The run stopped: ", as every run error is.
+ */
+export const refusalError: Record<Refusal, string> = {
+  concurrent: "the organization's runs-at-once limit was reached",
+  "per-caller": "you already had a run in progress",
+  "visitor-active": "too many runs with your own keys were active",
 };
 
 export type Usage = {
