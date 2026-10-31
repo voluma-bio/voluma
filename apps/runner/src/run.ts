@@ -429,11 +429,11 @@ async function claimBody(
         },
       );
     const streamFor =
-      (role: ModelRole): RoleSetup["streamFn"] =>
+      (role: ModelRole, threadName: string): RoleSetup["streamFn"] =>
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
         stream.result().then(
-          (reply) => meter.addModelCall(role, usageOf(reply)),
+          (reply) => meter.addModelCall(role, threadName, usageOf(reply)),
           () => {},
         );
         return stream;
@@ -443,7 +443,7 @@ async function claimBody(
       (thread, recorded) => ({
         model: threadModel(primary, recorded),
         thinkingLevel: thinking[modelRole],
-        streamFn: streamFor(modelRole),
+        streamFn: streamFor(modelRole, thread.name),
         systemPrompt: systemPrompt(definition, thread),
         tools: grant(modelRole),
       });
