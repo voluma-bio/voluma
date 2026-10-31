@@ -4,8 +4,8 @@
  * from its History when given an `input`; the run loop decides what to start and when,
  * from the stored log plus `running` (`run-loop.ts`). A thread that throws, or is refused
  * before it starts (`ran` false), is a failure of the run: `failure()` holds the first. One
- * refused because its stored History cannot be resumed (`stale`: a deploy changed its prompt,
- * tools or model) is not: `stale(threadId)` says why, and the run loop restarts the work.
+ * refused because its stored History cannot be resumed (`stale`: a deploy removed or reshaped a tool
+ * it called, or changed its model) is not: `stale(threadId)` says why, and the run loop restarts the work.
  */
 import {
   type StartThreadOptions,
