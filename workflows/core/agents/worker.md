@@ -3,6 +3,9 @@ name: worker
 description: Does one task of an analysis run in the sandbox and leaves the files, views and numbers a checker and the lab judge it by.
 model: wonder
 thinking: medium
+scratch: all
+outputs: write
+checkedBy: check
 tools: [bash, view_image, segment_sam, checkpoint, report_output, submit_task]
 ---
 

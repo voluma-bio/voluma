@@ -141,7 +141,7 @@ and check threads.
   A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
   cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
 - **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates:
-  it starts workers (`start_worker`, or `start_agent {role, task, brief}` for any role its file lists), steers them or sends feedback on a rejected task
+  it starts workers (`start_agent`), steers them or sends feedback on a rejected task
   (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan
   (`change_plan`, recorded as `plan.changed` before it applies) and ends the run
   (`finish_run`). Its tools are `tools/main-tools.ts`; each writes under an id derived from the
