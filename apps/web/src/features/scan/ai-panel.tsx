@@ -62,6 +62,8 @@ export function AiPanel({
   about,
   marks,
   snapshot,
+  draft: text,
+  onDraft: setText,
   onSent,
 }: {
   run: Run;
@@ -80,12 +82,14 @@ export function AiPanel({
    */
   snapshot: ((maxBytes: number) => Promise<Blob | null | undefined>) | undefined;
   /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
+  /** The words being written. The page holds them, so they outlive this panel being closed. */
+  draft: string;
+  onDraft: (text: string) => void;
   onSent: (marks: string[]) => void;
 }) {
   const events = useEvents();
   const items = useMemo(() => conversation(events), [events]);
   const subject = tasks.find((t) => t.id === (about?.taskId ?? task?.id));
-  const [text, setText] = useState("");
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (about) form.current?.querySelector("textarea")?.focus();

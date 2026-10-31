@@ -346,6 +346,7 @@ function ScanReview({
   );
   // Something's wrong: the AI panel opens on the item's task, the composer ready.
   const [about, setAbout] = useState<{ taskId: string; at: number }>();
+  const [draft, setDraft] = useState("");
   const tellAi = (taskOf: string) => {
     setAbout({ taskId: taskOf, at: Date.now() });
     openPanel("scan-ai");
@@ -538,6 +539,8 @@ function ScanReview({
             about={about}
             marks={sendable}
             snapshot={subjectShown ? marking.snapshot : undefined}
+            draft={draft}
+            onDraft={setDraft}
             onSent={(sent) => {
               setAbout(undefined);
               marking.drop(sent);
