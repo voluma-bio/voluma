@@ -39,11 +39,11 @@ we add our own pieces only when a real run needs them. The agent runs
 outside the sandbox, so credentials never enter it. A run is a tree of
 threads: a supervisor (the root, code), the main agent, workers (one per task),
 and check threads.
-- **Event log.** Ours, kept separately from Pi's history: the `threads` and
-  `events` tables in Postgres, behind the run domain's API. Each event is saved
+- **Event log.** Ours, kept separately from Pi's history: the `events`
+  table in Postgres, behind the run domain's API, keyed `(run_id, id)`. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the
   UI and the review read this log. Pi's own messages go in `pi_messages`,
-  one row per message, so a thread can resume.
+  one row per message, keyed `(run_id, thread_id, idx)`, so a thread can resume.
 - **Sandboxes.** One Modal sandbox per sandbox, CPU or GPU, created by the Node
   runner through the `Sandbox` port (`packages/harness/src/ports/sandbox.ts`); the
   adapter is `apps/runner/src/modal-sandbox.ts`, the only file that imports `modal`
@@ -83,11 +83,13 @@ and check threads.
   message into the thread (Pi's steering queue; one sent before the loop starts is queued
   for it) and answers false once it ended.
   `threads.ts` is the run's registry of what is running in this process (start or resume a
-  thread, `send`, `abort`, wait for one to go idle) and holds no run state. Thread ids are
-  unique across runs (History is keyed by the thread id alone) and are built by
-  `packages/harness/src/thread-id.ts`: the root is `<runId>.supervisor`, the main agent `<runId>.main`,
-  the others `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log
-  has started for that thread, so a restart never reuses a thread. `thread.started` carries the task id
+  thread, `send`, `abort`, wait for one to go idle) and holds no run state. A thread's id is opaque, unique within its run
+  only (every row and query is keyed by run): a new thread gets `uuid5(runId, name)`
+  (`packages/harness/src/thread-id.ts`), minted once when it first starts. Its `name` (`supervisor`,
+  `main`, `<taskId>.<role>`, plus `.<n>` for the n-th) is on `thread.started`, where n is how many the
+  log has started for that role, so a restart never reuses a thread. Everything after the mint reads
+  the id from the record; runs recorded before keep their `<runId>.<name>` ids, and a run's root is
+  looked up in its log (`rootThreadOf`), never rebuilt. `thread.started` carries the task id
   for a worker or check thread.
 - **Pi's batch rules shape the tools.** Pi runs the tool calls of one reply as a batch: in
   parallel, unless any tool in it is `sequential`, which makes the whole batch sequential. A
@@ -131,7 +133,7 @@ and check threads.
   A stale mark stops every worker and check of the dependent the same way, whatever its status.
   A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
   cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
-- **The main agent** (`<runId>.main[.n]`, kind `main`) is the one model thread that coordinates:
+- **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates:
   it starts workers (`start_worker`), steers them or sends feedback on a rejected task
   (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan
   (`change_plan`, recorded as `plan.changed` before it applies) and ends the run
@@ -290,8 +292,8 @@ Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended r
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how Storybook shows both themes side by side. The app is light on home and study
-pages and dark in the 3D review. Tailwind's default palette is removed.
+how Storybook shows both themes side by side. The app uses light chrome on home, study
+and scan review; the 3D and slice image wells stay dark. Tailwind's default palette is removed.
 
 The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
 `primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
@@ -308,7 +310,7 @@ the CSS stays the one source.
 
 ## Scan review
 
-One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (dark),
+One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (light chrome, dark image wells),
 with the selection in the URL (`task`, `item`, `agent`); the old `/runs/:id/live` and
 `/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
 conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and

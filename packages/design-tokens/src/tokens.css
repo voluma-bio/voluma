@@ -6,10 +6,9 @@
  * has no name for keeps ours (`select*`, `check-*`, `info-*`, `done*`,
  * `idle`, `mark-*`, the viewer and axis tokens).
  *
- * Two themes share one set of names, and the whole app switches between
- * them: light on home and study pages, dark in the 3D scan review. A theme
- * applies to the subtree under `data-theme`, so Storybook shows both side by
- * side.
+ * Two themes share one set of names. The app uses light chrome, including scan review;
+ * the viewer's image wells stay dark in both themes. A theme applies to the subtree
+ * under `data-theme`, so Storybook shows both side by side.
  *
  * Colour roles carry one meaning each:
  *   primary     the one main action on a view (ink-filled)

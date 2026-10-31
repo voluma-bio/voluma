@@ -231,7 +231,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
       // from here; the run loop then stops it.
       if (stored.length > 0 && stored[0]?.role !== "system") {
-        throw new ThreadStale("the stored history does not start with a system message");
+        throw new ThreadStale("its stored history does not start with a system message");
       }
       // The model is part of a thread's identity, like its prompt: History is the record of it
       // (an assistant message names the model that wrote it), not `thread.started`, which may
@@ -242,8 +242,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         (wrote.provider !== options.model.provider || wrote.model !== options.model.id)
       ) {
         throw new ThreadStale(
-          `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
-            "a resumed thread keeps its model",
+          `it was written by the model ${wrote.provider}/${wrote.model} and this run uses ${options.model.provider}/${options.model.id}; a thread keeps its model`,
         );
       }
       if (stored.length > 0) {
@@ -560,7 +559,7 @@ function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTo
       JSON.stringify(withoutDescriptions(now.parameters)) !==
         JSON.stringify(withoutDescriptions(d.parameters))
     ) {
-      throw new ThreadStale(`the input of ${d.name} changed since the thread started`);
+      throw new ThreadStale(`the input of its tool ${d.name} changed since it started`);
     }
     return {
       label: d.name,

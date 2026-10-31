@@ -36,12 +36,13 @@ import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/co
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
+import { NO_WORKFLOW_DIR, roleModelUnset } from "@voluma/harness/messages";
 import { usageOf } from "@voluma/harness/model-usage";
 import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import {
   type ModelSetup,
-  rootThreadIdOf,
+  rootThreadOf,
   type Supervised,
   superviseRun,
 } from "@voluma/harness/supervise-run";
@@ -215,7 +216,7 @@ async function claimBody(
     // message. The run's pin names the workflow directory; its files are snapshotted from this
     // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
     const workflowDir = run.workflows[0]?.path;
-    if (!workflowDir) throw new Error("the run pins no workflow directory");
+    if (!workflowDir) throw new Error(NO_WORKFLOW_DIR);
     const definition = await loadWorkflow(workflowDir, {
       store: objects,
       prefix: workflowSnapshotPrefix(runId),
@@ -229,10 +230,7 @@ async function claimBody(
     const roleModel = (role: ModelRole) => {
       const alias = definition.agents[role].model;
       const model = ctx.aliases[alias];
-      if (!model)
-        throw new Error(
-          `the ${role} role names model "${alias}", which RUNNER_MODEL_${alias.toUpperCase()} does not set`,
-        );
+      if (!model) throw new Error(roleModelUnset(role, alias));
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").
@@ -280,11 +278,10 @@ async function claimBody(
     const stored = await client.storedEvents();
     // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
     // run to different dependencies. A run recorded before the field existed takes this runner's.
+    const root = rootThreadOf(runId, stored);
     const pinnedImage = stored
       .flatMap((e) =>
-        e.type === "thread.started" && e.threadId === rootThreadIdOf(runId)
-          ? [e.payload.sandboxImage]
-          : [],
+        e.type === "thread.started" && e.threadId === root ? [e.payload.sandboxImage] : [],
       )
       .find((image) => image !== undefined);
     const sandboxImage = pinnedImage ?? config.sandbox.image;
@@ -345,6 +342,11 @@ async function claimBody(
             ...options,
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
+            // Meta's default prompt cache is in-memory and evicted under pressure or after
+            // inactivity. Runs have long tool calls and many independent threads, so ask the
+            // Responses API to keep Meta prefixes for up to 24 hours. Anthropic long retention
+            // costs more per cache write, so leave its existing setting unchanged.
+            ...(m.provider === "meta" && { cacheRetention: "long" }),
           }),
         (attempt, delayMs, error) => {
           log(
