@@ -261,6 +261,9 @@ importers:
       '@types/react-dom':
         specifier: 'catalog:'
         version: 19.3.0(@types/react@19.3.0)
+      remark-gfm:
+        specifier: 'catalog:'
+        version: 4.0.1
       storybook:
         specifier: ^10.6.5
         version: 10.6.5(@types/react@19.3.0)(react@19.3.1)

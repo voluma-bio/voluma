@@ -3,6 +3,7 @@
 
 import type { StorybookConfig } from "@storybook/react-vite";
 import tailwindcss from "@tailwindcss/vite";
+import remarkGfm from "remark-gfm";
 
 const config: StorybookConfig = {
   framework: "@storybook/react-vite",
@@ -11,7 +12,13 @@ const config: StorybookConfig = {
     "../../../packages/ui/src/**/*.stories.tsx",
     "../../../packages/run-view/src/**/*.stories.tsx",
   ],
-  addons: ["@storybook/addon-docs"],
+  // remark-gfm: the docs pages use Markdown tables.
+  addons: [
+    {
+      name: "@storybook/addon-docs",
+      options: { mdxPluginOptions: { mdxCompileOptions: { remarkPlugins: [remarkGfm] } } },
+    },
+  ],
   core: { disableTelemetry: true },
   viteFinal: (vite) => ({ ...vite, plugins: [...(vite.plugins ?? []), tailwindcss()] }),
 };

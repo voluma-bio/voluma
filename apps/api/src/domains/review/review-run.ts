@@ -24,9 +24,8 @@ export function reviewRun({
       status: t.status,
       resultRevisionId: t.resultRevisionId,
       checker: t.checker,
-      // No review chat yet: it is one thread per run, and its contract is still to come.
-      threads: { ...t.threads, chat: null },
-      models: { ...t.models, chat: null },
+      threads: t.threads,
+      models: t.models,
       measurements: t.measurements,
       scores: t.scores,
       missing: t.missing,

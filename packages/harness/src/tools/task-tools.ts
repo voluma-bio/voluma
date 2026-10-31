@@ -31,11 +31,12 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * printed. Every file the call names (the output's own, and `evidence`) given as a path becomes the ref the schema
  * takes; a path that is no file of this task is refused with the reason.
  */
-export function prepareReportOutput(args: unknown): unknown {
+export function prepareReportOutput(args: unknown, threadNames: ReadonlySet<string>): unknown {
   if (!isRecord(args) || !isRecord(args.output)) return args;
   const { taskId, output, evidence } = args;
   if (typeof taskId !== "string") return args;
-  const ref = (file: unknown) => (typeof file === "string" ? refOf(taskId, file) : file);
+  const ref = (file: unknown) =>
+    typeof file === "string" ? refOf(taskId, file, threadNames) : file;
   const { structure, surface, volume } = output;
   return {
     ...args,
@@ -62,7 +63,7 @@ export function prepareReportOutput(args: unknown): unknown {
  * - `toCheck` given as a string, or with its words under `text`, becomes the `title` it needs;
  *   `text` beside a `title` is appended to the checkpoint's `text`.
  */
-export function prepareCheckpoint(args: unknown): unknown {
+export function prepareCheckpoint(args: unknown, threadNames: ReadonlySet<string>): unknown {
   if (!isRecord(args)) return args;
   const { title, ...rest } = args;
   const out: Record<string, unknown> = { ...rest };
@@ -71,7 +72,7 @@ export function prepareCheckpoint(args: unknown): unknown {
   if (Array.isArray(out.evidence)) {
     const { taskId } = out;
     out.evidence = out.evidence.map((f) => {
-      if (typeof f === "string" && typeof taskId === "string") return refOf(taskId, f);
+      if (typeof f === "string" && typeof taskId === "string") return refOf(taskId, f, threadNames);
       if (!isRecord(f) || !isRecord(f.path)) return f;
       const root = f.path.root ?? f.root;
       return f.root !== undefined && f.path.root !== undefined && f.root !== f.path.root
@@ -112,7 +113,7 @@ export function taskTools(runtime: TaskRuntime) {
     description:
       'Record a milestone under a task, in plain language, with the files it rests on. Arguments: {taskId, text, summary, evidence: [path or {root, path}], verdict?, toCheck?: {title, focus?}}; there is no top-level title, and `text` is the milestone and `summary` one or two plain sentences for the researcher. Set toCheck when you are unsure of something a person should look at: `title` says what to look at in a few words, and `text` explains. A check thread sets verdict ("passed" or "needs-review") and puts the values it re-derived in `text`: it does not report outputs.',
     input: checkpointInputSchema,
-    prepare: prepareCheckpoint,
+    prepare: (args) => prepareCheckpoint(args, runtime.threadNames()),
     sequential: true,
     execute: (input, ctx) => result(() => runtime.checkpoint(caller(ctx), input)),
   };
@@ -121,7 +122,7 @@ export function taskTools(runtime: TaskRuntime) {
     description:
       "Report one result of a task: a measurement, score, structure, annotation, volume or file. Reuse the outputId when you redo the task.",
     input: reportOutputInputSchema,
-    prepare: prepareReportOutput,
+    prepare: (args) => prepareReportOutput(args, runtime.threadNames()),
     sequential: true,
     execute: (input, ctx) => result(() => runtime.reportOutput(caller(ctx), input)),
   };

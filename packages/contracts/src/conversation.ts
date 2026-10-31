@@ -7,14 +7,10 @@ export type ConversationItem =
       from: "person";
       /** The `person.message` event id. */
       id: string;
-      /** The id the panel sent with the message (`sendRunMessageRequestSchema.id`), the key of `runMessageSnapshotUrl`. */
-      messageId: string;
       seq: number;
       at: string;
       text: string;
       marks: Mark[];
-      /** The message has a view snapshot: `GET /api/review/runs/:runId/messages/:messageId/snapshot`. */
-      hasSnapshot: boolean;
       taskId?: string;
       go: boolean;
     }
@@ -32,17 +28,14 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
   const items: ConversationItem[] = [];
   for (const e of events) {
     if (e.type === "person.message") {
-      const { text, marks, snapshotKey, taskId, go } = e.payload;
-      const messageId = e.id.slice(e.id.indexOf(".person:") + ".person:".length);
+      const { text, marks, taskId, go } = e.payload;
       items.push({
         from: "person",
         id: e.id,
-        messageId,
         seq: e.seq,
         at: e.createdAt,
         text: text ?? "",
         marks: marks ?? [],
-        hasSnapshot: snapshotKey !== undefined,
         ...(taskId && { taskId }),
         go: go === true,
       });

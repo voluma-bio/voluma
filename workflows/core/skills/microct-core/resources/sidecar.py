@@ -21,6 +21,7 @@ Library use (other resources import this file):
   sidecar.value(v, unit, definition, kind='measurement', **provenance)   # one entry of a result record
   sidecar.emit_values(out_json, values, meta=None, objects=None, **fields)   # write the result record, print it (below)
   sidecar.save_image(fig, path)  # the image limits below, JPEG
+  sidecar.protocol(spec_path, output_id, *keys)   # one output's entry of the workflow's protocol.json (below): the numbers and ids a script uses
   sidecar.load_points(paths, grid_id)   # {name: [z, y, x]} merged from points files (`pick.py` writes one per view); refuses another grid
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
   sidecar.parser(__doc__)  # the argparse parser every resource uses: the docstring is the `--help` text, defaults appended;
@@ -33,6 +34,11 @@ A script that places something (`objects.py`) adds `"objects": {id: entry}` to t
 --objects` takes the record.
 `id` is the output id the caller asks for (a flag or a spec key; the workflow's `outputs.json` binds to it), `kind` is
 `measurement` or `diagnostic` (a number that helps judge a measurement but is not one), and `value` may be null.
+
+Protocol spec: a workflow's `protocol.json` is `{output id: {parameter: value, ...}}`, keyed by the ids of its `outputs.json`.
+A script that measures or cuts a region for an output takes `--spec protocol.json` and reads that output's parameters and the ids
+its values are written under from the entry, so no protocol number or output id is a flag the caller retypes. A script lists the
+keys it needs; `protocol` refuses an entry that lacks one. A core script has no default for a protocol number.
 
 CLI (for an array you made yourself):
   python sidecar.py --array out.npy --like hu.json [--input a.npy ...] [--param key=value ...]
@@ -198,6 +204,18 @@ def load_points(paths, grid_id):
                 fail(f'point "{p["name"]}" is in both {source[p["name"]]} and {path}: give each point one name')
             merged[p['name']], source[p['name']] = zyx, path
     return merged
+
+
+def protocol(spec_path, output_id, *keys):
+    """The entry of `output_id` in the protocol spec at `spec_path`; it must hold every key in `keys`."""
+    spec = json.loads(Path(spec_path).read_text())
+    if output_id not in spec:
+        fail(f'{spec_path} has no entry for the output {output_id!r}: its entries are {sorted(spec)}')
+    entry = spec[output_id]
+    missing = [k for k in keys if k not in entry]
+    if missing:
+        fail(f'{spec_path}: the entry for {output_id!r} lacks {missing}, which this script reads')
+    return entry
 
 
 def emit(**fields):

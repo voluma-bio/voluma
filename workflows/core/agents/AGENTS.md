@@ -10,13 +10,13 @@ task read) and its examples of work done right.
 |---|---|
 | `main.md` | Coordinates the run: plans it, starts a worker per task, routes the checkers' questions, decides what is fixed, accepted or skipped |
 | `worker.md` | Does one task in its sandbox and leaves the files, views and numbers it is judged by |
-| `checker.md` | Inspects one submitted task from its files, blind to the worker's reasoning, and gives one verdict |
+| `check.md` | Inspects one submitted task from its files, blind to the worker's reasoning, and gives one verdict |
 
-Every `.md` here except `AGENTS.md` is parsed as a role file; `main.md`, `worker.md` and `checker.md`
+Every `.md` here except `AGENTS.md` is parsed as a role file; `main.md`, `worker.md` and `check.md`
 are required. A stray `README.md`, or a draft without frontmatter, fails every run's load. A run
 snapshots the files with its workflow (`packages/workflow/src/load.ts`) and reads them from the
 snapshot, so a resumed thread gets the text it began with; a changed file reaches only runs started
-after it.
+after it. A snapshot that has `checker.md` and no `check.md` (a run from before the rename) is refused at load: that run can't be resumed.
 
 ## Frontmatter
 

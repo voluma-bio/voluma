@@ -424,7 +424,7 @@
     "on": ["roi-metaphyseal"],
     "context": ["growth-plate-distal-face"],
     "unit": "mm³",
-    "region": "ROI-3: from 50 µm below the growth plate, 200 µm long, 20 µm clear of cortical bone",
+    "region": "ROI-3: a band below the growth plate, clear of cortical bone (offsets in protocol.json)",
     "task": "metaphyseal-roi",
     "sourceRef": "deck #16"
   },

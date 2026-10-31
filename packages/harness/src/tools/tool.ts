@@ -2,14 +2,15 @@
  * What a harness tool is: a zod input schema and `execute`. Tools never import
  * Pi; the Pi adapter wraps them. The context carries what a tool may touch.
  */
-import type { ThreadKind } from "@voluma/contracts/events";
+
 import type { z } from "zod";
 import type { Sandbox } from "../ports/sandbox";
+import type { Role } from "../thread-log";
 
 export interface ToolContext {
   threadId: string;
   /** The calling thread's kind and, for a worker or check thread, its task. */
-  kind: ThreadKind;
+  kind: "main" | Role;
   taskId?: string;
   toolCallId: string;
   /** How many tool calls the reply that made this call holds, itself included. */
