@@ -23,6 +23,29 @@ import { RotateCcw, Send } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { describe, type YourMark } from "./marks-panel";
 
+/**
+ * The box's text, kept in this tab's sessionStorage so a reload (by hand, or onto a new deploy)
+ * keeps it. A send clears the box and with it the draft.
+ */
+function useDraft(key: string) {
+  const [text, setText] = useState(() => {
+    try {
+      return sessionStorage.getItem(key) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    try {
+      if (text) sessionStorage.setItem(key, text);
+      else sessionStorage.removeItem(key);
+    } catch {
+      // Without storage the draft lives only as long as the page.
+    }
+  }, [key, text]);
+  return [text, setText] as const;
+}
+
 /** Why this person can't write to the run's AI now, or nothing when they can. */
 function closedBecause(run: Run, me: Me): string | undefined {
   if (run.example) return "Example runs can't be changed.";
@@ -108,7 +131,7 @@ export function useMessage({
   onSent: (marks: string[]) => void;
 }) {
   const subject = tasks.find((t) => t.id === (about?.taskId ?? task?.id));
-  const [text, setText] = useState("");
+  const [text, setText] = useDraft(`voluma:ai-draft:${run.id}`);
   // The API deduplicates by id alone. A retry must keep the entire request, including its PNG.
   const tried = useRef<{
     fingerprint: string;

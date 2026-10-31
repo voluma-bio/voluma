@@ -20,7 +20,7 @@ export function followDeploys(running: string) {
     window.location.reload();
   });
 
-  const editing = trackEditing();
+  const pointer = trackPointer();
   let leaving: Promise<boolean> | undefined;
   let checking: Promise<boolean> | undefined;
   // A write's mismatch sends the tab Home rather than reloading the form that made it.
@@ -35,7 +35,7 @@ export function followDeploys(running: string) {
         return false;
       }
       leaving = Promise.resolve(true);
-      editing.whenIdle(() => {
+      pointer.whenIdle(() => {
         if (home) window.location.assign("/");
         else window.location.reload();
       });
@@ -76,33 +76,24 @@ function claim(key: string): boolean {
   }
 }
 
-const TYPED = new Set(["text", "search", "email", "url", "tel", "password", "number"]);
-
 /**
- * Whether the person is mid-edit: a pointer held down (drawing a mark, dragging) or a focused text
- * field holding text. `whenIdle` runs `leave` now if they aren't, or the tab is hidden; else at
- * the next point they stop: the tab hidden, focus leaving the field, the pointer released.
+ * Whether the person is mid-gesture: a pointer held down (drawing a mark, dragging). `whenIdle`
+ * runs `leave` now if not, or when the tab is hidden; else once the pointer is released. Typed
+ * text needs no wait: The AI box keeps its draft across a reload (`ai-panel.tsx`).
  */
-function trackEditing() {
+function trackPointer() {
   let pointerDown = false;
   window.addEventListener("pointerdown", () => (pointerDown = true), true);
   for (const type of ["pointerup", "pointercancel"])
     window.addEventListener(type, () => (pointerDown = false), true);
 
-  const busy = () => {
-    if (document.visibilityState === "hidden") return false;
-    if (pointerDown) return true;
-    const field = document.activeElement;
-    if (field instanceof HTMLTextAreaElement) return field.value !== "";
-    if (field instanceof HTMLInputElement) return TYPED.has(field.type) && field.value !== "";
-    return field instanceof HTMLElement && field.isContentEditable && field.textContent !== "";
-  };
+  const busy = () => pointerDown && document.visibilityState !== "hidden";
 
   return {
     whenIdle(leave: () => void) {
       if (!busy()) return leave();
-      const events = ["visibilitychange", "focusout", "pointerup", "pointercancel"] as const;
-      // After the event: focus has moved, and a release's click has run.
+      const events = ["visibilitychange", "pointerup", "pointercancel"] as const;
+      // After the event, so a release's click has run.
       let left = false;
       const check = () =>
         setTimeout(() => {

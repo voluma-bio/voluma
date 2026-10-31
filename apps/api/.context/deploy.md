@@ -88,9 +88,9 @@ one, moves traffic once `/health` answers, then sends the old one SIGTERM (SIGKI
 loads is gone, it reloads at once. When an API response fails the schema it was built with
 (`ContractError`, `@voluma/api-client`), it fetches `/` and compares the entry bundle there with
 the one it runs, looking again for about 30 s while traffic moves to the new instance. A
-different bundle means a deploy: the tab reloads once the person stops editing (no held pointer,
-no focused field with text, or the tab hidden), or goes Home if the failed call was a write, so
-they see what it made. The same bundle means the app's own bug, and the error shows. A tab
+different bundle means a deploy: the tab reloads once no pointer is held (a mark being drawn
+finishes first), or goes Home if the failed call was a write, so they see what it made. The AI
+box keeps its draft in sessionStorage, so typed text survives. The same bundle means the app's own bug, and the error shows. A tab
 reloads toward a given bundle at most once, so a failing deploy can't loop.
 
 **The migration runs while the previous code still serves**, and stays applied if the new
