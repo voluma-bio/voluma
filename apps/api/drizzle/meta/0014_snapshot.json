@@ -1,5 +1,5 @@
 {
-  "id": "c507d525-0b9a-43a6-bfe3-997571086712",
+  "id": "ebcf6121-d8ee-48cc-a726-e917bd54adb3",
   "prevId": "35af82d4-ebb4-4762-a1ee-b437f4c1be17",
   "version": "7",
   "dialect": "postgresql",
@@ -117,9 +117,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -127,8 +127,8 @@
       "uniqueConstraints": {
         "events_run_seq": {
           "name": "events_run_seq",
-          "nullsNotDistinct": false,
-          "columns": ["run_id", "seq"]
+          "columns": ["run_id", "seq"],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -379,9 +379,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "struck_lease_token": {
-          "name": "struck_lease_token",
-          "type": "text",
+        "claimable_after": {
+          "name": "claimable_after",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -445,9 +445,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "runs_started_by": {
           "name": "runs_started_by",
@@ -460,9 +460,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "runs_study": {
           "name": "runs_study",
@@ -475,9 +475,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -560,9 +560,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -691,9 +691,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -823,9 +823,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "provider_calls_open": {
           "name": "provider_calls_open",
@@ -844,9 +844,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -859,10 +859,10 @@
   },
   "enums": {},
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

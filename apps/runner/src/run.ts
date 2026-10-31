@@ -99,8 +99,8 @@ const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
 /**
- * How long a shutdown release waits for its events to reach an API that may be down before it
- * reports. The report's retries then get what is left of the shutdown budget (`main.ts`): a
+ * How long a shutdown release waits for its events and final usage to reach an API that may be
+ * down before it reports. The report's retries then get what is left of the shutdown budget (`main.ts`): a
  * release that never reaches the server is recorded as `lease-expired`, unless a later claim
  * has not yet swept the lease (`takeBackStrike`, `pg-queue.ts`).
  */
@@ -145,7 +145,12 @@ export function reportFor(
   error?: string,
 ): ReportRequest["report"] | undefined {
   if (stopped === "stop" || stopped === "lease-lost") return undefined;
-  if (stopped === "self-stop" || stopped === "loop-stalled" || stopped === "shutdown")
+  if (
+    stopped === "self-stop" ||
+    stopped === "loop-stalled" ||
+    stopped === "refused" ||
+    stopped === "shutdown"
+  )
     return { kind: "released", reason: stopped };
   return error === undefined
     ? { kind: "ended", outcome: "completed" }
@@ -230,7 +235,6 @@ async function claimBody(
       client,
       meter,
       onStop: stop,
-      onFail: (message) => scope.fail?.(new Error(message)),
       onRoundTrip: heartbeatRoundTrip,
       log,
     });
@@ -340,10 +344,11 @@ async function claimBody(
         },
       },
       runId,
-      () => stop("lease-lost"),
+      (reason) => stop(reason === "lease-lost" ? "lease-lost" : "self-stop"),
       undefined,
       stored,
       live,
+      halt.signal,
     );
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.
@@ -560,14 +565,15 @@ async function claimBody(
       }
     }
     shutdown.removeEventListener("abort", onShutdown);
-    const flushed = (async () => {
+    lease?.halt();
+    const wrapUp = (async () => {
       await live?.flush();
       await events?.flush();
+      if (report) await lease?.sendFinalUsage();
     })();
     await (report?.kind === "released" && report.reason === "shutdown"
-      ? Promise.race([flushed, delay(RELEASE_FLUSH_MS)])
-      : flushed);
-    await lease?.end(report !== undefined);
+      ? Promise.race([wrapUp, delay(RELEASE_FLUSH_MS)])
+      : wrapUp);
     if (report) {
       const stored = await client.report(report).catch((e) => {
         log(`report failed: ${e instanceof Error ? e.message : e}`);

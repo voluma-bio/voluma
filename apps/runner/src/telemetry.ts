@@ -43,10 +43,15 @@ const BLOCK_MS = 1_000;
 const ms = (ns: number) => Math.round(ns / 1e6);
 
 let roundTrips: number[] = [];
-let stalledTotal = 0;
+let soloStalledTotal = 0;
 
-/** Milliseconds the event loop has spent blocked since startup (sampled, so a floor); 0 before `startTelemetry`. */
-export const loopStalledMs = () => stalledTotal;
+/**
+ * Milliseconds the event loop has spent blocked while at most one run was live, since startup
+ * (sampled, so a floor); 0 before `startTelemetry`. A block while two runs share the process
+ * can't be pinned on either, so it isn't counted: a run only reports `loop-stalled` for
+ * blocking it was alone for (`lease.ts`).
+ */
+export const soloStalledMs = () => soloStalledTotal;
 
 export function heartbeatRoundTrip(millis: number) {
   roundTrips.push(millis);
@@ -97,7 +102,7 @@ export function startTelemetry(log: (line: string) => void) {
     const now = performance.now();
     const late = now - last - SAMPLE_MS;
     last = now;
-    if (late > SAMPLE_MS) stalledTotal += late;
+    if (late > SAMPLE_MS && scopes.size <= 1) soloStalledTotal += late;
     if (late > BLOCK_MS)
       log(
         `telemetry loop-block ${Math.round(late)}ms; in flight: ${inFlightCalls().join("; ") || "no tool"}`,

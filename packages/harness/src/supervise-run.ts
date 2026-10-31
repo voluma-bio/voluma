@@ -58,28 +58,28 @@ export interface SuperviseRunOptions {
   signal: AbortSignal;
 }
 
-/** The run's root thread. Ids are minted here and in `run-loop.ts` and read nowhere else. */
-export const rootThreadIdOf = (runId: string) => `${runId}.supervisor`;
+const ROOT_NAME = "supervisor";
+
+/** The run's root thread. Ids are minted here and in `run-loop.ts`; the sites that still parse one are those #312 deferred (ingest `inRun`, ops `run-dump.ts`, `seed-example.ts`, `backfill.ts`). */
+export const rootThreadIdOf = (runId: string) => `${runId}.${ROOT_NAME}`;
 
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, recorder, signal } = options;
   const rootThreadId = rootThreadIdOf(runId);
-  // A stored log means an earlier claim ran, and so does `previousClaim`, which says why it
-  // ended: a claim cut off before any event reached the API (an outage right after the claim)
-  // left no log. A run claimed before the API recorded reasons has none, and its resume says
-  // only "restarted".
-  const resumed = recorder.events().length > 0 || options.previousClaim !== undefined;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
+    name: ROOT_NAME,
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,
   });
   // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
-  // `claim.started` has one again, and says that instead.
+  // `claim.started` has one again, and says that instead. The schema's rule is
+  // `resumed === (after !== undefined || reopened)`; deriving it here keeps the two in step,
+  // and covers a claim cut off before any event reached the API (no log, but a `previousClaim`).
   const reopened = threadLog(recorder.events()).reopenPending && !options.previousClaim;
   recorder.emit(rootThreadId, "claim.started", {
-    resumed,
+    resumed: options.previousClaim !== undefined || reopened,
     ...(options.previousClaim && { after: options.previousClaim }),
     ...(reopened && { reopened }),
   });

@@ -24,7 +24,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
-import { type ClaimEnd, endClaim, stalledError } from "./claim-progress";
+import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, GUEST_KEYS_MESSAGE, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
@@ -141,7 +141,7 @@ async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason:
     .where(and(eq(runs.id, runId), eq(runs.struckLeaseToken, leaseToken)))
     .for("update");
   // A counted reason keeps its strike; an ended run (the sweep failed it) stays ended.
-  if (!run || run.state === "ended" || reason === "loop-stalled") return false;
+  if (!run || run.state === "ended" || isCounted(reason)) return false;
   await tx
     .update(runs)
     .set({

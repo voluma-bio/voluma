@@ -67,8 +67,8 @@ named by the thread's `name`, its id without the run id). `RunLayout.forThread(r
   locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
   citation resolves to the worker's file.
 - Readers take a thread's `name`, `role` and `taskId` from its `ThreadRecord`, never from its id.
-  `threadName` (`packages/contracts/src/threads.ts`) is the one parser of an id; ids are minted only
-  in `run-loop.ts` (`nextThread`) and `supervise-run.ts` (`rootThreadIdOf`). The runner knows a
+  The name is minted with the id (`nextThread` in `run-loop.ts`; `supervisor` in `supervise-run.ts`)
+  and recorded as `thread.started.name`, repeated by every resume; no code parses an id. The runner knows a
   thread's layout, and so its name, by id from `run.ts`'s `laidOut` map (filled by the run loop).
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.
@@ -163,6 +163,7 @@ who ends it:
    then closes its sandbox (no `stopped` event is stored); the service waits up to 50 s (Render's grace is 60 s), and the release retries for what is left of it after a 15 s cap on the flush of events (the final usage is always sent), so a deploy that overlaps an API outage is still recorded as `shutdown`. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
+   The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
@@ -430,7 +431,7 @@ script, from its docstring's first line; the loader reads it from the snapshot).
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run."
+changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
@@ -463,7 +464,7 @@ never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDepen
 failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
 (`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
 later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
-and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`. Neither counts toward the API's no-progress limit (the process was alive and no call got an answer). A self-stop whose window the event loop spent mostly blocked (`loopStalledMs`, `telemetry.ts`) reports `loop-stalled`, which counts; a heartbeat the API refuses with a 4xx fails the run instead (resending the same body cannot succeed). `lease-expired`, a runner that said nothing, counts too.
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`. Neither counts toward the API's no-progress limit (the process was alive and no call got an answer). A self-stop whose window the event loop spent mostly blocked while this was the only live run (`soloStalledMs`, `telemetry.ts`) reports `loop-stalled`, which counts; with two runs live the block is nobody's to count, so both report `self-stop`. A heartbeat the API refuses with a 4xx reports `refused`, which counts (resending the same body cannot succeed, and the next claim starts a fresh usage meter). `lease-expired`, a runner that said nothing, counts too.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The

@@ -56,7 +56,7 @@
  * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
  * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
- * counts consecutive claims that end `loop-stalled` or `lease-expired` without run-state
+ * counts consecutive claims that end `loop-stalled`, `refused` or `lease-expired` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
  * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
@@ -118,10 +118,11 @@ export const runnerIdSchema = z.string().min(1);
 
 /**
  * Why the runner gave up a lease. `loop-stalled` is a self-stop whose window the runner's own
- * event loop spent mostly blocked: the runner was alive but the run kept it from heartbeating,
- * so it counts toward the no-progress limit like an expired lease.
+ * event loop spent mostly blocked while it held only this run: the run kept the runner from
+ * heartbeating. `refused` is a heartbeat the API answered with a 4xx that a retry cannot fix.
+ * Both count toward the no-progress limit like an expired lease.
  */
-export const releaseReasonSchema = z.enum(["shutdown", "self-stop", "loop-stalled"]);
+export const releaseReasonSchema = z.enum(["shutdown", "self-stop", "loop-stalled", "refused"]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
 /**

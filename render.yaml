@@ -167,12 +167,10 @@ services:
         - pnpm-workspace.yaml
     envVars:
       - fromGroup: voluma-shared
-      # The API on the private network: host and port, no scheme (the runner adds http://).
+      # The API's public URL, not the private network: on an API deploy the private hostname kept
+      # pointing at the exiting instance for 30+ s, so heartbeats failed and runs self-stopped.
       - key: VOLUMA_API_URL
-        fromService:
-          type: web
-          name: voluma-api
-          property: hostport
+        value: https://voluma-api.onrender.com
       - key: VOLUMA_API_TOKEN
         fromService:
           type: web

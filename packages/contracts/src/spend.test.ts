@@ -10,7 +10,7 @@ describe("spend per thread", () => {
   it("a thread's time is every stretch; a later end adds none; a task and main are sums", () => {
     const l = log();
     // `log()` stamps one second per event, so a seq is also its time in seconds.
-    const worker = { parentThreadId: "sup", kind: "worker", task: "a" } as const;
+    const worker = { name: "w", parentThreadId: "sup", kind: "worker", task: "a" } as const;
     l.run(); // 0
     l.thread("sup", "supervisor"); // 1
     l.add("thread.started", "w:1", "w", worker); // 2
@@ -31,7 +31,7 @@ describe("spend per thread", () => {
 
   it("a resume with no end closes the open stretch at the thread's last event", () => {
     const l = log();
-    const worker = { parentThreadId: "sup", kind: "worker", task: "a" } as const;
+    const worker = { name: "w", parentThreadId: "sup", kind: "worker", task: "a" } as const;
     l.run(); // 0
     l.thread("sup", "supervisor"); // 1
     l.add("thread.started", "w:1", "w", worker); // 2

@@ -97,10 +97,16 @@ export function ResultsTable({
       header: "Scans",
       align: "end",
       cell: ({ output }) => (
-        <span className="font-mono text-sm whitespace-nowrap text-muted-foreground">
-          {groups
-            .map((g) => inGroup(g).filter((s) => scanValue(s, output) !== null).length)
-            .join(" and ")}
+        <span className="text-sm whitespace-nowrap text-muted-foreground">
+          {groups.map((g, i) => (
+            <span key={g}>
+              {i > 0 && ", "}
+              <span className="font-mono">
+                {inGroup(g).filter((s) => scanValue(s, output) !== null).length}
+              </span>
+              {grouped && ` ${g}`}
+            </span>
+          ))}
         </span>
       ),
     },

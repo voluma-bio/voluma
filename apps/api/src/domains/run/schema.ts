@@ -176,7 +176,14 @@ export const runs = pgTable(
     leaseExpiresAt: timestamptz(),
     /** Why the last claim ended (`claimEndReasonSchema`); the next claim carries it. Null before the first end. */
     lastClaimEnd: text({
-      enum: ["shutdown", "self-stop", "loop-stalled", "lease-expired", "provider-outage"],
+      enum: [
+        "shutdown",
+        "self-stop",
+        "loop-stalled",
+        "refused",
+        "lease-expired",
+        "provider-outage",
+      ],
     }),
     /**
      * The lease token of the last claim the API swept as `lease-expired` and counted as a strike,
