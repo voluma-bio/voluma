@@ -46,7 +46,3 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
-- **Drop `runs.claimable_after`.** `schema.ts` no longer names it (provider errors fail the run
-  instead of holding it); once that code is live, add the drop migration (`decisions.md`
-  2026-10-30, two-step column drops). `claimEndReasonSchema` keeps `provider-outage` for stored
-  events and rows; it stays.

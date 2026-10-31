@@ -161,7 +161,7 @@ who ends it:
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
    reports `released` with reason `shutdown` first, so the run is recovered within the platform's grace period,
-   then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
+   then closes its sandbox (no `stopped` event is stored); the service waits up to 50 s (Render's grace is 60 s), and the release retries for what is left of it after a 15 s cap on the flush of events (the final usage is always sent), so a deploy that overlaps an API outage is still recorded as `shutdown`. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
    The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
@@ -465,7 +465,7 @@ never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDepen
 failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
 (`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
 later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
-and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`. Neither counts toward the API's no-progress limit (the process was alive and no call got an answer). A self-stop whose window the event loop spent mostly blocked while this was the only live run (`soloStalledMs`, `telemetry.ts`) reports `loop-stalled`, which counts; with two runs live the block is nobody's to count, so both report `self-stop`. A heartbeat the API refuses with a 4xx reports `refused`, which counts (resending the same body cannot succeed, and the next claim starts a fresh usage meter). `lease-expired`, a runner that said nothing, counts too.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The

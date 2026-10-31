@@ -1,6 +1,11 @@
 /**
- * The no-progress limit: a run whose claims keep ending in infrastructure trouble without
- * changing run state ends `failed` instead of looping. Progress is a change to run state
+ * The no-progress limit: a run whose runner keeps vanishing (the server expires its lease: a
+ * crash, an OOM), a runner that reports its event loop stalled (`loop-stalled`) or one whose
+ * heartbeat the API refused (`refused`), without changing run state, ends `failed` instead of
+ * looping. A `shutdown` or `self-stop` (the process was alive and no call reached the API) is
+ * never counted. The runner reports `loop-stalled` only when it held that one run for the
+ * blocked time; with two runs live a block is `self-stop` for both, so a run that blocks a
+ * shared runner is not counted until it is the only one live. Progress is a change to run state
  * (a task, checkpoint, output, attempt, revision or plan change); model turns and tool calls are not, since a loop that kills the runner every
  * time still makes them. The run row keeps `last_progress_seq` (set on append) and the
  * current claim's `claim_start_seq`; `endClaim` judges a claim when it ends.
@@ -9,6 +14,11 @@ import type { ReleaseReason } from "@voluma/contracts/runner";
 
 /** Why a claim ends now; `provider-outage` is read only (`claimEndReasonSchema`). */
 export type ClaimEnd = ReleaseReason | "lease-expired";
+
+const COUNTED: ReadonlySet<ClaimEnd> = new Set(["lease-expired", "loop-stalled", "refused"]);
+
+/** Whether a claim that ends for this reason without progress is a strike. */
+export const isCounted = (reason: ClaimEnd) => COUNTED.has(reason);
 
 const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
   "task",
@@ -33,23 +43,18 @@ export const isProgress = (event: { type: string; payload: unknown }) =>
 /** Consecutive claims that end without progress before the run fails. */
 export const STALLED_CLAIMS_LIMIT = 3;
 
-/** A deploy (`shutdown`) is nobody's fault: never counted. */
-const COUNTED_REASONS: ReadonlySet<ClaimEnd> = new Set(["self-stop", "lease-expired"]);
-
 export function endClaim(
   run: { lastProgressSeq: number; claimStartSeq: number; stalledClaims: number },
   reason: ClaimEnd,
-): { stalledClaims: number; exhausted: boolean } {
+): { stalledClaims: number; exhausted: boolean; counted: boolean } {
   const progressed = run.lastProgressSeq > run.claimStartSeq;
-  const stalledClaims = progressed ? 0 : run.stalledClaims + (COUNTED_REASONS.has(reason) ? 1 : 0);
-  return { stalledClaims, exhausted: stalledClaims >= STALLED_CLAIMS_LIMIT };
+  const stalledClaims = progressed ? 0 : run.stalledClaims + (isCounted(reason) ? 1 : 0);
+  return {
+    stalledClaims,
+    exhausted: stalledClaims >= STALLED_CLAIMS_LIMIT,
+    counted: stalledClaims > run.stalledClaims,
+  };
 }
 
-const WHY: Record<ClaimEnd, string> = {
-  shutdown: "the runner restarted",
-  "self-stop": "the runner lost contact with the server",
-  "lease-expired": "the server lost contact with the runner",
-};
-
-export const stalledError = (reason: ClaimEnd, tool: string | undefined) =>
-  `Stopped: ${WHY[reason]} ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;
+export const stalledError = (tool: string | undefined) =>
+  `Stopped: the server lost contact with the runner ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;

@@ -171,9 +171,6 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   });
 
   const result = (async (): Promise<Folded> => {
-    // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
-    // before the API recorded reasons has none, and its resume says only "restarted".
-    const resumed = recorder.events().length > 0;
     // Not a derived id: each invocation of the root is a thread start of its own.
     recorder.emit(rootThreadId, "thread.started", {
       name: ROOT_NAME,
@@ -183,10 +180,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       sandboxImage: options.sandbox.image,
     });
     // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
-    // `claim.started` has one again, and says that instead.
+    // `claim.started` has one again, and says that instead. The schema's rule is
+    // `resumed === (after !== undefined || reopened)`; deriving it here keeps the two in step,
+    // and covers a claim cut off before any event reached the API (no log, but a `previousClaim`).
     const reopened = threadLog(recorder.events()).reopenPending && !options.previousClaim;
     recorder.emit(rootThreadId, "claim.started", {
-      resumed,
+      resumed: options.previousClaim !== undefined || reopened,
       ...(options.previousClaim && { after: options.previousClaim }),
       ...(reopened && { reopened }),
     });
