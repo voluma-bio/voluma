@@ -9,9 +9,9 @@
  *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
  * Every route on a run carries the lease token (400 when missing); a stale one is a 409
- * `lease-lost`, checked in the write's own transaction. Reads and writes
- * are keyed by the path's run, so the lease scopes them whatever a thread's id looks like.
- * An event id stored under another run is a 409. A claim returns a visitor run's keys once (pg-queue.ts).
+ * `lease-lost`, checked in the write's own transaction. Every read and
+ * write is keyed by the path's run (event ids and thread ids are unique within a run only), so
+ * the lease scopes it. A claim returns a visitor run's keys once (pg-queue.ts).
  */
 import { eventInputSchema, type RunEventsResponse } from "@voluma/contracts/events";
 import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
@@ -33,7 +33,6 @@ import { type AppEnv, parseJson, requireService } from "../../domain";
 import type { RunDeps } from ".";
 import { afterParam, EVENTS_PAGE } from "./cursor";
 import { LeaseLost } from "./lease";
-import { EventIdTaken } from "./pg-event-log";
 import { RunEnded } from "./pg-queue";
 
 type IngestEnv = { Variables: AppEnv["Variables"] & { leaseToken: string } };
@@ -56,7 +55,7 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
     if (error instanceof LeaseLost) {
       return c.json({ code: "lease-lost" } satisfies z.infer<typeof leaseLostSchema>, 409);
     }
-    if (error instanceof RunEnded || error instanceof EventIdTaken) {
+    if (error instanceof RunEnded) {
       return c.json({ error: error.message }, 409);
     }
     if (error instanceof HistoryConflict) return c.text(error.message, 409);

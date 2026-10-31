@@ -37,7 +37,7 @@ the review-asset converter, all through the same session. `RunLayout.forThread(r
   `(path) => boolean` that `forThread(thread, cited)` takes; callers pass
   `(p) => runtime.cites(taskId, p)`, answered from the fold (`FoldedTask.citedScratch`).
   The same `keyOf` check validates the evidence a checker names. The main agent
-  (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
+  (name `main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
   no sandbox today.
 - Every thread spills a truncated bash output to `/scratch/<name>/.tool-output/<id>`
   (`toolOutputKey(runId, threadName, toolCallId)`), a worker too.
@@ -321,7 +321,7 @@ recovery leaves the refusal as the thread's failure (unless the summary's own er
 length is retried once with twice the room (the thread's reasoning setting stays, so the cache holds; both calls' usage is recorded); one that also called a tool is accepted by its text.
 A compaction that would leave the thread due again (the last turn alone is over a limit) waits until a request is tight or cold. A failed summary fails the thread with the provider's own error text (so `provider-error.ts` classifies it), the
 context in a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
-it, a failed summary's usage too (an event with `compaction: true` and no text). The event carries `compaction: true`: the run page shows it as a collapsed "History summarized" row (the notices read "Context notice") and leaves it out of a thread's `said` and `reply`. The wrap-up and overflow notices are steered in with sender `{kind: "runtime", notice: true}`, which `thread-log` does not count as a nudge. One overflow test (`context-overflow.ts`: a 400, a 413 or no
+it, a failed summary's usage too (an event with `compaction: true` and no text). The event carries `compaction: true`: the run page shows it as a collapsed "History summarized" row (the notices read "Context notice") and leaves it out of a thread's `said` and `reply`. The wrap-up and overflow notices go through the thread's inbox with sender `{kind: "runtime", notice: true}`, which `thread-log` does not count as a nudge. One overflow test (`context-overflow.ts`: a 400, a 413 or no
 status, and Pi's patterns) serves both this and the runner's classifier.
 The result is a marker row `{role: "compaction", summary, keptFrom}` appended to `pi_messages`; every earlier row
 stays. `keptFrom` indexes the thread's messages (rows that are not markers); `foldHistory` rebuilds them and the
@@ -348,8 +348,8 @@ other error, a 4xx included (Meta's `404 model_not_found` too), or the spent bud
 at once. The failed reply is stored and the thread ends `failed` with the provider's message. The
 run loop (`packages/harness/src/run-loop.ts`) sees a thread this process ran that failed on a
 provider error (`providerFailure` in `provider-error.ts`: any 4xx or 5xx status, a connection
-failure, an empty account) and fails the run with it in `state.error`: "the main agent failed on a
-model provider error: <message>", or "<taskId>: its worker failed on a model provider error:
+failure, an empty account) and fails the run with it in `state.error`: "the AI stopped on an error
+from its provider: <message>", or "<task title>: the AI stopped on an error from its provider:
 <message>". A retryable error (the set above) on a thread that already streamed content, or that
 outlasted the 60 s, resumes that thread once ("The model provider failed during your last reply;
 continue.") before the run fails; the resumed call has its own 60 s. A context overflow (400/413

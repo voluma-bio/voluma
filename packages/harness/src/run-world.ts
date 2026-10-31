@@ -36,6 +36,8 @@ export const call = (name: string, input: unknown = {}): Call => ({ name, input 
 /** One model request: the thread asking and what its history holds. */
 export interface Turn {
   thread: string;
+  /** The thread's name from its `thread.started` (`t1.worker`, `main.2`). */
+  name: string | undefined;
   /** The thread's role and, for a worker or checker, its task. */
   role: "main" | "worker" | "check";
   task: string | undefined;
@@ -74,7 +76,7 @@ const textOf = (content: unknown): string =>
 
 function turnOf(
   messages: any[],
-  who: Pick<Turn, "thread" | "role" | "task">,
+  who: Pick<Turn, "thread" | "name" | "role" | "task">,
   signal: AbortSignal | undefined,
 ): Turn {
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
@@ -160,9 +162,9 @@ export function checker(
   };
 }
 
-/** The ids of the asks main was told about (`askId <id>)`) and has not answered. */
+/** The ids of the asks main was told about (in a user message or a tool result) (`askId <id>)`) and has not answered. */
 export function openAskIds(t: Turn): string[] {
-  const asked = t.users.flatMap((u) =>
+  const asked = [...t.users, ...t.results].flatMap((u) =>
     [...u.matchAll(/askId (\S+)\)/g)].map((m) => m[1] as string),
   );
   const answered = t.calls.filter((c) => c.name === "answer").map((c) => c.input.askId);
@@ -236,7 +238,8 @@ export function world(o: WorldOptions) {
       const thread = options?.sessionId as string;
       const started = stored.find((e) => e.type === "thread.started" && e.threadId === thread);
       const task = started?.type === "thread.started" ? started.payload.task : undefined;
-      const turn = turnOf(ctx.messages as any[], { thread, role, task }, options?.signal);
+      const name = started?.type === "thread.started" ? started.payload.name : undefined;
+      const turn = turnOf(ctx.messages as any[], { thread, name, role, task }, options?.signal);
       const reply = await script(turn);
       if (reply === undefined)
         throw new Error(`no scripted reply for ${turn.thread} (${turn.steps} steps)`);
@@ -433,15 +436,14 @@ export function world(o: WorldOptions) {
     },
     /** The log as one line per event, for a failure message. */
     text(): string {
-      return stored.map((e) => line(e)).join("\n");
+      return stored.map((e) => line(e, stored)).join("\n");
     },
   };
 }
 
-const short = (id: string) => id.replace(`${RUN}.`, "");
-
-function line(e: RunEvent): string {
-  const who = short(e.threadId);
+function line(e: RunEvent, stored: readonly RunEvent[]): string {
+  const started = stored.find((s) => s.type === "thread.started" && s.threadId === e.threadId);
+  const who = started?.type === "thread.started" ? started.payload.name : e.threadId;
   switch (e.type) {
     case "task":
       return `${who} task ${e.payload.taskId} ${e.payload.status} (${e.payload.by.kind === "rule" ? e.payload.by.rule : e.payload.by.kind})`;
