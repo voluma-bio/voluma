@@ -8,7 +8,9 @@ import { cx } from "@voluma/ui";
 import { useEffect, useRef, useState } from "react";
 import {
   BufferGeometry,
+  CircleGeometry,
   Float32BufferAttribute,
+  Group,
   LineBasicMaterial,
   LineSegments,
   Mesh,
@@ -18,6 +20,7 @@ import {
   WebGLRenderer,
 } from "three";
 import { type Contrast, compose, type OverlayPlane } from "./compose";
+import { loadMesh, sliceSegment, surfaceTrace } from "./geometry";
 import { CHIP, PANE } from "./pane-style";
 import { corners, type Picture, quad, texture } from "./picture";
 import { readPlane } from "./planes";
@@ -69,6 +72,7 @@ export function SlicePane({
     scene: Scene;
     image: Mesh<BufferGeometry, MeshBasicMaterial>;
     cross: LineSegments<BufferGeometry, LineBasicMaterial>;
+    drawings: Group;
     render(): void;
   } | null>(null);
   const view = useRef<View | null>(null);
@@ -77,6 +81,8 @@ export function SlicePane({
   const [level, setLevel] = useState(scene.image.levels.length - 1);
   const [shown, setShown] = useState<{ level: number; index: number } | null>(null);
   const [error, setError] = useState<string>();
+  const [traceError, setTraceError] = useState<string>();
+  const [traces, setTraces] = useState<Map<string, BufferGeometry>>(new Map());
   const latest = useRef({ point, onPoint, onLoading });
   latest.current = { point, onPoint, onLoading };
 
@@ -99,13 +105,15 @@ export function SlicePane({
       new LineBasicMaterial({ vertexColors: true, depthTest: false }),
     );
     cross.renderOrder = 1;
-    s.add(image, cross);
+    const drawings = new Group();
+    s.add(image, cross, drawings);
     const state = {
       renderer,
       camera,
       scene: s,
       image,
       cross,
+      drawings,
       // One frame per animation frame, however many changes asked for it.
       render() {
         frame ||= requestAnimationFrame(paint);
@@ -183,6 +191,102 @@ export function SlicePane({
     };
     // Runs once: the scene's grid is fixed for the pane's life (the viewer remounts on a new grid).
   }, []);
+
+  const traceMeshes = scene.meshes.filter((m) => m.trace);
+  const traceKey = traceMeshes.map((m) => m.id).join("\n");
+  const latestTraces = useRef(traceMeshes);
+  latestTraces.current = traceMeshes;
+  useEffect(() => {
+    const abort = new AbortController();
+    const loaded = new Map<string, BufferGeometry>();
+    setTraces(new Map());
+    setTraceError(undefined);
+    Promise.all(
+      latestTraces.current.map(async (m) => {
+        const geometry = await loadMesh(m, abort.signal);
+        if (abort.signal.aborted) geometry.dispose();
+        else {
+          loaded.set(m.id, geometry);
+          setTraces(new Map(loaded));
+        }
+      }),
+    ).catch((cause) => {
+      if (!abort.signal.aborted)
+        setTraceError(`Couldn't load surface traces: ${(cause as Error).message}`);
+    });
+    return () => {
+      abort.abort();
+      for (const geometry of loaded.values()) geometry.dispose();
+    };
+  }, [traceKey]);
+
+  useEffect(() => {
+    const t = three.current;
+    if (!t) return;
+    const objects: (
+      | Mesh<CircleGeometry, MeshBasicMaterial>
+      | LineSegments<BufferGeometry, LineBasicMaterial>
+    )[] = [];
+    const line = (points: readonly Zyx[], color: string, opacity: number) => {
+      if (!points.length || opacity <= 0) return;
+      const geometry = new BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new Float32BufferAttribute(
+          points.flatMap((p) => [...toPane(p), 2]),
+          3,
+        ),
+      );
+      const object = new LineSegments(
+        geometry,
+        new LineBasicMaterial({ color, opacity, transparent: opacity < 1, depthTest: false }),
+      );
+      object.renderOrder = 2;
+      objects.push(object);
+    };
+    for (const m of traceMeshes) {
+      const geometry = traces.get(m.id);
+      if (geometry && m.opacity > 0)
+        line(surfaceTrace(geometry, axis, point[axis], m.offsetZyx), m.color, m.opacity);
+    }
+    for (const a of scene.annotations) {
+      if (a.opacity <= 0) continue;
+      let dots = [...a.points];
+      if (a.points.length === 2) {
+        const segment = sliceSegment(a.points[0]!, a.points[1]!, axis, point[axis]);
+        if (segment) {
+          line(segment, a.color, a.opacity);
+          // A ruler crossing perpendicular to the pane projects to a point, not a visible line.
+          const [p, q] = segment;
+          if (Math.hypot((p[ra] - q[ra]) * sr, (p[ca] - q[ca]) * sc) < Math.min(sr, sc)) dots = [p];
+        }
+      }
+      for (const p of dots) {
+        if (Math.abs(p[axis] - point[axis]) > 0.5) continue;
+        const dot = new Mesh(
+          new CircleGeometry(Math.max(sr, sc) * 2, 12),
+          new MeshBasicMaterial({
+            color: a.color,
+            opacity: a.opacity,
+            transparent: a.opacity < 1,
+            depthTest: false,
+          }),
+        );
+        dot.position.set(...toPane(p), 2);
+        dot.renderOrder = 2;
+        objects.push(dot);
+      }
+    }
+    t.drawings.add(...objects);
+    t.render();
+    return () => {
+      for (const object of objects) {
+        t.drawings.remove(object);
+        object.geometry.dispose();
+        object.material.dispose();
+      }
+    };
+  }, [point[axis], scene.annotations, scene.meshes, traces]);
 
   /** The level that gives each device pixel at least one voxel at the current zoom. */
   function pickLevel() {
@@ -400,7 +504,8 @@ export function SlicePane({
 
   const total = scene.shapeZyx[axis];
   const refining = shown && (shown.level !== level || shown.index !== index);
-  const loading = !shown || !!refining || !!error;
+  const loading =
+    !shown || !!refining || !!error || !!traceError || traces.size !== traceMeshes.length;
   useEffect(() => latest.current.onLoading(loading), [loading]);
   const scale = shown ? scene.image.levels[shown.level]!.scaleZyx[axis] : null;
   return (
@@ -424,6 +529,11 @@ export function SlicePane({
       {error && (
         <span className={cx(CHIP, "top-2 right-2")} role="alert">
           Couldn't load this slice: {error}
+        </span>
+      )}
+      {traceError && (
+        <span className={cx(CHIP, "top-2 right-2")} role="alert">
+          {traceError}
         </span>
       )}
     </div>
