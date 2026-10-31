@@ -19,6 +19,7 @@ stdout is one JSON line. Entry: `src/main.ts`; the steps are `src/run.ts`.
   `streamReply` in `src/meta.ts` turns that back into a reply with Meta's status (null: 502), so
   the 429 backoff, the 404 retry and the infrastructure rules work on statuses as before. A stream
   that ends without `response.completed` is an infrastructure failure (`src/response.ts`).
+- A gateway redeploy cuts the calls its old instance still holds. `again` in `src/meta.ts` retries the upload, and the tracking request with its whole reply, once on an infrastructure failure (a stream that ends without `response.completed` counts, however it ended; a first try that ran to the 30-minute limit is not retried). The second failure says it was retried, and adds the redeploy hint only when the network or gateway cut the request, not for a 5xx, 401 or 429 it answered. The cut tracking request stays a `cut` row of unknown cost, so a retry is a second paid row.
 - Keep every pass over the reply linear (`src/response.ts`): responses are 100+ MB, and the
   quadratic version of this parse is what stopped staging runs.
 - `src/sam-mask.ts` is the one mask decoder. R2 mounts take whole files, so outputs are built in

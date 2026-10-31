@@ -46,14 +46,10 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
-- **Run-keyed rows, contract step.** After the expand migration (0015) and the API that reads by
+- **Run-keyed rows, contract step.** After the expand migration (0016) and the API that reads by
   `run_id` are live: opaque thread ids from the runner (`uuid5(runId, name)`); then one migration
   that sets `pi_messages.run_id` NOT NULL, moves the primary keys to `events(run_id, id)` and
   `pi_messages(run_id, thread_id, idx)`, drops the `pi_messages_fill_run_id` trigger and the unused
   `threads` table; `seed:example` then copies a run verbatim (no id rewriting) and `EventIdTaken`
   goes. A copied run's history rows hold R2 image keys under the source run's `runs/<runId>/scratch/…`
   (fine for a read-only example; give a copy its own keys before an example can be rerun).
-- **Drop `runs.claimable_after`.** `schema.ts` no longer names it (provider errors fail the run
-  instead of holding it); once that code is live, add the drop migration (`decisions.md`
-  2026-10-30, two-step column drops). `claimEndReasonSchema` keeps `provider-outage` for stored
-  events and rows; it stays.

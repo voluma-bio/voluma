@@ -74,7 +74,7 @@ export const events = pgTable(
 
 /**
  * `run_id` is null only on rows an older API wrote; the trigger `pi_messages_fill_run_id` (in
- * migration 0015, not declared here) fills it from the thread id's `<runId>.` prefix. The code reads
+ * migration 0016, not declared here) fills it from the thread id's `<runId>.` prefix. The code reads
  * and writes by `(run_id, thread_id, idx)`; `(thread_id, idx)` stays the primary key until the
  * contract step (`NOT NULL`, the primary key moved to the run-keyed index).
  */
@@ -189,8 +189,20 @@ export const runs = pgTable(
     leaseExpiresAt: timestamptz(),
     /** Why the last claim ended (`claimEndReasonSchema`); the next claim carries it. Null before the first end. */
     lastClaimEnd: text({
-      enum: ["shutdown", "self-stop", "lease-expired", "provider-outage"],
+      enum: [
+        "shutdown",
+        "self-stop",
+        "loop-stalled",
+        "refused",
+        "lease-expired",
+        "provider-outage",
+      ],
     }),
+    /**
+     * The lease token of the last claim the API swept as `lease-expired` and counted as a strike,
+     * kept so a `released` report from that runner, still alive behind an outage, takes it back.
+     */
+    struckLeaseToken: text(),
     /** Seq of the latest progress event (`claim-progress.ts`), and the log's last seq when the current claim began. */
     lastProgressSeq: integer().notNull().default(0),
     claimStartSeq: integer().notNull().default(0),

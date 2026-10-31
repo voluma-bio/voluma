@@ -29,6 +29,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
@@ -92,6 +93,13 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
+/**
+ * How long a shutdown release waits for its events and final usage to reach an API that may be
+ * down before it reports. The report's retries then get what is left of the shutdown budget (`main.ts`): a
+ * release that never reaches the server is recorded as `lease-expired`, unless a later claim
+ * has not yet swept the lease (`takeBackStrike`, `pg-queue.ts`).
+ */
+const RELEASE_FLUSH_MS = 15_000;
 /** How long an ended run waits for the review assets still being converted before it reports. */
 const DRAIN_MS = 10 * 60_000;
 /** Pi's own retries of a model call (429 honours retry-after, 5xx, dropped connections). */
@@ -132,7 +140,12 @@ export function reportFor(
   error?: string,
 ): ReportRequest["report"] | undefined {
   if (stopped === "stop" || stopped === "lease-lost") return undefined;
-  if (stopped === "self-stop" || stopped === "shutdown")
+  if (
+    stopped === "self-stop" ||
+    stopped === "loop-stalled" ||
+    stopped === "refused" ||
+    stopped === "shutdown"
+  )
     return { kind: "released", reason: stopped };
   return error === undefined
     ? { kind: "ended", outcome: "completed" }
@@ -549,9 +562,15 @@ async function claimBody(
       }
     }
     shutdown.removeEventListener("abort", onShutdown);
-    await live?.flush();
-    await events?.flush();
-    await lease?.end(report !== undefined);
+    lease?.halt();
+    const wrapUp = (async () => {
+      await live?.flush();
+      await events?.flush();
+      if (report) await lease?.sendFinalUsage();
+    })();
+    await (report?.kind === "released" && report.reason === "shutdown"
+      ? Promise.race([wrapUp, delay(RELEASE_FLUSH_MS)])
+      : wrapUp);
     if (report) {
       const stored = await client.report(report).catch((e) => {
         log(`report failed: ${e instanceof Error ? e.message : e}`);

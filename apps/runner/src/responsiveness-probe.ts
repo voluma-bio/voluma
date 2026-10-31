@@ -484,7 +484,7 @@ try {
   );
   assert.equal(leaseFailures, 0);
 } finally {
-  await lease.end(false);
+  lease.halt();
   server.disconnect();
   await once(server, "exit");
   await rm(scratch, { recursive: true, force: true });

@@ -111,7 +111,8 @@ const close = () =>
   (closing ??= (async () => {
     log("closing");
     rl.close();
-    await lease.end(true).catch(() => {});
+    lease.halt();
+    await lease.sendFinalUsage().catch(() => {});
     await sandbox?.destroy().catch((e) => log(`destroy failed: ${e}`));
     await terminateClaim(config.modal, run.id, claimId).catch((e) => log(`terminate failed: ${e}`));
     if (counted) meter.sandboxDown();
