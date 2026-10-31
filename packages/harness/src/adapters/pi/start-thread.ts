@@ -527,17 +527,39 @@ function strictObjects<T>(schema: T): T {
 }
 
 /**
+ * A schema without its `description` keywords, for comparing what a call may contain. Keys
+ * of a map of named schemas (`properties`, `$defs`) are names, so only their values are walked.
+ */
+function withoutDescriptions(schema: unknown, named = false): unknown {
+  if (Array.isArray(schema)) return schema.map((s) => withoutDescriptions(s));
+  if (typeof schema !== "object" || schema === null) return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => named || key !== "description")
+      .map(([key, value]) => [
+        key,
+        withoutDescriptions(value, !named && ["properties", "$defs", "definitions"].includes(key)),
+      ]),
+  );
+}
+
+/**
  * The tools a resumed thread offers: the definitions it started with, run by the current tool
  * of the same name. A tool whose input schema changed since is refused as stale: Pi checks a
  * call against the stored schema and `execute` then parses it with the current one, so a call
- * could pass one and fail the other for the rest of the thread. A description change resumes.
+ * could pass one and fail the other for the rest of the thread. A description change resumes,
+ * the tool's or a field's (`.describe()`); a changed default or any other keyword is refused.
  * A tool since removed answers a call with an error; a tool added since is not offered.
  * (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
  */
 function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTool[] {
   return declared.map((d) => {
     const now = current.find((t) => t.name === d.name);
-    if (now && JSON.stringify(now.parameters) !== JSON.stringify(d.parameters)) {
+    if (
+      now &&
+      JSON.stringify(withoutDescriptions(now.parameters)) !==
+        JSON.stringify(withoutDescriptions(d.parameters))
+    ) {
       throw new ThreadStale(`the input of ${d.name} changed since the thread started`);
     }
     return {
