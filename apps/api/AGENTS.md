@@ -78,25 +78,29 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   event ids and thread ids (opaque UUIDs for new threads, `<runId>.<name>` in older runs) are unique within a
   run only, so every query on either table filters by `run_id` and no code reads a thread id's text.
   A copy of a run (`seed:example`) keeps every id and payload verbatim under a new `run_id`.
-- **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
-  limit counts can't race. The lease is judged by the database's `now()`. An ingest write
+- **Browser writes, claim and `import:run`/`archive:run` hold one lock** (`QUEUE_LOCK`, a transaction
+  advisory lock), so limit counts can't race. `heartbeat` and `report` skip it: they only end or release
+  a running run, which lowers the counts a claim reads, and take just the run's event lock and row. The
+  only write that raises a count (`queued` to `running`) stays in the claim. This is the one place the
+  rule is stated; other comments point here. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
-- **Recovery ends a claim with a reason** (`shutdown`, `self-stop` from the runner's `released`;
-  `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
+- **Recovery ends a claim with a reason** (`shutdown`, `self-stop`, `loop-stalled`, `refused` from
+  the runner's `released`; `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
   for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
-  the counting rule and the progress events). There is no other restart counter. `provider-outage`
-  is read only (events and `last_claim_end` written before provider errors failed the run). The
-  column `runs.claimable_after` is unused and gone from `schema.ts`; drop it in a later migration
-  ([TODO](.context/TODO.md)).
+  the counting rule and the progress events; `lease-expired`, `loop-stalled` and `refused` count).
+  There is no other restart counter. `provider-outage` is read only (events and `last_claim_end`
+  written before provider errors failed the run).
 - **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
   checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
-  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock, then the run's event lock
-  (`eventLock`), then row locks** (a runner's append takes the event lock before it shares the run
+  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock (where taken), then the run's event lock
+  (`eventLock`), then row locks.** `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
+  each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` takes the
+  event and row locks before judging the run's state. A runner's append takes the event lock before it shares the run
   row, so a transaction holding the row and then asking for the event lock deadlocks with it:
-  `recover`, `heartbeat`, `report` and `decideMessage` take the event lock first, through the one
+  `recover`, `heartbeat`, `report`, `cancel` and `decideMessage` take the event lock first, through the one
   `eventLock` in `pg-event-log.ts`; `decide` (review decisions) checks the run has ended before
   taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
   to a queued or running run (409: one message, one claim) and reopens an ended `completed` one: it
@@ -146,19 +150,22 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   atomically; preserve that order to avoid deadlocking runner appends. Review owns policy;
   Run owns authorization filters, sequence allocation and persistence. No domain imports
   the other. `review-state` overlays acceptance on `fold` without changing scientific state.
-- Accept check resolves one current task-result/check identity; only explicit Mark reviewed
+- Accept check compares the request's displayed task `resultRevisionId` with the current task
+  before deduplicating or writing its decision; the completed base revision must also match.
+  Only explicit Mark reviewed
   at zero remaining sets `reviewedAt`. Both are idempotent, shared across authorized
   readers, and forbidden on examples. The same derived summary is `Run.review` and
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
   have null summaries. Review mutations return/refetch snapshots; execution SSE closes
   at run end and does not continuously deliver human review changes.
 - One loader, `resultsLoader()` (`pg-runs.ts`), serves the run and study reads and Review's `RunRecords.load`
-  and `decide`. It memoizes derived results (`{results, summary, tasks, values, toCheck}`, all
-  from one `reviewState(log)`) up to 250,000 folded events in total (about 20 MB; least recently read out
-  first). An unreadable run's verdict is cached too, so lists don't re-parse it. Keyed by each run's latest event ID
+  and `decide`. It memoizes the run's fold (`{results, correcting, open, failed}`), including
+  `reviewState(log)`, up to 250,000 folded events in total (about 20 MB; least recently read out
+  first). An unreadable run's verdict is cached too, so lists don't re-parse it. Keyed by the run's `generation` and latest event ID
   (ordered by sequence) among `FOLD_EVENT_TYPES` (`packages/contracts/src/fold.ts`, next to the
   switch it describes; add a type there when the fold starts to read it) in the same repeatable-read
-  snapshot, including reseeded examples with reused sequence numbers. Cache misses load only those
+  snapshot. Seed and import replacements start a new generation, invalidating cached results even
+  when event IDs repeat or there are no fold events. Cache misses load only those
   events; hits load no event payloads. A single-run read of a run of any state throws on events that don't parse; lists
   leave out a completed run that doesn't and keep another with empty results. The event log remains the only durable human-decision state.
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed

@@ -49,7 +49,7 @@ if (dump.run.state !== "ended") {
 }
 // A shutdown/stale sweep marks calls cut before their handler's final settlement can land.
 if (dump.providerCalls.some((call) => call.status === "open" || call.durationMs === null)) {
-  throw new Error(`run ${runId} has unsettled provider calls; nothing deleted`);
+  throw new Error(`run ${runId} has unsettled gateway requests; nothing deleted`);
 }
 if (
   !dump.input ||

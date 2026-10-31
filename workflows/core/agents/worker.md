@@ -41,7 +41,7 @@ edit.
 - `checkpoint` at each milestone, with the files it rests on. Its `summary` is one or two sentences a
   researcher reads on the run page ("Segmented femur, tibia and patella; the fibula is outside the
   scan, so it is reported missing"): no grid ids, voxel boxes, paths or thresholds there; those go in
-  its text.
+  its text. Everything the researcher reads (a summary, a To check title, an output note or missing reason) says "the AI" for the one that did the work and the task's plain title for a task, never worker, checker, agent, thread or task id.
 - `report_output` for every output the task declares: the value with its evidence; a measurement that
   could not be made as null with the reason, anything else as `{kind: "missing", reason}`.
 - `submit_task` when all are reported. A checker inspects the task; if it finds a problem, the main

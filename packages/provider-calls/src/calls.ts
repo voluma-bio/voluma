@@ -1,6 +1,6 @@
 /**
  * The gateway's database side, which the API shares: admit a call (one transaction under the
- * run's row lock), settle it, close rows left open, and sum a run's calls. The `runs` columns it
+ * run's row lock), settle it, close rows left open, and sum a run's gateway requests. The `runs` columns it
  * reads are named in SQL (`state`, `lease_token`, `lease_expires_at`, `credentials`), so
  * nothing here imports the API.
  *
@@ -155,13 +155,14 @@ export async function cutStaleCalls(db: PostgresJsDatabase) {
 export type RunCalls = {
   /** Known costs only. */
   costUsd: number;
+  /** Non-open gateway requests: uploads, responses, deletes and retries, not SAM operations. */
   calls: number;
-  /** Ended calls whose cost is unknown (`cut`). */
+  /** Non-open requests with no known cost, including cut requests awaiting settlement. */
   unknownCostCalls: number;
   bySandbox: { sandbox: string; costUsd: number; calls: number; unknownCostCalls: number }[];
 };
 
-/** Each run's calls that are no longer in flight, by sandbox; a run with none is absent. */
+/** Each run's non-open gateway requests, including failures and cuts; a run with none is absent. */
 export async function callsOfRuns(db: Db, runIds: string[]): Promise<Map<string, RunCalls>> {
   const out = new Map<string, RunCalls>();
   if (runIds.length === 0) return out;

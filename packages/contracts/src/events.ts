@@ -146,6 +146,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
        * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
        */
       covers: nonEmpty.optional(),
+      /** A context-compaction notice, not a nudge: it does not count toward `nudges` (`thread-log`). */
+      notice: z.literal(true).optional(),
     }),
     z.object({ kind: z.literal("person") }),
   ]);
@@ -176,6 +178,13 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         spawnedBy: nonEmpty.optional(),
         /** The workflow files the run ran, with the commit the runner's checkout was at; required on the root thread; child threads may omit it. */
         workflows: z.array(recordedPinSchema).min(1).optional(),
+        /**
+         * The sandbox image (`registry/name@sha256:…`) the run's sandboxes use; every claim
+         * writes it on the root thread and the first one decides it, so a resume keeps the image
+         * the run began on. Absent on a run recorded before the field existed: the next claim
+         * records its runner's image.
+         */
+        sandboxImage: nonEmpty.optional(),
         /**
          * The model this thread calls, as the runner names it: `provider/id`
          * (`meta/muse-spark-1.3`). Main, worker and check threads call one and
@@ -280,6 +289,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         reasoning: z.string().optional(),
         /** The reply's model usage; absent on a reply that never reached the model. */
         usage: modelUsageSchema.optional(),
+        /**
+         * The text is the summary that replaced the thread's earlier history, not something the
+         * thread said: views leave it out of what the thread said or replied. Its usage is spend.
+         */
+        compaction: z.literal(true).optional(),
       }),
       z.object({ role: z.literal("system"), text: z.string() }),
     ]),

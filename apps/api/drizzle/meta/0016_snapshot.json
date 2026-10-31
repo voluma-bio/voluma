@@ -1,6 +1,6 @@
 {
-  "id": "0608bb6d-d325-48c8-add5-a05f9f9a3f4a",
-  "prevId": "4d1f8421-778c-45a1-b842-f81903b37313",
+  "id": "fc22f3b4-748b-457d-9a76-24040c9f4239",
+  "prevId": "b2b6c3cb-ceb7-49c5-b4d2-937de45c3009",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -56,14 +56,14 @@
       "name": "events",
       "schema": "",
       "columns": {
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "id": {
           "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -99,14 +99,52 @@
           "notNull": true
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "events_run_id_id_pk": {
-          "name": "events_run_id_id_pk",
-          "columns": ["run_id", "id"]
+      "indexes": {
+        "events_thread": {
+          "name": "events_thread",
+          "columns": [
+            {
+              "expression": "thread_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "events_run_id_id": {
+          "name": "events_run_id_id",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "events_run_seq": {
           "name": "events_run_seq",
@@ -189,7 +227,7 @@
           "name": "run_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "thread_id": {
           "name": "thread_id",
@@ -210,12 +248,40 @@
           "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "pi_messages_run_thread_idx": {
+          "name": "pi_messages_run_thread_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "thread_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idx",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "pi_messages_run_id_thread_id_idx_pk": {
-          "name": "pi_messages_run_id_thread_id_idx_pk",
-          "columns": ["run_id", "thread_id", "idx"]
+        "pi_messages_thread_id_idx_pk": {
+          "name": "pi_messages_thread_id_idx_pk",
+          "columns": ["thread_id", "idx"]
         }
       },
       "uniqueConstraints": {},
@@ -368,9 +434,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "claimable_after": {
-          "name": "claimable_after",
-          "type": "timestamp with time zone",
+        "struck_lease_token": {
+          "name": "struck_lease_token",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -610,6 +676,83 @@
           "columns": ["study_id", "input_id"]
         }
       },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.threads": {
+      "name": "threads",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_thread_id": {
+          "name": "parent_thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task": {
+          "name": "task",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "threads_run": {
+          "name": "threads_run",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

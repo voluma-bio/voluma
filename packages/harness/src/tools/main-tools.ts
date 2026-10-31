@@ -257,7 +257,9 @@ export function mainTools(deps: MainDeps) {
       "Stop a worker for good: it is never resumed. If it was working on its task, the task goes back to pending with your reason; its attempt is kept. Start a new worker on the task to redo it.",
     input: z.object({
       threadId: nonEmpty.describe("The worker's name, as the agents list shows it."),
-      reason: nonEmpty.describe("One plain line for the researcher."),
+      reason: nonEmpty.describe(
+        "One plain line for the researcher, with no mention of workers, checkers, agents, threads or task ids.",
+      ),
     }),
     sequential: true,
     execute: inSection(async ({ threadId: ref, reason }, ctx) => {
@@ -357,7 +359,7 @@ export function mainTools(deps: MainDeps) {
   const accept: Tool<z.ZodObject<{ taskId: typeof taskIdSchema; reason: z.ZodString }>> = {
     name: "accept",
     description:
-      "Accept a task whose check rejected it (needs-review): it is left to-check for the researcher with the checker's items open, and tasks that build on it may start. Give the reason in plain words for the researcher.",
+      "Accept a task whose check rejected it (needs-review): it is left to-check for the researcher with the checker's items open, and tasks that build on it may start. Give the reason in plain words for the researcher, with no mention of workers, checkers, agents, threads or task ids.",
     input: z.object({ taskId: taskIdSchema, reason: nonEmpty }),
     sequential: true,
     execute: inSection(async ({ taskId, reason }, ctx) => {
@@ -378,7 +380,9 @@ export function mainTools(deps: MainDeps) {
   };
 
   const changePlanInput = z.object({
-    reason: nonEmpty.describe("One plain line for the researcher: why the plan changes."),
+    reason: nonEmpty.describe(
+      "One plain line for the researcher: why the plan changes, with no mention of workers, checkers, agents, threads or task ids.",
+    ),
     add: z
       .array(taskIdSchema)
       .optional()
@@ -406,7 +410,7 @@ export function mainTools(deps: MainDeps) {
       .array(z.object({ taskId: taskIdSchema, reason: nonEmpty }))
       .optional()
       .describe(
-        "Tasks to skip, with the reason. Tasks that build on a skipped task are skipped too, and their outputs are reported missing.",
+        "Tasks to skip, with the reason (one plain line for the researcher, with no mention of workers, checkers, agents, threads or task ids). Tasks that build on a skipped task are skipped too, and their outputs are reported missing.",
       ),
   });
 
@@ -521,7 +525,7 @@ export function mainTools(deps: MainDeps) {
   const finish_run: Tool<z.ZodObject<{ summary: z.ZodString }>> = {
     name: "finish_run",
     description:
-      "End the run. Refused while the researcher's last message is unanswered or their go is not acted on, while a worker or checker is running, while a task is neither done, left to check nor skipped (pending, in progress, under review, stale), while a task's check rejected it and you have not sent feedback or accepted it, and while a selected output is neither reported nor skipped with a reason. `summary` is one or two plain sentences for the researcher.",
+      "End the run. Refused while the researcher's last message is unanswered or their go is not acted on, while a worker or checker is running, while a task is neither done, left to check nor skipped (pending, in progress, under review, stale), while a task's check rejected it and you have not sent feedback or accepted it, and while a selected output is neither reported nor skipped with a reason. `summary` is one or two plain sentences for the researcher, with no mention of workers, checkers, agents, threads or task ids.",
     input: z.object({ summary: nonEmpty }),
     sequential: true,
     execute: async (input, ctx) =>

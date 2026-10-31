@@ -1,4 +1,4 @@
--- Contract step of run-keyed rows (the expand step is 0015). The API deployed before this one
+-- Contract step of run-keyed rows (the expand step is 0016). The API deployed before this one
 -- reads and writes by run_id and conflicts on (run_id, id) / (run_id, thread_id, idx), so it
 -- keeps working on this schema; it never touches `threads`.
 DROP TRIGGER "pi_messages_fill_run_id" ON "pi_messages";--> statement-breakpoint

@@ -49,7 +49,3 @@
 - **Copied runs read the source's scratch images.** `seed:example` copies `pi_messages` verbatim, and
   history rows hold R2 image keys under the source run's `runs/<runId>/scratch/…`. Fine for a read-only
   example; give a copy its own keys (or resolve them per run) before an example can be rerun or reopened.
-- **Drop `runs.claimable_after`.** `schema.ts` no longer names it (provider errors fail the run
-  instead of holding it); once that code is live, add the drop migration (`decisions.md`
-  2026-10-30, two-step column drops). `claimEndReasonSchema` keeps `provider-outage` for stored
-  events and rows; it stays.

@@ -11,8 +11,7 @@ import { cx } from "@voluma/ui";
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
-  BufferAttribute,
-  BufferGeometry,
+  CylinderGeometry,
   DepthTexture,
   DirectionalLight,
   DoubleSide,
@@ -25,6 +24,7 @@ import {
   PlaneGeometry,
   Raycaster,
   Scene,
+  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -32,6 +32,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Contrast } from "./compose";
+import { loadMesh } from "./geometry";
 import { CHIP, PANE } from "./pane-style";
 import { readLevel } from "./planes";
 import { capturePane, type GridMesh, type GridScene, type PaneHandle, type Zyx } from "./scene";
@@ -56,6 +57,7 @@ export function Grid3D({
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
     meshes: Group;
+    annotations: Scene;
     volumes: Scene;
     depth: DepthTexture;
     render(): void;
@@ -102,6 +104,7 @@ export function Grid3D({
     );
     const flat = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const volumes = new Scene();
+    const annotations = new Scene();
     const size2 = new Vector2();
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(center);
@@ -127,6 +130,8 @@ export function Grid3D({
       }
       renderer.autoClear = false;
       renderer.render(volumes, camera);
+      renderer.clearDepth();
+      renderer.render(annotations, camera);
       renderer.autoClear = true;
     };
     const render = () => {
@@ -134,7 +139,7 @@ export function Grid3D({
     };
     controls.addEventListener("change", render);
     controls.update();
-    three.current = { meshes, volumes, depth, render };
+    three.current = { meshes, annotations, volumes, depth, render };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
     handle.current = {
       capture: () => ({
@@ -222,6 +227,48 @@ export function Grid3D({
       handle.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const t = three.current;
+    if (!t) return;
+    const radius = toWorld(scene.shapeZyx).length() * 0.002;
+    const objects: Mesh[] = [];
+    for (const a of scene.annotations) {
+      if (a.opacity <= 0) continue;
+      const material = new MeshBasicMaterial({
+        color: a.color,
+        opacity: a.opacity,
+        transparent: a.opacity < 1,
+      });
+      const points = a.points.map(toWorld);
+      for (const p of points) {
+        const dot = new Mesh(new SphereGeometry(radius * 2, 12, 8), material);
+        dot.position.copy(p);
+        objects.push(dot);
+      }
+      if (points.length === 2) {
+        const [a, b] = points as [Vector3, Vector3];
+        const direction = b.clone().sub(a);
+        const line = new Mesh(
+          new CylinderGeometry(radius, radius, direction.length(), 8),
+          material,
+        );
+        line.position.copy(a).add(b).multiplyScalar(0.5);
+        line.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), direction.normalize());
+        objects.push(line);
+      }
+    }
+    t.annotations.add(...objects);
+    t.render();
+    return () => {
+      for (const object of objects) {
+        t.annotations.remove(object);
+        object.geometry.dispose();
+        (object.material as MeshBasicMaterial).dispose();
+      }
+      t.render();
+    };
+  }, [scene.annotations]);
 
   // Meshes load once each; a scene change adds or drops only what changed, and colour or
   // opacity changes repaint the loaded ones.
@@ -355,21 +402,4 @@ function paint(mesh: Mesh, m: GridMesh) {
   mesh.visible = m.opacity > 0;
   // Draw see-through shells after what they contain.
   mesh.renderOrder = m.opacity < 1 ? 1 : 0;
-}
-
-async function loadMesh(m: GridMesh, signal: AbortSignal) {
-  const response = await fetch(m.url, { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const bytes = await response.arrayBuffer();
-  if (bytes.byteLength !== m.vertices * 12 + m.indices * 4)
-    throw new Error("the file has the wrong size");
-  const geometry = new BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new BufferAttribute(new Float32Array(bytes, 0, m.vertices * 3), 3),
-  );
-  geometry.setIndex(new BufferAttribute(new Uint32Array(bytes, m.vertices * 12, m.indices), 1));
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
-  return geometry;
 }

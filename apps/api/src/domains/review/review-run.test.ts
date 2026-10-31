@@ -111,7 +111,6 @@ describe("reviewRun", () => {
       evidence: [],
       files: [],
     });
-    expect(pending?.ask).toBe(tasks.find((t) => t.id === "segmentation")?.instructions);
     expect(result?.revisions[0]?.structures).toEqual([]);
     expect(reviewRunSchema.safeParse(result).success).toBe(true);
   });

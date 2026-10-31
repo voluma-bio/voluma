@@ -4,7 +4,8 @@
  * written synchronously), and Pi's events go to the run's recorder (the stream
  * record, queued in the background). A thread with stored
  * history resumes from it unchanged, system message included, so the prompt cache
- * stays valid; steering and follow-ups are new messages, never edits.
+ * stays valid: the model keeps seeing the prompt and tool definitions the thread started
+ * with, and calls run on the current tools. Steering and follow-ups are new messages, never edits.
  *
  * `startThread` returns at once with a handle. While the thread runs, `send` steers a
  * message into it (Pi's steering queue: delivered after the current tool calls); one sent
@@ -19,16 +20,24 @@ import {
   type StreamFn,
   type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  getCurrentTools,
+  type Model,
+  type Tool as ToolDeclaration,
+  type ToolResultMessage,
+  Type,
+} from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
+import { isContextOverflowError } from "../../context-overflow";
 import { replyFrames } from "../../live";
 import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
 import { SandboxUnavailableError, type Tool, type ToolResult } from "../../tools/tool";
-import { elideOldImages } from "./elide-images";
+import { type Compactor, compactor, foldHistory } from "./compaction";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -61,7 +70,10 @@ export type StartThreadOptions = ThreadIdentity & {
   thinkingLevel?: ThinkingLevel;
   /** `models.streamSimple.bind(models)` from pi-ai. */
   streamFn: StreamFn;
-  /** Fixed for the thread's life: a resumed thread whose stored prompt or tools differ fails. */
+  /**
+   * A new thread stores both. A resumed thread keeps the stored prompt and tool definitions;
+   * it is refused only if the input schema of a tool it was given changed.
+   */
   systemPrompt: string;
   tools: Tool[];
   recorder: Recorder;
@@ -111,16 +123,37 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     return 1;
   };
 
+  // `compacting` is built before the agent but needs `persistRow`, declared below with the history cursor.
+  const compacting: Compactor = compactor({
+    threadId,
+    model: options.model,
+    thinkingLevel: options.thinkingLevel,
+    streamFn: options.streamFn,
+    store: (row) => persistRow(row),
+    // The summary was a model call: its usage is spend (`spend.ts` counts assistant `message`s).
+    onSummary: (reply, summary) => {
+      const used = usageOf(reply);
+      emit("message", {
+        role: "assistant",
+        text: summary,
+        compaction: true,
+        ...(used && { usage: used }),
+      });
+    },
+  });
+
+  const agentTools = options.tools.map((tool) => toAgentTool(tool, options, batchSize));
   const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
-      tools: options.tools.map((tool) => toAgentTool(tool, options, batchSize)),
+      tools: agentTools,
       messages: [],
     },
     streamFn: options.streamFn,
-    transformContext: async (messages) => elideOldImages(messages),
+    // The one place a request's messages differ from the thread's: after a compaction.
+    transformContext: async (messages, signal) => compacting.prepare(messages, signal),
     sessionId: threadId,
   });
   // Pi made the system message the current prompt and tools call for.
@@ -131,10 +164,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   // emitted (the stream record follows the history), and the agent stops.
   let nextIdx = 0;
   let historyError: unknown;
-  const persist = async (message: AgentMessage): Promise<boolean> => {
+  const persist = (message: AgentMessage) => persistRow(JSON.stringify(message));
+  const persistRow = async (row: string): Promise<boolean> => {
     if (historyError || cutOff()) return false;
     try {
-      await history.appendMessage(threadId, nextIdx, JSON.stringify(message));
+      await history.appendMessage(threadId, nextIdx, row);
       nextIdx++;
       return true;
     } catch (error) {
@@ -189,16 +223,15 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     const abort = () => agent.abort();
     signal?.addEventListener("abort", abort);
     try {
-      const stored = (await history.load(threadId)).map((row) => JSON.parse(row) as AgentMessage);
-      nextIdx = stored.length;
+      const rows = await history.load(threadId);
+      nextIdx = rows.length;
+      const { messages: stored, compaction } = foldHistory(rows);
+      compacting.restore(compaction);
       // Every check that can refuse the thread runs before the thread's own events: a refused
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
       // from here; the run loop then stops it.
-      if (stored.length > 0 && !sameSystem(stored[0], system)) {
-        throw new ThreadStale(
-          "the stored system message differs from the current system prompt or tools; " +
-            "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
-        );
+      if (stored.length > 0 && stored[0]?.role !== "system") {
+        throw new ThreadStale("the stored history does not start with a system message");
       }
       // The model is part of a thread's identity, like its prompt: History is the record of it
       // (an assistant message names the model that wrote it), not `thread.started`, which may
@@ -212,6 +245,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
           `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
             "a resumed thread keeps its model",
         );
+      }
+      if (stored.length > 0) {
+        // The model keeps the tool definitions it started with (the system message in `stored`
+        // declares them; Pi would otherwise append the difference to the current tools).
+        agent.state.tools = storedTools(getCurrentTools(stored), agentTools);
       }
       const repairs = interruptedToolResults(stored, options.interrupted);
       const hasUser = stored.some((m) => m.role === "user");
@@ -306,6 +344,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             }
             break;
           }
+          case "turn_end": {
+            // Tools ran, so another turn follows: the thread can still use the notice.
+            if (historyError || cutOff() || event.toolResults.length === 0) break;
+            const notice = compacting.wrapUp(agent.state.messages);
+            if (notice) agent.steer(userMessage(notice, NOTICE));
+            break;
+          }
           case "tool_execution_start":
             // The call is in History (its assistant message was stored first) unless a write failed.
             if (historyError || cutOff()) break;
@@ -325,8 +370,18 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         for (const { text, sender } of early.splice(0)) agent.steer(userMessage(text, sender));
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
-        // A message steered in as the loop was ending is still queued.
-        while (!historyError && !signal?.aborted && agent.hasQueuedMessages()) {
+        // A message steered in as the loop was ending is still queued. A request the provider
+        // refused as too large is retried once, after a compaction; the note that starts the retry
+        // is stored only once the summary was.
+        while (!historyError && !signal?.aborted) {
+          if (overflowRetryable(agent.state.messages)) {
+            const recovered = await compacting.recover(agent.state.messages, signal).catch((e) => {
+              // The summary's own provider failure ends the thread as that failure, which the run retries.
+              throw new ThreadFailure(e instanceof Error ? e.message : String(e));
+            });
+            if (!recovered) break;
+            agent.steer(userMessage(OVERFLOW_NOTE, NOTICE));
+          } else if (!agent.hasQueuedMessages()) break;
           await agent.continue();
         }
       }
@@ -374,12 +429,27 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   };
 }
 
+/** The sender of compaction notices: the runtime, but not a nudge. */
+const NOTICE: UserSender = { kind: "runtime", notice: true };
+
+const OVERFLOW_NOTE =
+  "The last request was too large for the model, so your history was summarized. Continue the task.";
+
+/** Whether the thread ended on a too-large request whose predecessor, if it was one, was not also refused. */
+function overflowRetryable(messages: AgentMessage[]): boolean {
+  const replies = messages.filter((m) => m.role === "assistant");
+  const [last, before] = [replies.at(-1), replies.at(-2)];
+  const refused = (m: AgentMessage | undefined) =>
+    m?.role === "assistant" && m.stopReason === "error" && isContextOverflowError(m.errorMessage);
+  return messages.at(-1) === last && refused(last) && !refused(before);
+}
+
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
 class ThreadFailure extends Error {}
 
 /**
- * The stored thread cannot be resumed as it is (its prompt, tools or model changed, e.g. by a
- * deploy): `ran` is false and `stale` true. The caller starts the work again on a new thread.
+ * The stored thread cannot be resumed as it is (a deploy changed the input of one of its tools,
+ * or its model changed): `ran` is false and `stale` true. The caller starts the work again on a new thread.
  */
 class ThreadStale extends ThreadFailure {}
 
@@ -456,11 +526,55 @@ function strictObjects<T>(schema: T): T {
   ) as T;
 }
 
-/** The stored system message must be the one the current prompt and tools would make. */
-function sameSystem(stored: AgentMessage | undefined, current: AgentMessage | undefined): boolean {
-  const key = (m: AgentMessage | undefined) =>
-    m?.role === "system" ? JSON.stringify([m.content, m.toolsAdded]) : undefined;
-  return key(stored) !== undefined && key(stored) === key(current);
+/**
+ * A schema without its `description` keywords, for comparing what a call may contain. Keys
+ * of a map of named schemas (`properties`, `$defs`) are names, so only their values are walked.
+ */
+function withoutDescriptions(schema: unknown, named = false): unknown {
+  if (Array.isArray(schema)) return schema.map((s) => withoutDescriptions(s));
+  if (typeof schema !== "object" || schema === null) return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => named || key !== "description")
+      .map(([key, value]) => [
+        key,
+        withoutDescriptions(value, !named && ["properties", "$defs", "definitions"].includes(key)),
+      ]),
+  );
+}
+
+/**
+ * The tools a resumed thread offers: the definitions it started with, run by the current tool
+ * of the same name. A tool whose input schema changed since is refused as stale: Pi checks a
+ * call against the stored schema and `execute` then parses it with the current one, so a call
+ * could pass one and fail the other for the rest of the thread. A description change resumes,
+ * the tool's or a field's (`.describe()`); a changed default or any other keyword is refused.
+ * A tool since removed answers a call with an error; a tool added since is not offered.
+ * (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
+ */
+function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTool[] {
+  return declared.map((d) => {
+    const now = current.find((t) => t.name === d.name);
+    if (
+      now &&
+      JSON.stringify(withoutDescriptions(now.parameters)) !==
+        JSON.stringify(withoutDescriptions(d.parameters))
+    ) {
+      throw new ThreadStale(`the input of ${d.name} changed since the thread started`);
+    }
+    return {
+      label: d.name,
+      execute: async () => ({
+        content: [{ type: "text" as const, text: `The tool ${d.name} is no longer available.` }],
+        details: {},
+        isError: true,
+      }),
+      ...now,
+      name: d.name,
+      description: d.description,
+      parameters: d.parameters,
+    };
+  });
 }
 
 /**

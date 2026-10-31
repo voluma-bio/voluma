@@ -1,6 +1,6 @@
 /**
- * Report: the scan's task graph (report size), then the task in view: where it stands, what the
- * AI was asked, its items, its values, how they compare with reference readers, its QC images
+ * Report: the scan's task graph (report size), then the task in view: where it stands, what it is
+ * for, its items, its values, how they compare with reference readers, its QC images
  * and its files. Picking a box sets up the views on that task; a box's agent opens its steps.
  */
 import { reviewFileUrl } from "@voluma/api-client";
@@ -37,7 +37,7 @@ export function ReportPanel({
   task: TaskView | undefined;
   /** Its review data (values, references, files), once the run has some. */
   reviewTask: ReviewTask | undefined;
-  /** Every item of the scan, with what was accepted here. */
+  /** Every item of the scan, reconciled with authoritative human decisions. */
   items: NeedItem[];
   onTask: (taskId: string) => void;
   onItem: (item: NeedItem) => void;
@@ -50,7 +50,8 @@ export function ReportPanel({
       </div>
     );
   return (
-    <div className="grid gap-5 p-4">
+    // One track no wider than the panel, so the graph fits it rather than widening it.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 p-4">
       <section aria-label="Tasks">
         <h3 className="mb-3 text-sm font-semibold">Tasks</h3>
         <TaskGraph
@@ -126,17 +127,13 @@ function TaskDetail({
           {task.check && (
             <span>
               {task.check.verdict === "passed"
-                ? "Second AI check agreed"
-                : "Second AI check sent it back"}
+                ? "Second check agreed"
+                : "Second check sent it back"}
             </span>
           )}
         </p>
-        {reviewTask?.ask && (
-          <p className="text-sm leading-relaxed">
-            <span className="text-muted-foreground">Asked: </span>
-            {reviewTask.ask}
-          </p>
-        )}
+        {/* The workflow's sentence for a person, never the AI's instructions (paths, skills). */}
+        {task.purpose && <p className="text-sm leading-relaxed">{task.purpose}</p>}
         {task.dependsOn.length > 0 && (
           <p className="text-sm text-muted-foreground">
             Uses {task.dependsOn.map(titleOf).join(", ")}.

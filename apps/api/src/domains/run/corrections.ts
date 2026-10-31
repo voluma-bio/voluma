@@ -1,11 +1,12 @@
 /**
  * The server's side of corrections (`@voluma/contracts/messages`): judging a researcher's message
  * to a run, reopening a finished run for it, and recording how a correction ended. The queue
- * (pg-queue.ts) calls these inside its transactions, under the queue lock.
+ * (pg-queue.ts) calls these inside its transactions (locks: `apps/api/AGENTS.md`).
  *
- * Lock order, everywhere: the queue lock, then the run's event lock (`eventLock`), then row
- * locks. A runner's append takes the event lock before it shares the run row (`assertLease`), so
- * a transaction that holds the row and then asks for the event lock can deadlock with it.
+ * Lock order, everywhere: the queue lock (where taken), then the run's
+ * event lock (`eventLock`), then row locks. A runner's append takes the event lock before it
+ * shares the run row (`assertLease`), so a transaction that holds the row and then asks for the
+ * event lock can deadlock with it.
  */
 import { runEventSchema } from "@voluma/contracts/events";
 import { corrections, fold } from "@voluma/contracts/fold";
@@ -65,6 +66,7 @@ async function reopen(tx: Tx, runId: string, messageEventId: string, by: string)
       endedAt: null,
       error: null,
       lastClaimEnd: null,
+      struckLeaseToken: null,
       stalledClaims: 0,
       ...noLease,
     })
@@ -107,7 +109,7 @@ export const GUEST_KEYS_MESSAGE =
 /**
  * A researcher's message to a run, judged in the order the contract lists the refusals. `write`
  * false judges only (nothing is stored, no lock is taken): the route calls that first, so a
- * refused message stores no snapshot, and again with `write` under the queue lock. A run that
+ * refused message stores no snapshot, and again with `write` inside the queue's transaction. A run that
  * ended `completed` is reopened through admission. A run still queued or running takes no message
  * (one message, one claim). A run whose workflow files are not the study's current ones cannot
  * be reopened: the runner could not load them.

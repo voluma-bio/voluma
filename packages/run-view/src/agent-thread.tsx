@@ -99,7 +99,9 @@ export function AgentThread({
           empty={
             running
               ? "Nothing yet."
-              : thread.status === "paused" || thread.status === "cancelled"
+              : thread.status === "waiting" ||
+                  thread.status === "paused" ||
+                  thread.status === "cancelled"
                 ? "It was cut off before it wrote anything."
                 : "It wrote nothing."
           }

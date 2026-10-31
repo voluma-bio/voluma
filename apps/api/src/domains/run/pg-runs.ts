@@ -215,10 +215,15 @@ function progressOf(latest: Revision | undefined): Run["tasks"] {
 
 /**
  * One run's cache entry: null `fold` is the verdict that its events don't parse, kept against
- * the watermark so an unreadable run isn't loaded again on every read. `weight` is its event
+ * the generation and watermark so an unreadable run isn't loaded again on every read. `weight` is its event
  * count, a stand-in for its size.
  */
-type CacheEntry = { lastEventId: string | null; fold: RunFold | null; weight: number };
+type CacheEntry = {
+  generation: string;
+  lastEventId: string | null;
+  fold: RunFold | null;
+  weight: number;
+};
 type SummaryCache = { entries: Map<string, CacheEntry>; weight: number };
 
 /**
@@ -273,14 +278,13 @@ async function loadResults(
   const rows = await loadRows(tx, where);
   // Rows are newest first, so a scan's first row is its newest run.
   const seen = new Set<string>();
-  const ids = rows
-    .filter(({ run }) => {
-      const newest = !seen.has(run.inputId);
-      seen.add(run.inputId);
-      const halted = run.state === "ended" && run.outcome !== "completed";
-      return !halted || stopped === "all" || (stopped === "newest" && newest);
-    })
-    .map(({ run }) => run.id);
+  const foldRows = rows.filter(({ run }) => {
+    const newest = !seen.has(run.inputId);
+    seen.add(run.inputId);
+    const halted = run.state === "ended" && run.outcome !== "completed";
+    return !halted || stopped === "all" || (stopped === "newest" && newest);
+  });
+  const ids = foldRows.map(({ run }) => run.id);
   const watermarks = ids.length
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
@@ -288,21 +292,30 @@ async function loadResults(
         .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
         .orderBy(events.runId, desc(events.seq))
     : [];
-  // Event identity also changes when the seeder replaces a history at the same sequence.
+  // Appends move the event watermark; replacements change generation even when event IDs repeat.
   const versions = new Map(watermarks.map(({ runId, id }) => [runId, id]));
   const cached = new Map(ids.map((id) => [id, cache.entries.get(id)]));
-  const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
+  const missing = foldRows
+    .filter(({ run }) => {
+      const hit = cached.get(run.id);
+      return (
+        hit?.generation !== run.generation || hit.lastEventId !== (versions.get(run.id) ?? null)
+      );
+    })
+    .map(({ run }) => run.id);
   const { logs, unreadable } = await loadLogs(tx, missing);
   const foldOf = new Map<string, RunFold>();
   const failed: string[] = [];
-  for (const id of ids) {
+  for (const { run } of foldRows) {
+    const { id, generation } = run;
     const lastEventId = versions.get(id) ?? null;
     const hit = cached.get(id);
     let entry: CacheEntry;
-    if (hit?.lastEventId === lastEventId) entry = hit;
+    if (hit?.generation === generation && hit.lastEventId === lastEventId) entry = hit;
     else {
       const log = logs.get(id) ?? [];
       entry = {
+        generation,
         lastEventId,
         fold: unreadable.has(id) ? null : foldRun(log),
         weight: log.length + 1,
