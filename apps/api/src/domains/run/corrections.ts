@@ -9,7 +9,7 @@
  * event lock can deadlock with it.
  */
 import { runEventSchema } from "@voluma/contracts/events";
-import { corrections, FOLD_EVENT_TYPES, fold } from "@voluma/contracts/fold";
+import { corrections, FOLD_EVENT_TYPES, fold, redoRefusal } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -191,19 +191,13 @@ export async function decideMessage(
   if (view.plan.tasks.length === 0)
     throw new HTTPException(409, { message: "The run has no plan yet." });
   if (taskId !== undefined) {
-    if (!view.plan.tasks.some((t) => t.id === taskId)) {
-      throw new HTTPException(404, { message: `${taskId} is not a task of this run.` });
-    }
-    if (view.tasks.find((t) => t.id === taskId)?.skipped) {
-      throw new HTTPException(409, {
-        message: `${taskId} was skipped, so it cannot be corrected.`,
-      });
-    }
+    const cannot = redoRefusal(view, taskId);
+    if (cannot) throw new HTTPException(cannot.status, { message: cannot.message });
     if (
       itemId !== undefined &&
       !view.tasks.find((t) => t.id === taskId)?.checks.some((c) => c.id === itemId)
     ) {
-      throw new HTTPException(400, { message: `${itemId} is not a To check item of ${taskId}.` });
+      throw new HTTPException(400, { message: "That is not one of this task's To check items." });
     }
   }
   const refused = admit(

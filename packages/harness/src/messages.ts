@@ -348,7 +348,7 @@ export function finishedRunText(view: Folded): string {
 /**
  * What the researcher was reviewing when they wrote, told to a main agent that starts inside a
  * correction: the task and open item by name, the attached picture and marks, and the rule that
- * a redo needs their go. Undefined when the message names no task.
+ * a redo needs their go.
  */
 export function reviewingText(o: {
   task: string;

@@ -10,7 +10,7 @@
  * They never wait for a thread inside the section.
  */
 import type { By } from "@voluma/contracts/events";
-import { transitiveDependents } from "@voluma/contracts/fold";
+import { redoRefusal, transitiveDependents } from "@voluma/contracts/fold";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { fileRefInputSchema } from "@voluma/contracts/output";
 import { replyInputSchema } from "@voluma/contracts/task-tools";
@@ -512,15 +512,8 @@ export function mainTools(deps: MainDeps) {
     sequential: true,
     execute: inSection(async ({ text, offer }, ctx) => {
       if (offer) {
-        const t = runtime.taskOf(offer.taskId);
-        if (!t) throw new Refusal(`${offer.taskId} is not a task of the plan.`);
-        if (t.skipped) throw new Refusal(`${offer.taskId} was skipped, so it cannot be redone.`);
-        if (t.status !== "done" && t.status !== "to-check") {
-          throw new Refusal(`${offer.taskId} is ${t.status}: it can be redone once it is done.`);
-        }
-        if (agents.fixLimitReached(log(), offer.taskId)) {
-          throw new Refusal(`${offer.taskId} has used its fix rounds; it stays as it is.`);
-        }
+        const cannot = redoRefusal(runtime.view(), offer.taskId);
+        if (cannot) throw new Refusal(cannot.message);
       }
       await recorder.append(
         ctx.threadId,
