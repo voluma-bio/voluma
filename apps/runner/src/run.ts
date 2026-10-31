@@ -331,7 +331,7 @@ async function claimBody(
         },
       },
       runId,
-      () => stop("lease-lost"),
+      (reason) => stop(reason === "lease-lost" ? "lease-lost" : "self-stop"),
       undefined,
       stored,
       live,

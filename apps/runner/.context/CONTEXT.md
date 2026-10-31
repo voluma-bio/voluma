@@ -163,6 +163,7 @@ who ends it:
    then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
+   The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
