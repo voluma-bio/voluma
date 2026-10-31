@@ -10,9 +10,11 @@
  * the next request would carry are fetched, those in the messages since the latest compaction
  * (`compaction.ts`); the ones it summarized away become that note.
  *
- * Any read error but `FileNotFound` (the one classification the Files port makes) is retried
- * with a short backoff, since a transient R2 error must not fail the history load and stop the
- * thread; after the last attempt it propagates.
+ * A failed image read is retried once with jittered backoff. The S3 client already retries 5xx
+ * and throttling; this layer covers what it gives up on or cannot see: a stream that breaks
+ * mid-body, or stalls past `READ_TIMEOUT_MS`. Any error but `FileNotFound` (the one
+ * classification the Files port makes) is retried, since a transient R2 error must not fail the
+ * history load and stop the thread; after the last attempt it propagates.
  */
 import { createHash } from "node:crypto";
 import { historyImageKey } from "@voluma/contracts/r2";
@@ -24,8 +26,9 @@ import { parseMarker } from "./compaction";
 // so check the stream before buffering it: a sandbox can replace it with a larger file.
 const MAX_IMAGE_BYTES = 1024 * 1024;
 
-const READ_ATTEMPTS = 3;
-const READ_BACKOFF_MS = 500; // doubles: 0.5 s, then 1 s
+const READ_ATTEMPTS = 2;
+const READ_BACKOFF_MS = 500;
+const READ_TIMEOUT_MS = 30_000; // per attempt, so a stalled stream throws and is retried
 
 type Block = { type: string; [key: string]: unknown };
 type Row = { content?: unknown; [key: string]: unknown };
@@ -44,13 +47,13 @@ export function withImageRefs(
   runId: string,
   nameOf: (threadId: string) => string,
 ): History {
-  const signal = new AbortController().signal;
+  const signal = new AbortController().signal; // writes: never aborted
   const note = (why: string): Block => ({
     type: "text",
     text: `[an image is not available: ${why}]`,
   });
 
-  async function fetchImage(block: Block): Promise<Block> {
+  async function fetchImage(threadId: string, block: Block): Promise<Block> {
     const { key, sha256, mimeType } = block as unknown as {
       key: string;
       sha256: string;
@@ -61,7 +64,7 @@ export function withImageRefs(
       chunks = [];
       let size = 0;
       try {
-        for await (const chunk of files.read(key, signal)) {
+        for await (const chunk of files.read(key, AbortSignal.timeout(READ_TIMEOUT_MS))) {
           size += chunk.length;
           if (size > MAX_IMAGE_BYTES) return note("its file exceeds the image size limit");
           chunks.push(chunk);
@@ -69,8 +72,13 @@ export function withImageRefs(
         break;
       } catch (error) {
         if (error instanceof FileNotFound) return note("its file was deleted");
-        if (attempt >= READ_ATTEMPTS || signal.aborted) throw error;
-        await new Promise((resolve) => setTimeout(resolve, READ_BACKOFF_MS * 2 ** (attempt - 1)));
+        if (attempt >= READ_ATTEMPTS) throw error;
+        console.error(
+          `image-refs: reading ${key} for thread ${threadId} failed, retrying: ${String(error)}`,
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, READ_BACKOFF_MS * (0.5 + Math.random())),
+        );
       }
     }
     const bytes = Buffer.concat(chunks);
@@ -99,7 +107,9 @@ export function withImageRefs(
           if (!r.row || !blocks || !has(r.row, "imageRef")) return r.text;
           const content =
             index >= keptFrom
-              ? await Promise.all(blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)))
+              ? await Promise.all(
+                  blocks.map((b) => (b.type === "imageRef" ? fetchImage(threadId, b) : b)),
+                )
               : [...blocks.filter((b) => b.type !== "imageRef"), { type: "text", text: GONE_NOTE }];
           return JSON.stringify({ ...r.row, content });
         }),
