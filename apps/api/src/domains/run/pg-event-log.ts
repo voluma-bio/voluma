@@ -46,15 +46,19 @@ export const eventLock = (tx: Tx, runId: string) =>
 
 /** Caller holds the event lock and has authorized the write under the run-row lock. */
 export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
-  return tx
-    .insert(events)
-    .values({
-      ...event,
-      createdAt: new Date(event.createdAt),
-      seq: sql`(SELECT COALESCE(MAX(${events.seq}), 0) + 1 FROM ${events} WHERE ${events.runId} = ${event.runId})`,
-    })
-    .onConflictDoNothing({ target: events.id })
-    .returning({ id: events.id, seq: events.seq });
+  return (
+    tx
+      .insert(events)
+      .values({
+        ...event,
+        createdAt: new Date(event.createdAt),
+        seq: sql`(SELECT COALESCE(MAX(${events.seq}), 0) + 1 FROM ${events} WHERE ${events.runId} = ${event.runId})`,
+      })
+      // No target: the previous key `(id)` and the run-keyed one `(run_id, id)` both skip a repeat, so
+      // this works before and after the contract migration.
+      .onConflictDoNothing()
+      .returning({ id: events.id, seq: events.seq })
+  );
 }
 
 /**
@@ -143,10 +147,10 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
         const inserted = await insertEvent(tx, event);
         if (inserted.length === 0) {
           const [stored] = await tx
-            .select({ runId: events.runId })
+            .select({ id: events.id })
             .from(events)
-            .where(eq(events.id, event.id));
-          if (stored?.runId !== event.runId) throw new EventIdTaken();
+            .where(and(eq(events.runId, event.runId), eq(events.id, event.id)));
+          if (!stored) throw new EventIdTaken();
           return;
         }
         const [row] = inserted;
