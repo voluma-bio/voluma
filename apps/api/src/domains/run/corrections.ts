@@ -3,9 +3,10 @@
  * to a run, reopening a finished run for it, and recording how a correction ended. The queue
  * (pg-queue.ts) calls these inside its transactions, under the queue lock.
  *
- * Lock order, everywhere: the queue lock, then the run's event lock (`eventLock`), then row
- * locks. A runner's append takes the event lock before it shares the run row (`assertLease`), so
- * a transaction that holds the row and then asks for the event lock can deadlock with it.
+ * Lock order, everywhere: the queue lock (a heartbeat and a report skip it), then the run's
+ * event lock (`eventLock`), then row locks. A runner's append takes the event lock before it
+ * shares the run row (`assertLease`), so a transaction that holds the row and then asks for the
+ * event lock can deadlock with it.
  */
 import { runEventSchema } from "@voluma/contracts/events";
 import { corrections, fold } from "@voluma/contracts/fold";
