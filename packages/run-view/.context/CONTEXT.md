@@ -1,43 +1,20 @@
-# Run feature
+# Run view
 
-One screen under the shell (`AppShell`, one `QueryClient` in `SignedIn`, no top bar): `/runs/:id/live`,
-the run page (`run-page.tsx`). Starting runs is `features/study` (Run on new scans, `/new`); there
-is no runs list: Home (`features/study`) replaces it.
+`@voluma/run-view` holds what any screen needs to show a run, so features share it without
+importing each other: the run model (`run-model.ts`: `runView`, `agentTree`, `haltOf`), the
+transcript fold (`transcript.ts`), the run store (`run-store.tsx`), `AgentThread`, the task graph
+(`task-graph.tsx`: `TaskGraph` at study, summary and report size), `ItemToCheck`, `chat/`, the
+clock (`use-now.ts`), and the status, formatting and visitor-key helpers. It has no router. Its
+screen today is the scan review (`apps/web/src/features/scan`).
 
-The run's reusable parts live in `packages/run-view` (`@voluma/run-view`), so other features can
-show them without importing this one: `run-model.ts`, `transcript.ts`, `run-store.tsx`,
-`agent-thread.tsx`, `agents.tsx`, `transcript-view.tsx`, `task-flow.tsx`, `chat/`, `use-now.ts`
-(the clock), and the status and keys helpers. File names below refer to that package unless they
-are in this directory. The package has no router: `TaskFlow` takes the router `Link` as a prop.
-
-- **Task titles** come from `workflows/mouse-oa/tasks.json`, read through `catalog["mouse-oa"]`
-  from `@voluma/workflow/bundled` (JSON imports parsed with the contract's schemas; the API's
-  workflow catalog is the same export; no endpoint serves it) by the bundle's `taskTitle` (a task
-  without a title shows its id); don't add another copy. The API's build filter in `render.yaml` includes
-  `workflows/*/tasks.json` and `outputs.json` (see `apps/api/.context/deploy.md`), so a change
-  redeploys the web app. The page reads the plan from the first
-  `revision.started` itself because `fold` doesn't expose it.
-- **The page** (`run-page.tsx`) is the R2 run screen of the full-flow prototype: a researcher sees
-  where the run is, what needs their eye and the results without reading a transcript. Header
-  (`run-header.tsx`): a crumb to the study (Home for a study of one: `getStudy` is read once for
-  labels only), the scan as "OA6-1, right knee", group and workflow, "N of M tasks done", "K to
-  check", a bar, Run details (started as a date, took or running for, settled cost, and "What
-  the AI did"), Stop while live, and Open in 3D (`/runs/:id?task=`, the review, until a 3D
-  panel exists). A queued run with a plan lost its runner: it reads "Paused". Left: the plan as
-  a flowchart (`task-flow.tsx`), rows by dependency depth and each row ordered by its parents'
-  columns, so a plan change needs no layout table; below 1100 px a compact list, and the page
-  scrolls as one. Right: Overview (`overview.tsx`: working on now, needs your eye, results by
-  task), one task (`?task=<id>`, `task-view.tsx`), or the Agents view
-  (`?view=agents`, from Run details; `agents-view.tsx`).
-- **The Agents view** (a debug view for now; the redesign restyles it): every agent as a tree and
-  the selected agent's stream (`&agent=<threadId>`; no `agent` means Follow live, which keeps the
-  agent it shows while that one works, else shows the newest working agent with no working agent
-  under it, else the lead AI). The tree is `agentTree` (`run-model.ts`): each thread under its
-  `thread.started.parentThreadId`, the supervisor hidden; siblings sharing `task` sit under the
-  task's title. Never parse thread ids and never assume one worker and one check per task: a redo
-  resumes the same worker thread (its tries are its `attempt.opened` ids, `Thread.attempts`), and
-  each check is a new thread whose `attemptId` names the try it checked. Every door onto an agent
-  (a card's name in the lead AI's stream, the tree) is `openThread`, which opens it here.
+- **Task titles** are the plan's (`TaskView.title`, from the run's first `revision.started`); a
+  task without one shows its id. `catalog["mouse-oa"]` (`@voluma/workflow/bundled`) is only for
+  what the log doesn't carry.
+- **The agent tree** is `agentTree` (`run-model.ts`): each thread under its
+  `thread.started.parentThreadId`, the supervisor hidden. Never parse thread ids and never assume
+  one worker and one check per task: a redo resumes the same worker thread (its tries are its
+  `attempt.opened` ids, `Thread.attempts`), and each check is a new thread whose `attemptId` names
+  the try it checked. Every door onto an agent is `openThread`.
 - **Researcher words** everywhere but inside a transcript: the AI, a second AI check, the lead AI;
   never worker, checker or model, and no paths, file names or tool names outside "How the AI did
   it". A task's line is its current attempt's latest worker checkpoint `summary`, else its
@@ -52,29 +29,18 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
 - **One count.** "N of M tasks done" and "K to check" are `progress(latest revision)` from
   `@voluma/contracts/review-state`, the function the server's `Run.tasks` and review summary use,
   so the page agrees with Home and the review: done or To check by fold status (a skipped task
-  counts), and the open check items. The Overview's badge is the same K. Cards that can't be
+  counts), and the open check items. Cards that can't be
   accepted (a task sent back, a value missing, a failed task) show but aren't counted.
-- **Needs your eye** comes from `reviewState` (the fold plus `check.accepted`): every check item
-  of a task, open or accepted, live or finished. "Looks right" calls `useAcceptCheck`
-  (`@voluma/api-client/query`, the one mutation and error rule the study page and review share; it also refetches the run, review and study reads) with
-  `Run.review.revisionId`, only on a completed run that isn't an example. An ended run's stream has
-  closed, so the page also counts what it accepted itself (`useAccepting`, which keeps a pending
-  set per item). A To check task with no check item gets a card with no "Looks right"; a failed
-  task gets its own card. The fold's generic "Marked to check" title is not shown. A value is
-  blue when its task's result came from a correction revision.
 - **QC images** are the run's evidence files through `reviewFileUrl`, 80 to 360 KB each with no
   smaller rendition: `loading="lazy"`, full size only in the lightbox, and "Image not available"
   when the file is missing (a copied run has no R2 files).
 - **One agent's thread is `<AgentThread threadId>`** (`agent-thread.tsx`), wherever it shows: the
-  Agents view and "How the AI did it" today. The caller names the thread and gives it a box; the
-  container reads its rows and thread from the run store (`run-store.tsx`: one per run page, fed by
-  the page's stream; selector hooks, so a thread re-renders only for its own frames), and owns its header (name, status, clock, cost), its live line and
+  scan review's Agents panel today. The caller names the thread and gives it a box; the
+  container reads its rows and thread from the run store (`run-store.tsx`: one per run, fed by
+  the screen's stream; selector hooks, so a thread re-renders only for its own frames), and owns its header (name, status, clock, cost), its live line and
   its own scroll, which sticks to the newest line while the reader is at the bottom. Hosts add
   header controls through `actions`. Shape from Meridian Flow's `ChatView`. Don't render a thread
   any other way; a new place for one is a new `<AgentThread>`.
-- **"How the AI did it"** shows the task's agents (the AI's work, its tries in one thread, then a
-  check per try), each an `AgentThread` in a box of at most 36rem; open by default only while the
-  task works, and built only once it opens.
 - **The log is not complete when the runner stops.** Stop ends the run in the API at once, and a
   lost runner writes nothing more (its lease expires and the run goes back to queued or awaiting
   keys), so threads can have a `thread.started` and no `thread.ended`. `haltOf(Run.state, closed)`
@@ -133,8 +99,6 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
   run uses and lets the user remove it. They live in localStorage under
   `voluma.visitor-keys.<userId>`; a run in `awaiting-keys` shows the form on its page
   (`resendKeys`) only to the user who started it.
-- A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
-
 - **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
   `formatDuration`, `plural`, `shortDate`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
@@ -142,4 +106,4 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
   each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own
   cost (`Thread.spend`). Only `Elapsed` and the header's running-for tick each second.
 
-Gaps: "Reviewed" needs review state, which the review lane doesn't expose yet ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).
+Gaps: "Reviewed" needs review state ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).

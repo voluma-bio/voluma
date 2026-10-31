@@ -25,15 +25,6 @@ export type ReviewSnapshots = {
   ): Promise<{ snapshot: ReviewSnapshot; created: boolean }>;
 };
 
-/** The published reference archive; a version pins the bytes described by the lookup. */
-export type ReferenceArchive = {
-  head(signal: AbortSignal): Promise<{ byteLength: number; version: string }>;
-  open(
-    version: string,
-    signal: AbortSignal,
-  ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
-};
-
 export type RunRecord = {
   /** Opaque run lifetime; changes when an example is replaced under the same id. */
   generation: string;
