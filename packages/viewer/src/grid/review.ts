@@ -6,7 +6,7 @@
  */
 import type { Focus, ReviewAssets, ReviewTask, Revision, Volume } from "@voluma/contracts/review";
 import { readLevel } from "./planes";
-import type { GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
+import type { GridAnnotation, GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
 
 /** The Structures panel's settings, by structure id; opacity in percent. */
 export type StructureDisplay = Record<string, { visible: boolean; opacity: number }>;
@@ -35,6 +35,7 @@ type Input = {
   task: ReviewTask;
   assets: Record<string, ReviewAssets>;
   display: StructureDisplay;
+  labels?: boolean;
   focus?: Focus;
   /** The URL prefix (ending in "/") of a file's converted assets. */
   assetBase(sha256: string): string;
@@ -47,6 +48,7 @@ export function taskGrid({
   task,
   assets,
   display,
+  labels: showLabels = false,
   focus,
   assetBase,
   token,
@@ -183,7 +185,7 @@ export function taskGrid({
         l.label,
         focusedLabel(volume, l.label)
           ? { color: token("--check-outline"), opacity: 1 }
-          : paint(l.id, token(`--label-${((l.label - 1) % 12) + 1}`)),
+          : paint(l.id, token(showLabels ? `--label-${((l.label - 1) % 12) + 1}` : "--bone")),
       ]),
     );
     const shown = [...looks].filter(([, look]) => look.opacity > 0);
@@ -232,7 +234,7 @@ export function taskGrid({
       }
     }
   }
-  // Surfaces: their meshes (the slices' trace of a surface is still to come).
+  // The same published surface sheet supplies 3D geometry and slice intersections.
   for (const s of revision.surfaces) {
     if (!named.includes(s.id)) continue;
     if (volumes.get(s.volumeId)?.gridId !== gridId) {
@@ -241,7 +243,30 @@ export function taskGrid({
     }
     const look = paint(s.id, nextColour());
     const a = ready(s.heights.sha256, s.name);
-    if (a) meshes.push(...a.meshes.map((m) => mesh(s.heights.sha256, m, s.name, [0, 0, 0], look)));
+    if (a)
+      meshes.push(
+        ...a.meshes.map((m) => ({
+          ...mesh(s.heights.sha256, m, s.name, [0, 0, 0], look),
+          trace: true,
+        })),
+      );
+  }
+  const annotations: GridAnnotation[] = [];
+  for (const a of revision.annotations) {
+    if (!named.includes(a.id)) continue;
+    const volume = volumes.get(a.volumeId);
+    if (!volume || volume.gridId !== gridId) {
+      notes.elsewhere.push(a.name);
+      continue;
+    }
+    annotations.push({
+      id: a.id,
+      name: a.name,
+      points: (a.kind === "point" ? [a.position] : [a.a, a.b]).map(
+        (p) => voxelOf(image, p) as unknown as Zyx,
+      ),
+      ...paint(a.id, token("--ruler")),
+    });
   }
 
   return {
@@ -254,6 +279,7 @@ export function taskGrid({
       image: { base: assetBase(image.data.sha256), levels: imageAssets.levels },
       overlays,
       meshes,
+      annotations,
     },
     focus: focus && focusPoint(focus, revision, image, gridId === scanGrid),
     focusLabels,

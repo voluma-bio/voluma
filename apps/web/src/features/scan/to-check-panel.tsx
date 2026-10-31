@@ -40,10 +40,10 @@ export function ToCheckPanel({
   if (items.length === 0)
     return (
       <div className="p-4">
-        <EmptyState title={live ? "Nothing to check yet" : "Nothing to check on this scan"}>
+        <EmptyState title={live ? "Nothing to check yet" : "No items to check were recorded"}>
           {live
             ? "Items appear here when the AI asks for your check."
-            : "The AI and its second check raised no item here."}
+            : "See Report for which tasks finished and what they reported."}
         </EmptyState>
       </div>
     );
