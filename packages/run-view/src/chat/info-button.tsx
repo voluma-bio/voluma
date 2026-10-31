@@ -53,14 +53,14 @@ export function InfoButton({ label, sections }: { label: string; sections: InfoS
 
 const count = (n: number) => n.toLocaleString();
 
-/** Rows for one model call's or a sum of calls' usage: tokens, the share read from cache, cost. */
-export function usageRows(u: ModelUsage, model?: string): InfoSection["rows"] {
+/** Rows for one model call's usage: tokens, the share read from cache, whether it missed the cache, cost. */
+export function usageRows(u: ModelUsage, miss = false): InfoSection["rows"] {
   const read = u.input + u.cacheRead;
   return [
-    ...(model ? ([["Model", model]] as [string, string][]) : []),
     ["Input tokens", count(read)],
     ["Output tokens", count(u.output)],
     ["Cache hit", read > 0 ? `${Math.round((100 * u.cacheRead) / read)}%` : "none"],
+    ...(miss ? ([["Cache", "miss"]] as [string, string][]) : []),
     ["Cache writes", count(u.cacheWrite)],
     ["Cost", `$${u.costUsd.toFixed(u.costUsd < 0.1 ? 4 : 2)}`],
   ];

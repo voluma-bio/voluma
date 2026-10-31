@@ -1,7 +1,7 @@
 /**
- * The scan review (`/scans/:runId`): one scan's run, live or finished, in the dark shell. The main
- * area is the task in view on its grid; the left side holds To check, Report and Agents, the right
- * side View, Marks and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
+ * The scan review (`/scans/:runId`): one scan's run, live or finished, in the light shell. The main
+ * area is the task in view on its grid; the left side holds Study, To check, Report and Agents, the
+ * right side View, Marks and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
  * `item` (the To check item open) and `agent` (the agent whose steps show; none follows the one
  * working now). Everything is derived from the run's stream (`runView`), the run (`getRun`,
  * polled while it goes, for what isn't an event) and its review data (`getReviewRun`, for the
@@ -18,23 +18,19 @@ import type { Run } from "@voluma/contracts/run";
 import {
   DisclosureProvider,
   haltOf,
+  isLive,
   type NeedItem,
+  plural,
   RunStoreProvider,
+  runHref,
   runView,
+  StudyPanel,
   ThreadNavigationProvider,
   useClosed,
   useEvents,
   useRunStore,
 } from "@voluma/run-view";
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  LoadingState,
-  ShellLink,
-  ShellPanel,
-  useOpenPanel,
-} from "@voluma/ui";
+import { Button, EmptyState, ErrorState, LoadingState, ShellPanel, useOpenPanel } from "@voluma/ui";
 import type {
   GridMark,
   GridViewerHandle,
@@ -42,13 +38,15 @@ import type {
   StructureDisplay,
   Zyx,
 } from "@voluma/viewer/grid";
+import { workflowById } from "@voluma/workflow/bundled";
 import {
+  ArrowUpRight,
   CircleAlert,
   Layers,
-  LayoutDashboard,
   ListChecks,
   MessagesSquare,
   Network,
+  PanelLeft,
   Users,
 } from "lucide-react";
 import {
@@ -61,7 +59,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
+import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel } from "./ai-panel";
 import {
@@ -95,8 +93,10 @@ export function ScanPage() {
 function Scan({ runId }: { runId: string }) {
   const run = useQuery({
     ...runQuery(runId),
-    // Queue place and state changes aren't events; the stream is the source for the rest.
+    // Queue place and state changes aren't events; the stream is the source for the rest. Also in
+    // a background tab: a run waiting for keys gets them from this page (`RunAlert`).
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
+    refetchIntervalInBackground: true,
   });
   // Laid out as the study page's own loading and not-found states.
   const page = "mx-auto w-full max-w-2xl px-6 py-8";
@@ -238,12 +238,11 @@ function ScanReview({
   refetchRun: () => void;
 }) {
   const me = useOutletContext<Me>();
-  const navigate = useNavigate();
   const openPanel = useOpenPanel();
   const study = useQuery({
     ...studyQuery(run.studyId),
-    // Labels only (the study's name, the scan's subject, knee and group): read once.
-    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: (query) =>
+      isLive(run) || query.state.data?.scans.some((scan) => isLive(scan.runs[0])) ? 5000 : false,
   });
   const store = useRunStore();
   const [reopened, setReopened] = useState(0);
@@ -371,7 +370,6 @@ function ScanReview({
 
   const open = items.filter((n) => !n.accepted).length;
   const { title } = scanTitle(run, study.data);
-  const studyId = study.data?.study.id;
 
   let main: React.ReactNode;
   if (!review.data) {
@@ -435,14 +433,63 @@ function ScanReview({
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openAgent}>
         <ScanHeading run={run} study={study.data} progress={view.progress} />
-        <ShellLink
+        <ShellPanel
           id="scan-study"
+          side="left"
           group="study"
           label="Study"
-          icon={<LayoutDashboard />}
-          active={false}
-          go={() => studyId && navigate(`/studies/${studyId}`)}
-        />
+          icon={<PanelLeft />}
+          shortcut="s"
+        >
+          {study.data ? (
+            <>
+              {study.isError && (
+                <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
+                  Couldn't refresh the study; what you see may be out of date.
+                  <Button variant="link" onClick={() => void study.refetch()}>
+                    Try again
+                  </Button>
+                </p>
+              )}
+              {study.data.scans.length > 1 && (
+                <div className="border-b border-border px-4 py-2">
+                  <Button asChild variant="link">
+                    <Link to={`/studies/${study.data.study.id}`}>
+                      Study overview <ArrowUpRight className="size-3.5" />
+                    </Link>
+                  </Button>
+                </div>
+              )}
+              <StudyPanel
+                detail={study.data}
+                about={`${plural(study.data.scans.length, "scan")}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
+                current={run.input.id}
+                scanLink={({ runs: [latestRun] }) =>
+                  latestRun
+                    ? (props) => (
+                        <Link
+                          to={
+                            latestRun.id === run.id
+                              ? { search: params.toString() }
+                              : runHref({ runId: latestRun.id })
+                          }
+                          {...props}
+                        />
+                      )
+                    : undefined
+                }
+              />
+            </>
+          ) : study.isPending ? (
+            <LoadingState label="Loading the study" rows={3} className="p-4" />
+          ) : (
+            <div className="p-4">
+              <ErrorState title="Couldn't load the study" onRetry={() => void study.refetch()}>
+                Check your connection, then try again.
+              </ErrorState>
+            </div>
+          )}
+        </ShellPanel>
         <ShellPanel
           id="scan-to-check"
           side="left"

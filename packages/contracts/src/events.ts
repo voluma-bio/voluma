@@ -179,6 +179,13 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         /** The workflow files the run ran, with the commit the runner's checkout was at; required on the root thread; child threads may omit it. */
         workflows: z.array(recordedPinSchema).min(1).optional(),
         /**
+         * The sandbox image (`registry/name@sha256:…`) the run's sandboxes use; every claim
+         * writes it on the root thread and the first one decides it, so a resume keeps the image
+         * the run began on. Absent on a run recorded before the field existed: the next claim
+         * records its runner's image.
+         */
+        sandboxImage: nonEmpty.optional(),
+        /**
          * The model this thread calls, as the runner names it: `provider/id`
          * (`meta/muse-spark-1.3`). Main, worker and check threads call one and
          * should set it. The root thread sets none: it runs no model (the `main` thread,
@@ -494,7 +501,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   /**
    * Review assets (OME-Zarr levels, meshes) for one reported file were converted: the
    * manifest plus the `sourceSha256` of the file. Written by the runner's conversion worker
-   * on the run's root thread (`<runId>.supervisor`); id `<runId>:assets:<sha256>`, so a retry
+   * on the run's root thread (`thread.started` with no parent); id `<runId>:assets:<sha256>`, so a retry
    * or a resumed worker stores one event. The files are under `reviewAssetKey(runId,
    * sourceSha256, path)`. The assets are a function of the source bytes and the converter
    * version, so a rerun of a task that reports the same bytes reuses them. The server serves

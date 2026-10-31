@@ -5,7 +5,7 @@
  *   GATEWAY_TOKEN_SECRET    `<kid>:<base64 of 32 bytes>[,…]`, the same value the runner mints with
  *   GATEWAY_META_API_KEY, GATEWAY_ANTHROPIC_API_KEY, GATEWAY_OPENAI_API_KEY   our keys (each optional)
  *   GATEWAY_<PROVIDER>_BASE_URL   optional: another upstream (tests use local stubs)
- *   GATEWAY_DRAIN_SECONDS   how long SIGTERM waits for calls in flight (default 60)
+ *   GATEWAY_DRAIN_SECONDS   how long SIGTERM waits for calls in flight (default 240)
  *   PORT                    default 8080
  * Every 5 minutes, and at boot, open rows older than the longest call are marked `cut`.
  * On SIGTERM: stop taking calls, drain, mark this instance's still-open rows `cut`, exit.
@@ -32,7 +32,7 @@ function required(name: string): string {
 const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
 const instance = `${process.env.RENDER_INSTANCE_ID ?? "local"}-${randomUUID().slice(0, 8)}`;
 const SWEEP_MS = 5 * 60_000;
-const drainMs = Number(process.env.GATEWAY_DRAIN_SECONDS ?? 60) * 1000;
+const drainMs = Number(process.env.GATEWAY_DRAIN_SECONDS ?? 240) * 1000;
 
 const client = postgres(required("DATABASE_URL"), { max: 10, onnotice: () => {} });
 const db = drizzle(client, { casing: "snake_case" });
