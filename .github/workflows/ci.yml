@@ -3,8 +3,14 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - ".github/pr-assets/**"
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".github/pr-assets/**"
 
 permissions:
   contents: read
@@ -24,5 +30,13 @@ jobs:
           node-version-file: .tool-versions
           cache: pnpm
       - uses: astral-sh/setup-uv@v7
+      # Nx replays a task whose inputs it has seen, so a run pays only for the projects it touches.
+      # Keyed by commit because a cache entry never updates; restore-keys takes the newest one.
+      - uses: actions/cache@v6
+        with:
+          path: .nx/cache
+          key: nx-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            nx-${{ runner.os }}-
       - run: pnpm i
       - run: pnpm check
