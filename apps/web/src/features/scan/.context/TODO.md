@@ -1,5 +1,18 @@
 # Scan review: deferred work
 
+## Recorded-run acceptance
+
+- [#142](https://github.com/voluma-bio/voluma/issues/142): Jimmy still needs to explain a recorded
+  run's task purpose, work, evidence and remaining decisions unaided, without a jargon table.
+  The browser walk of ce5a0f21 establishes reachability, not researcher comprehension.
+- [#145](https://github.com/voluma-bio/voluma/issues/145): verify genuine recorded post-#306
+  provider fail-fast, paused lost-lease and awaiting-keys states when records are available.
+  The retained 2026-10-30 archive covers historical error rendering and attribution only.
+  Do not synthesize those records or restore spend caps/outage holds. Acceptance status stays
+  with #210/#174. Bounded rendering fixes: [#327](https://github.com/voluma-bio/voluma/pull/327).
+
+## Features removed with the old review
+
 The old review (`features/review`, deleted in #310) had these; the scan review doesn't yet. The
 API routes and `@voluma/api-client` calls they need are still in place, waiting for them.
 
