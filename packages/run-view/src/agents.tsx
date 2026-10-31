@@ -37,6 +37,7 @@ function spendRows(s: Spend): InfoSection["rows"] {
     ["Input tokens", count(s.input + s.cacheRead)],
     ["Output tokens", count(s.output)],
     ["Cache hit", hit === null ? "none" : `${Math.round(100 * hit)}%`],
+    ["Cache misses", count(s.cacheMisses)],
     ["Cache writes", count(s.cacheWrite)],
   );
   return rows;

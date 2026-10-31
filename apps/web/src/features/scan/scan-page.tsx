@@ -1,5 +1,5 @@
 /**
- * The scan review (`/scans/:runId`): one scan's run, live or finished, in the dark shell. The main
+ * The scan review (`/scans/:runId`): one scan's run, live or finished, in the light shell. The main
  * area is the task in view on its grid; the left side holds To check, Report and Agents, the right
  * side View and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
  * `item` (the To check item open) and `agent` (the agent whose steps show; none follows the one

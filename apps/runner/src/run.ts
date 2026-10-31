@@ -356,8 +356,10 @@ async function claimBody(
       (role: ModelRole): ModelSetup["streamFn"] =>
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
+        // `sessionId` is the thread's id, for a turn and for a compaction summary.
+        const threadId = options?.sessionId as string;
         stream.result().then(
-          (reply) => meter.addModelCall(role, usageOf(reply)),
+          (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
           () => {},
         );
         return stream;
