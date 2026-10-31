@@ -98,13 +98,6 @@ function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
 
 const frontmatter = (file: string, text: string) => parseFile(file, text, frontmatterSchema).data;
 
-/**
- * What the worker file said before it declared `scratch`, `outputs` and `checkedBy`: a run's
- * snapshot from then has no such keys and must build the same sandboxes (`main` and `check` match
- * the defaults). Delete with the last such snapshot.
- */
-const WORKER_BEFORE_FRONTMATTER = { scratch: "all", outputs: "write", checkedBy: "check" } as const;
-
 /** `skills` still unresolved: `parseAgent` leaves the default to the caller, who knows the skills. */
 type ParsedAgent = Omit<AgentDefinition, "skills"> & { skills?: string[] };
 
@@ -119,10 +112,8 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
     throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the harness`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
-  const declared = data.scratch ?? data.outputs ?? data.checkedBy;
-  const given = name === "worker" && !declared ? WORKER_BEFORE_FRONTMATTER : data;
-  const scratch = given.scratch ?? "own";
-  const outputs = given.outputs ?? "read";
+  const scratch = data.scratch ?? "own";
+  const outputs = data.outputs ?? "read";
   const hasBash = data.tools.includes("bash");
   if (
     !hasBash &&
@@ -141,7 +132,7 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
     tools: data.tools,
     scratch,
     outputs,
-    checkedBy: given.checkedBy,
+    checkedBy: data.checkedBy,
     subagents: data.subagents,
     skills: data.skills,
     body,
@@ -316,12 +307,6 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     }
     if (agent.tools.includes("start_agent") && agent.subagents.length === 0) {
       throw new WorkflowParseError(path, "a role with start_agent lists the roles it may start");
-    }
-    if (agent.tools.includes("start_worker") && !agent.subagents.includes("worker")) {
-      throw new WorkflowParseError(
-        path,
-        `a role with start_worker lists "worker" in its subagents`,
-      );
     }
     const unknown = agent.skills?.find((n) => !skillNames.includes(n));
     if (unknown)

@@ -135,10 +135,9 @@ export function mainTools(deps: MainDeps) {
     throw new Refusal(`${ref} is not a worker of this run.`);
   };
 
-  /** Starts `role` on a task: the checks both start tools share. `tool` names the effect, so a replay finds it. */
+  /** Starts `role` on a task. */
   async function startTask(
     role: string,
-    tool: "start_worker" | "start_agent",
     { taskId, brief }: { taskId: string; brief: string },
     ctx: ToolContext,
   ) {
@@ -160,7 +159,7 @@ export function mainTools(deps: MainDeps) {
     });
     if (live) {
       throw new Refusal(
-        `${taskId} has a worker, ${live.name} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first${d.threads.get(live.id)?.end?.status === "failed" ? ` (a worker that failed keeps its history; for a fresh one, \`stop_worker\` then \`${tool}\`)` : ""}.`,
+        `${taskId} has a worker, ${live.name} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first${d.threads.get(live.id)?.end?.status === "failed" ? ` (a worker that failed keeps its history; for a fresh one, \`stop_worker\` then \`start_agent\`)` : ""}.`,
       );
     }
     if (t?.status === "under-review") throw new Refusal(`${taskId} is under review.`);
@@ -173,7 +172,7 @@ export function mainTools(deps: MainDeps) {
       brief,
       mainThreadId: ctx.threadId,
       spawnedBy: ctx.toolCallId,
-      startedEventId: effectId(tool, ctx.threadId, ctx.toolCallId),
+      startedEventId: effectId("start_agent", ctx.threadId, ctx.toolCallId),
     });
     const name = log().threads.get(threadId)?.name ?? "";
     return { message: `Worker ${name} started on ${taskId}.` };
@@ -181,16 +180,6 @@ export function mainTools(deps: MainDeps) {
 
   const TASK_START =
     "`brief` is your message to it: what matters for this task beyond the task text, what earlier tasks settled, where their files are. Refused when a task it builds on has no usable result, when the task already has a live worker, is under review, or has used its fix rounds.";
-
-  // Registered for threads that began with it in their tool list: a main agent resumes with the
-  // tools it stored, so it stays while any live thread holds it.
-  const start_worker: Tool<z.ZodObject<{ taskId: typeof taskIdSchema; brief: z.ZodString }>> = {
-    name: "start_worker",
-    description: `Start a worker on a task of the plan. ${TASK_START}`,
-    input: z.object({ taskId: taskIdSchema, brief: nonEmpty }),
-    sequential: true,
-    execute: inSection((input, ctx) => startTask("worker", "start_worker", input, ctx), true),
-  };
 
   const start_agent: Tool<
     z.ZodObject<{ role: z.ZodString; task: typeof taskIdSchema; brief: z.ZodString }>
@@ -203,7 +192,7 @@ export function mainTools(deps: MainDeps) {
       if (!subagents.includes(role)) {
         throw new Refusal(`You can start these roles: ${subagents.join(", ")}. Not "${role}".`);
       }
-      return startTask(role, "start_agent", { taskId: task, brief }, ctx);
+      return startTask(role, { taskId: task, brief }, ctx);
     }, true),
   };
 
@@ -626,7 +615,6 @@ export function mainTools(deps: MainDeps) {
   };
 
   return {
-    start_worker,
     start_agent,
     message,
     wait,

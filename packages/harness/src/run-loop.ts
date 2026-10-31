@@ -229,22 +229,24 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
   }
 
   function mainFirstMessage(view: Folded, n: number, d: ThreadLog) {
-    // A main that starts when the open correction's message is still unread (a fresh `main.<n>`,
-    // or the first main of a run made before corrections) was never told the run had finished.
+    if (n === 1)
+      return { prompt: mainPrompt(view, o.selectedOutputs, o.definition.files, o.notes) };
+    // A fresh `main.<n>` starts after the open correction's message, which it has not read when
+    // that message is still undelivered: it was never told the run had finished.
     const message = corrections(recorder.events()).open?.message;
     const inCorrection = d.undelivered.some((u) => u.kind === "person" && u.eventId === message);
     const covers = { promptCovers: recorder.events().at(-1)?.id };
-    const first = () => mainPrompt(view, o.selectedOutputs, o.definition.files, o.notes);
-    if (n === 1 && !inCorrection) return { prompt: first() };
-    const state = stateBlock(d, view, stateOf);
-    const restart = () =>
-      mainRestartPrompt(view, state, o.selectedOutputs, o.definition.files, o.notes);
+    const restart = mainRestartPrompt(
+      view,
+      stateBlock(d, view, stateOf),
+      o.selectedOutputs,
+      o.definition.files,
+      o.notes,
+    );
     // A replacement main starts after the correction's message was delivered, and still needs to be told.
-    if (!inCorrection)
-      return { prompt: `${restart()}${reviewing(view, message, false)}`, ...covers };
-    const brief = n === 1 ? `${first()}\n\n${state}` : restart();
+    if (!inCorrection) return { prompt: `${restart}${reviewing(view, message, false)}`, ...covers };
     return {
-      prompt: `${finishedRunText(view)}${reviewing(view, message, false)}\n\n${brief}`,
+      prompt: `${finishedRunText(view)}${reviewing(view, message, false)}\n\n${restart}`,
       ...covers,
     };
   }

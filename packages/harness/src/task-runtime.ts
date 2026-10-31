@@ -8,7 +8,7 @@
  * whichever thread asks, and the recorder adds an event to the view only once it is stored.
  * Slow work (hashing and copying evidence) happens outside the section, and the decision is
  * checked again inside. A thread's kind and task come from the call (`Caller`), not from the
- * log, which may not yet hold its `thread.started`. A refusal is thrown as a `Refusal`: the
+ * log. A refusal is thrown as a `Refusal`: the
  * tool turns it into the error the model reads, and nothing is appended. A store failure is
  * an ordinary error: the tool call fails, and the run loop fails the run when its own
  * append hits one.
@@ -312,7 +312,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         );
       }
       const t = taskOf(taskId);
-      // The check thread's own `thread.started` may not be stored yet, so an unset one is this thread's.
+      // The attempt records its check thread only once that thread writes, so an unset one is this thread's.
       if (t?.status !== "under-review" || (t.threads.check && t.threads.check !== c.threadId)) {
         throw new Refusal(`${taskId} is no longer under review; stop here.`);
       }
@@ -351,9 +351,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         );
       }
     } else {
-      // Its own `thread.started` may not be stored yet: a thread not in the log is the newest.
       const latest = workers.at(-1);
-      if (latest && latest.id !== c.threadId && d.threads.has(c.threadId)) {
+      if (latest && latest.id !== c.threadId) {
         throw new Refusal(`${taskId} is held by a newer worker (${latest.name}); stop here.`);
       }
     }
@@ -387,7 +386,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
    * The correction of `taskId` reaches each of its dependents: its live threads are stopped
    * first, append-first, whatever the task's status and whether or not it has an attempt (a
    * worker may have read the old files; idle ones too, which would otherwise block
-   * `start_worker` on the stale task; a check has no result to write). A dependent with an
+   * `start_agent` on the stale task; a check has no result to write). A dependent with an
    * attempt that isn't stale yet is then marked stale, and that mark tells the main agent; the
    * stop of a dependent without one says why itself.
    */

@@ -44,15 +44,10 @@ after it. A snapshot that has `checker.md` and no `check.md` (a run from before 
   `submit_task` must name one. A role that is some role's `checkedBy` is a reviewer: its prompt says
   so, and it opens only the scratch files the attempt under review cites.
 - `subagents`: the roles this role may start (`main`: `[worker]`), through `start_agent {role, task, brief}`.
-  A role holding `start_agent` lists at least one. A role that holds `start_worker` (kept registered
-  for runs started before `start_agent`; no file here offers it) must list `worker`. The checker is
+  A role holding `start_agent` lists at least one. The checker is
   started by code on every `submit_task` and is never listed.
 - `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,
   the workflow's own skill first.
-
-A snapshot from before `scratch`, `outputs` and `checkedBy` existed has none of them; for `worker` the
-loader fills what the code did then (`WORKER_BEFORE_FRONTMATTER` in `packages/workflow/src/load.ts`,
-to delete when no such run is live); `main` and `check` match the defaults.
 
 Any other key fails the load.
 

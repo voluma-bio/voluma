@@ -29,11 +29,7 @@ const tid = (name: string) => threadIdOf(RUN, name);
 const T1 = [task("t1"), task("t2", ["t1"])];
 
 const started = (t: Turn, taskId: string) =>
-  t.calls.some(
-    (c) =>
-      (c.name === "start_agent" || c.name === "start_worker") &&
-      (c.input.task ?? c.input.taskId) === taskId,
-  );
+  t.calls.some((c) => c.name === "start_agent" && c.input.task === taskId);
 const told = (t: Turn, re: RegExp) => t.users.some((u) => re.test(u));
 const passed = (t: Turn, taskId: string) => told(t, new RegExp(`The check of ${taskId} passed`));
 
@@ -171,7 +167,7 @@ describe("run loop", () => {
     };
     const feedback: Script = (t) =>
       t.fresh && /The check of t1 found problems/.test(t.lastUser)
-        ? call("message", { threadId: tid("t1.worker"), text: "Redo it." })
+        ? call("message", { threadId: "t1.worker", text: "Redo it." })
         : undefined;
     const w = world({
       plan,
@@ -219,9 +215,9 @@ describe("run loop", () => {
     const main: Script = (t) => {
       const did = (name: string) => t.calls.some((c) => c.name === name);
       if (t.fresh && /The check of t1 found problems/.test(t.lastUser))
-        return call("message", { threadId: tid("t1.worker"), text: "Redo it." });
+        return call("message", { threadId: "t1.worker", text: "Redo it." });
       if (t.fresh && did("message") && !did("stop_worker") && t.users.length > 2)
-        return call("stop_worker", { threadId: tid("t1.worker"), reason: "Replacing it." });
+        return call("stop_worker", { threadId: "t1.worker", reason: "Replacing it." });
       const starts = t.calls.filter((c) => c.name === "start_agent").length;
       if (t.fresh && did("stop_worker") && starts === 1)
         return call("start_agent", { role: "worker", task: "t1", brief: "Measure t1 again." });
@@ -247,16 +243,16 @@ describe("run loop", () => {
     const main: Script = (t) => {
       const lastResult = t.results.at(-1) ?? "";
       const sent = (to: string) =>
-        t.calls.some((c) => c.name === "message" && c.input.threadId === tid(to));
+        t.calls.some((c) => c.name === "message" && c.input.threadId === to);
       if (!t.fresh) {
         if (/used its fix rounds/.test(lastResult) && !sent("t1.worker"))
           return call("message", {
-            threadId: tid("t1.worker"),
+            threadId: "t1.worker",
             text: "Redo t1 with another method.",
           });
         // t2's old worker is still there (idle): stop it, then start a new one.
         if (/has a worker/.test(lastResult))
-          return call("stop_worker", { threadId: tid("t2.worker"), reason: "Redoing t2." });
+          return call("stop_worker", { threadId: "t2.worker", reason: "Redoing t2." });
         if (/is stopped\.|stopped\./.test(lastResult))
           return call("start_agent", {
             role: "worker",
@@ -266,9 +262,9 @@ describe("run loop", () => {
         return "Waiting.";
       }
       if (/used its fix rounds/.test(t.lastUser))
-        return call("message", { threadId: tid("t2.worker"), text: "One more try." });
+        return call("message", { threadId: "t2.worker", text: "One more try." });
       if (/t2 is rejected/.test(t.lastUser))
-        return call("message", { threadId: tid("t2.worker"), text: "Redo the placement." });
+        return call("message", { threadId: "t2.worker", text: "Redo the placement." });
       // Redo t2 once t1 passes again after its correction made t2 stale.
       const redone = t.calls.some((c) => c.name === "stop_worker");
       if (told(t, /t2 is stale/) && /The check of t1 passed/.test(t.lastUser) && !redone)
@@ -392,7 +388,7 @@ describe("run loop", () => {
       const redo = t.calls.some((c) => c.name === "message");
       if (t.fresh && passed(t, "t2") && !redo)
         return call("message", {
-          threadId: tid("t1.worker"),
+          threadId: "t1.worker",
           text: "Redo t1 with another method.",
         });
       if (!t.fresh) return "Waiting.";
@@ -418,25 +414,6 @@ describe("run loop", () => {
       of(events, "message", thread).flatMap((e) =>
         e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
       );
-
-    it("start_worker still starts a worker (runs from before start_agent)", async () => {
-      const w = world({
-        plan: [task("t1")],
-        main: (t) => {
-          if (!t.fresh) return "Waiting.";
-          if (!started(t, "t1"))
-            return call("start_worker", { taskId: "t1", brief: "Measure t1." });
-          if (passed(t, "t1") && !t.results.some((r) => /run is finished/.test(r)))
-            return call("finish_run", { summary: "Done." });
-          return call("wait");
-        },
-      });
-      const folded = await w.run();
-      expect(
-        folded.tasks.map((x) => `${x.id}:${x.status}`),
-        w.text(),
-      ).toEqual(["t1:done"]);
-    });
 
     it("start_agent: the worker is not started twice and main is told it was", async () => {
       const w = world({
@@ -590,7 +567,7 @@ describe("run loop", () => {
     it("a plain message to an idle worker on a done task reaches it and reopens nothing", async () => {
       const note: Script = (t) =>
         t.fresh && passed(t, "t1") && !t.calls.some((c) => c.name === "message")
-          ? call("message", { threadId: tid("t1.worker"), text: "Note: keep units in mm." })
+          ? call("message", { threadId: "t1.worker", text: "Note: keep units in mm." })
           : undefined;
       const noted: Script = (t) => (/Note: keep units/.test(t.lastUser) ? "Noted." : worker(t));
       const w = world({
@@ -678,7 +655,7 @@ describe("run loop", () => {
       if (t.calls.length === 0 && t.fresh)
         return [
           call("start_agent", { role: "worker", task: "t1", brief: "t1." }),
-          call("stop_worker", { threadId: tid("t1.worker"), reason: "Not now." }),
+          call("stop_worker", { threadId: "t1.worker", reason: "Not now." }),
         ];
       if (!t.fresh) {
         const started2 = t.calls.filter((c) => c.name === "start_agent").length > 1;
@@ -944,8 +921,8 @@ describe("run loop", () => {
         const batch = t.calls.some((c) => c.name === "stop_worker");
         if (passed(t, "t1") && !batch)
           return [
-            call("message", { threadId: tid("t1.worker"), text: "Look at it once more." }),
-            call("stop_worker", { threadId: tid("t1.worker"), reason: "Not needed." }),
+            call("message", { threadId: "t1.worker", text: "Look at it once more." }),
+            call("stop_worker", { threadId: "t1.worker", reason: "Not needed." }),
           ];
         return batch ? call("finish_run", { summary: "Done." }) : undefined;
       });
@@ -978,7 +955,7 @@ describe("run loop", () => {
       const main = nudgeAfterPass((t) => {
         const sent = t.calls.some((c) => c.name === "message");
         if (passed(t, "t1") && !sent)
-          return call("message", { threadId: tid("t1.worker"), text: "Look at it once more." });
+          return call("message", { threadId: "t1.worker", text: "Look at it once more." });
         return sent && !t.results.some((r) => /run is finished/.test(r))
           ? call("finish_run", { summary: "Done." })
           : undefined;
@@ -1018,18 +995,14 @@ describe("run loop", () => {
         if (!started(t, "t2") && passes("t1") === 1)
           return call("start_agent", { role: "worker", task: "t2", brief: "t2." });
         if (passes("t2") === 1 && !redo)
-          return call("message", { threadId: tid("t1.worker"), text: "Redo t1." });
+          return call("message", { threadId: "t1.worker", text: "Redo t1." });
         if (redo && passes("t1") === 2 && passes("t2") === 1 && !refused)
           return call("finish_run", { summary: "Too early." });
         if (passes("t2") === 2) return call("finish_run", { summary: "Done." });
         return call("wait");
       };
       const started2 = (t: Turn) =>
-        t.calls.filter(
-          (c) =>
-            (c.name === "start_agent" || c.name === "start_worker") &&
-            (c.input.task ?? c.input.taskId) === "t2",
-        ).length > 1;
+        t.calls.filter((c) => c.name === "start_agent" && c.input.task === "t2").length > 1;
       const w = world({ plan: T1, main });
       const folded = await w.run();
       expect(
@@ -1124,10 +1097,10 @@ describe("run loop", () => {
 
     it("work tools are refused until a go; finish_run until main has replied", async () => {
       const probes = [
-        call("message", { threadId: tid("t1.worker"), text: "Redo it." }),
+        call("message", { threadId: "t1.worker", text: "Redo it." }),
         call("start_agent", { role: "worker", task: "t1", brief: "Again." }),
         call("change_plan", { reason: "Tighten.", doneWhen: [{ taskId: "t1", lines: ["x"] }] }),
-        call("stop_worker", { threadId: tid("t1.worker"), reason: "No." }),
+        call("stop_worker", { threadId: "t1.worker", reason: "No." }),
         call("finish_run", { summary: "Too soon." }),
         call("reply", { text: "Looking at it." }),
         call("finish_run", { summary: "Answered." }),
@@ -1154,7 +1127,7 @@ describe("run loop", () => {
         if (!talking(t)) return undefined;
         const last = t.results.at(-1) ?? "";
         if (t.fresh && /They said go on t1/.test(t.lastUser))
-          return call("message", { threadId: tid("t1.worker"), text: "The left edge is off." });
+          return call("message", { threadId: "t1.worker", text: "The left edge is off." });
         if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing t1." });
         // t1's redo made t2 stale and stopped its worker; t2 is redone by a new one.
         if (t.fresh && /The check of t1 passed/.test(t.lastUser) && count(t, "start_agent") === 2)
@@ -1203,7 +1176,7 @@ describe("run loop", () => {
       const script: Script = (t) => {
         if (!talking(t)) return undefined;
         if (t.fresh && /They said go on t1/.test(t.lastUser))
-          return call("message", { threadId: tid("t1.worker"), text: "Redo t1." });
+          return call("message", { threadId: "t1.worker", text: "Redo t1." });
         if (wrote(t)) return call("reply", { text: "t1 is thin." });
         return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
       };
@@ -1264,7 +1237,7 @@ describe("run loop", () => {
       const first1: Script = (t) => {
         if (talking(t) || !t.fresh) return undefined;
         if (/The check of t1 found problems/.test(t.lastUser))
-          return call("message", { threadId: tid("t1.worker"), text: "Fix it." });
+          return call("message", { threadId: "t1.worker", text: "Fix it." });
         if (/used its fix rounds/.test(t.lastUser)) return call("finish_run", { summary: "Left." });
         return undefined;
       };
@@ -1272,7 +1245,7 @@ describe("run loop", () => {
         if (!talking(t)) return undefined;
         const last = t.results.at(-1) ?? "";
         if (t.fresh && /They said go on t1/.test(t.lastUser))
-          return call("message", { threadId: tid("t1.worker"), text: "Redo t1." });
+          return call("message", { threadId: "t1.worker", text: "Redo t1." });
         if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing." });
         if (t.fresh && /The check of t1 passed/.test(t.lastUser))
           return call("finish_run", { summary: "Done." });
@@ -1334,7 +1307,7 @@ describe("run loop", () => {
       const main: Script = (t) => {
         const did = (name: string) => t.calls.some((c) => c.name === name);
         if (t.fresh && told(t, /t1.worker \(t1\) failed: overloaded/) && !did("stop_worker"))
-          return call("stop_worker", { threadId: tid("t1.worker"), reason: "It failed." });
+          return call("stop_worker", { threadId: "t1.worker", reason: "It failed." });
         if (
           t.fresh &&
           did("stop_worker") &&
@@ -1453,7 +1426,7 @@ describe("run loop", () => {
       const ok = checker();
       const w = world({
         plan: [task("t1")],
-        main: mainFor(actOnce("message", { threadId: tid("t1.check"), text: "Continue." })),
+        main: mainFor(actOnce("message", { threadId: "t1.check", text: "Continue." })),
         check: failing([cut], ok),
       });
       const folded = await w.run();
@@ -1467,7 +1440,7 @@ describe("run loop", () => {
     it("lets main replace a failed check, within the limit", async () => {
       const w = world({
         plan: [task("t1")],
-        main: mainFor(actOnce("stop_worker", { threadId: tid("t1.check"), reason: "It failed." })),
+        main: mainFor(actOnce("stop_worker", { threadId: "t1.check", reason: "It failed." })),
         check: failing([cut], checker()),
       });
       const folded = await w.run();
@@ -1496,7 +1469,7 @@ describe("run loop", () => {
     });
 
     it("resumes a failed check even when main was cut on the turn that read the notice", async () => {
-      const act = actOnce("message", { threadId: tid("t1.check"), text: "Continue." });
+      const act = actOnce("message", { threadId: "t1.check", text: "Continue." });
       const base = mainFor(act);
       let cutOnce = false;
       const w = world({
