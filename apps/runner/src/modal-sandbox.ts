@@ -171,33 +171,34 @@ async function* otherClaims(
   }
 }
 
-/** Rejects when `signal` aborts; the pending `work` is left to finish on its own. */
-function until<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return work;
-  return Promise.race([
-    work,
-    new Promise<never>((_, reject) => {
-      const stop = () => reject(signal.reason);
-      if (signal.aborted) stop();
-      else signal.addEventListener("abort", stop, { once: true });
-    }),
-  ]);
+// gRPC codes (CANCELLED, UNKNOWN, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, INTERNAL, UNAVAILABLE) and
+// socket errors that a later try can clear. Anything else (UNAUTHENTICATED, PERMISSION_DENIED,
+// INVALID_ARGUMENT, NOT_FOUND, ...) is permanent and must fail the claim with its message.
+const TRANSIENT_GRPC = new Set([1, 2, 4, 8, 13, 14]);
+const TRANSIENT_SOCKET = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN"]);
+
+function isTransient(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (typeof code === "number") return TRANSIENT_GRPC.has(code);
+  return typeof code === "string" && TRANSIENT_SOCKET.has(code);
 }
 
 const RETRY_MS = { first: 2000, max: 30_000 };
+const POLL_MS = 1000;
 const PROGRESS_LOG_MS = 30_000;
 
 /**
  * Ends every live sandbox of the run that another claim started, and returns only once Modal has
- * reported each one terminated (`Sandbox.wait` resolves with the exit result) and a fresh listing
- * shows none left. Called right after a claim succeeds and before it starts any sandbox: the
- * claim holds the lease, and an earlier claim's sandbox (a crashed or lost runner's) that is still
- * alive could write over this claim's `/outputs` or scratch on the shared mounts.
+ * reported each one terminated (`poll` returns an exit code) and a fresh listing shows none left.
+ * Called right after a claim succeeds and before it starts any sandbox: the claim holds the lease,
+ * and an earlier claim's sandbox (a crashed or lost runner's) that is still alive could write over
+ * this claim's `/outputs` or scratch on the shared mounts.
  *
  * There is no deadline: a guess shorter than Modal's own would start a writer beside a live one.
- * Modal API errors are retried with backoff and logged; the wait ends only when termination is
- * confirmed or `signal` aborts (a stop, shutdown or lost lease), and a sandbox Modal never reports
- * still ends at its lifetime limit. While waiting the claim heartbeats and starts nothing.
+ * Transient Modal errors are retried with backoff and logged; a permanent one (a revoked token)
+ * throws, so the claim fails with its message. The wait ends when termination is confirmed or
+ * `signal` aborts (a stop, shutdown or lost lease), and a sandbox Modal never reports still ends
+ * at its lifetime limit. While waiting the claim heartbeats and starts nothing.
  */
 export async function endOtherClaims(
   modal: ModalSandboxConfig["modal"],
@@ -207,33 +208,34 @@ export async function endOtherClaims(
   log: (line: string) => void,
 ): Promise<number> {
   const started = Date.now();
-  let ended = 0;
+  const ended = new Set<string>();
+  let nextLog = started;
   for (let delay = RETRY_MS.first; ; ) {
     try {
       const live: ModalSandbox[] = [];
       for await (const sandbox of otherClaims(modal, runId, claim, signal)) live.push(sandbox);
-      if (live.length === 0) return ended;
-      log(
-        `waiting for ${live.length} sandbox${live.length === 1 ? "" : "es"} of an earlier claim to terminate`,
-      );
-      const progress = setInterval(
-        () =>
-          log(
-            `still waiting for an earlier claim's sandboxes (${Math.round((Date.now() - started) / 1000)} s)`,
-          ),
-        PROGRESS_LOG_MS,
-      );
-      try {
-        await until(Promise.all(live.map((sandbox) => sandbox.terminate({ wait: true }))), signal);
-      } finally {
-        clearInterval(progress);
-        // Stops the SDK's wait loop when we gave up on it.
-        for (const sandbox of live) sandbox.detach();
+      if (live.length === 0) return ended.size;
+      for (const sandbox of live) {
+        if (ended.has(sandbox.sandboxId)) continue;
+        await sandbox.terminate();
+        ended.add(sandbox.sandboxId);
       }
-      ended += live.length;
+      // Our own loop, not `terminate({wait: true})`: the SDK's wait cannot be stopped by a signal.
+      for (let pending = live; pending.length > 0; ) {
+        if (Date.now() >= nextLog) {
+          log(
+            `waiting for ${pending.length} sandbox${pending.length === 1 ? "" : "es"} of an earlier claim to terminate (${Math.round((Date.now() - started) / 1000)} s)`,
+          );
+          nextLog = Date.now() + PROGRESS_LOG_MS;
+        }
+        await setTimeout(POLL_MS, undefined, { signal });
+        const codes = await Promise.all(pending.map((sandbox) => sandbox.poll()));
+        pending = pending.filter((_, i) => codes[i] === null);
+      }
       delay = RETRY_MS.first;
     } catch (e) {
       signal.throwIfAborted();
+      if (!isTransient(e)) throw e;
       log(`ending an earlier claim's sandboxes failed, retrying in ${delay / 1000} s: ${e}`);
       await setTimeout(delay, undefined, { signal });
       delay = Math.min(delay * 2, RETRY_MS.max);
