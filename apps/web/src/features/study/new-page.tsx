@@ -10,7 +10,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, createStudy, signIn } from "@voluma/api-client";
-import { inputsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
+import { inputsQuery, runModelsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
@@ -115,6 +115,7 @@ export function NewPage() {
 
   const inputs = useQuery(inputsQuery());
   const runs = useQuery(runsQuery());
+  const runModels = useQuery(runModelsQuery());
   const uploads = useUploads();
   const [rows, setRows] = useState<Row[]>([]);
   const [sheet, setSheet] = useState<SheetState>({ kind: "none" });
@@ -124,6 +125,7 @@ export function NewPage() {
   const [studyName, setStudyName] = useState("");
   const [pilot, setPilot] = useState(true);
   const [keys, setKeys] = useState<VisitorKeys | undefined>(() => loadKeys(me.userId));
+  const [pickedModel, setPickedModel] = useState<string>();
   /** Start was pressed while scans were still uploading. */
   const [armed, setArmed] = useState(false);
   const nextId = useRef(0);
@@ -219,6 +221,16 @@ export function NewPage() {
                 ? "Add your Meta key first."
                 : undefined;
 
+  // A start with keys runs on the starter's own Meta key, so it gets the visitor list.
+  const modelList =
+    keys || !runModels.data?.voluma ? runModels.data?.visitor : runModels.data.voluma;
+  const forced = keys || !runModels.data?.voluma ? undefined : runModels.data.forced;
+  const model = modelList?.choices.some((c) => c.model === pickedModel)
+    ? pickedModel
+    : modelList?.default;
+  /** What the list shows ticked: the forced model, which may not be in the list, ticks nothing. */
+  const shown = forced ? forced.model : model;
+
   const start = useMutation({
     mutationFn: async () => {
       if (!workflow) throw new Error("no workflow");
@@ -233,6 +245,7 @@ export function NewPage() {
         })),
         start: table.filter((r) => startIds.includes(r.id)).map((r) => (r.input as Input).id),
         keys,
+        model,
       };
       // A deploy's reload waits for the answer: leaving mid-request would hide whether it started.
       const release = holdLeave();
@@ -356,8 +369,30 @@ export function NewPage() {
           </div>
         </Step>
 
+        {runModels.data && modelList && (
+          <Step n={3} title="Choose a model">
+            <fieldset className="grid gap-2" disabled={forced !== undefined}>
+              <legend className="sr-only">Model</legend>
+              {modelList.choices.map((c) => (
+                <Choice
+                  key={c.model}
+                  name="model"
+                  checked={shown === c.model}
+                  onChange={() => setPickedModel(c.model)}
+                  title={c.label}
+                >
+                  {c.note ?? c.model}
+                </Choice>
+              ))}
+            </fieldset>
+            {forced && (
+              <p className="text-sm text-muted-foreground">Debug: every run uses {forced.label}.</p>
+            )}
+          </Step>
+        )}
+
         {several && (
-          <Step n={3} title="Study">
+          <Step n={4} title="Study">
             <TextField
               label="Name"
               className="max-w-md"
@@ -468,11 +503,13 @@ function Step({ n, title, children }: { n?: number; title: string; children: Rea
 }
 
 function Choice({
+  name = "pilot",
   checked,
   onChange,
   title,
   children,
 }: {
+  name?: string;
   checked: boolean;
   onChange: () => void;
   title: string;
@@ -484,7 +521,7 @@ function Choice({
     >
       <input
         type="radio"
-        name="pilot"
+        name={name}
         className="mt-1 size-4 accent-primary"
         checked={checked}
         onChange={onChange}

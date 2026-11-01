@@ -45,6 +45,7 @@
 import { z } from "zod";
 import {
   inputIdSchema,
+  modelRefSchema,
   runIdSchema,
   segmentSchema,
   studyIdSchema,
@@ -207,6 +208,8 @@ export const createStudyRequestSchema = z
     notes: z.string().max(4000).optional(),
     /** Present: these runs use these (`credentials: "visitor"`). */
     keys: visitorKeysSchema.optional(),
+    /** For every run started by this call, as in `startRunRequestSchema`. */
+    model: modelRefSchema.optional(),
   })
   .refine((r) => new Set(r.scans.map((s) => s.inputId)).size === r.scans.length, {
     path: ["scans"],

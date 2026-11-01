@@ -53,6 +53,7 @@ import {
   readableStudies,
   type Tx,
 } from "./pg-runs";
+import { modelChoices, pickModel } from "./run-models";
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
 /**
@@ -226,6 +227,8 @@ type Starts = {
   selectedOutputs?: string[];
   notes?: string;
   keys?: VisitorKeys;
+  /** The model the caller asked for; `pickModel` decides the run's. */
+  model?: string;
 };
 
 /** A limit reached is 429, except the per-caller one: the web branches on its 409. */
@@ -243,6 +246,8 @@ export function pgRunQueue(
   vault: KeyVault,
   notifier: Notifier,
   workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputEntry[] } | undefined,
+  /** `RUN_MODEL_OVERRIDE`, validated by `modelOverride`. */
+  modelOverride: string | null,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
@@ -337,6 +342,7 @@ export function pgRunQueue(
     // A guest runs only on their own keys: Voluma's are for signed-in accounts.
     if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
+    const model = pickModel(modelOverride, credentials, starts.model);
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limitsOf(reader.labId), used, { credentials });
@@ -352,6 +358,7 @@ export function pgRunQueue(
         notes: starts.notes ?? null,
         inputId,
         credentials,
+        model,
         state: "queued",
       });
       used.callerUnfinished++;
@@ -360,6 +367,9 @@ export function pgRunQueue(
   };
 
   return {
+    /** The choices for a start, with the debug override that forces them (`GET /models`). */
+    models: () => modelChoices(modelOverride),
+
     /**
      * Creates one run `queued` on a scan of an existing study. Refuses a study the reader
      * can't read (or the example's), a scan the study lacks, an input still uploading, a

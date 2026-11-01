@@ -41,7 +41,12 @@ import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { errorText } from "@voluma/harness/error-text";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
-import { NO_WORKFLOW_DIR, roleModelUnset } from "@voluma/harness/messages";
+import {
+  NO_WORKFLOW_DIR,
+  roleModelUnset,
+  runModelNotForVisitors,
+  runModelUnavailable,
+} from "@voluma/harness/messages";
 import { usageOf } from "@voluma/harness/model-usage";
 import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
@@ -61,6 +66,7 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
+import { metaImages } from "./meta-images.ts";
 import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
 import { loggedFetch } from "./model-fetch.ts";
 import { providerFailure } from "./provider-error.ts";
@@ -70,7 +76,7 @@ import { sandboxGateway } from "./sandbox-gateway.ts";
 import { storeEvidence } from "./store-evidence.ts";
 import { storeFiles } from "./store-files.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
-import { assertThinking } from "./thinking.ts";
+import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
 import { usageMeter } from "./usage.ts";
 
@@ -202,6 +208,7 @@ async function claimBody(
   let events: Recorder | undefined;
   let live: LiveBatcher | undefined;
   let supervised: Supervised | undefined;
+  let images: ReturnType<typeof metaImages> | undefined;
   let outcome: Outcome | undefined;
   let error: string | undefined;
   // An error nobody caught (`telemetry.ts`). Before the supervisor exists it fails the claim at
@@ -289,13 +296,19 @@ async function claimBody(
       (m, context, options) => {
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
         const threadId = options?.sessionId as string;
+        const apiKey = keyFor(m.provider);
+        const fetch = loggedFetch(role, log, options?.signal);
+        // Meta requests name each image by an uploaded file id, not its bytes (`meta-images.ts`).
+        if (m.provider === "meta" && apiKey) images ??= metaImages(m.baseUrl, apiKey, log);
+        const call = m.provider === "meta" ? images?.forCall(fetch, options?.signal) : undefined;
         const stream = models.streamSimple(m, context, {
           ...options,
-          apiKey: keyFor(m.provider),
+          apiKey,
           maxRetries: MODEL_RETRIES,
           maxRetryDelayMs: MODEL_MAX_RETRY_DELAY_MS,
           timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
-          fetch: loggedFetch(role, log, options?.signal),
+          fetch: call?.fetch ?? fetch,
+          ...(call && { onPayload: call.onPayload }),
           // All registered providers await this before normalizing each event. An async
           // iterator alone can drain buffered deltas entirely through microtasks, starving
           // lease timers.
@@ -336,10 +349,31 @@ async function claimBody(
           knownTools: TOOL_NAMES,
         }),
       );
-      // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
-      // models only: the main thread keeps its configured model when that is one, else the
-      // visitor model.
+      // The model every role uses: `RUNNER_MODEL` (a plumbing check) over the run's own model
+      // (`run.model`, chosen by the API) over the role file's alias. A run without one predates
+      // the choice. A visitor's key and scan go to Standard-mode Meta models only, whatever the
+      // API recorded, so a run that asks for another fails here and says which.
+      const runModel = (): Model<Api> | undefined => {
+        if (!run.model || config.modelForced) return undefined;
+        const [provider = "", ...id] = run.model.split("/");
+        if (visitor && !isVisitorSafe({ provider, id: id.join("/") })) {
+          log(`the visitor run's model ${run.model} is not a Standard-mode Meta model`);
+          throw new Error(runModelNotForVisitors(run.model));
+        }
+        const model = models.getModel(provider, id.join("/"));
+        if (!model || !keyFor(provider)) {
+          log(
+            `the run's model ${run.model} is unknown here or has no key: VOLUMA_${provider.toUpperCase()}_API_KEY`,
+          );
+          throw new Error(runModelUnavailable(run.model));
+        }
+        return model;
+      };
+      const chosen = runModel();
+      // Without a run model, a role's model is its file's alias; a visitor's main thread keeps
+      // it when that is Standard-mode Meta, else the visitor model.
       const roleModel = ({ name, model: alias }: AgentDefinition) => {
+        if (chosen) return chosen;
         const model = ctx.aliases[alias];
         if (!model) {
           log(
@@ -350,9 +384,11 @@ async function claimBody(
         return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
       };
       // A role's file may set its thinking level; else the runner's; else none is sent ("off").
+      // The run's model gets the nearest level it supports (DeepSeek Flash has no `medium`).
       const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
         if (visitor) return "off";
-        const level = config.modelForced ? config.thinking : (thinking ?? config.thinking);
+        const wanted = config.modelForced ? config.thinking : (thinking ?? config.thinking);
+        const level = chosen ? nearestThinking(wanted, model) : wanted;
         assertThinking(level, [model], `the ${name} role's`);
         return level ?? "off";
       };
@@ -478,6 +514,7 @@ async function claimBody(
       }
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
+      if (images) log(`model requests this claim: ${images.summary()}`);
     } else {
       log(`stopped (${[...reasons].join(", ")}); nothing more to report`);
     }
