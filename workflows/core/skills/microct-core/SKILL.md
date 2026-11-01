@@ -40,6 +40,10 @@ Say "the AI" for the one that did the work, "a second AI check" for the check, a
 - The names later tasks look for in `/outputs/<task>/`: `hu.npy`, `hu.json`, `scan-notes.md`, `pieces.md`,
   and the rough orientation `frame.json`, `oriented.npy`, `keyframe.jpg` (intake); `labels.npy`, the final labels on the scan grid
   (segmentation). Working files go in `$SCRATCH`.
+- An **account file** (`pieces.md`, `small-structures.md`) is prose a researcher and a check can read, opened by a
+  YAML front-matter block with one entry per piece or structure: `label` (or the piece's id), `name`, `file`,
+  `volume_mm3`, `made_from` (paths of the files it was read from), `status` (`named`, `unnamed`, `absent` or
+  `to-check`) and, for `to-check`, `question`.
 
 ## Scripts
 
