@@ -61,6 +61,7 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
+import { metaImages } from "./meta-images.ts";
 import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
 import { loggedFetch } from "./model-fetch.ts";
 import { providerFailure } from "./provider-error.ts";
@@ -202,6 +203,7 @@ async function claimBody(
   let events: Recorder | undefined;
   let live: LiveBatcher | undefined;
   let supervised: Supervised | undefined;
+  let images: ReturnType<typeof metaImages> | undefined;
   let outcome: Outcome | undefined;
   let error: string | undefined;
   // An error nobody caught (`telemetry.ts`). Before the supervisor exists it fails the claim at
@@ -289,13 +291,19 @@ async function claimBody(
       (m, context, options) => {
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
         const threadId = options?.sessionId as string;
+        const apiKey = keyFor(m.provider);
+        const fetch = loggedFetch(role, log, options?.signal);
+        // Meta requests name each image by an uploaded file id, not its bytes (`meta-images.ts`).
+        if (m.provider === "meta" && apiKey) images ??= metaImages(m.baseUrl, apiKey, log);
+        const call = m.provider === "meta" ? images?.forCall(fetch, options?.signal) : undefined;
         const stream = models.streamSimple(m, context, {
           ...options,
-          apiKey: keyFor(m.provider),
+          apiKey,
           maxRetries: MODEL_RETRIES,
           maxRetryDelayMs: MODEL_MAX_RETRY_DELAY_MS,
           timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
-          fetch: loggedFetch(role, log, options?.signal),
+          fetch: call?.fetch ?? fetch,
+          ...(call && { onPayload: call.onPayload }),
           // All registered providers await this before normalizing each event. An async
           // iterator alone can drain buffered deltas entirely through microtasks, starving
           // lease timers.
@@ -478,6 +486,7 @@ async function claimBody(
       }
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
+      if (images) log(`model requests this claim: ${images.summary()}`);
     } else {
       log(`stopped (${[...reasons].join(", ")}); nothing more to report`);
     }
