@@ -6,7 +6,7 @@
  * Lock order: `lockRun` (`pg-event-log.ts`).
  */
 import { runEventSchema } from "@voluma/contracts/events";
-import { corrections, FOLD_EVENT_TYPES, fold, redoRefusal } from "@voluma/contracts/fold";
+import { fold, redoRefusal } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
@@ -17,7 +17,14 @@ import type { MessageSent } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
 import { noLease } from "./lease";
 import { eventLock, insertEvent, lockRun } from "./pg-event-log";
-import { loadRun, type Queryable, readableRuns, readEvents, type Tx } from "./pg-runs";
+import {
+  loadRun,
+  openCorrectionOf,
+  type Queryable,
+  readableRuns,
+  readEvents,
+  type Tx,
+} from "./pg-runs";
 import { events, runs, studies } from "./schema";
 
 const personThread = (runId: string) => `${runId}.person`;
@@ -78,11 +85,11 @@ async function reopen(tx: Tx, runId: string, messageEventId: string, by: string)
  */
 export async function openCorrection(tx: Queryable, runId: string): Promise<string | null> {
   const rows = await tx
-    .select()
+    .select({ id: events.id, type: events.type, seq: events.seq })
     .from(events)
     .where(and(eq(events.runId, runId), inArray(events.type, ["run.reopened", "correction.ended"])))
     .orderBy(asc(events.seq));
-  return corrections(readEvents(rows)).open?.reopenId ?? null;
+  return openCorrectionOf(rows)?.id ?? null;
 }
 
 /** Writes `correction.ended`, keyed to the open correction's `run.reopened` (`openCorrection`). */
@@ -212,15 +219,16 @@ export async function decideMessage(
     return { eventId, state: await stateNow(), duplicate: true };
   if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
   const { taskId, itemId } = msg.payload;
-  const view = fold(
-    readEvents(
-      await tx
-        .select()
-        .from(events)
-        .where(and(eq(events.runId, runId), inArray(events.type, [...FOLD_EVENT_TYPES])))
-        .orderBy(asc(events.seq)),
-    ),
+  // The runner resumes from the whole log and fails on a row it can't read, so a correction on
+  // such a run could never finish.
+  const { events: log, skipped } = readEvents(
+    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
   );
+  if (skipped.length)
+    throw new HTTPException(409, {
+      message: "This run has an event that can't be read; rerun it.",
+    });
+  const view = fold(log);
   if (view.plan.tasks.length === 0)
     throw new HTTPException(409, { message: "The run has no plan yet." });
   if (taskId !== undefined) {

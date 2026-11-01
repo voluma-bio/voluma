@@ -334,7 +334,9 @@ export function world(o: WorldOptions) {
       if (!cancelled && o.cancelAfter?.(event)) {
         cancelled = cut = frozen = true;
         abort.abort();
-        for (const ended of cancelEnds(RUN, stored, new Date())) {
+        const reopened = corrections(stored).open?.reopened;
+        const openSince = reopened === undefined ? undefined : stored[reopened]?.seq;
+        for (const ended of cancelEnds(RUN, stored, new Date(), openSince)) {
           stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
         }
         // A cancel inside a correction also records how it ended (`correction.ended`).

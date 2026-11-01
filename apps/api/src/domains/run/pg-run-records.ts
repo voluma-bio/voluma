@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { runEventSchema } from "@voluma/contracts/events";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { HTTPException } from "hono/http-exception";
 import type { RunRecords } from "../../ports";
 import type { Notifier } from "./notifier";
 import { insertEvent, lockRun } from "./pg-event-log";
@@ -50,6 +51,11 @@ export function pgRunRecords(
         if (!record) throw new Error(`run ${runId} vanished inside its transaction`);
         const next = decision(record);
         if (!next) return record;
+        // A decision is stored against what the page showed, and a skipped fold event left some of it out.
+        if (record.skipped)
+          throw new HTTPException(409, {
+            message: "This run has an event that can't be read, so it can't be reviewed.",
+          });
         await insertEvent(
           tx,
           runEventSchema.parse({

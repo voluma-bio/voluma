@@ -15,17 +15,20 @@
  * commit, and the stream then reads the log from its cursor, so a missed or early wake-up
  * costs a read, never an event. Stored rows are parsed against the current event schema:
  * the runner's read (`readLeased`) fails on an unsupported historical event rather than
- * reinterpret it; the browser's stream and cancel skip and log it (`readEvents`).
+ * reinterpret it; the browser's reads (stream, run loader) skip and log it (`readEvents`). A read
+ * that decides a write (cancel, corrections, review) uses row columns only or refuses on a
+ * skipped type it decides on.
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { cancelEnds } from "@voluma/contracts/threads";
 import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { HTTPException } from "hono/http-exception";
 import type { ReadScope } from "../../domain";
 import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { readableRuns, readEvents, type Tx, toRunEvent } from "./pg-runs";
+import { openCorrectionOf, readableRuns, readEvents, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
@@ -75,10 +78,17 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
   await eventLock(tx, runId);
-  const log = readEvents(
-    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
-  );
-  for (const ended of cancelEnds(runId, log, new Date())) {
+  const rows = await tx
+    .select()
+    .from(events)
+    .where(eq(events.runId, runId))
+    .orderBy(asc(events.seq));
+  const { events: log, skipped } = readEvents(rows);
+  // Which threads are open comes from their starts and ends, so a skipped one would end the
+  // wrong threads. The open correction comes from row columns, so a bad payload there is fine.
+  if (skipped.some((row) => row.type === "thread.started" || row.type === "thread.ended"))
+    throw new HTTPException(409, { message: "This run has an event that can't be read." });
+  for (const ended of cancelEnds(runId, log, new Date(), openCorrectionOf(rows)?.seq)) {
     await insertEvent(tx, ended);
   }
 }
@@ -134,7 +144,7 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
       // not move the cursor back or make a full page look like the end of the log.
       return {
         ended: first.state === "ended",
-        events: readEvents(stored),
+        events: readEvents(stored).events,
         next: stored.at(-1)?.seq ?? after,
         full: stored.length >= limit,
       };

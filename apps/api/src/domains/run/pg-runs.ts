@@ -71,13 +71,18 @@ export const toInput = (row: typeof inputs.$inferSelect): Input => ({
 export const toRunEvent = (row: typeof events.$inferSelect) =>
   runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
 
+type EventRow = typeof events.$inferSelect;
+
 /**
- * The browser's, cancel's and corrections' read of stored rows: a row that fails
- * `runEventSchema` is skipped and logged with its id and type, so one bad event doesn't take
- * down the run's page. The runner's resume reads with `toRunEvent` and stays strict.
+ * The tolerant read of stored rows: a row that fails `runEventSchema` is skipped and logged with
+ * its id and type, so one bad event doesn't take down the run's page, and returned in `skipped`.
+ * A read that decides a write must either use only row columns (`openCorrectionOf`) or refuse
+ * when `skipped` holds a type it decides on. The runner's resume reads with `toRunEvent` and
+ * stays strict.
  */
-export function readEvents(rows: (typeof events.$inferSelect)[]): RunEvent[] {
+export function readEvents(rows: EventRow[]): { events: RunEvent[]; skipped: EventRow[] } {
   const log: RunEvent[] = [];
+  const skipped: EventRow[] = [];
   for (const row of rows) {
     try {
       log.push(toRunEvent(row));
@@ -86,9 +91,26 @@ export function readEvents(rows: (typeof events.$inferSelect)[]): RunEvent[] {
         `run ${row.runId}: event ${row.id} (${row.type}) does not parse; skipped:`,
         error,
       );
+      skipped.push(row);
     }
   }
-  return log;
+  return { events: log, skipped };
+}
+
+/**
+ * The open correction (`corrections`) from row columns alone, so a bad payload cannot change the
+ * answer: `run.reopened` rows and `correction.ended` rows in `seq` order, the open one being a
+ * `run.reopened` with no `correction.ended` after it.
+ */
+export function openCorrectionOf(
+  rows: Pick<EventRow, "id" | "type" | "seq">[],
+): { id: string; seq: number } | null {
+  let open: { id: string; seq: number } | null = null;
+  for (const { id, type, seq } of rows) {
+    if (type === "run.reopened") open = { id, seq };
+    else if (type === "correction.ended") open = null;
+  }
+  return open;
 }
 
 function toRun({ run, input, position, calls }: Row, { summary, revisions }: Results): Run {
@@ -178,15 +200,20 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
  * folds from the rest.
  */
 async function loadLogs(tx: Tx, ids: string[]) {
-  const logs = new Map<string, RunEvent[]>();
+  const logs = new Map<string, { events: RunEvent[]; skipped: number }>();
   if (ids.length) {
     const stored = await tx
       .select()
       .from(events)
       .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
       .orderBy(asc(events.seq));
-    for (const id of ids) logs.set(id, []);
-    for (const event of readEvents(stored)) logs.get(event.runId)?.push(event);
+    for (const id of ids) logs.set(id, { events: [], skipped: 0 });
+    const { events: read, skipped } = readEvents(stored);
+    for (const event of read) logs.get(event.runId)?.events.push(event);
+    for (const row of skipped) {
+      const log = logs.get(row.runId);
+      if (log) log.skipped++;
+    }
   }
   return logs;
 }
@@ -207,9 +234,12 @@ export type RunFold = {
   open: readonly string[];
   /** The threads whose latest end failed (`failedThreads`). */
   failed: ReadonlySet<string>;
+  /** The stored fold events that did not parse and are missing from `results`. */
+  skipped: number;
 };
 
-const foldRun = (log: RunEvent[]): RunFold => ({
+const foldRun = (log: RunEvent[], skipped = 0): RunFold => ({
+  skipped,
   results: reviewState(log),
   correcting: openCorrectionRevision(log),
   open: openThreads(log),
@@ -321,11 +351,11 @@ async function loadResults(
     let entry: CacheEntry;
     if (hit?.generation === generation && hit.lastEventId === lastEventId) entry = hit;
     else {
-      const log = logs.get(id) ?? [];
+      const { events: log, skipped } = logs.get(id) ?? { events: [], skipped: 0 };
       entry = {
         generation,
         lastEventId,
-        fold: foldRun(log),
+        fold: foldRun(log, skipped),
         weight: log.length + 1,
       };
     }

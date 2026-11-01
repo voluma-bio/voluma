@@ -7,7 +7,6 @@
  * page asks here instead of guessing from a thread's last event.
  */
 import type { EventInput, RunEvent } from "./events";
-import { corrections } from "./fold";
 import { threadPlace } from "./thread-place";
 
 /** Ids of the threads left open, in the order they first started; the root thread (kind `supervisor`) among them. */
@@ -39,11 +38,17 @@ export function failedThreads(events: readonly RunEvent[]): Set<string> {
  * above all, has one id for every claim, so an id keyed to the thread would collide with the
  * end of an earlier correction.
  *
- * In a correction (`corrections`) the ends also cover the threads that already finished inside
+ * In a correction (`openSince`) the ends also cover the threads that already finished inside
  * it, root excepted: the correction is discarded, and an agent that resumed would believe its
  * reverted work stands. The next correction starts them fresh (`messages.ts`).
  */
-export function cancelEnds(runId: string, events: readonly RunEvent[], at: Date): EventInput[] {
+export function cancelEnds(
+  runId: string,
+  events: readonly RunEvent[],
+  at: Date,
+  /** The `seq` of the open correction's `run.reopened` (`corrections`), if one is open. */
+  openSince: number | undefined,
+): EventInput[] {
   const root = events.find((e) => e.type === "thread.started" && threadPlace(e.payload) === "root");
   const isRoot = (id: string) => id === root?.threadId;
   const start = new Map<string, string>(); // thread -> its latest thread.started id
@@ -57,9 +62,8 @@ export function cancelEnds(runId: string, events: readonly RunEvent[], at: Date)
     }
   }
   const ending = new Set(openThreads(events));
-  const open = corrections(events).open;
-  if (open) {
-    for (const e of events.slice(open.reopened)) {
+  if (openSince !== undefined) {
+    for (const e of events.filter((e) => e.seq >= openSince)) {
       if (start.has(e.threadId) && !isRoot(e.threadId) && !stopped.has(e.threadId))
         ending.add(e.threadId);
     }
