@@ -424,6 +424,7 @@ function ScanReview({
           revision={latest}
           task={reviewTask}
           assets={review.data.assets}
+          onRetry={() => void review.refetch()}
           display={display}
           focus={focus}
           tool={marking.tool}

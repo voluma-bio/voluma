@@ -14,7 +14,8 @@ VOLUMA_REVIEW_RUNTIME must identify the pinned sandbox image. The cache is parti
 runtime, mode and source bytes, not by a run's affine or grid id: assets contain voxel coordinates only.
 Cache hits copy the assets into `--out`, preserving run-scoped URLs and authorization. Each publisher writes a unique
 generation, then a small `ready` record selecting it. Readers select that immutable generation once; concurrent or
-interrupted publishers cannot modify its files. No calibration, source paths or geometry are read from the cache.
+interrupted publishers cannot modify its files. A failed cache write still publishes to `--out`; a failed copy from the
+cache converts again. No calibration, source paths or geometry are read from the cache.
 
 Levels (OME-Zarr 0.4 on Zarr v2, Blosc zstd, 64-cubed chunks): level 0 is the source; each next level halves every axis
 (rounding up) until every axis is at most ceil(level 0 / 8); the last is one chunk. Images are averaged; labels and masks take the
@@ -29,9 +30,11 @@ import json
 import os
 import shutil
 import sys
+import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Lock
 
 import numcodecs
 import numpy as np
@@ -162,14 +165,23 @@ def write_meshes(arr, kind, out):
 def publish(src, dst):
     """Copies src to dst, 32 files at a time (a bucket mount is slow per file), manifest.json last so a copy cut short has none."""
     files = [p for p in src.rglob('*') if p.is_file() and p.name != 'manifest.json']
-    # Every directory first, serially: Modal's R2 CloudBucketMount fails when parallel workers create one parent
-    # (a copy loses its parent between mkdir and open; see apps/runner/src/modal-sandbox.ts, STAGE_PREPARE_SCRIPT).
     dst.mkdir(parents=True, exist_ok=True)
-    for d in {(dst / p.relative_to(src)).parent for p in files}:
-        d.mkdir(parents=True, exist_ok=True)
+    # Modal's R2 mount does not keep empty directories, so a parent made before the copies is gone by
+    # open(). Parallel mkdir of one parent fails with File exists (STAGE_PREPARE_SCRIPT). Make the
+    # parent immediately before each copy, one mkdir at a time, and retry if it still vanishes.
+    mkdir_lock = Lock()
 
     def copy(p):
-        shutil.copyfile(p, dst / p.relative_to(src))
+        target = dst / p.relative_to(src)
+        for attempt in range(4):
+            try:
+                with mkdir_lock:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(p, target)
+                return
+            except (FileNotFoundError, FileExistsError):
+                if attempt == 3:
+                    raise
 
     with ThreadPoolExecutor(32) as pool:
         list(pool.map(copy, files))
@@ -237,10 +249,14 @@ def main():
             ready = {}
         if (ready.get('sourceSha256') == digest and ready.get('converterVersion') == VERSION
                 and ready.get('mode') == mode):
-            publish(generation, final)
-            print(f'review assets: reused {digest} from input cache', file=sys.stderr)
-            print(text.strip())
-            return
+            try:
+                publish(generation, final)
+            except OSError as e:
+                print(f'review assets: could not copy input cache ({e}); converting again', file=sys.stderr)
+            else:
+                print(f'review assets: reused {digest} from input cache', file=sys.stderr)
+                print(text.strip())
+                return
     if a.int16:
         lo, hi = np.float64(np.inf), np.float64(-np.inf)
         for z in range(0, arr.shape[0], SLAB):
@@ -281,10 +297,19 @@ def main():
     (out / 'manifest.json').write_text(text + '\n')
     if cached is not None:
         # Never overwrite completed files: another publisher can stop halfway through its own generation.
+        # A cache write must not fail this run: --out is what the viewer reads.
         generation = uuid.uuid4().hex
-        publish(out, cached / generation)
-        (cached / 'ready').write_text(generation + '\n')
-    publish(out, final)  # manifest.json last: a reader never sees half a manifest
+        try:
+            publish(out, cached / generation)
+            (cached / 'ready').write_text(generation + '\n')
+        except OSError as e:
+            print(f'review assets: could not write input cache ({e}); publishing to --out only', file=sys.stderr)
+    try:
+        publish(out, final)  # manifest.json last: a reader never sees half a manifest
+    except OSError:
+        traceback.print_exc()
+        print('could not write the review files', file=sys.stderr)
+        sys.exit(1)
     shutil.rmtree(out)
     print(text)
 
