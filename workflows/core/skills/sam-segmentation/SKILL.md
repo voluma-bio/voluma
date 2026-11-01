@@ -19,18 +19,10 @@ segmentation of every bone and a second opinion on your own; **you own the final
 - **A scan that may not leave the lab.** Meta's API retains what it receives. If the study's terms forbid sending
   the scan out, do not call it, and say so.
 
-## General strategies
+## Planning requests
 
-- **Group a request by what you want found together.** Structures in one request are tracked together and never
-  share a voxel; a structure left out is tracked onto by its neighbour. So every structure a target could track
-  into goes in the target's request, each boxed on a slice where it is separate from its neighbours (up to 16 per
-  request). One request per structure costs several times as much and gives overlapping masks.
-- **Keep structures of very different size in separate requests.** A small structure in a request of big ones
-  costs the mid-size one beside it its track. Find the small ones on the scan grid first (`unlabelled.py`), give
-  each a slice and a box (`map_points.py --pieces`), and send them together, one temporary label per 3D piece. A
-  piece the stack's edge cuts needs a wider orientation margin first.
-
-The workflow's anatomy reference says how this plays out for its structures.
+Open `references/strategies.md` before you plan your requests: how to group structures into requests. Then the
+workflow's anatomy reference, for how that applies to its structures.
 
 ## What the tool does, so you can plan around it
 
