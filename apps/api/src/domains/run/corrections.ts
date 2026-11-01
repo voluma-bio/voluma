@@ -6,7 +6,7 @@
  * Lock order: `lockRun` (`pg-event-log.ts`).
  */
 import { runEventSchema } from "@voluma/contracts/events";
-import { fold, redoRefusal } from "@voluma/contracts/fold";
+import { FOLD_EVENT_TYPES, fold, redoRefusal } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
@@ -220,9 +220,19 @@ export async function decideMessage(
   if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
   const { taskId, itemId } = msg.payload;
   // The runner resumes from the whole log and fails on a row it can't read, so a correction on
-  // such a run could never finish.
+  // such a run could never finish. Only the write pass reads the whole log to check; the judging
+  // pass folds the fold's events, which is all it needs.
   const { events: log, skipped } = readEvents(
-    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
+    await tx
+      .select()
+      .from(events)
+      .where(
+        and(
+          eq(events.runId, runId),
+          write ? undefined : inArray(events.type, [...FOLD_EVENT_TYPES]),
+        ),
+      )
+      .orderBy(asc(events.seq)),
   );
   if (skipped.length)
     throw new HTTPException(409, {

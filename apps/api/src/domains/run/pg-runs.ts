@@ -13,6 +13,8 @@ import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { HTTPException } from "hono/http-exception";
+import { ZodError } from "zod";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import { events, inputs, referenceInput, runs, studies } from "./schema";
 
@@ -87,9 +89,11 @@ export function readEvents(rows: EventRow[]): { events: RunEvent[]; skipped: Eve
     try {
       log.push(toRunEvent(row));
     } catch (error) {
+      const issue = error instanceof ZodError ? error.issues[0] : undefined;
       console.error(
-        `run ${row.runId}: event ${row.id} (${row.type}) does not parse; skipped:`,
-        error,
+        `run ${row.runId}: event ${row.id} (${row.type}) does not parse; skipped: ${
+          issue ? `${issue.path.join(".")}: ${issue.message}` : String(error)
+        }`,
       );
       skipped.push(row);
     }
@@ -297,7 +301,7 @@ interface LoadOptions {
   /**
    * The lists and the study reads: a completed run with no review summary (no revision,
    * which `runSchema` forbids) is left out rather than failing every run listed with it.
-   * Without it (one run's read) that run throws.
+   * Without it (one run's read, a cancel's reply) that run is a 409: its events can't be read.
    */
   skipSummaryless?: boolean;
   /**
@@ -374,6 +378,10 @@ async function loadResults(
     )
     .map((row) => {
       const fold = foldOf.get(row.run.id) ?? NOTHING;
+      if (row.run.state === "ended" && row.run.outcome === "completed" && !fold.results.summary)
+        throw new HTTPException(409, {
+          message: "This run's review can't be read: its events don't parse.",
+        });
       return { run: toRun(row, fold.results), generation: row.run.generation, ...fold };
     });
 }

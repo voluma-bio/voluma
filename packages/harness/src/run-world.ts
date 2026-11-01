@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { RunEvent } from "@voluma/contracts/events";
 import { corrections, type Folded, fold } from "@voluma/contracts/fold";
-import { cancelEnds } from "@voluma/contracts/threads";
+import { cancelEnds, cancelRow } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 import { EvidenceNotFound } from "./ports/evidence";
@@ -336,7 +336,7 @@ export function world(o: WorldOptions) {
         abort.abort();
         const reopened = corrections(stored).open?.reopened;
         const openSince = reopened === undefined ? undefined : stored[reopened]?.seq;
-        for (const ended of cancelEnds(RUN, stored, new Date(), openSince)) {
+        for (const ended of cancelEnds(RUN, stored.map(cancelRow), new Date(), openSince)) {
           stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
         }
         // A cancel inside a correction also records how it ended (`correction.ended`).

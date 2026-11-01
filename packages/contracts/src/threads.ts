@@ -7,10 +7,9 @@
  * page asks here instead of guessing from a thread's last event.
  */
 import type { EventInput, RunEvent } from "./events";
-import { threadPlace } from "./thread-place";
 
 /** Ids of the threads left open, in the order they first started; the root thread (kind `supervisor`) among them. */
-export function openThreads(events: readonly RunEvent[]): string[] {
+export function openThreads(events: readonly { type: string; threadId: string }[]): string[] {
   const open = new Map<string, boolean>();
   for (const e of events) {
     if (e.type === "thread.started") open.set(e.threadId, true);
@@ -31,6 +30,31 @@ export function failedThreads(events: readonly RunEvent[]): Set<string> {
 }
 
 /**
+ * What `cancelEnds` reads of an event: columns, plus the two payload fields it needs. The server
+ * reads exactly these from the stored rows, so a payload that no longer parses cannot change
+ * which threads a cancel ends.
+ */
+export type CancelRow = {
+  id: string;
+  type: string;
+  threadId: string;
+  seq: number;
+  /** `thread.started` only: it has no parent. */
+  root?: boolean;
+  /** `thread.ended` only. */
+  status?: string;
+};
+
+export const cancelRow = (e: RunEvent): CancelRow => ({
+  id: e.id,
+  type: e.type,
+  threadId: e.threadId,
+  seq: e.seq,
+  ...(e.type === "thread.started" && { root: e.payload.parentThreadId === null }),
+  ...(e.type === "thread.ended" && { status: e.payload.status }),
+});
+
+/**
  * The server's cancel of a run that did not finish (a user's cancel, or a failure it records as
  * one): every open thread ends `cancelled` and the root last. The server writes the ends in the
  * transaction that ends the run: after that it refuses the runner's writes. A runtime abort
@@ -44,12 +68,12 @@ export function failedThreads(events: readonly RunEvent[]): Set<string> {
  */
 export function cancelEnds(
   runId: string,
-  events: readonly RunEvent[],
+  events: readonly CancelRow[],
   at: Date,
   /** The `seq` of the open correction's `run.reopened` (`corrections`), if one is open. */
   openSince: number | undefined,
 ): EventInput[] {
-  const root = events.find((e) => e.type === "thread.started" && threadPlace(e.payload) === "root");
+  const root = events.find((e) => e.type === "thread.started" && e.root);
   const isRoot = (id: string) => id === root?.threadId;
   const start = new Map<string, string>(); // thread -> its latest thread.started id
   const stopped = new Set<string>(); // threads whose latest end is `cancelled`
@@ -57,7 +81,7 @@ export function cancelEnds(
     if (e.type === "thread.started") {
       start.set(e.threadId, e.id);
       stopped.delete(e.threadId);
-    } else if (e.type === "thread.ended" && e.payload.status === "cancelled") {
+    } else if (e.type === "thread.ended" && e.status === "cancelled") {
       stopped.add(e.threadId);
     }
   }

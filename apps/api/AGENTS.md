@@ -106,7 +106,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `correction.ended` since the latest `run.reopened`), so its claims are corrections. A correction never ends a run worse than `completed`: every way the queue would
   fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
   claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its threads
-  cancelled, the open ones and those that finished inside the correction (`cancelEnds`).
+  cancelled, the open ones and those that finished inside the correction (`cancelEnds`, fed row columns only: it runs inside the claim, so it never refuses).
 - **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
   under the lock. Never store, log or return them, and log no body on a route that takes
   them. A transition holds the keys before the write that makes the run claimable commits;

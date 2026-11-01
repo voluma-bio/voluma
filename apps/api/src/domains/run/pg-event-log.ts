@@ -16,14 +16,13 @@
  * costs a read, never an event. Stored rows are parsed against the current event schema:
  * the runner's read (`readLeased`) fails on an unsupported historical event rather than
  * reinterpret it; the browser's reads (stream, run loader) skip and log it (`readEvents`). A read
- * that decides a write (cancel, corrections, review) uses row columns only or refuses on a
- * skipped type it decides on.
+ * that decides a write uses row columns only (cancel, which also runs inside the claim, so it
+ * must never refuse) or refuses on an event it can't read (corrections, review).
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { cancelEnds } from "@voluma/contracts/threads";
 import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { HTTPException } from "hono/http-exception";
 import type { ReadScope } from "../../domain";
 import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
@@ -78,16 +77,30 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
   await eventLock(tx, runId);
+  // Columns, plus the two payload fields `cancelEnds` reads, each under its own `type` (the
+  // json cast may run before the `type` filter, `AGENTS.md` "Contract changes"), so an event
+  // that no longer parses cannot stop or change a cancel.
   const rows = await tx
-    .select()
+    .select({
+      id: events.id,
+      type: events.type,
+      threadId: events.threadId,
+      seq: events.seq,
+      root: sql<
+        boolean | null
+      >`CASE WHEN ${events.type} = 'thread.started' THEN json_typeof(${events.payload}->'parentThreadId') = 'null' END`,
+      status: sql<
+        string | null
+      >`CASE WHEN ${events.type} = 'thread.ended' THEN ${events.payload}->>'status' END`,
+    })
     .from(events)
     .where(eq(events.runId, runId))
     .orderBy(asc(events.seq));
-  const { events: log, skipped } = readEvents(rows);
-  // Which threads are open comes from their starts and ends, so a skipped one would end the
-  // wrong threads. The open correction comes from row columns, so a bad payload there is fine.
-  if (skipped.some((row) => row.type === "thread.started" || row.type === "thread.ended"))
-    throw new HTTPException(409, { message: "This run has an event that can't be read." });
+  const log = rows.map(({ root, status, ...row }) => ({
+    ...row,
+    ...(root !== null && { root }),
+    ...(status !== null && { status }),
+  }));
   for (const ended of cancelEnds(runId, log, new Date(), openCorrectionOf(rows)?.seq)) {
     await insertEvent(tx, ended);
   }
