@@ -32,7 +32,7 @@ export function modelOverride(value: string | undefined): string | null {
 }
 
 const CHOICES = {
-  voluma: { choices: [WONDER, CONTRIBUTOR], default: WONDER.model },
+  voluma: { choices: [WONDER, SPARK, CONTRIBUTOR], default: WONDER.model },
   visitor: { choices: [WONDER, SPARK], default: WONDER.model },
 };
 
