@@ -6,9 +6,10 @@
     "dependsOn": [],
     "copyInputs": true,
     "outputs": ["header", "scan"],
-    "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
+    "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Clean up the scan, so it holds the specimen and nothing else. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
     "doneWhen": [
-      "The spacing and size come from the files themselves, with the file or header each came from."
+      "The spacing and size come from the files themselves, with the file or header each came from.",
+      "No holder, padding or debris is left in the scan and no bone of the knee was removed, shown on a 3D view of the cleaned scan and one of what was removed."
     ]
   },
   {
@@ -44,7 +45,8 @@
     "instructions": "Segment the bones and joint structures and settle the final labels; a piece the data do not support is not named, and whether its structure is absent is decided by the segmentation-check skill, section 2.",
     "doneWhen": [
       "Every label is one structure and every piece present is labelled or raised as a To check item, checked on the 3D sheet and the label checks, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (segmentation) describes.",
-      "The volumes of #1-3 follow from the final labels."
+      "The volumes of #1-3 follow from the final labels.",
+      "The checkpoint names each of labels 5 to 12 (/workflow/workflows/mouse-oa/skills/mouse-oa/references/anatomy.md) as labelled, or as absent with the reason."
     ]
   },
   {

@@ -1,8 +1,8 @@
 ---
 name: scan-intake
 description: >
-  Load at the start of a scan: turn a DICOM series into a calibrated HU volume with its header, and write the scan's
-  notes from what the researcher left in /inputs.
+  Load at the start of a scan: turn a DICOM series into a calibrated HU volume with its header, clean it up to the
+  specimen, and write the scan's notes from what the researcher left in /inputs.
 ---
 
 # Scan intake
@@ -25,5 +25,10 @@ description: >
   - `## Other facts later tasks need`: a measurement threshold, a calibration caveat, the animal, side or age, how
     the orientation was worked out, anything that changes how a number is read.
 
-  Do not infer what the notes do not say, and do not add what you saw on the scan: intake has not looked at the
-  bones.
+  Do not infer what the notes do not say. The notes are the researcher's account: what you see on the scan goes in
+  your checkpoint, not here.
+- **Clean up the scan.** The field can hold the sample holder, padding and debris beside the specimen; every later
+  task, and the researcher's 3D view, reads `hu.npy`. Set what is not the specimen to air (-1000 HU) in `hu.npy`,
+  keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar
+  (`sidecar.py --like hu.json`). A piece that may be bone of the leg stays, with a To check item asking what it is:
+  bone wrongly removed is lost to every task after you.
