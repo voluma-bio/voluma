@@ -189,7 +189,13 @@ export function mainTools(deps: MainDeps) {
   > = {
     name: "start_agent",
     description: `Start an agent of one of your roles (${subagents.join(", ")}) on a task of the plan. ${TASK_START}`,
-    input: z.object({ role: nonEmpty, task: taskIdSchema, brief: nonEmpty }),
+    input: z.object({
+      role: nonEmpty,
+      task: taskIdSchema.describe(
+        "The task id, e.g. `intake`, not the plan section text (the title and description after it).",
+      ),
+      brief: nonEmpty,
+    }),
     sequential: true,
     execute: inSection(({ role, task, brief }, ctx) => {
       if (!subagents.includes(role)) {
