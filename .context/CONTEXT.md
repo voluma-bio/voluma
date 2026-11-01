@@ -177,7 +177,7 @@ and check threads.
   5 s), so the lease is renewed soon after the API answers again. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our model key; a `visitor` run uses the claim's Meta key, in that run's scope
   only. Every sandbox runs on our Modal token. A guest may start only `visitor` runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are what its role file lists (`workflows/core/agents/`), built from the registry (`packages/harness/src/tools/registry.ts`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are what its role file lists (`workflows/core/agents/`), built from the registry (`packages/harness/src/tools/registry.ts`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can
@@ -190,8 +190,8 @@ and check threads.
   that talks to the API. Whether it moves into a Durable Object per run is
   decided after the first real run.
 
-The design, the evidence behind it and the order of work are in the
-voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
+The original design and the evidence behind it are in the archived voluma-bio/docs work item
+`mvp-contracts-and-data`: `git show 101a8b09:work/mvp-contracts-and-data/design/harness-v0.md`.
 
 ## Authentication
 
@@ -231,7 +231,7 @@ route, which reads through the user's `readerOf` or, for the read-only debug tok
 (`VOLUMA_DEBUG_TOKEN`), every lab. A cookie-authenticated non-GET request must
 carry an `Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not
 same-origin) and a JSON content type. No GET changes app state. Nothing upgrades to
-WebSockets (run streams are planned as server-sent events, plain GETs, in #28); a route that
+WebSockets (run streams are server-sent events over plain GETs, `apps/api/src/domains/run/stream.ts`); a route that
 ever accepts an upgrade must add the `Origin` check for upgrades back to the CSRF guard.
 Bearer requests are exempt. `APP_URL` (the Vite origin in `pnpm dev`, the public URL in
 production) is config, never the `Host` header: it builds the redirect

@@ -90,6 +90,9 @@ stopped.
   when leaving the run, except the draft, which is kept per run in sessionStorage so a reload
   (by hand, or onto a new deploy) keeps it, and cleared by a successful send. Keep capture, retry identity and the submission guard in that page lifetime.
   There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`).
+  This offer/go flow is the interim: review moves to one conversation with the scan's main agent,
+  with no button outside it and no "redo" in researcher-facing text (`.context/decisions.md`,
+  2026-10-31, two modes; issue #400). Build nothing new on the offer/go flow.
   "Yes, redo <task>" and "No, keep it" under the open offer (`openOffer`: the AI's latest reply,
   with no message of the person's after it; an outcome after it leaves it open) never send on
   their own: they make the box an answer to that offer, where the person can add detail. Send

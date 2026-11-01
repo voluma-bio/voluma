@@ -23,8 +23,10 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 | `pnpm worktrees:clean` | Read-only inventory of registered worktrees; automatic cleanup and `--yes` are disabled |
 | `pnpm format` | Biome format and safe fixes |
 | `pnpm check:pr-body <body.md>` | Check a PR body draft against the template |
-| `pnpm --filter @voluma/runner start` | The runner service: claims queued runs from the API and runs them (`RUNNER_MODEL=openai/<id>` in `.env`; `pnpm dev` running locally, start a run in the browser); see [CONTEXT.md](.context/CONTEXT.md) |
+| `pnpm --filter @voluma/runner start` | The runner service: claims queued runs from the API and runs them (`RUNNER_MODEL=deepseek/deepseek-v4-pro` in `.env`; `pnpm dev` running locally, start a run in the browser); see [CONTEXT.md](.context/CONTEXT.md) |
 | `pnpm --filter @voluma/<pkg> <script>` | One package's script, e.g. `pnpm --filter @voluma/api db:migrate` |
+
+Agents never start a run on staging or on `wonder` (Jimmy): test runs are local, on `deepseek/deepseek-v4-pro` or `meta/muse-spark-1.3-contributor`.
 
 An agent that starts sandboxes runs `pnpm --filter @voluma/runner sandboxes:clean --run <id>` for each of its runs before it finishes (without `--run` it ends every agent's sandboxes).
 
