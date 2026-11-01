@@ -211,7 +211,7 @@ export function runLayout({
       description:
         `${common(copy)}${writeRule(outputsAccess === "read-write" ? `${OUTPUTS} and ${dir}` : dir)}- ${OUTPUTS} holds the worker's files: ${outputsAccess === "read-write" ? "the files you produce go here too" : "read them, do not modify them"}.\n` +
         `- ${dir} is for your intermediate files; it is kept. $SCRATCH is ${dir}. Write nothing else under ${SCRATCH}. ` +
-        `bash sees only your folder there; view_image also opens the files under ${SCRATCH}/ that the worker cited as evidence (read-only).`,
+        `bash sees only your folder there; view_image and read also open the files under ${SCRATCH}/ that the worker cited as evidence (read-only).`,
       restartNote: `The sandbox was restarted. ${dir} was kept, ${copy ? `${INPUTS} was copied again, ` : ""}and local files elsewhere (including /tmp) are gone.`,
     };
   };

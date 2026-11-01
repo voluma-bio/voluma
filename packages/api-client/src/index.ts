@@ -34,7 +34,9 @@ import {
   listRunsResponseSchema,
   type ResendKeysRequest,
   type Run,
+  type RunModelsResponse,
   type RunRead,
+  runModelsResponseSchema,
   runReadSchema,
   runSchema,
   type StartRunRequest,
@@ -226,6 +228,11 @@ export async function signOut(): Promise<void> {
 /** Starts a run on a scan of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return read(runSchema, await request("/run/runs", { method: "POST", body: req }));
+}
+
+/** The models a start may pick, per kind of credentials; see `runModelsResponseSchema`. */
+export async function getRunModels(): Promise<RunModelsResponse> {
+  return read(runModelsResponseSchema, await request("/run/models"));
 }
 
 /** Creates a study and starts the runs for `req.start` in one call; a refusal (409, 429) leaves no study. See `@voluma/contracts/study`. */

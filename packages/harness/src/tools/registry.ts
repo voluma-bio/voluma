@@ -9,7 +9,7 @@ import type { Files } from "../ports/files";
 import type { TaskRuntime } from "../task-runtime";
 import { bashTool } from "./bash";
 import { type MainDeps, mainTools } from "./main-tools";
-import { readFileTool } from "./read-file";
+import { readTool } from "./read";
 import { segmentSamTool } from "./segment-sam";
 import { taskTools } from "./task-tools";
 import type { Tool } from "./tool";
@@ -33,6 +33,9 @@ export const TOOL_NAMES = [
   "submit_task",
   "view_image",
   "segment_sam",
+  "read",
+  // DELETE one deploy after `read` ships (.context/TODO.md): the old name of `read`, which a live
+  // run's snapshot of main.md still lists; without it the run cannot load its workflow on resume.
   "read_file",
   "ask",
   "start_agent",
@@ -50,11 +53,14 @@ export type ToolName = (typeof TOOL_NAMES)[number];
 
 /** The tools that need only the thread's own layout and the run's files. */
 const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => Tool> = {
-  bash: ({ layout }) => bashTool(layout),
+  bash: ({ layout }, names) => bashTool(layout, names.includes("read")),
   view_image: ({ layout, files }, names) =>
     viewImageTool({ layout, files, hasSandbox: names.includes("bash") }),
   segment_sam: ({ layout }) => segmentSamTool(layout),
-  read_file: ({ layout, files }) => readFileTool({ layout, files }),
+  read: ({ layout, files }, names) =>
+    readTool({ layout, files, name: "read", hasSandbox: names.includes("bash") }),
+  read_file: ({ layout, files }, names) =>
+    readTool({ layout, files, name: "read_file", hasSandbox: names.includes("bash") }),
 };
 
 export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
