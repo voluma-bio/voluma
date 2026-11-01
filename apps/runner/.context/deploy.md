@@ -8,7 +8,7 @@ service's settings. This file holds only what differs.
 
 ## Always on until about 2026-11-18 (the freeze)
 
-Staging is frozen at **2026-11-04 23:59 PT** as the hackathon submission, and judges use it
+Staging is frozen at **2026-11-04 6:00 PM PT** (9:00 PM ET, the submission deadline; changing the repo after it marks the entry late) as the hackathon submission, and judges use it
 until about **2026-11-18**. The runner stays on for all of that time, so a judge's run is claimed
 within seconds instead of sitting queued. Render bills it by the second (about $0.035/hour at
 `1c-2g`, about $12 for the two weeks).
