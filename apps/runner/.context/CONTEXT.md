@@ -264,9 +264,9 @@ An agent in its own worktree tries a workflow change on the real system like thi
 ### Watching prompt-cache misses on a long run
 
 `pnpm --filter @voluma/runner cache-watch --run <id> [--watch <minutes>] [--every <seconds>] [--url <api>]`
-(`src/cache-watch.ts`) is a read-only operator script: one GET of the run's stream per poll, writes nothing. It
+(`src/cache-watch.ts`) is a read-only operator script: one open GET of the run's stream, writes nothing. It
 judges every model call with `cacheStep` (the rule the run page uses, `@voluma/contracts/spend`), resets a thread's
-baseline on a compaction summary as `spend()` does, and prints run-wide calls, misses, unexpected misses, a per-thread
+baseline on a compaction summary as `spend()` does, and prints every `--every` seconds run-wide calls, misses, unexpected misses, a per-thread
 table, and one block per new unexpected miss (prompt sizes, gap since the thread's previous call, the tool result just
 before, any `claim.started` / `run.reopened` / "Tools changed" between the two calls). Unexpected = a miss that is not
 the first call after a "Tools changed" notice in its thread; a thread's first call and the call after a compaction are
@@ -276,9 +276,8 @@ not misses under `cacheStep`.
   unexpected rate is over 1% once the run has made 200 calls. The line is advice; the script never cancels. These
   limits are calibrated on the rehearsal runs: 3 in 10 / 5% missed the image-elision bug, whose misses came in pairs.
 - `VOLUMA_DEBUG_TOKEN` from the environment or the repo-root `.env`; `--url` defaults to staging
-  (`https://voluma-api.onrender.com`), or pass the local API from `.dev/env.json`. With `--watch` it polls until the run ends or the minutes run out.
-- A poll stops 4 s after the last *stored* event (or at `end`), not the last byte: a live run sends `event: live`
-  frames continuously, which must not keep the poll open.
+  (`https://voluma-api.onrender.com`), or pass the local API from `.dev/env.json`. `--url` must be https or localhost (the token reads every lab's runs). The default `--watch` is 10 minutes; the script stops at the run's end or then.
+- It keeps one stream open as `try-run` does: resumes with `Last-Event-ID` after a drop or an API restart (a deploy), and gives up after 30 failures in a row. `event: live` frames are ignored.
 - Not in stored events: why the provider missed (eviction vs prefix change), and `claim.ended` (a claim end shows only as the next
   `claim.started`'s `after`). Event time is when the reply ended, so "since previous call" includes generation time.
 

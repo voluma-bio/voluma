@@ -4,12 +4,14 @@
  * and judges every model call with `cacheStep`, the rule the run page uses, then reports misses
  * per thread. A miss is expected when it is the call right after a "Tools changed" notice in its
  * own thread; every other miss is unexpected and is printed with what surrounds it. A
- * compaction summary resets the thread's baseline, as in `spend`. Writes nothing anywhere.
+ * compaction summary counts as a call, is not judged, and resets the thread's baseline, as in
+ * `spend`. Holds one stream open, resumes it after a drop or an API restart, prints the summary
+ * every `--every` seconds, and stops at the run's end or after `--watch` minutes. Writes nothing.
  *
  *   pnpm --filter @voluma/runner cache-watch --run <id> [--watch <minutes>] [--every <seconds>]
  *
  * `VOLUMA_DEBUG_TOKEN` comes from the environment or the repo `.env`; `--url` defaults
- * to staging. The flag line fires when a thread has 2 or more unexpected misses in its last 10
+ * to staging (https, or localhost). The flag line fires when a thread has 2 or more unexpected misses in its last 10
  * calls, or the run-wide unexpected rate is over 1% once the run has made 200 calls.
  */
 import { parseArgs } from "node:util";
@@ -19,7 +21,7 @@ import { type CacheState, cacheStep } from "@voluma/contracts/spend";
 const { values } = parseArgs({
   options: {
     run: { type: "string" },
-    watch: { type: "string" },
+    watch: { type: "string", default: "10" },
     every: { type: "string", default: "30" },
     url: { type: "string", default: "https://voluma-api.onrender.com" },
   },
@@ -30,6 +32,17 @@ const runId = values.run;
 const token = process.env.VOLUMA_DEBUG_TOKEN;
 if (!token) throw new Error("VOLUMA_DEBUG_TOKEN is not set");
 const base = values.url;
+const minutes = Number(values.watch);
+const every = Number(values.every);
+if (!(minutes > 0 && Number.isFinite(minutes)) || !(every > 0 && Number.isFinite(every)))
+  throw new Error("--watch and --every must be positive numbers");
+// The debug token reads every lab's runs: never send it in the clear to a remote host.
+const { protocol, hostname } = new URL(base);
+if (protocol !== "https:" && !["localhost", "127.0.0.1"].includes(hostname))
+  throw new Error(`--url must be https (or localhost), got ${base}`);
+
+const RECONNECT_MS = 2000;
+const MAX_STREAM_FAILURES = 30;
 
 // Jimmy's flag line for the dress rehearsal: 2 unexpected misses in a thread's last 10 calls,
 // or a run-wide unexpected rate over 1% once the run has made 200 calls.
@@ -64,6 +77,16 @@ let unexpected = 0;
 let misses = 0;
 let finished = false;
 
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const t = setTimeout(done, ms);
+    function done() {
+      clearTimeout(t);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done);
+  });
 const mmss = (ms: number) => {
   const s = Math.round(ms / 1000);
   return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m${String(s % 60).padStart(2, "0")}s`;
@@ -109,18 +132,13 @@ function ingest(e: RunEvent, out: string[]) {
         markers.push({ at, what: `${e.threadId}: ${clip(m.text, 80)}` });
       }
       if (m.role !== "assistant" || !m.usage) break;
-      if (m.compaction) {
-        th.cache = undefined;
-        th.prev = undefined;
-        th.toolsChangedSince = undefined;
-        break;
-      }
       const u = m.usage;
       const prompt = u.input + u.cacheRead + u.cacheWrite;
-      const step = cacheStep(th.cache, u);
+      // A compaction summary is a call that is not judged and resets the baseline, as in `spend`.
+      const step = m.compaction ? { next: undefined, miss: false } : cacheStep(th.cache, u);
       th.cache = step.next;
       if (prompt === 0) break; // unreported, not a call
-      const prev = th.prev;
+      const prev = m.compaction ? undefined : th.prev;
       const expected = step.miss && th.toolsChangedSince !== undefined;
       th.calls++;
       calls++;
@@ -147,7 +165,7 @@ function ingest(e: RunEvent, out: string[]) {
           ].join("\n"),
         );
       }
-      th.prev = { at, prompt, seq: e.seq };
+      th.prev = m.compaction ? undefined : { at, prompt, seq: e.seq };
       th.toolsChangedSince = undefined;
       break;
     }
@@ -155,53 +173,55 @@ function ingest(e: RunEvent, out: string[]) {
 }
 
 /**
- * Reads events after the cursor. The stream stays open on a live run and sends `event: live`
- * frames constantly, so stop at `end` or 4 s after the last stored event, not the last byte.
+ * Follows the run's stream on one connection, like `try-run`: `id: seq` frames are stored events,
+ * resumed with `Last-Event-ID` after a drop or an API restart; `event: end` closes the run.
+ * Gives up after MAX_STREAM_FAILURES failures in a row.
  */
-async function fetchEvents(): Promise<RunEvent[]> {
-  const ctl = new AbortController();
-  let quiet: NodeJS.Timeout | undefined;
-  const arm = () => {
-    clearTimeout(quiet);
-    quiet = setTimeout(() => ctl.abort(), 4000);
-  };
-  arm();
-  const res = await fetch(`${base}/api/run/runs/${runId}/stream?after=${cursor}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
-    signal: ctl.signal,
-  });
-  if (!res.ok) throw new Error(`stream ${res.status}`);
-  const found: RunEvent[] = [];
-  let buf = "";
+async function follow(signal: AbortSignal, onEvent: (e: RunEvent) => void) {
   const decoder = new TextDecoder();
-  try {
-    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-      buf += decoder.decode(chunk, { stream: true });
-      for (let i = buf.indexOf("\n\n"); i >= 0; i = buf.indexOf("\n\n")) {
-        const frame = buf.slice(0, i);
-        buf = buf.slice(i + 2);
-        const name = /^event: (.*)$/m.exec(frame)?.[1];
-        const data = frame
-          .split("\n")
-          .filter((l) => l.startsWith("data: "))
-          .map((l) => l.slice(6))
-          .join("\n");
-        if (name === "end") finished = true;
-        else if (!name && data) {
-          arm();
-          const parsed = runEventSchema.safeParse(JSON.parse(data));
-          if (parsed.success) found.push(parsed.data);
-          else skipped++;
-          cursor = Math.max(cursor, (JSON.parse(data) as { seq: number }).seq);
+  for (let failures = 0; !finished && !signal.aborted; ) {
+    try {
+      const res = await fetch(`${base}/api/run/runs/${runId}/stream`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "text/event-stream",
+          ...(cursor && { "Last-Event-ID": String(cursor) }),
+        },
+        signal,
+      });
+      if (!res.ok) throw new Error(`stream ${res.status}`);
+      let buf = "";
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        buf += decoder.decode(chunk, { stream: true });
+        for (let i = buf.indexOf("\n\n"); i >= 0; i = buf.indexOf("\n\n")) {
+          const frame = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const name = /^event: (.*)$/m.exec(frame)?.[1];
+          const data = frame
+            .split("\n")
+            .filter((l) => l.startsWith("data: "))
+            .map((l) => l.slice(6))
+            .join("\n");
+          if (name === "end") finished = true;
+          else if (!name && data) {
+            const json = JSON.parse(data) as { seq: number };
+            cursor = Math.max(cursor, json.seq);
+            const parsed = runEventSchema.safeParse(json);
+            if (parsed.success) onEvent(parsed.data);
+            else skipped++;
+          }
         }
       }
+      failures = 0;
+      // The API closes streams cleanly when it drains; pause so a repeat is not a tight loop.
+      if (!finished) await sleep(RECONNECT_MS, signal);
+    } catch (error) {
+      if (signal.aborted) return;
+      if (++failures > MAX_STREAM_FAILURES) throw error;
+      console.log(`stream dropped (${error instanceof Error ? error.message : error}); resuming`);
+      await sleep(RECONNECT_MS, signal);
     }
-  } catch (error) {
-    if (!ctl.signal.aborted) throw error;
-  } finally {
-    clearTimeout(quiet);
   }
-  return found;
 }
 
 function summary(): string[] {
@@ -230,19 +250,19 @@ function summary(): string[] {
   return lines;
 }
 
-async function poll() {
-  const out: string[] = [];
-  for (const e of await fetchEvents()) ingest(e, out);
+const deadline = AbortSignal.timeout(minutes * 60_000);
+const report = () => {
   console.log(`\n[${new Date().toISOString()}]`);
-  for (const l of out) console.log(l);
   for (const l of summary()) console.log(l);
+};
+const timer = setInterval(report, every * 1000);
+try {
+  await follow(deadline, (e) => {
+    const out: string[] = [];
+    ingest(e, out);
+    for (const l of out) console.log(l);
+  });
+} finally {
+  clearInterval(timer);
 }
-
-await poll();
-if (values.watch) {
-  const until = Date.now() + Number(values.watch) * 60_000;
-  while (!finished && Date.now() < until) {
-    await new Promise((r) => setTimeout(r, Number(values.every) * 1000));
-    await poll();
-  }
-}
+report();
