@@ -6,14 +6,9 @@
   A crashed handler that never settles leaves its run retained indefinitely. Decide how an
   operator proves no settlement can arrive and records unknown accounting before permitting
   removal; don't fabricate duration/cost or add an age-based override. Export remains available.
-- **Neon free-tier limits, after 2026-11-04.** Check CU-hours and storage in Neon's console
-  (limits: 100 CU-hours a month, 1 GB; staging was 256 MB on 2026-10-30, about 95 MB per full
-  run, #255). Storage will likely run out first.
-  To allow scale to zero with the runner suspended, remove the per-probe SQL from the gateway's
-  `/health` (`apps/gateway/src/gateway.ts`) while preserving its migration-readiness gate, and
-  lengthen `SWEEP_MS` in `apps/gateway/src/main.ts` past five minutes. Verify an idle interval
-  with no browser polling or other database traffic; changing the sweep alone is insufficient
-  ([deploy.md](deploy.md)). Alternatively, move to Launch. Also watch storage against 1 GB.
+- **Neon after the freeze.** Moves to Launch on 2026-11-04 (always-on passes Free's 100
+  CU-hours; [deploy.md](deploy.md)). After judging (about Nov 18) the new staging gets its own
+  Neon project; downgrade or delete this one then. Launch has no 1 GB cap, so watch the bill, not storage.
 - **Postgres migration drill.** Before the lab relies on the database: `pg_dump` from
   Neon (direct URL, see [deploy.md](deploy.md)), restore into a fresh local Postgres, run the app against the copy. Proves the "portable Postgres" rule.
 - **Scheduled `pg_dump` to R2**, so backups don't depend on the host.
