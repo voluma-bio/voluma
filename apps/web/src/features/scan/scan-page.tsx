@@ -453,11 +453,9 @@ function ScanReview({
           count={open}
           shortcut="t"
           defaultOpen
-          tools={<span className="text-xs text-muted-foreground">{title}</span>}
         >
           <ToCheckPanel
             runId={run.id}
-            scan={title}
             items={items}
             tasks={tasks}
             current={item}

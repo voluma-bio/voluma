@@ -13,7 +13,6 @@ import type { Accepting } from "./scan-page";
 
 export function ToCheckPanel({
   runId,
-  scan,
   items,
   tasks,
   current,
@@ -25,7 +24,6 @@ export function ToCheckPanel({
   live,
 }: {
   runId: string;
-  scan: string;
   /** Every item of the scan in task order, reconciled with authoritative human decisions. */
   items: NeedItem[];
   tasks: TaskView[];
@@ -77,7 +75,7 @@ export function ToCheckPanel({
       <div className="flex items-center gap-2">
         <p className="flex-1 text-xs text-muted-foreground">
           {current
-            ? `${at + 1} of ${queue.length} on ${scan}`
+            ? `${at + 1} of ${queue.length}`
             : `Nothing to check in ${inView ?? "this task"}`}
         </p>
         <IconButton
@@ -151,7 +149,7 @@ export function ToCheckPanel({
           className="flex cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2.5 text-left inset-ring inset-ring-border hover:bg-accent"
         >
           <span className="min-w-0 flex-1">
-            <span className="block text-xs text-muted-foreground">Next on {scan}</span>
+            <span className="block text-xs text-muted-foreground">Next</span>
             <span className="block truncate text-sm font-medium">
               {next.title ?? titleOf(next.taskId)}
             </span>
