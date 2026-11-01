@@ -6,7 +6,6 @@
  * `index.ts`): every run on Voluma's keys gets it whatever was picked. Visitor runs keep
  * their pick: their Meta key cannot call DeepSeek, and contributor is never allowed on it.
  */
-import type { RunModelsResponse } from "@voluma/contracts/run";
 import { HTTPException } from "hono/http-exception";
 
 const WONDER = { model: "meta/muse-wonder-1.0", label: "Muse Wonder 1.0" };
@@ -32,7 +31,7 @@ export function modelOverride(value: string | undefined): string | null {
 }
 
 const CHOICES = {
-  voluma: { choices: [WONDER, CONTRIBUTOR], default: WONDER.model },
+  voluma: { choices: [WONDER, SPARK, CONTRIBUTOR], default: WONDER.model },
   visitor: { choices: [WONDER, SPARK], default: WONDER.model },
 };
 
