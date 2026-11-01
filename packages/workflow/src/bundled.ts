@@ -23,6 +23,11 @@ import mouseOaTasks from "../../../workflows/mouse-oa/tasks.json" with { type: "
 import smokeOutputs from "../../../workflows/smoke/outputs.json" with { type: "json" };
 import smokeTasks from "../../../workflows/smoke/tasks.json" with { type: "json" };
 
+const idAsTitle = (id: string) => {
+  const words = id.replaceAll("-", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 export interface BundledWorkflow {
   /** The catalog id `createStudy` takes. */
   id: string;
@@ -56,7 +61,9 @@ function bundle(
     outputs,
     // `headline` is optional in the schema; an output without it is not a headline.
     headline: outputs.filter((o) => "headline" in o && o.headline === true),
-    taskTitle: (id) => titles.get(id) ?? id,
+    // A task a recorded plan names but today's workflow retired (and a plan recorded before titles
+    // has no title for): its id as words, "femoral-geometry" -> "Femoral geometry".
+    taskTitle: (id) => titles.get(id) ?? idAsTitle(id),
     outputName: (id) => names.get(id) ?? id,
   };
 }
