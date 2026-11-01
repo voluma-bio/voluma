@@ -5,6 +5,11 @@ Neon's free tier (AWS us-east-1, next to Render's Virginia), reached over the in
 see "The database (Neon)". Staging moved from Railway to
 Render on 2026-10-30 because Meta's API refuses Railway's network (`decisions.md`).
 
+This staging is also the **hackathon demo**: the app judges use, frozen from 2026-11-04 6:00 PM PT
+(runner deploy.md). Its Neon project is named `voluma-demo`. The Render services, URLs and the
+`voluma-staging` bucket keep their names, because WorkOS redirects and the runner's private address
+use them. Work after the freeze gets a separate staging with its own `voluma-next-*` names.
+
 ## How it is set up
 
 Render workspace `Voluma Staging`, region Virginia for everything. **`render.yaml` at the repo
