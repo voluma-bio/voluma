@@ -97,7 +97,8 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
   return {
     /**
      * The browser's read, scoped to what `reader` can read (null when it can't): whether the
-     * run has ended, and up to `limit` events with `seq > after`, oldest first. One statement,
+     * run has ended, and up to `limit` events with `seq > after`, oldest first (`next` is the
+     * last seq read, `full` whether the page filled). One statement,
      * so one snapshot: an append holds `FOR SHARE` on the run row until it commits and every
      * end is an `UPDATE` of that row, so a snapshot that shows `ended` shows every event.
      */
@@ -128,9 +129,14 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
         .orderBy(asc(page.seq));
       const first = rows[0];
       if (!first) return null;
+      const stored = rows.flatMap((row) => (row.event ? [row.event] : []));
+      // `next` and `full` come from the rows read, not the events kept: a skipped event must
+      // not move the cursor back or make a full page look like the end of the log.
       return {
         ended: first.state === "ended",
-        events: readEvents(rows.flatMap((row) => (row.event ? [row.event] : []))),
+        events: readEvents(stored),
+        next: stored.at(-1)?.seq ?? after,
+        full: stored.length >= limit,
       };
     },
 

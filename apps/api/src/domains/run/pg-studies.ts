@@ -140,7 +140,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           for (const result of await results(
             tx,
             and(readableRuns(reader), inArray(runs.studyId, ids)),
-            { skipUnreadable: true, stopped: "none" },
+            { skipSummaryless: true, stopped: "none" },
           )) {
             const group = byStudy.get(result.run.studyId) ?? [];
             group.push(result);
@@ -171,7 +171,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             .where(eq(studyScans.studyId, studyId))
             .orderBy(asc(studyScans.position));
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
-            skipUnreadable: true,
+            skipSummaryless: true,
             stopped: "newest",
           });
           const { newest, newestCompleted } = newestOf(found);

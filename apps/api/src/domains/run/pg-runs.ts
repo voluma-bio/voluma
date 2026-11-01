@@ -174,32 +174,21 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
 
 /**
  * The fold's events of each run, in `seq` order. Rows an older build wrote cross a trust
- * boundary: a run whose events no longer parse is reported in `unreadable` instead of
- * throwing, so `loadResults` decides what that means for its caller.
+ * boundary: an event that no longer parses is skipped and logged (`readEvents`), so the run
+ * folds from the rest.
  */
 async function loadLogs(tx: Tx, ids: string[]) {
   const logs = new Map<string, RunEvent[]>();
-  const unreadable = new Set<string>();
   if (ids.length) {
     const stored = await tx
       .select()
       .from(events)
       .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
       .orderBy(asc(events.seq));
-    for (const row of stored) {
-      if (unreadable.has(row.runId)) continue;
-      try {
-        const log = logs.get(row.runId) ?? [];
-        log.push(toRunEvent(row));
-        logs.set(row.runId, log);
-      } catch (error) {
-        unreadable.add(row.runId);
-        logs.delete(row.runId);
-        console.error(`run ${row.runId}: event ${row.id} (${row.type}) does not parse:`, error);
-      }
-    }
+    for (const id of ids) logs.set(id, []);
+    for (const event of readEvents(stored)) logs.get(event.runId)?.push(event);
   }
-  return { logs, unreadable };
+  return logs;
 }
 
 type Results = ReturnType<typeof reviewState>;
@@ -237,14 +226,13 @@ function progressOf(latest: Revision | undefined): Run["tasks"] {
 }
 
 /**
- * One run's cache entry: null `fold` is the verdict that its events don't parse, kept against
- * the generation and watermark so an unreadable run isn't loaded again on every read. `weight` is its event
+ * One run's cache entry, kept against the generation and watermark. `weight` is its event
  * count, a stand-in for its size.
  */
 type CacheEntry = {
   generation: string;
   lastEventId: string | null;
-  fold: RunFold | null;
+  fold: RunFold;
   weight: number;
 };
 type SummaryCache = { entries: Map<string, CacheEntry>; weight: number };
@@ -277,13 +265,11 @@ export type RunResult = { run: Run; generation: string } & RunFold;
 interface LoadOptions {
   cache?: SummaryCache;
   /**
-   * The lists and the study reads: a completed run whose events no longer parse is left out
-   * rather than failing every run listed with it. Without it (one run's read) it throws: the
-   * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
-   * A completed run with no revision is left out the same way. Any other run whose events
-   * don't parse is kept, with `tasks: null`: it still runs.
+   * The lists and the study reads: a completed run with no review summary (no revision,
+   * which `runSchema` forbids) is left out rather than failing every run listed with it.
+   * Without it (one run's read) that run throws.
    */
-  skipUnreadable?: boolean;
+  skipSummaryless?: boolean;
   /**
    * Which failed or cancelled runs to fold. A stopped run's row says all a list shows of it
    * (`review` and `tasks` are null), so the lists take `none`; the study read takes `newest`, a
@@ -296,7 +282,7 @@ interface LoadOptions {
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
-  { cache = newCache(), skipUnreadable = false, stopped = "all" }: LoadOptions = {},
+  { cache = newCache(), skipSummaryless = false, stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
   // Rows are newest first, so a scan's first row is its newest run.
@@ -326,9 +312,8 @@ async function loadResults(
       );
     })
     .map(({ run }) => run.id);
-  const { logs, unreadable } = await loadLogs(tx, missing);
+  const logs = await loadLogs(tx, missing);
   const foldOf = new Map<string, RunFold>();
-  const failed: string[] = [];
   for (const { run } of foldRows) {
     const { id, generation } = run;
     const lastEventId = versions.get(id) ?? null;
@@ -340,22 +325,19 @@ async function loadResults(
       entry = {
         generation,
         lastEventId,
-        fold: unreadable.has(id) ? null : foldRun(log),
+        fold: foldRun(log),
         weight: log.length + 1,
       };
     }
-    if (entry.fold) foldOf.set(id, entry.fold);
-    else failed.push(id);
+    foldOf.set(id, entry.fold);
     remember(cache, id, entry);
   }
-  if (!skipUnreadable && failed.length)
-    throw new Error(`run ${failed.join(", ")}: stored events can't be read`);
   return rows
     .filter(
-      // A completed run whose events don't parse, or have no revision, has no review summary,
-      // so `runSchema` would throw: in a list it is left out.
+      // A completed run with no revision has no review summary, so `runSchema` would throw:
+      // in a list it is left out.
       ({ run }) =>
-        !skipUnreadable ||
+        !skipSummaryless ||
         run.state !== "ended" ||
         run.outcome !== "completed" ||
         foldOf.get(run.id)?.results.summary,
@@ -390,7 +372,7 @@ export function pgRunReads(db: PostgresJsDatabase, results: ResultsLoader) {
     list: (reader: ReadScope) =>
       db.transaction(
         async (tx) =>
-          (await results(tx, readableRuns(reader), { skipUnreadable: true, stopped: "none" })).map(
+          (await results(tx, readableRuns(reader), { skipSummaryless: true, stopped: "none" })).map(
             ({ run }) => run,
           ),
         { isolationLevel: "repeatable read" },
