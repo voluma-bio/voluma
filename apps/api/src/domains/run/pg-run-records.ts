@@ -3,11 +3,20 @@ import { randomUUID } from "node:crypto";
 import { runEventSchema } from "@voluma/contracts/events";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { HTTPException } from "hono/http-exception";
 import type { RunRecords } from "../../ports";
 import type { Notifier } from "./notifier";
 import { insertEvent, lockRun } from "./pg-event-log";
 import { type ResultsLoader, readableRuns } from "./pg-runs";
 import { runs } from "./schema";
+
+/** A decision is stored against what the page showed, and a skipped fold event left some of it out. */
+function refuseSkipped({ skipped }: { skipped: number }) {
+  if (skipped)
+    throw new HTTPException(409, {
+      message: "This run has an event that can't be read, so it can't be reviewed.",
+    });
+}
 
 export function pgRunRecords(
   db: PostgresJsDatabase,
@@ -41,6 +50,7 @@ export function pgRunRecords(
           { isolationLevel: "repeatable read" },
         );
         if (!record) return null;
+        refuseSkipped(record);
         if (!decision(record)) return record;
       }
       const result = await db.transaction(async (tx) => {
@@ -48,6 +58,7 @@ export function pgRunRecords(
         if (!row) return null;
         const [record] = await results(tx, eq(runs.id, runId));
         if (!record) throw new Error(`run ${runId} vanished inside its transaction`);
+        refuseSkipped(record);
         const next = decision(record);
         if (!next) return record;
         await insertEvent(
