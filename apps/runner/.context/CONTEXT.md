@@ -526,11 +526,13 @@ composes byte-identical text and an edited file reaches only new threads (a resu
 definitions it started with, run by the current tools; a tool whose input schema changed (a `.default`, a `.min`, a new field), or that is new to the role, is declared to it by a system message Pi appends to the transcript (`resumedTools`), stored with the history so a later resume does not append it again, and new calls use the current schema; it costs one uncached request per thread on Meta and DeepSeek and none on Anthropic's Opus 5, measured; a tool removed since is declared removed the same way; a description change (the tool's or a field's) changes nothing sent. It is `ThreadStale` only when a tool it has called no longer exists, or its model changed: switching the model under a live thread would replay another provider's reasoning blocks and ids, which nothing has measured). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
-A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
+A run's model is decided by the API when the run is created and arrives as `run.model` (optional: a run made before the choice has none; `run-models.ts` in the API's run domain holds the choices). Precedence: `RUNNER_MODEL` (the plumbing check), then `run.model` (every role uses it, and a visitor run too), then the role file's alias. A run whose model has no key here (`VOLUMA_<PROVIDER>_API_KEY`) or is unknown to Pi fails at claim with a message naming it, as does a visitor run whose model is not a Standard-mode Meta model (the API refuses that too; neither side trusts the other). The deploy overlap holds both ways: `runSchema` strips unknown keys, so a runner without this reads a claim that has `model`, and a claim without it is today's behaviour.
+
+Without `run.model`, a role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
 `RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
 (no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
 set, forces every alias to one model. Each configured alias's provider key is required at start. A
-visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
+visitor run without `run.model` uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
 A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
 levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a plumbing
@@ -542,7 +544,7 @@ role's set level against its model (the role files load per run); both use `thin
 only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
 guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
 DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
-without asking Muse for an unsupported effort. Visitor runs always use `"off"`. The level is
+without asking Muse for an unsupported effort. With `run.model`, the role file's level goes to the nearest level the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`), and `RUNNER_THINKING` is checked against the aliases only. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop

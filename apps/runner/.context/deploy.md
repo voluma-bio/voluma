@@ -67,7 +67,7 @@ Variables (names only; values never go in the repo):
 | `VOLUMA_GATEWAY_URL` | literal `https://voluma-gateway.onrender.com` (public https, no port: the sandbox allowlist is built from it). Must match the gateway's real subdomain, which Render can suffix: check at cutover |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env`; `R2_BUCKET` comes from the env group `voluma-shared` |
-| `VOLUMA_<PROVIDER>_API_KEY` for any other provider | not in the yaml: add in the dashboard only when a role file or `RUNNER_MODEL_*` names that provider |
+| `VOLUMA_<PROVIDER>_API_KEY` for any other provider | not in the yaml: add in the dashboard only when a role file, `RUNNER_MODEL_*` or the API's `RUN_MODEL_OVERRIDE` (`apps/api/.context/deploy.md`) names that provider; DeepSeek on staging needs `VOLUMA_DEEPSEEK_API_KEY`. A run whose model this runner has no key for fails at its claim and says so |
 
 With `RUNNER_THINKING` unset, a role without a `thinking` key in its role file requests no effort.
 Set it to one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; the runner refuses a
@@ -79,7 +79,7 @@ are ignored and `RUNNER_THINKING` alone applies.
 
 Agents never start a run on staging, and never test on wonder (Jimmy). An agent's test run is a local runner with `RUNNER_MODEL=deepseek/deepseek-v4-pro` (`deepseek/deepseek-flash` is too slow for a full run) or `meta/muse-spark-1.3-contributor`.
 
-There is no fallback model. Pi is the only retry layer: it retries a 5xx, a 409, a network error or a 60 s wait for headers, up to 10 times. A worker or check whose call still fails ends `failed`, and main decides what to do. Main's own failure fails the run, except a reply cut off after its headers, which gets one resume of main (see `CONTEXT.md`). Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key for every role except main, which keeps its role file's model when that is a Standard-mode Meta model (with no `RUNNER_MODEL`, wonder), so a visitor's key without wonder access fails the run at its first call.
+There is no fallback model. Pi is the only retry layer: it retries a 5xx, a 409, a network error or a 60 s wait for headers, up to 10 times. A worker or check whose call still fails ends `failed`, and main decides what to do. Main's own failure fails the run, except a reply cut off after its headers, which gets one resume of main (see `CONTEXT.md`). A run made with a model (`run.model`, chosen by the API: `apps/api/src/domains/run/run-models.ts`) uses it for every role, visitor runs included (Spark 1.3 or Wonder on their own key). `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) and the aliases serve only runs without one, made before the choice existed; a visitor run whose model is not a Standard-mode Meta model fails at its claim.
 
 ## The sandbox image
 

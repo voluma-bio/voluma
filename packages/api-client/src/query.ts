@@ -18,6 +18,7 @@ import {
   acceptCheck,
   getReviewRun,
   getRun,
+  getRunModels,
   getStudy,
   getUserSettings,
   listInputs,
@@ -34,6 +35,8 @@ export const studiesQuery = () => queryOptions({ queryKey: ["studies"], queryFn:
 export const studyQuery = (id: string) =>
   queryOptions({ queryKey: ["study", id], queryFn: () => getStudy(id) });
 export const runsQuery = () => queryOptions({ queryKey: ["runs"], queryFn: listRuns });
+export const runModelsQuery = () =>
+  queryOptions({ queryKey: ["run-models"], queryFn: getRunModels });
 export const inputsQuery = () => queryOptions({ queryKey: ["inputs"], queryFn: listInputs });
 
 /** Identity scopes the cache only; the server always takes the user from the session. */

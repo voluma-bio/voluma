@@ -53,6 +53,8 @@
  * keeps its `events` already written, and the next claim resumes the thread
  * from them. That claim carries `previousClaim.reason`, why the claim before it ended
  * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
+ * claim's `run.model`, when present, is the model every role uses (`run.ts`); absent on runs made
+ * before the choice, the runner then uses its own config. It is optional so either side deploys first. The
  * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
  * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
