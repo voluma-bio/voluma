@@ -8,7 +8,7 @@
  */
 import { Info } from "lucide-react";
 import { Popover as P } from "radix-ui";
-import type { ReactElement, ReactNode } from "react";
+import { type ReactElement, type ReactNode, useRef } from "react";
 import { IconButton } from "./button";
 import { cx } from "./cx";
 import { floatingClass, useThemedPortal } from "./portal";
@@ -39,6 +39,7 @@ export function Popover({
   className,
 }: PopoverProps) {
   const portal = useThemedPortal(onOpenChange);
+  const content = useRef<HTMLDivElement>(null);
   return (
     <P.Root open={open} onOpenChange={portal.onOpenChange}>
       <P.Trigger asChild ref={portal.ref}>
@@ -46,6 +47,12 @@ export function Popover({
       </P.Trigger>
       <P.Portal>
         <P.Content
+          ref={content}
+          // Read the facts first, rather than focusing an action and opening its tooltip.
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            content.current?.focus();
+          }}
           data-theme={portal.theme}
           align={align}
           side={side}
