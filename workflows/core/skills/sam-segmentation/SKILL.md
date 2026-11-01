@@ -34,6 +34,8 @@ segmentation of every bone and a second opinion on your own; **you own the final
   (`clip_to_bone.py`) before any volume means anything, and never refill clipped voxels by nearest label. Read the
   clipped labels' checks (`segmentation-check`) per label: a label in range keeps SAM's result, and one bad label
   does not discard the request.
+- **Survey bare bone first** (`components.py`): with no labels yet, it lists the threshold's largest connected
+  components (size, box, centre, whether they touch the edge), in 3D or on one slice with `--index`.
 - **Small structures go in their own request**, one temporary label per 3D piece, after `unlabelled.py` has found
   them on the scan grid and `map_points.py --pieces` has given each a slice and a box. Added to the big-bone
   request they cost the mid-size bone beside them its track. A piece the stack's edge cuts needs a wider
