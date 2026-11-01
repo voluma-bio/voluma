@@ -9,8 +9,9 @@
  * outputs join as the recorder stores them (polled, one cheap scan of the new events). One file at a
  * time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session, which
  * creates it at the first file and replaces one the provider ended, running a command it
- * refused once more). A conversion that fails, or whose sandbox dies or cannot be created, is
- * recorded and the worker moves on. Identity never comes from the converter's output: the
+ * refused once more). A conversion that fails is retried once (not after a timeout or bad
+ * arguments, not when stopped) and then recorded; a sandbox that dies or cannot be created is
+ * recorded without a retry. The worker moves on. Identity never comes from the converter's output: the
  * `sourceSha256` is the queue item's, and a converter that prints another one has failed.
  *
  * `options.signal` is the host's cut-off (a stop, a lost lease, shutdown): the worker ends and
@@ -31,6 +32,9 @@ import type { Recorder } from "./recorder";
 
 /** One conversion; a 1.25 GB scan is minutes. The drain bounds the end of the run, not this. */
 const CONVERT_TIMEOUT_SECONDS = 1200;
+/** A conversion's outcome; `retry: false` marks a failure a repeat cannot fix. */
+type ConvertResult = { manifest: ReviewAssetsManifest } | { error: string; retry?: false };
+
 const POLL_MS = 1000;
 /** How long `drain` waits for a halted loop (a sandbox call that ignores abort) before it moves on. */
 const HALT_GRACE_MS = 5000;
@@ -81,11 +85,7 @@ interface Recording {
  * Queues the job's `assets.*` event; a scan marks it finished once it is stored. `emit` retries,
  * and its id is the job's, so a repeat is a no-op.
  */
-function record(
-  { runId, rootThreadId, recorder }: Recording,
-  job: Job,
-  result: { manifest: ReviewAssetsManifest } | { error: string },
-) {
+function record({ runId, rootThreadId, recorder }: Recording, job: Job, result: ConvertResult) {
   const id = `${runId}:assets:${job.sha256}`;
   if ("manifest" in result)
     recorder.emit(
@@ -195,9 +195,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     });
 
   /** Waits for another run of this input to populate the cache before opening our sandbox. */
-  async function convert(
-    job: Job,
-  ): Promise<{ manifest: ReviewAssetsManifest } | { error: string }> {
+  async function convert(job: Job): Promise<ConvertResult> {
     const key = `${inputReviewPrefix(options.inputId)}${job.sha256}/${job.flags}`;
     while (converting.has(key)) {
       await Promise.race([converting.get(key), sleep(POLL_MS)]);
@@ -219,9 +217,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   }
 
   /** One conversion's result, or a throw when the sandbox failed. */
-  async function convertInSandbox(
-    job: Job,
-  ): Promise<{ manifest: ReviewAssetsManifest } | { error: string }> {
+  async function convertInSandbox(job: Job): Promise<ConvertResult> {
     const box = await options.sandbox();
     const command =
       `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${EVIDENCE}/${job.sha256} ` +
@@ -242,7 +238,11 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     // A command whose sandbox died may report an exit code instead of throwing.
     if (code !== 0 && (await box.exitCode()) !== null)
       throw new SandboxEndedError(`the sandbox ended during the command (exit ${code})`);
-    if (code === 124) return { error: `conversion timed out after ${CONVERT_TIMEOUT_SECONDS}s` };
+    // Exit 2 is the converter's argument error: a repeat fails the same way, and a timeout would take another full timeout.
+    if (code === 124)
+      return { error: `conversion timed out after ${CONVERT_TIMEOUT_SECONDS}s`, retry: false };
+    if (code === 2)
+      return { error: stderr.trim() || "the converter rejected its arguments", retry: false };
     if (code !== 0) return { error: stderr.trim() || `the converter exited ${code}` };
     const last = stdout.trim().split("\n").at(-1) ?? "";
     let printed: unknown;
@@ -264,7 +264,15 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     log(`review assets: converting ${job.sha256.slice(0, 8)} (${job.flags})`);
     const started = Date.now();
     try {
-      const result = await convert(job);
+      let result = await convert(job);
+      // One retry: a conversion can fail on a transient mount error. Safe to repeat: the converter clears its
+      // output and publishes a fresh generation, writing `ready`/`manifest.json` last.
+      if ("error" in result && result.retry !== false && !signal.aborted) {
+        log(
+          `review assets: ${job.sha256.slice(0, 8)} failed, retrying once: ${result.error.slice(-200)}`,
+        );
+        result = await convert(job);
+      }
       record(options, job, result);
       const seconds = Math.round((Date.now() - started) / 1000);
       log(

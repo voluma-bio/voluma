@@ -161,13 +161,15 @@ def write_meshes(arr, kind, out):
 
 def publish(src, dst):
     """Copies src to dst, 32 files at a time (a bucket mount is slow per file), manifest.json last so a copy cut short has none."""
-    dst.mkdir(parents=True, exist_ok=True)
     files = [p for p in src.rglob('*') if p.is_file() and p.name != 'manifest.json']
+    # Every directory first, serially: Modal's R2 CloudBucketMount fails when parallel workers create one parent
+    # (a copy loses its parent between mkdir and open; see apps/runner/src/modal-sandbox.ts, STAGE_PREPARE_SCRIPT).
+    dst.mkdir(parents=True, exist_ok=True)
+    for d in {(dst / p.relative_to(src)).parent for p in files}:
+        d.mkdir(parents=True, exist_ok=True)
 
     def copy(p):
-        target = dst / p.relative_to(src)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(p, target)
+        shutil.copyfile(p, dst / p.relative_to(src))
 
     with ThreadPoolExecutor(32) as pool:
         list(pool.map(copy, files))
