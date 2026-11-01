@@ -266,7 +266,7 @@ function personLine(n: Extract<Notice, { kind: "person" }>): string {
   for (const m of n.marks) {
     const where = markWhere(m);
     lines.push(
-      `  Marked ${where} of volume ${m.volumeId}${m.file ? ` (file ${m.file}: a binary array, which \`read_file\` cannot open; you have no tool for it, so work from the marked position, the task's evidence and their view image)` : ""}.`,
+      `  Marked ${where} of volume ${m.volumeId}${m.file ? ` (file ${m.file}: a binary array, which your file-reading tool cannot open; you have no tool for it, so work from the marked position, the task's evidence and their view image)` : ""}.`,
     );
   }
   if (n.snapshot) {
@@ -388,7 +388,7 @@ function carriedNotices(d: ThreadLog, view: Folded): Notice[] {
  * What a main agent that starts inside a correction is told first: the run had finished, so
  * the tasks below are done and these are its results, which answer the researcher's question
  * (their message comes with the state block). Only the values are listed; the text files are
- * read with `read_file` (main has no shell, and `.npy` volumes are binary).
+ * read with main's file-reading tool (main has no shell, and `.npy` volumes are binary).
  */
 export function finishedRunText(view: Folded): string {
   const lines = view.tasks.flatMap((t) => [
@@ -397,7 +397,7 @@ export function finishedRunText(view: Folded): string {
     ),
     ...t.scores.map((c) => `- ${c.id}: level "${c.level}"`),
   ]);
-  return `The run had already finished before the researcher wrote to you. Its tasks are done (see the table below) and their results are the current ones; nothing is being redone unless the researcher said go. Their message is quoted below under "Still open, or not yet told to you": read it and answer it with \`reply\`, from these results when it asks about them. The files are in /outputs/<task id>/ (\`read_file\` opens the text ones; \`.npy\` volumes are binary and it cannot); the values reported:\n${lines.length ? lines.join("\n") : "(none)"}`;
+  return `The run had already finished before the researcher wrote to you. Its tasks are done (see the table below) and their results are the current ones; nothing is being redone unless the researcher said go. Their message is quoted below under "Still open, or not yet told to you": read it and answer it with \`reply\`, from these results when it asks about them. The files are in /outputs/<task id>/ (your file-reading tool opens the text ones; \`.npy\` volumes are binary and it cannot); the values reported:\n${lines.length ? lines.join("\n") : "(none)"}`;
 }
 
 /**

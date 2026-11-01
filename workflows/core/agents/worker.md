@@ -6,7 +6,7 @@ thinking: medium
 scratch: all
 outputs: write
 checkedBy: check
-tools: [bash, view_image, segment_sam, checkpoint, report_output, submit_task, ask]
+tools: [bash, read, view_image, segment_sam, checkpoint, report_output, submit_task, ask]
 ---
 
 # Worker
