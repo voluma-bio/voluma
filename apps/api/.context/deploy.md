@@ -16,7 +16,7 @@ file, and Render applies it when the Blueprint syncs (not on a service deploy). 
 |---|---|
 | `voluma-api` | Web service, auto-deployed from `main`. `https://voluma-api.onrender.com` until a custom domain (`app.voluma.bio`) exists |
 | `voluma-gateway` | Web service: the provider gateway. Notes: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md) |
-| `voluma-runner` | Background worker, always on until 2026-11-04, then suspended between runs (its deploy.md). Claims runs over the private network (why not the public URL: runner deploy.md, `VOLUMA_API_URL`). Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
+| `voluma-runner` | Background worker, always on through the freeze (2026-11-04 23:59 PT) and judging, until about 2026-11-18 (its deploy.md). Claims runs over the private network (why not the public URL: runner deploy.md, `VOLUMA_API_URL`). Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
 
 Things `render.yaml` holds that are easy to miss:
 
@@ -198,18 +198,13 @@ What that means here:
   full mouse-oa run (9 tasks) added about 95 MB, nearly all model history: about 7 more full runs
   reach 1 GB for rows written before images moved to R2 (#255; later runs store image references). Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
 - **Compute hours.** The runner polls `claim` every 2 s, so with it
-  running the compute never reaches its 5 idle minutes. At 0.25 CU that is about 6 CU-hours a
-  day, about 180 a month against the 100 allowed; the 5 days to Nov 4 cost about 30. With the
-  runner suspended, Render's gateway health checks still query Postgres: `render.yaml` sets
-  `healthCheckPath: /health`, and `apps/gateway/src/gateway.ts` calls `isMigrated` (a SQL query)
-  on every probe. [Render probes running services every few seconds](https://render.com/docs/health-checks),
-  preventing five idle minutes even with no browser open. The gateway also sweeps every five
-  minutes (`SWEEP_MS` in `apps/gateway/src/main.ts`); live run and study pages poll through the
-  API. Lengthening the sweep alone cannot enable scale to zero: the health checks must stop
-  querying Postgres too, with the runner suspended and no other database traffic. Past the cap
-  compute pauses and every call fails. Launch
-  (pay as you go) is $0.106 per CU-hour and $0.35 per GB-month. After Nov 4 check Neon's
-  console usage ([TODO.md](TODO.md)).
+  running the compute never reaches its 5 idle minutes; Render's gateway health checks also
+  query Postgres (`isMigrated` in `apps/gateway/src/gateway.ts`). At 0.25 CU that is about
+  6 CU-hours a day, so always-on passes Free's 100 CU-hours about the 17th of a month (read on
+  2026-11-01 19:13 UTC: 4.63 CU-hours since midnight). Past the cap compute pauses and every call
+  fails. **Neon moves to Launch (pay as you go, $0.106 per CU-hour and $0.35 per GB-month) on
+  Nov 4, before the freeze**, so the judging fortnight can't hit the cap; about $10 for
+  Nov 4 to 18. Cost, steps and checks: `work/deadline-ops/design/deadline-freeze.md` in the docs repo.
 - **Scale to zero** costs the first query after a suspend a cold start. Checked 2026-10-30: with
   the compute suspended through Neon's API, the API's next sign-in and runs list answered in 1.2 s
   with no connection error (postgres.js replaces the connections Neon closed).
@@ -220,7 +215,7 @@ allow list by default). **Restoring a dump into Neon:** the API's pre-deploy has
 migrated it, so a plain restore collides with the existing tables. Suspend the API, gateway and
 runner first (`r -X POST "$B/services/<ID>/suspend"` for each, so nothing writes while the
 tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d "$NEON_DIRECT_URL" dump`, then resume the API and gateway
-(`.../resume`; the runner stays suspended until a run). Compare row counts with the source
+(`.../resume`), then the runner. Compare row counts with the source
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
