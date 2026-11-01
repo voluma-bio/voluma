@@ -330,6 +330,17 @@ is therefore not an independent image backup. Retaining those objects, remapping
 and rolling back to a runner that cannot decode `imageRef` need an operator policy before cleanup or rollback;
 there is no automatic conversion to inline rows.
 
+**Meta requests name images by file id.** Pi sends every image of a thread's history in every request as base64,
+so each call re-sent megabytes (about 3 GB of Render egress per full `wonder` run). `apps/runner/src/meta-images.ts`,
+Pi's `onPayload` hook on `meta/*` models only, uploads each image once per claim to Meta's Files API (`expires_after`
+24 h; reused until 2 h before it expires) and swaps `file_id` in for the `data:` URL in the outgoing request only:
+Pi's messages and stored history keep their bytes or `imageRef`s. Meta's prompt cache reads the image, not how it
+was sent (measured: base64 and `file_id` for the same bytes share a cached prefix), so nothing about ids outlives
+the claim, and every failure falls back to inline bytes without a cache miss: a failed upload goes inline for that
+call (retried after 5 min), and a request Meta answers `404 file_not_found` is resent inline in the same `fetch`
+(the 404 would otherwise read as fatal in `provider-error.ts`). The claim-end log line `model requests this
+claim:` gives bytes sent against bytes with every image inline. Images count against compaction's limits as before.
+
 **Context compaction.** `adapters/pi/compaction.ts`; nothing rewrites history between requests, so the provider's
 cache prefix stays intact. Token decisions use only what the last request used (the last reply's reported input, cache read and cache write
 tokens): nothing blocks or splits a request on an estimate, so a request may go past the budget. Only a thread with no
