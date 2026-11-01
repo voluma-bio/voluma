@@ -1,9 +1,7 @@
 # Viewer follow-up
 
-- Rulers and points in the slices and 3D (world mm through the grid's affine), a surface's trace
-  in the slices, selection framing (frame the `on` blocks, move the slices only on a user's
-  selection), an outline rather than a fill for the region under check, 3D Slicer's mouse and
-  keyboard map (#146).
+- Selection framing (frame the `on` blocks, move the slices only on a user's selection), and 3D
+  Slicer's mouse and keyboard map (#146).
 - A check's `point` and `box` are scan voxels, so they place the crosshair only on the scan's grid.
   A check on an aligned grid can only point through its `on` blocks until the contract gives the
   focus a grid.

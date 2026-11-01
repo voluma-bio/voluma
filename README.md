@@ -1,7 +1,7 @@
 # Voluma
 
-`apps/web` shows each scan's run, live and for review, at `/scans/:runId` (dark
-theme). No simulated results or agent responses are mounted.
+`apps/web` shows each scan's run, live and for review, at `/scans/:runId`, in the
+user's Light or Dark theme (`DESIGN.md`). No simulated results or agent responses are mounted.
 
 Use the Node version in `.tool-versions` and the pnpm version in `package.json`.
 Run `pnpm install`, then `pnpm dev`. In an Amp orb, run

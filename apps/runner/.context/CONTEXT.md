@@ -459,7 +459,7 @@ Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once
 **`/scratch` stays an R2 mount**, though it is only intermediate files. Two things need it to
 outlive a sandbox: a long bash output is stored there for the model to open (`toolOutputPath`),
 and a checkpoint's evidence may be a `scratch` file, which the host copies into the run's
-evidence (`r2-evidence.ts`, a server-side copy). The restart note also promises it survives a
+evidence (`store-evidence.ts`, a server-side copy). The restart note also promises it survives a
 restart. A local `/scratch` would break all three.
 
 # Runner: who gets which task tools

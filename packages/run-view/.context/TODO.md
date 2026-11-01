@@ -11,8 +11,8 @@
   `threadRows`/`mainRows` over every event on each frame (about 1 ms today). Split each into a
   durable part memoized on `events` and a live tail on `live`, then `memo(RowView)`.
 - **Label threads with the run's own plan titles.** The task graph and the scan review's panels use
-  the plan's `title` from the run's log; `threadName` and the transcript rows still read the bundled
-  `tasks.json` (`taskTitle`), so an older run's cards show today's titles.
+  the plan's `title` from the run's log; the transcript rows still read the bundled `tasks.json`
+  (`taskTitle` in `transcript.ts`), so an older run's rows show today's titles.
 - **Undo "Looks right".** The prototype offers Undo; the review API has no call to withdraw an
   acceptance.
 - **A thumbnail rendition of QC images.** Each is 80 to 360 KB and the To check card draws them
