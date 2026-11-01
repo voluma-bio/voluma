@@ -77,7 +77,7 @@ function log() {
 }
 
 describe("reviewRun", () => {
-  it("keeps all nine planned tasks when intake fails and the other eight never start", () => {
+  it("keeps all eight planned tasks when intake fails and the other seven never start", () => {
     const l = log();
     const initial = l.add("revision.started", { reason: "run", plan });
     l.worker("intake", "review-111.intake.worker");
@@ -87,7 +87,6 @@ describe("reviewRun", () => {
     const result = reviewRun({ run, results: reviewState(l.events) });
     expect(result?.revisions[0]?.tasks.map((t) => [t.id, t.status])).toEqual([
       ["intake", "failed"],
-      ["orientation", "pending"],
       ["segmentation", "pending"],
       ["iioc", "pending"],
       ["subchondral-plate", "pending"],
@@ -98,7 +97,7 @@ describe("reviewRun", () => {
     ]);
     const pending = result?.revisions[0]?.tasks.find((t) => t.id === "segmentation");
     expect(pending).toMatchObject({
-      dependsOn: ["orientation"],
+      dependsOn: ["intake"],
       resultRevisionId: initial,
       checker: null,
       threads: { worker: null, check: null },
@@ -118,7 +117,7 @@ describe("reviewRun", () => {
   it("uses only the recorded plan, even before any attempt", () => {
     const l = log();
     const selected: WorkflowPlan = {
-      tasks: plan.tasks.filter((t) => t.id === "intake" || t.id === "orientation"),
+      tasks: plan.tasks.filter((t) => t.id === "intake" || t.id === "segmentation"),
     };
     // A root invocation can precede the initial revision.
     l.add("thread.started", {
@@ -135,7 +134,7 @@ describe("reviewRun", () => {
       ]),
     ).toEqual([
       ["intake", "pending"],
-      ["orientation", "pending"],
+      ["segmentation", "pending"],
     ]);
   });
 
@@ -143,33 +142,33 @@ describe("reviewRun", () => {
     const l = log();
     const initial = l.add("revision.started", { reason: "run", plan });
     l.add("revision.started", { reason: "correction", taskId: "intake" });
-    l.worker("orientation", "review-111.orientation.worker");
+    l.worker("segmentation", "review-111.segmentation.worker");
     l.add(
       "thread.ended",
       { status: "failed", error: "Provider unavailable" },
-      "review-111.orientation.worker",
+      "review-111.segmentation.worker",
     );
     l.add("revision.started", { reason: "correction", taskId: "intake" });
-    const first = l.open("orientation", "review-111.orientation.worker");
-    l.status("orientation", first, "failed", "review-111.orientation.worker");
-    l.add("revision.started", { reason: "correction", taskId: "orientation" });
-    l.worker("orientation", "review-111.orientation.worker-2");
-    l.open("orientation", "review-111.orientation.worker-2");
+    const first = l.open("segmentation", "review-111.segmentation.worker");
+    l.status("segmentation", first, "failed", "review-111.segmentation.worker");
+    l.add("revision.started", { reason: "correction", taskId: "segmentation" });
+    l.worker("segmentation", "review-111.segmentation.worker-2");
+    l.open("segmentation", "review-111.segmentation.worker-2");
     l.worker("intake", "review-111.intake.worker");
     l.open("intake", "review-111.intake.worker");
 
     const revisions = reviewRun({ run, results: reviewState(l.events) })?.revisions ?? [];
-    const orientation = revisions.map((r) => r.tasks.find((t) => t.id === "orientation"));
-    expect(orientation.map((t) => [t?.status, t?.threads.worker])).toEqual([
+    const segmentation = revisions.map((r) => r.tasks.find((t) => t.id === "segmentation"));
+    expect(segmentation.map((t) => [t?.status, t?.threads.worker])).toEqual([
       ["pending", null],
-      ["pending", "review-111.orientation.worker"],
-      ["failed", "review-111.orientation.worker"],
-      ["in-progress", "review-111.orientation.worker-2"],
+      ["pending", "review-111.segmentation.worker"],
+      ["failed", "review-111.segmentation.worker"],
+      ["in-progress", "review-111.segmentation.worker-2"],
     ]);
-    expect(orientation[1]?.models.worker).toBe("meta/muse-spark-1.3");
-    expect(orientation.slice(0, 2).map((t) => t?.resultRevisionId)).toEqual([initial, initial]);
-    expect(orientation[2]?.dependsOn).toEqual(["intake"]);
-    expect(revisions[3]?.tasks.slice(0, 2).map((t) => t.id)).toEqual(["intake", "orientation"]);
+    expect(segmentation[1]?.models.worker).toBe("meta/muse-spark-1.3");
+    expect(segmentation.slice(0, 2).map((t) => t?.resultRevisionId)).toEqual([initial, initial]);
+    expect(segmentation[2]?.dependsOn).toEqual(["intake"]);
+    expect(revisions[3]?.tasks.slice(0, 2).map((t) => t.id)).toEqual(["intake", "segmentation"]);
   });
 
   it("returns no review without a recorded plan and accepts an empty recorded plan", () => {
