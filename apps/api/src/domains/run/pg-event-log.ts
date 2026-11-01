@@ -14,17 +14,20 @@
  * every event below it. The stream (stream.ts) relies on that: the notifier fires after a
  * commit, and the stream then reads the log from its cursor, so a missed or early wake-up
  * costs a read, never an event. Stored rows are parsed against the current event schema:
- * an unsupported historical event fails the read rather than being reinterpreted.
+ * the runner's read (`readLeased`) fails on an unsupported historical event rather than
+ * reinterpret it; the browser's reads (stream, run loader) skip and log it (`readEvents`). A read
+ * that decides a write uses row columns only (cancel, which also runs inside the claim, so it
+ * must never refuse) or refuses on an event it can't read (corrections, review).
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
-import { cancelEnds } from "@voluma/contracts/threads";
+import { type CancelRow, cancelEnds } from "@voluma/contracts/threads";
 import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
 import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
+import { openCorrectionOf, readableRuns, readEvents, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
@@ -74,10 +77,31 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
   await eventLock(tx, runId);
-  const log = (
-    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))
-  ).map(toRunEvent);
-  for (const ended of cancelEnds(runId, log, new Date())) {
+  // Row columns, plus the raw payload of the two types `cancelEnds` reads fields of. No json
+  // operator touches it: Postgres errors on `\u0000` anywhere in the document, which would
+  // fail the claim, sweep or report this cancel runs in. The fields are picked in JS, so an
+  // event that no longer parses cannot stop or change a cancel.
+  const rows = await tx
+    .select({
+      id: events.id,
+      type: events.type,
+      threadId: events.threadId,
+      seq: events.seq,
+      payload: sql<unknown>`CASE WHEN ${events.type} IN ('thread.started', 'thread.ended') THEN ${events.payload} END`,
+    })
+    .from(events)
+    .where(eq(events.runId, runId))
+    .orderBy(asc(events.seq));
+  const log = rows.map(({ payload, ...row }): CancelRow => {
+    const fields = (payload ?? {}) as { parentThreadId?: unknown; status?: unknown };
+    return {
+      ...row,
+      ...(row.type === "thread.started" && { root: fields.parentThreadId === null }),
+      ...(row.type === "thread.ended" &&
+        typeof fields.status === "string" && { status: fields.status }),
+    };
+  });
+  for (const ended of cancelEnds(runId, log, new Date(), openCorrectionOf(rows)?.seq)) {
     await insertEvent(tx, ended);
   }
 }
@@ -96,7 +120,8 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
   return {
     /**
      * The browser's read, scoped to what `reader` can read (null when it can't): whether the
-     * run has ended, and up to `limit` events with `seq > after`, oldest first. One statement,
+     * run has ended, and up to `limit` events with `seq > after`, oldest first (`next` is the
+     * last seq read, `full` whether the page filled). One statement,
      * so one snapshot: an append holds `FOR SHARE` on the run row until it commits and every
      * end is an `UPDATE` of that row, so a snapshot that shows `ended` shows every event.
      */
@@ -127,9 +152,14 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
         .orderBy(asc(page.seq));
       const first = rows[0];
       if (!first) return null;
+      const stored = rows.flatMap((row) => (row.event ? [row.event] : []));
+      // `next` and `full` come from the rows read, not the events kept: a skipped event must
+      // not move the cursor back or make a full page look like the end of the log.
       return {
         ended: first.state === "ended",
-        events: rows.flatMap((row) => (row.event ? [toRunEvent(row.event)] : [])),
+        events: readEvents(stored).events,
+        next: stored.at(-1)?.seq ?? after,
+        full: stored.length >= limit,
       };
     },
 

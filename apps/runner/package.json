@@ -9,7 +9,8 @@
     "start": "node ../../tools/dev-run.mjs runner tsx src/main.ts",
     "sandboxes:clean": "tsx src/sandboxes-clean.ts",
     "try-run": "node ../../tools/dev-run.mjs try-run tsx src/try-run.ts",
-    "dev-sandbox": "tsx src/dev-sandbox.ts"
+    "dev-sandbox": "tsx src/dev-sandbox.ts",
+    "cache-watch": "tsx --env-file-if-exists=../../.env src/cache-watch.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",

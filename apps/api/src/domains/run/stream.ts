@@ -104,10 +104,10 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
               if (!read) return;
               for (const event of read.events) {
                 await stream.writeSSE({ id: String(event.seq), data: JSON.stringify(event) });
-                cursor = event.seq;
               }
+              cursor = read.next;
               if (read.events.length > 0) lastWrite = Date.now();
-              if (read.events.length < EVENTS_PAGE) {
+              if (!read.full) {
                 ended = read.ended;
                 break;
               }

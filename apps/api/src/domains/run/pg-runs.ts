@@ -13,6 +13,8 @@ import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { HTTPException } from "hono/http-exception";
+import { ZodError } from "zod";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import { events, inputs, referenceInput, runs, studies } from "./schema";
 
@@ -70,6 +72,50 @@ export const toInput = (row: typeof inputs.$inferSelect): Input => ({
 
 export const toRunEvent = (row: typeof events.$inferSelect) =>
   runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
+
+type EventRow = typeof events.$inferSelect;
+
+/**
+ * The tolerant read of stored rows: a row that fails `runEventSchema` is skipped and logged with
+ * its id and type, so one bad event doesn't take down the run's page, and returned in `skipped`.
+ * A read that decides a write must either use only row columns (`openCorrectionOf`) or refuse
+ * when `skipped` holds a type it decides on. The runner's resume reads with `toRunEvent` and
+ * stays strict.
+ */
+export function readEvents(rows: EventRow[]): { events: RunEvent[]; skipped: EventRow[] } {
+  const log: RunEvent[] = [];
+  const skipped: EventRow[] = [];
+  for (const row of rows) {
+    try {
+      log.push(toRunEvent(row));
+    } catch (error) {
+      const issue = error instanceof ZodError ? error.issues[0] : undefined;
+      console.error(
+        `run ${row.runId}: event ${row.id} (${row.type}) does not parse; skipped: ${
+          issue ? `${issue.path.join(".")}: ${issue.message}` : String(error)
+        }`,
+      );
+      skipped.push(row);
+    }
+  }
+  return { events: log, skipped };
+}
+
+/**
+ * The open correction (`corrections`) from row columns alone, so a bad payload cannot change the
+ * answer: `run.reopened` rows and `correction.ended` rows in `seq` order, the open one being a
+ * `run.reopened` with no `correction.ended` after it.
+ */
+export function openCorrectionOf(
+  rows: Pick<EventRow, "id" | "type" | "seq">[],
+): { id: string; seq: number } | null {
+  let open: { id: string; seq: number } | null = null;
+  for (const { id, type, seq } of rows) {
+    if (type === "run.reopened") open = { id, seq };
+    else if (type === "correction.ended") open = null;
+  }
+  return open;
+}
 
 function toRun({ run, input, position, calls }: Row, { summary, revisions }: Results): Run {
   const iso = (d: Date | null) => d?.toISOString() ?? null;
@@ -154,32 +200,26 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
 
 /**
  * The fold's events of each run, in `seq` order. Rows an older build wrote cross a trust
- * boundary: a run whose events no longer parse is reported in `unreadable` instead of
- * throwing, so `loadResults` decides what that means for its caller.
+ * boundary: an event that no longer parses is skipped and logged (`readEvents`), so the run
+ * folds from the rest.
  */
 async function loadLogs(tx: Tx, ids: string[]) {
-  const logs = new Map<string, RunEvent[]>();
-  const unreadable = new Set<string>();
+  const logs = new Map<string, { events: RunEvent[]; skipped: number }>();
   if (ids.length) {
     const stored = await tx
       .select()
       .from(events)
       .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
       .orderBy(asc(events.seq));
-    for (const row of stored) {
-      if (unreadable.has(row.runId)) continue;
-      try {
-        const log = logs.get(row.runId) ?? [];
-        log.push(toRunEvent(row));
-        logs.set(row.runId, log);
-      } catch (error) {
-        unreadable.add(row.runId);
-        logs.delete(row.runId);
-        console.error(`run ${row.runId}: event ${row.id} (${row.type}) does not parse:`, error);
-      }
+    for (const id of ids) logs.set(id, { events: [], skipped: 0 });
+    const { events: read, skipped } = readEvents(stored);
+    for (const event of read) logs.get(event.runId)?.events.push(event);
+    for (const row of skipped) {
+      const log = logs.get(row.runId);
+      if (log) log.skipped++;
     }
   }
-  return { logs, unreadable };
+  return logs;
 }
 
 type Results = ReturnType<typeof reviewState>;
@@ -198,9 +238,12 @@ export type RunFold = {
   open: readonly string[];
   /** The threads whose latest end failed (`failedThreads`). */
   failed: ReadonlySet<string>;
+  /** The stored fold events that did not parse and are missing from `results`. */
+  skipped: number;
 };
 
-const foldRun = (log: RunEvent[]): RunFold => ({
+const foldRun = (log: RunEvent[], skipped = 0): RunFold => ({
+  skipped,
   results: reviewState(log),
   correcting: openCorrectionRevision(log),
   open: openThreads(log),
@@ -217,14 +260,13 @@ function progressOf(latest: Revision | undefined): Run["tasks"] {
 }
 
 /**
- * One run's cache entry: null `fold` is the verdict that its events don't parse, kept against
- * the generation and watermark so an unreadable run isn't loaded again on every read. `weight` is its event
+ * One run's cache entry, kept against the generation and watermark. `weight` is its event
  * count, a stand-in for its size.
  */
 type CacheEntry = {
   generation: string;
   lastEventId: string | null;
-  fold: RunFold | null;
+  fold: RunFold;
   weight: number;
 };
 type SummaryCache = { entries: Map<string, CacheEntry>; weight: number };
@@ -257,13 +299,11 @@ export type RunResult = { run: Run; generation: string } & RunFold;
 interface LoadOptions {
   cache?: SummaryCache;
   /**
-   * The lists and the study reads: a completed run whose events no longer parse is left out
-   * rather than failing every run listed with it. Without it (one run's read) it throws: the
-   * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
-   * A completed run with no revision is left out the same way. Any other run whose events
-   * don't parse is kept, with `tasks: null`: it still runs.
+   * The lists and the study reads: a completed run with no review summary (no revision,
+   * which `runSchema` forbids) is left out rather than failing every run listed with it.
+   * Without it (one run's read, a cancel's reply) that run is a 409: its events can't be read.
    */
-  skipUnreadable?: boolean;
+  skipSummaryless?: boolean;
   /**
    * Which failed or cancelled runs to fold. A stopped run's row says all a list shows of it
    * (`review` and `tasks` are null), so the lists take `none`; the study read takes `newest`, a
@@ -276,7 +316,7 @@ interface LoadOptions {
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
-  { cache = newCache(), skipUnreadable = false, stopped = "all" }: LoadOptions = {},
+  { cache = newCache(), skipSummaryless = false, stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
   // Rows are newest first, so a scan's first row is its newest run.
@@ -306,9 +346,8 @@ async function loadResults(
       );
     })
     .map(({ run }) => run.id);
-  const { logs, unreadable } = await loadLogs(tx, missing);
+  const logs = await loadLogs(tx, missing);
   const foldOf = new Map<string, RunFold>();
-  const failed: string[] = [];
   for (const { run } of foldRows) {
     const { id, generation } = run;
     const lastEventId = versions.get(id) ?? null;
@@ -316,32 +355,33 @@ async function loadResults(
     let entry: CacheEntry;
     if (hit?.generation === generation && hit.lastEventId === lastEventId) entry = hit;
     else {
-      const log = logs.get(id) ?? [];
+      const { events: log, skipped } = logs.get(id) ?? { events: [], skipped: 0 };
       entry = {
         generation,
         lastEventId,
-        fold: unreadable.has(id) ? null : foldRun(log),
+        fold: foldRun(log, skipped),
         weight: log.length + 1,
       };
     }
-    if (entry.fold) foldOf.set(id, entry.fold);
-    else failed.push(id);
+    foldOf.set(id, entry.fold);
     remember(cache, id, entry);
   }
-  if (!skipUnreadable && failed.length)
-    throw new Error(`run ${failed.join(", ")}: stored events can't be read`);
   return rows
     .filter(
-      // A completed run whose events don't parse, or have no revision, has no review summary,
-      // so `runSchema` would throw: in a list it is left out.
+      // A completed run with no revision has no review summary, so `runSchema` would throw:
+      // in a list it is left out.
       ({ run }) =>
-        !skipUnreadable ||
+        !skipSummaryless ||
         run.state !== "ended" ||
         run.outcome !== "completed" ||
         foldOf.get(run.id)?.results.summary,
     )
     .map((row) => {
       const fold = foldOf.get(row.run.id) ?? NOTHING;
+      if (row.run.state === "ended" && row.run.outcome === "completed" && !fold.results.summary)
+        throw new HTTPException(409, {
+          message: "This run's review can't be read: its events don't parse.",
+        });
       return { run: toRun(row, fold.results), generation: row.run.generation, ...fold };
     });
 }
@@ -370,7 +410,7 @@ export function pgRunReads(db: PostgresJsDatabase, results: ResultsLoader) {
     list: (reader: ReadScope) =>
       db.transaction(
         async (tx) =>
-          (await results(tx, readableRuns(reader), { skipUnreadable: true, stopped: "none" })).map(
+          (await results(tx, readableRuns(reader), { skipSummaryless: true, stopped: "none" })).map(
             ({ run }) => run,
           ),
         { isolationLevel: "repeatable read" },

@@ -12,7 +12,7 @@ the lab's.
 
 ## segmentation
 
-`segmentation/deck-patella-menisci.jpg`: the lab's labels 1 (patella), 2 (lateral meniscus with osteophytes) and 3 (medial) on the knee, front and back. Each label is one bone: on the 3D sheet no colour reaches onto a neighbour, every structure that is present and
+`segmentation/deck-patella-menisci.jpg`: the lab's parameters #1 (patella), #2 (lateral meniscus with osteophytes) and #3 (medial) on the knee, front and back. Each label is one bone: on the 3D sheet no colour reaches onto a neighbour, every structure that is present and
 named carries its colour, and a piece nobody can name stays uncoloured with a To check item asking what it is. On
 the quad view every joint face's boundary runs through the dark joint space, never through bone. The patella is the large
 bone in front of the femur in the trochlear groove; a small piece near the joint is a sesamoid or a fragment,
@@ -22,8 +22,8 @@ own label.
 ## iioc
 
 `iioc/deck-roi1-heights-width.jpg`: the tibia opened along the shaft, the growth plate, and ROI-1 above it with the heights 7, 8, 9 and the width 10 drawn on. ROI-1 runs from the growth plate's proximal face up to the articular surface of the tibial plateau, over the whole
-plateau: on a coronal section the region sits on the traced face, includes the marrow, and excludes the femur above
-and the growth-plate band below. The width (#10) is a chord along the growth plate on a coronal section, from the
+plateau: on a coronal section the region sits on the traced face, includes the marrow, and excludes the femur
+and the growth-plate band. The width (#10) is a chord along the growth plate on a coronal section, from the
 centre of the fibula–tibia junction on the tibial surface to the point that sticks out furthest on the other side
 of the plateau. The heights (#7–9) run along the shaft axis from the growth plate's face up to the top of the
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the

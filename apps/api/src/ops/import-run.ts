@@ -3,7 +3,8 @@
  *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
  * pi messages, snapshots and provider calls first. Dumps with study metadata restore the original
- * study and scans, refusing conflicting shared rows. Older dumps get a study of one scan.
+ * study and scans, refusing conflicting shared rows (a reference input matches by content, not
+ * creation time: each database seeds its own on boot). Older dumps get a study of one scan.
  * The study's workflow is the one the dump names (the run's `workflowId` in older dumps, else its study's; their
  * pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
@@ -99,11 +100,15 @@ if (strays.length > 0) {
 
 const client = postgres(url);
 const db = drizzle(client, { casing: "snake_case" });
-function sameSharedRow(name: string, actual: unknown, expected: unknown) {
+function sameSharedRow(name: string, actual: unknown, expected: unknown, ignore: string[] = []) {
   // Old dumps may omit columns added since they were written; compare the fields they have.
   const saved = JSON.parse(JSON.stringify(actual ?? {}));
   const wanted = JSON.parse(JSON.stringify(expected));
-  if (Object.keys(wanted).some((key) => !isDeepStrictEqual(saved[key], wanted[key]))) {
+  if (
+    Object.keys(wanted).some(
+      (key) => !ignore.includes(key) && !isDeepStrictEqual(saved[key], wanted[key]),
+    )
+  ) {
     throw new Error(`${name} conflicts with existing shared data; nothing imported`);
   }
 }
@@ -120,7 +125,13 @@ await db.transaction(async (tx) => {
   for (const input of dump.studyInputs ?? (dump.input ? [dump.input] : [])) {
     await tx.insert(inputs).values(revive(inputs, input)).onConflictDoNothing();
     const [stored] = await tx.select().from(inputs).where(eq(inputs.id, input.id));
-    sameSharedRow(`input ${input.id}`, stored, input);
+    // Each database seeds its own reference input on boot, so its creation time never matches.
+    sameSharedRow(
+      `input ${input.id}`,
+      stored,
+      input,
+      input.source === "reference" ? ["createdAt"] : [],
+    );
   }
   const run = revive(runs, dump.run);
   // Import starts a new local lifetime, even when restoring an earlier dump of this run.

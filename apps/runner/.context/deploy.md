@@ -6,27 +6,32 @@ ids, the API helper `r()` and the settings that apply to every service are in
 [../../api/.context/deploy.md](../../api/.context/deploy.md); `render.yaml` is the record of this
 service's settings. This file holds only what differs.
 
-## Suspending the runner between runs (from 2026-11-04)
+## Always on until about 2026-11-18 (the freeze)
 
-Render bills a running worker per second (about $0.035/hour at `1c-2g`). **Until Nov 4 the
-runner stays on**: hackathon visitors start runs while nobody watches, and a suspended runner
-would leave them queued. After Nov 4 it is **suspended unless a run is queued or running**. The
-Blueprint has no field to create a service suspended, so suspend it by hand. With `r` and `$B`
-from the API's deploy.md and `srv-dbideabl550s73bu5120` from its table (both paths are in Render's API
-reference):
+Staging is frozen at **2026-11-04 6:00 PM PT** (9:00 PM ET, the submission deadline; changing the repo after it marks the entry late) as the hackathon submission, and judges use it
+until about **2026-11-18**. The runner stays on for all of that time, so a judge's run is claimed
+within seconds instead of sitting queued. Render bills it by the second (about $0.035/hour at
+`1c-2g`, about $12 for the two weeks).
+
+From the freeze nothing is merged or deployed to `main`, and no setting changes, except to
+recover from an outage. Allowed in an outage: restart or resume the service (below), fix an
+env var that broke it, resume Neon's compute. Not allowed: a merge, a deploy of new code, a
+plan change. How to tell it is down and the full list:
+`work/deadline-ops/design/deadline-freeze.md` in the docs repo.
+
+After about Nov 18 either staging moves to the new repo's services or it is wound down: suspend
+the runner first, then the gateway and API (`r -X POST "$B/services/<ID>/suspend"`, ids in the
+API's deploy.md), after the last run reports `released` or ends. Suspending mid-run sends
+SIGTERM, and the run waits for the lease to lapse before the next claim resumes it.
+
+With `r` and `$B` from the API's deploy.md and `srv-dbideabl550s73bu5120` from its table:
 
 ```bash
-r -X POST "$B/services/srv-dbideabl550s73bu5120/resume"    # before starting a run
-r -X POST "$B/services/srv-dbideabl550s73bu5120/suspend"   # when no run is queued or running
+r -X POST "$B/services/srv-dbideabl550s73bu5120/restart"   # outage recovery
+r -X POST "$B/services/srv-dbideabl550s73bu5120/resume"    # only if it was suspended
 ```
 
-A run started while the runner is suspended is created `queued` and stays that way: nothing
-claims it until the next resume, after which the runner claims it within its 2 s poll. Resume
-takes the time of a start (the service boots), so resume first and check the log. Suspend only
-after the last run reports `released` or ends: suspending mid-run sends SIGTERM, and the run
-waits for the lease to lapse before the next claim resumes it. Automating this is later work.
-
-The same suspend keeps it from claiming a plumbing run you start yourself with `dev-sandbox`.
+A suspended runner also can't claim a plumbing run you start yourself with `dev-sandbox`.
 A commit to `main` that touches the runner's build filter (including this file) redeploys it,
 and a deploy of a suspended service is not started until it is resumed (not yet checked on
 Render), so check the deploys list after a resume. The 2026-10-29 plumbing runs on Railway are
