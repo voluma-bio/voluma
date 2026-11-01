@@ -177,12 +177,12 @@ function planBlock(
         : "";
   const tasks = view.plan.tasks.map((t) => {
     if (t.id === own?.id)
-      return `### ${t.id}${t.title ? ` — ${t.title}` : ""} (${own.reader === "worker" ? "your task" : "the task you check"}, in full above)`;
+      return `### ${t.id}${t.title ? ` (${t.title})` : ""} (${own.reader === "worker" ? "your task" : "the task you check"}, in full above)`;
     const outputs = t.outputs.map(
       (o) =>
         `  - ${o.id}${names.has(o.id) ? ` (${names.get(o.id)})` : ""}: ${o.kind}${o.required ? ", required" : ""}`,
     );
-    return `### ${t.id}${t.title ? ` — ${t.title}` : ""}
+    return `### ${t.id}${t.title ? ` (${t.title})` : ""}
 Builds on: ${t.dependsOn.length ? t.dependsOn.join(", ") : "nothing"}
 ${taskBrief(t)}
 Reports:
