@@ -13,7 +13,7 @@ description: >
 Anything a researcher reads (a To check title, a checkpoint `summary` or `text`, a check's `text`, an output's note or missing reason, a `finish_run` or
 `accept` summary, a `reply`) never says worker, checker, check thread, model, thread, agent or a task id.
 Say "the AI" for the one that did the work, "a second AI check" for the check, and the task's plain title
-("orientation") for a task. Say what was found, not who found it.
+("Scan intake") for a task. Say what was found, not who found it.
 
 - Before: "The checker evidence shows the oriented frame is internally consistent; task orient-joint passed."
 - After: "The joint's orientation is consistent with the scan."
@@ -37,8 +37,8 @@ Say "the AI" for the one that did the work, "a second AI check" for the check, a
   place something write it as `objects` in their result record; `quad_view.py --objects <record>.json` draws it. Every
   structure, surface and annotation is reported on the grid `outputs.json` declares for it, in voxel indices, never
   world mm (a point or line end may be fractional).
-- The names later tasks look for in `/outputs/<task>/`: `hu.npy`, `hu.json`, `scan-notes.md` (intake);
-  `frame.json`, `oriented.npy`, `keyframe.jpg` (orientation); `labels.npy`, the final labels on the scan grid
+- The names later tasks look for in `/outputs/<task>/`: `hu.npy`, `hu.json`, `scan-notes.md`, `pieces.md`,
+  and the rough orientation `frame.json`, `oriented.npy`, `keyframe.jpg` (intake); `labels.npy`, the final labels on the scan grid
   (segmentation). Working files go in `$SCRATCH`.
 
 ## Scripts

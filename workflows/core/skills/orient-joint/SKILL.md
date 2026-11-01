@@ -1,11 +1,23 @@
 ---
 name: orient-joint
 description: >
-  Load before SAM segmentation of a joint between two long bones, or whenever slices must show both bones through the
-  joint: a coarse frame from a bone threshold alone, the oriented stack, and moving labels and points between grids.
+  Load whenever your task needs the scan cut or viewed a particular way: before SAM segmentation of a joint, to orient
+  a knee roughly at intake, or to re-orient for the region you place or measure. A coarse frame from a bone threshold
+  alone, the oriented stack, which way up, and moving labels and points between grids.
 ---
 
 # Orient a joint
+
+## Orient for your task
+
+No one orientation serves every task. Orient for what your task places or measures and for the tasks in the plan
+that build on your files, and make a new frame when the one an earlier task left does not show your region the way
+you need: a frame through the joint for segmentation, a frame on one bone's shaft for that bone's measurements (a
+workflow's own frame scripts, such as mouse-oa's `tibia_frame.py`). Which way up your views show comes from your
+task's done-when lines and the workflow's example figures; name it on each view you cite ("tibia plateau up, femur
+above").
+
+## The joint frame
 
 SAM tracks through a stack of slices, so each slice must show the bones you want, with a keyframe through the joint.
 The scanner's axes rarely do that, and tracking along the wrong axis loses a bone at the growth plate. So orient
@@ -31,7 +43,7 @@ stands for is outside the field, the piece taken for it is something else, harml
 of the slice and which bone is A. If a bone is missing, cut off, or the joint space is not in the slice, do not run
 SAM: read `bend_deg` and `skew_vox` in the output, and try another `--threshold-hu`.
 
-A wrong frame makes everything after it stale: orientation is its own task, and a corrected frame reruns the rest.
+Labels and points made on a wrong frame are wrong on the scan grid too: a corrected frame reruns what was made on it.
 
 ## Between the grids
 

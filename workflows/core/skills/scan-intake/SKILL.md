@@ -2,7 +2,7 @@
 name: scan-intake
 description: >
   Load at the start of a scan: turn a DICOM series into a calibrated HU volume with its header, clean it up to the
-  specimen, and write the scan's notes from what the researcher left in /inputs.
+  specimen, find out what each bone piece is, and write the scan's notes from what the researcher left in /inputs.
 ---
 
 # Scan intake
@@ -32,3 +32,7 @@ description: >
   keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar
   (`sidecar.py --like hu.json`). A piece that may be bone of the leg stays, with a To check item asking what it is:
   bone wrongly removed is lost to every task after you.
+- **Find out what each bone piece is.** `components.py` (`sam-segmentation`) lists the bone pieces of the cleaned
+  scan; name each one in `/outputs/intake/pieces.md` from the 3D view and the workflow's anatomy reference (two
+  bones touching at a joint can be one piece: name both), with its centre and volume. Segmentation and orientation
+  start from these names.
