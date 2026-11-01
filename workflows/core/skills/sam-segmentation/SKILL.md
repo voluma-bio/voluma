@@ -26,6 +26,8 @@ segmentation of every bone and a second opinion on your own; **you own the final
 - **Orient first** (`orient-joint`) and pass the oriented stack with its keyframe. Boxes drawn by eye cut bone
   edges off: `snap_boxes.py` fits them to the threshold components, and `render_slices.py --boxes` shows them
   before you send.
+- **Survey bare bone first** (`components.py --in <oriented stack>`): with no labels yet, it lists the threshold's
+  largest connected components (size, box, centre, whether they touch the edge), in 3D or on one slice with `--index`.
 - **One request for every bone a target could track into.** Structures in one request are tracked together and
   never share a voxel; a bone left out is tracked onto by its neighbour. Up to 16 per request, each boxed on a
   slice where it is separate from its neighbours. One request per bone costs three times as much and gives
