@@ -451,7 +451,11 @@ export function pgRunQueue(
       });
       notifier.notify(runId);
       // After the commit, so a reply that cannot be read cannot roll the cancel back.
-      return { run: await db.transaction((tx) => loadRun(tx, runId)) };
+      return {
+        run: await db.transaction((tx) => loadRun(tx, runId), {
+          isolationLevel: "repeatable read",
+        }),
+      };
     },
 
     /** Why `caller` can't message `run` now, or null (`messageRefusal`); the run read reports it. */
