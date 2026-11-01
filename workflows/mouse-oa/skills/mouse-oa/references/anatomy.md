@@ -97,7 +97,10 @@ a merged one shows on the 3D sheet as a bump or a disconnected piece. How to loo
 4. **Labels 10 to 12:** keep separate. Whether they belong to the tibia or patella volumes is the lab's call. Whether label 12
    counts toward the patella (#1) is open.
 
-## Prompts for `segment_sam`
+## Segmentation notes
+
+How `sam-segmentation`'s general strategies play out on the mouse knee. On OA6-1RK, small structures sent in the
+big-bone request cost the patella its track (Dice with the reference 0.95 to 0.86).
 
 - **Request 1, the four big bones together:** femur (1), tibia (2), patella (3), fibula (4), one box each, even though only the
   first three are measured: the fibula box stops the tibia track from taking it. Put the fibula box on a slice where it is
