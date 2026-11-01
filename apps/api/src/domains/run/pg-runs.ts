@@ -23,26 +23,32 @@ export type Queryable = Pick<PostgresJsDatabase, "select">;
 
 export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0];
 
-/** `lab_id = labId AND (ownerId IS NULL OR started_by = ownerId OR example)`; every run for `EVERY_LAB`. */
+/**
+ * An example run is readable by every organization; any other run needs `lab_id = labId AND
+ * (ownerId IS NULL OR started_by = ownerId)`. Every run for `EVERY_LAB`. Reading is all an
+ * example allows: decisions, messages, starts and cancels refuse it (`example` checks).
+ */
 export const readableRuns = (scope: ReadScope): SQL | undefined =>
   scope === EVERY_LAB
     ? undefined
-    : and(
-        eq(runs.labId, scope.labId),
-        scope.ownerId === null
-          ? undefined
-          : or(eq(runs.startedBy, scope.ownerId), eq(runs.example, true)),
+    : or(
+        eq(runs.example, true),
+        and(
+          eq(runs.labId, scope.labId),
+          scope.ownerId === null ? undefined : eq(runs.startedBy, scope.ownerId),
+        ),
       );
 
-/** The same rule on a study: `lab_id = labId AND (ownerId IS NULL OR created_by = ownerId OR example)`. */
+/** The same rule on a study: examples to everyone, else `lab_id = labId AND (ownerId IS NULL OR created_by = ownerId)`. */
 export const readableStudies = (scope: ReadScope): SQL | undefined =>
   scope === EVERY_LAB
     ? undefined
-    : and(
-        eq(studies.labId, scope.labId),
-        scope.ownerId === null
-          ? undefined
-          : or(eq(studies.createdBy, scope.ownerId), eq(studies.example, true)),
+    : or(
+        eq(studies.example, true),
+        and(
+          eq(studies.labId, scope.labId),
+          scope.ownerId === null ? undefined : eq(studies.createdBy, scope.ownerId),
+        ),
       );
 
 /** The input rule: the caller's upload, or the org's reference scan. */
