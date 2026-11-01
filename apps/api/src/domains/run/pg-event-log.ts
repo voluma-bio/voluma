@@ -20,7 +20,7 @@
  * must never refuse) or refuses on an event it can't read (corrections, review).
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
-import { cancelEnds } from "@voluma/contracts/threads";
+import { type CancelRow, cancelEnds } from "@voluma/contracts/threads";
 import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
@@ -77,30 +77,30 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
   await eventLock(tx, runId);
-  // Columns, plus the two payload fields `cancelEnds` reads, each under its own `type` (the
-  // json cast may run before the `type` filter, `AGENTS.md` "Contract changes"), so an event
-  // that no longer parses cannot stop or change a cancel.
+  // Row columns, plus the raw payload of the two types `cancelEnds` reads fields of. No json
+  // operator touches it: Postgres errors on `\u0000` anywhere in the document, which would
+  // fail the claim, sweep or report this cancel runs in. The fields are picked in JS, so an
+  // event that no longer parses cannot stop or change a cancel.
   const rows = await tx
     .select({
       id: events.id,
       type: events.type,
       threadId: events.threadId,
       seq: events.seq,
-      root: sql<
-        boolean | null
-      >`CASE WHEN ${events.type} = 'thread.started' THEN json_typeof(${events.payload}->'parentThreadId') = 'null' END`,
-      status: sql<
-        string | null
-      >`CASE WHEN ${events.type} = 'thread.ended' THEN ${events.payload}->>'status' END`,
+      payload: sql<unknown>`CASE WHEN ${events.type} IN ('thread.started', 'thread.ended') THEN ${events.payload} END`,
     })
     .from(events)
     .where(eq(events.runId, runId))
     .orderBy(asc(events.seq));
-  const log = rows.map(({ root, status, ...row }) => ({
-    ...row,
-    ...(root !== null && { root }),
-    ...(status !== null && { status }),
-  }));
+  const log = rows.map(({ payload, ...row }): CancelRow => {
+    const fields = (payload ?? {}) as { parentThreadId?: unknown; status?: unknown };
+    return {
+      ...row,
+      ...(row.type === "thread.started" && { root: fields.parentThreadId === null }),
+      ...(row.type === "thread.ended" &&
+        typeof fields.status === "string" && { status: fields.status }),
+    };
+  });
   for (const ended of cancelEnds(runId, log, new Date(), openCorrectionOf(rows)?.seq)) {
     await insertEvent(tx, ended);
   }

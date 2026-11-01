@@ -133,22 +133,29 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
   }
 }
 
-/** The tool of the latest call this claim made that has no result: what the claim was cut off in. */
+/**
+ * The tool of the latest call this claim made that has no result: what the claim was cut off in.
+ * Matches in JS over the raw payloads: a json operator would error on a `tool.result` output
+ * holding `\u0000`, and this runs inside claim.
+ */
 async function inFlightTool(tx: Tx, runId: string, sinceSeq: number): Promise<string | undefined> {
-  const [row] = await tx
-    .select({ name: sql<string>`${events.payload}->>'name'` })
+  const rows = await tx
+    .select({ type: events.type, payload: events.payload })
     .from(events)
     .where(
       and(
         eq(events.runId, runId),
-        eq(events.type, "tool.call"),
+        inArray(events.type, ["tool.call", "tool.result"]),
         gt(events.seq, sinceSeq),
-        sql`NOT EXISTS (SELECT 1 FROM events r WHERE r.run_id = ${events.runId} AND r.type = 'tool.result' AND r.payload->>'toolCallId' = ${events.payload}->>'toolCallId')`,
       ),
     )
-    .orderBy(desc(events.seq))
-    .limit(1);
-  return row?.name;
+    .orderBy(desc(events.seq));
+  const idOf = (payload: unknown) => (payload as { toolCallId?: unknown } | null)?.toolCallId;
+  const answered = new Set(
+    rows.filter((r) => r.type === "tool.result").map((r) => idOf(r.payload)),
+  );
+  const open = rows.find((r) => r.type === "tool.call" && !answered.has(idOf(r.payload)));
+  return (open?.payload as { name?: string } | undefined)?.name;
 }
 
 /**
@@ -433,19 +440,18 @@ export function pgRunQueue(
      * `completed` with the cancel recorded (`endUnfinished`). Example runs are read-only.
      */
     async cancel(reader: Reader, runId: string) {
-      const result = await attempt(async (tx) => {
+      await attempt(async (tx) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
         vault.drop(runId);
         // A report may end the run under its own locks: take them and judge the state they leave.
         const locked = await lockRun(tx, runId);
-        if (locked?.state === "ended") return { run: await loadRun(tx, runId) };
-        await endUnfinished(tx, runId, "cancelled");
-        return { run: await loadRun(tx, runId) };
+        if (locked?.state !== "ended") await endUnfinished(tx, runId, "cancelled");
       });
       notifier.notify(runId);
-      return result;
+      // After the commit, so a reply that cannot be read cannot roll the cancel back.
+      return { run: await db.transaction((tx) => loadRun(tx, runId)) };
     },
 
     /** Why `caller` can't message `run` now, or null (`messageRefusal`); the run read reports it. */

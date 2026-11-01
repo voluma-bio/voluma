@@ -95,7 +95,10 @@ for deletion. Step 2, after step 1 is live: a PR that re-runs the migration, mak
 the field required and deletes the fallback. Note step 2 in the package's
 `.context/TODO.md`. `payload` is `json` because some payloads hold `\u0000`:
 read or cast payload fields only inside `CASE WHEN type = '<type>' THEN … END`,
-since Postgres may evaluate the json condition before the `type` filter. Before step 2, parse every staging run's
+since Postgres may evaluate the json condition before the `type` filter. In a path that must not
+throw (claim, recover, report, heartbeat, cancel) use no json operator on `events.payload` at
+all: select the raw payload and pick fields in JS, because Postgres errors on `\u0000` anywhere
+in the document. Before step 2, parse every staging run's
 events, and every `run.json` under `r2:dev/runs/`, with the new `runEventSchema`: fetch each run's log from
 `GET /api/run/runs/:id/stream` with `VOLUMA_DEBUG_TOKEN` (agents can't reach
 staging's database), leaving out its `event: live` frames, which are not stored events. A query for the fields you think changed is not enough: it
