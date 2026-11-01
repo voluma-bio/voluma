@@ -148,6 +148,7 @@ function toRun({ run, input, position, calls }: Row, { summary, revisions }: Res
     ...(run.notes !== null && { notes: run.notes }),
     input: toInput(input),
     credentials: run.credentials,
+    ...(run.model !== null && { model: run.model }),
     example: run.example,
     createdAt: run.createdAt.toISOString(),
     state,

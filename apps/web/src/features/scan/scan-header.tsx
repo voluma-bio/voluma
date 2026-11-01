@@ -161,7 +161,13 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
   const work = runWork(events, state, useNow(live));
   const failed = useMemo(() => failedThreads(events).size, [events]);
   const threads = useThreads();
-  const models = useMemo(() => runModels(threads), [threads]);
+  // Before any thread has started, the model the API recorded; after, what the threads used.
+  const threadModels = useMemo(() => runModels(threads), [threads]);
+  const models = threadModels.length
+    ? threadModels
+    : run.model
+      ? [{ label: "Model", models: [run.model] }]
+      : [];
   // Each claim records the commit its runner's checkout was at; a resume after a deploy adds one.
   const commits = useMemo(() => {
     const seen = new Set<string>();
