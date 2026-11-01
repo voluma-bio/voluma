@@ -34,5 +34,4 @@ description: >
   bone wrongly removed is lost to every task after you.
 - **Find out what each bone piece is.** `components.py` (`sam-segmentation`) lists the bone pieces of the cleaned
   scan; name each one in `/outputs/intake/pieces.md` from the 3D view and the workflow's anatomy reference (two
-  bones touching at a joint can be one piece: name both), with its centre and volume. Segmentation and orientation
-  start from these names.
+  bones touching at a joint can be one piece: name both), with its centre and volume.

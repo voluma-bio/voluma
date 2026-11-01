@@ -7,8 +7,8 @@ crop from the lab's parameter deck unless its name says otherwise.
 ## intake
 
 The keyframe of the rough orientation cuts the femur and the tibia in one slice through the joint, with the joint
-space between them dark and open, and the patella too when the scan's notes put it in the field. The femur is above
-the tibia, as in every deck figure of the knee. No deck figure of the keyframe: the frame is ours, not the lab's.
+space between them dark and open, and the patella too when the scan's notes put it in the field. The view says which
+bone is on top. No deck figure of the keyframe: the frame is ours, not the lab's.
 
 ## segmentation
 

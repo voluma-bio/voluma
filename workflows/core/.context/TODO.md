@@ -36,3 +36,9 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 
 ## Lengths still in voxels (left by the skills cleanup)
 - Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `snap_boxes.py` `min_px=50`.
+
+## Which way up a render shows
+- `quad_view.py` fixes its 3D camera's view-up to scan +z (`'view_up': [0.0, 0.0, 1.0]`); `--rotate` changes azimuth and
+  elevation only. A task that wants its 3D views a particular way up (the femur with its shaft up, as in the mouse-OA
+  deck) cannot ask for it. Direction: a view-up argument, kept in `.view.json` so `pick.py` still maps picks. Likewise
+  `orient_joint.py` puts bone A above bone B with no override (#429 review).
