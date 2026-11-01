@@ -53,7 +53,7 @@ import {
   readableStudies,
   type Tx,
 } from "./pg-runs";
-import { pickModel, runModels } from "./run-models";
+import { modelChoices, pickModel } from "./run-models";
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
 /**
@@ -368,7 +368,7 @@ export function pgRunQueue(
 
   return {
     /** The choices for a start, with the debug override that forces them (`GET /models`). */
-    models: () => runModels(modelOverride),
+    models: () => modelChoices(modelOverride),
 
     /**
      * Creates one run `queued` on a scan of an existing study. Refuses a study the reader

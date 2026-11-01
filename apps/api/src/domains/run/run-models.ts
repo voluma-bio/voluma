@@ -31,13 +31,16 @@ export function modelOverride(value: string | undefined): string | null {
   return value;
 }
 
-export function runModels(override: string | null): RunModelsResponse {
+const CHOICES = {
+  voluma: { choices: [WONDER, CONTRIBUTOR], default: WONDER.model },
+  visitor: { choices: [WONDER, SPARK], default: WONDER.model },
+};
+
+/** The choices for both kinds of caller, with the override that forces Voluma-key runs (`GET /models` trims them per caller). */
+export function modelChoices(override: string | null) {
   return {
-    voluma: { choices: [WONDER, CONTRIBUTOR], default: WONDER.model },
-    visitor: { choices: [SPARK, WONDER], default: SPARK.model },
-    ...(override && {
-      forced: { model: override, label: OVERRIDES[override] as string },
-    }),
+    ...CHOICES,
+    ...(override && { forced: { model: override, label: OVERRIDES[override] as string } }),
   };
 }
 
@@ -48,7 +51,7 @@ export function pickModel(
   requested: string | undefined,
 ): string {
   if (credentials === "voluma" && override) return override;
-  const { choices, default: fallback } = runModels(null)[credentials]!;
+  const { choices, default: fallback } = CHOICES[credentials];
   if (requested === undefined) return fallback;
   if (!choices.some((c) => c.model === requested))
     throw new HTTPException(400, {

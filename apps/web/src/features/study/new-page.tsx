@@ -224,7 +224,7 @@ export function NewPage() {
   // A start with keys runs on the starter's own Meta key, so it gets the visitor list.
   const modelList =
     keys || !runModels.data?.voluma ? runModels.data?.visitor : runModels.data.voluma;
-  const forced = keys ? undefined : runModels.data?.forced;
+  const forced = keys || !runModels.data?.voluma ? undefined : runModels.data.forced;
   const model = modelList?.choices.some((c) => c.model === pickedModel)
     ? pickedModel
     : modelList?.default;
