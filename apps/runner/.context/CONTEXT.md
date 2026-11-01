@@ -337,8 +337,9 @@ Pi's `onPayload` hook on `meta/*` models only, uploads each image once per claim
 Pi's messages and stored history keep their bytes or `imageRef`s. Meta's prompt cache reads the image, not how it
 was sent (measured: base64 and `file_id` for the same bytes share a cached prefix), so nothing about ids outlives
 the claim, and every failure falls back to inline bytes without a cache miss: a failed upload goes inline for that
-call (retried after 5 min), and a request Meta answers `404 file_not_found` is resent inline in the same `fetch`
-(the 404 would otherwise read as fatal in `provider-error.ts`). The claim-end log line `model requests this
+call (retried after 5 min), a key the Files API refuses (401, 403) sends every image inline for the rest of the
+claim, and a request Meta refuses with a 4xx naming a file (`404 file_not_found` for a deleted one) is resent inline
+in the same `fetch` (the 4xx would otherwise read as fatal in `provider-error.ts`). The claim-end log line `model requests this
 claim:` gives bytes sent against bytes with every image inline. Images count against compaction's limits as before.
 
 **Context compaction.** `adapters/pi/compaction.ts`; nothing rewrites history between requests, so the provider's
