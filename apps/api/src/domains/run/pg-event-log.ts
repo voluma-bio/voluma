@@ -14,7 +14,8 @@
  * every event below it. The stream (stream.ts) relies on that: the notifier fires after a
  * commit, and the stream then reads the log from its cursor, so a missed or early wake-up
  * costs a read, never an event. Stored rows are parsed against the current event schema:
- * an unsupported historical event fails the read rather than being reinterpreted.
+ * the runner's read (`readLeased`) fails on an unsupported historical event rather than
+ * reinterpret it; the browser's stream and cancel skip and log it (`readEvents`).
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { cancelEnds } from "@voluma/contracts/threads";
@@ -24,7 +25,7 @@ import type { ReadScope } from "../../domain";
 import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
+import { readableRuns, readEvents, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
@@ -74,9 +75,9 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
   await eventLock(tx, runId);
-  const log = (
-    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))
-  ).map(toRunEvent);
+  const log = readEvents(
+    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
+  );
   for (const ended of cancelEnds(runId, log, new Date())) {
     await insertEvent(tx, ended);
   }
@@ -129,7 +130,7 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
       if (!first) return null;
       return {
         ended: first.state === "ended",
-        events: rows.flatMap((row) => (row.event ? [toRunEvent(row.event)] : [])),
+        events: readEvents(rows.flatMap((row) => (row.event ? [row.event] : []))),
       };
     },
 

@@ -17,7 +17,7 @@ import type { MessageSent } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
 import { noLease } from "./lease";
 import { eventLock, insertEvent, lockRun } from "./pg-event-log";
-import { loadRun, type Queryable, readableRuns, type Tx, toRunEvent } from "./pg-runs";
+import { loadRun, type Queryable, readableRuns, readEvents, type Tx } from "./pg-runs";
 import { events, runs, studies } from "./schema";
 
 const personThread = (runId: string) => `${runId}.person`;
@@ -82,7 +82,7 @@ export async function openCorrection(tx: Queryable, runId: string): Promise<stri
     .from(events)
     .where(and(eq(events.runId, runId), inArray(events.type, ["run.reopened", "correction.ended"])))
     .orderBy(asc(events.seq));
-  return corrections(rows.map(toRunEvent)).open?.reopenId ?? null;
+  return corrections(readEvents(rows)).open?.reopenId ?? null;
 }
 
 /** Writes `correction.ended`, keyed to the open correction's `run.reopened` (`openCorrection`). */
@@ -213,13 +213,13 @@ export async function decideMessage(
   if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
   const { taskId, itemId } = msg.payload;
   const view = fold(
-    (
+    readEvents(
       await tx
         .select()
         .from(events)
         .where(and(eq(events.runId, runId), inArray(events.type, [...FOLD_EVENT_TYPES])))
-        .orderBy(asc(events.seq))
-    ).map(toRunEvent),
+        .orderBy(asc(events.seq)),
+    ),
   );
   if (view.plan.tasks.length === 0)
     throw new HTTPException(409, { message: "The run has no plan yet." });

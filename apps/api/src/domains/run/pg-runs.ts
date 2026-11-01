@@ -71,6 +71,26 @@ export const toInput = (row: typeof inputs.$inferSelect): Input => ({
 export const toRunEvent = (row: typeof events.$inferSelect) =>
   runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
 
+/**
+ * The browser's, cancel's and corrections' read of stored rows: a row that fails
+ * `runEventSchema` is skipped and logged with its id and type, so one bad event doesn't take
+ * down the run's page. The runner's resume reads with `toRunEvent` and stays strict.
+ */
+export function readEvents(rows: (typeof events.$inferSelect)[]): RunEvent[] {
+  const log: RunEvent[] = [];
+  for (const row of rows) {
+    try {
+      log.push(toRunEvent(row));
+    } catch (error) {
+      console.error(
+        `run ${row.runId}: event ${row.id} (${row.type}) does not parse; skipped:`,
+        error,
+      );
+    }
+  }
+  return log;
+}
+
 function toRun({ run, input, position, calls }: Row, { summary, revisions }: Results): Run {
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
