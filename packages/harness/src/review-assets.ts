@@ -264,7 +264,15 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     log(`review assets: converting ${job.sha256.slice(0, 8)} (${job.flags})`);
     const started = Date.now();
     try {
-      const result = await convert(job);
+      let result = await convert(job);
+      // One retry: a conversion can fail on a transient mount error. Safe to repeat: the converter clears its
+      // output and publishes a fresh generation, writing `ready`/`manifest.json` last.
+      if ("error" in result && !signal.aborted) {
+        log(
+          `review assets: ${job.sha256.slice(0, 8)} failed, retrying once: ${result.error.slice(-200)}`,
+        );
+        result = await convert(job);
+      }
       record(options, job, result);
       const seconds = Math.round((Date.now() - started) / 1000);
       log(
