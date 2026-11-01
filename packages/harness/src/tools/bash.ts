@@ -28,7 +28,8 @@ const inputSchema = z.object({
     .describe("Seconds before the command and everything it started is killed."),
 });
 
-export function bashTool(layout: ThreadLayout): Tool<typeof inputSchema> {
+/** `canRead`: the thread holds `read`, so a cut output's note points at it (a role file from before `read` does not). */
+export function bashTool(layout: ThreadLayout, canRead: boolean): Tool<typeof inputSchema> {
   return {
     name: "bash",
     description:
@@ -50,7 +51,13 @@ export function bashTool(layout: ThreadLayout): Tool<typeof inputSchema> {
         live.add(chunk.type, chunk.data);
       }
       live.flush();
-      const view = await modelView(output, sandbox, layout.toolOutputPath(ctx.toolCallId), ctx);
+      const view = await modelView(
+        output,
+        sandbox,
+        layout.toolOutputPath(ctx.toolCallId),
+        ctx,
+        canRead,
+      );
       return {
         output: `${view.output}\n[exit code ${exitCode}]`,
         isError: exitCode !== 0,
@@ -93,11 +100,14 @@ async function modelView(
   sandbox: Sandbox,
   path: string,
   ctx: ToolContext,
+  canRead: boolean,
 ): Promise<Pick<ToolResult, "output" | "truncated">> {
   if (!output.cut) return { output: output.head + output.tail, truncated: false };
   const text = output.stored();
   const omitted = output.total - HEAD_CHARS - TAIL_CHARS;
-  let note = `${omitted} of ${output.total} characters omitted. read ${path} for the rest of the output`;
+  let note = canRead
+    ? `${omitted} of ${output.total} characters omitted. read ${path} for the rest of the output`
+    : `${omitted} of ${output.total} characters omitted; full output at ${path}`;
   let stored = true;
   try {
     await sandbox.writeFile(path, new TextEncoder().encode(text), ctx.signal);

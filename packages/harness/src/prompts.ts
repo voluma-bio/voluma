@@ -27,12 +27,23 @@ Check what you report against the files themselves, and say which file or header
 }
 
 /**
+ * The tool a role reads files with: `read`; `read_file`, its old name, in a role file a run copied
+ * before `read` existed (runs keep their role files, and a correction reopens a finished run with
+ * them); bash for a role file from then without either.
+ */
+const readerOf = (role: AgentDefinition) =>
+  role.tools.includes("read")
+    ? "`read`"
+    : role.tools.includes("read_file")
+      ? "`read_file`"
+      : "bash";
+
+/**
  * The role's skills, progressively disclosed: name, description and path here, the skill and its
- * references and resources read with `read` when needed (bash for a role file without `read`: a
- * live run's snapshot of the role files can predate it). The workflow's own skill comes first and is read first.
+ * references and resources read with the role's reading tool (`readerOf`) when needed. The workflow's own skill comes first and is read first.
  */
 function skillList(def: WorkflowDefinition, role: AgentDefinition): string {
-  const reader = role.tools.includes("read") ? "`read`" : "bash";
+  const reader = readerOf(role);
   const lines = def.skills
     .filter((s) => role.skills.includes(s.name))
     .map(
@@ -49,7 +60,7 @@ function toolIndex(def: WorkflowDefinition, role: AgentDefinition, shell: boolea
     .map((t) => `- ${t.skill}/${t.script}: ${t.summary}`);
   const use = shell
     ? "Run `python <skill dir>/resources/<script> --help` before you use one."
-    : "Workers run them; read one with `read` to know what a worker's result rests on.";
+    : `Workers run them; read one with ${readerOf(role)} to know what a worker's result rests on.`;
   return `Scripts of those skills, at <skill dir>/resources/<script> (skill dirs are listed above). ${use}\n${lines.join("\n")}`;
 }
 

@@ -53,12 +53,14 @@ export type ToolName = (typeof TOOL_NAMES)[number];
 
 /** The tools that need only the thread's own layout and the run's files. */
 const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => Tool> = {
-  bash: ({ layout }) => bashTool(layout),
+  bash: ({ layout }, names) => bashTool(layout, names.includes("read")),
   view_image: ({ layout, files }, names) =>
     viewImageTool({ layout, files, hasSandbox: names.includes("bash") }),
   segment_sam: ({ layout }) => segmentSamTool(layout),
-  read: ({ layout, files }) => readTool({ layout, files }),
-  read_file: ({ layout, files }) => ({ ...readTool({ layout, files }), name: "read_file" }),
+  read: ({ layout, files }, names) =>
+    readTool({ layout, files, name: "read", hasSandbox: names.includes("bash") }),
+  read_file: ({ layout, files }, names) =>
+    readTool({ layout, files, name: "read_file", hasSandbox: names.includes("bash") }),
 };
 
 export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
