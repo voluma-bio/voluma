@@ -178,6 +178,12 @@ export const NO_WORKFLOW_DIR = "no workflow was named to start";
 export const roleModelUnset = (alias: string) =>
   `the "${alias}" AI this workflow needs is not set up; whoever runs Voluma sets it up`;
 
+/** What the researcher reads when a run's chosen model cannot be used by this runner. */
+export const runModelUnavailable = (model: string) =>
+  `this run's AI (${model}) is not set up on this server; whoever runs Voluma sets it up`;
+export const runModelNotForVisitors = (model: string) =>
+  `${model} cannot run on your own Meta key; start the run again with a standard model`;
+
 /** Read when main reads the notice: the task may have moved on since the check failed. */
 const awaitsMain = (d: ThreadLog, threadId: string) => {
   const r = d.threads.get(threadId);

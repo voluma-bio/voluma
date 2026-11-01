@@ -11,6 +11,7 @@
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (self|lab, default self) to let anyone in as a guest (the repo .env).
+ * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
  * _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
@@ -44,6 +45,7 @@ import { pgRunRecords } from "./domains/run/pg-run-records";
 import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
 import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
+import { modelOverride } from "./domains/run/run-models";
 import { createUser } from "./domains/user";
 import { pgUserSettings } from "./domains/user/pg-settings";
 
@@ -148,6 +150,7 @@ const queue = pgRunQueue(
       }
     );
   },
+  modelOverride(process.env.RUN_MODEL_OVERRIDE),
 );
 const eventLog = pgEventLog(db, notifier);
 
