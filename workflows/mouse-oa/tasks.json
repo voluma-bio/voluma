@@ -9,7 +9,7 @@
     "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Clean up the scan, so it holds the specimen and nothing else. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
     "doneWhen": [
       "The spacing and size come from the files themselves, with the file or header each came from.",
-      "No holder, padding or debris is left in the scan and no bone of the knee was removed, shown on a 3D view of the cleaned scan and one of what was removed."
+      "Holder, padding and debris are set to air in hu.npy under a removal mask on the scan grid, and hu.npy is unchanged outside it; a piece that may be anatomy stays, with a To check item. Both are shown on a 3D view of the cleaned scan and one of the mask."
     ]
   },
   {
@@ -46,7 +46,7 @@
     "doneWhen": [
       "Every label is one structure and every piece present is labelled or raised as a To check item, checked on the 3D sheet and the label checks, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (segmentation) describes.",
       "The volumes of #1-3 follow from the final labels.",
-      "The checkpoint names each of labels 5 to 12 (/workflow/workflows/mouse-oa/skills/mouse-oa/references/anatomy.md) as labelled, or as absent with the reason."
+      "/outputs/segmentation/small-structures.md accounts for each of labels 5 to 12 (/workflow/workflows/mouse-oa/skills/mouse-oa/references/anatomy.md): labelled, absent with the reason and the view it rests on, or unresolved with its To check item."
     ]
   },
   {
