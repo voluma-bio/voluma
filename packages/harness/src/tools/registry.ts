@@ -34,6 +34,9 @@ export const TOOL_NAMES = [
   "view_image",
   "segment_sam",
   "read",
+  // DELETE one deploy after `read` ships (.context/TODO.md): the old name of `read`, which a live
+  // run's snapshot of main.md still lists; without it the run cannot load its workflow on resume.
+  "read_file",
   "ask",
   "start_agent",
   "message",
@@ -55,6 +58,7 @@ const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => To
     viewImageTool({ layout, files, hasSandbox: names.includes("bash") }),
   segment_sam: ({ layout }) => segmentSamTool(layout),
   read: ({ layout, files }) => readTool({ layout, files }),
+  read_file: ({ layout, files }) => ({ ...readTool({ layout, files }), name: "read_file" }),
 };
 
 export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {

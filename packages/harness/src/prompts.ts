@@ -28,17 +28,18 @@ Check what you report against the files themselves, and say which file or header
 
 /**
  * The role's skills, progressively disclosed: name, description and path here, the skill and its
- * references and resources read with `read` when
- * needed. The workflow's own skill comes first and is read first.
+ * references and resources read with `read` when needed (bash for a role file without `read`: a
+ * live run's snapshot of the role files can predate it). The workflow's own skill comes first and is read first.
  */
 function skillList(def: WorkflowDefinition, role: AgentDefinition): string {
+  const reader = role.tools.includes("read") ? "`read`" : "bash";
   const lines = def.skills
     .filter((s) => role.skills.includes(s.name))
     .map(
       (s) =>
         `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? " [read first]" : ""}`,
     );
-  return `Skills: read a skill's SKILL.md with \`read\` before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
+  return `Skills: read a skill's SKILL.md with ${reader} before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
 /** One line per script of the role's skills, from its docstring. */
