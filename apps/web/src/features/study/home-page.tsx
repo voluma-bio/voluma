@@ -11,7 +11,6 @@ import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
 import { isLive, liveStatus, plural, runHref, runStatus, studyStatus } from "@voluma/run-view";
 import {
   Box,
-  Breadcrumb,
   Button,
   Count,
   type Density,
@@ -23,7 +22,6 @@ import {
   Progress,
   RowLink,
   SegmentedControl,
-  ShellHeading,
   type Status,
   StatusMark,
   Table,
@@ -87,9 +85,6 @@ export function HomePage() {
 
   return (
     <div className="shrink-0">
-      <ShellHeading>
-        <Breadcrumb current="Home" />
-      </ShellHeading>
       <PageHead
         title="Home"
         actions={

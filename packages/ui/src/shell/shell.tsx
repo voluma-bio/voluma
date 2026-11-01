@@ -621,9 +621,6 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
         <>
           <header className="flex h-[var(--panel-head-h)] shrink-0 items-center gap-2 border-b border-border px-3">
             <h2 className="min-w-0 truncate font-medium text-base">{label}</h2>
-            {count != null && (
-              <span className="font-mono text-muted-foreground text-xs">{count}</span>
-            )}
             <span className="flex-1" />
             {tools}
             <button

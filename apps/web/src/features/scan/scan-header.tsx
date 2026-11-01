@@ -96,25 +96,19 @@ export function ScanHeading({
   return (
     <ShellHeading>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-2 text-sm">
-        {study ? (
-          study.scans.length > 1 ? (
+        {(!study || study.scans.length > 1) && (
+          <>
             <Link
-              to={`/studies/${study.study.id}`}
+              to={study ? `/studies/${study.study.id}` : "/"}
               className="truncate text-muted-foreground hover:text-foreground"
             >
-              {study.study.name}
+              {study ? study.study.name : "Home"}
             </Link>
-          ) : (
-            <span className="truncate text-muted-foreground">{study.study.name}</span>
-          )
-        ) : (
-          <Link to="/" className="text-muted-foreground hover:text-foreground">
-            Home
-          </Link>
+            <span aria-hidden className="text-fg-subtle">
+              /
+            </span>
+          </>
         )}
-        <span aria-hidden className="text-fg-subtle">
-          /
-        </span>
         <h1 className="truncate font-semibold">{title}</h1>
       </nav>
       {group && <span className="shrink-0 text-sm text-muted-foreground">{group}</span>}
