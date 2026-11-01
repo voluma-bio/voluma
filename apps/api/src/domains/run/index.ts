@@ -1,7 +1,7 @@
 /**
  * Run lane's API domain, mounted at /api/run/ (paths are relative to the mount). A short
  * mount list: each file owns its routes and its guard.
- *   runs.ts    the run routes (users and guests; the reads also take the debug token)
+ *   runs.ts    the run routes (users and guests; the reads also take the debug token), and `GET /models`
  *   studies.ts the browser's study routes: create (with its first runs), list, get
  *   inputs.ts  the browser's scans: list, and upload (members); `src/ops/upload-scan.ts` is the CLI for it
  *   stream.ts  the server-sent event stream of a run's stored events (users, debug token)

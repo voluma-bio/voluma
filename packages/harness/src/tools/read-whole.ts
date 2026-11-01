@@ -1,5 +1,5 @@
 /**
- * Reads a whole file the model named, for the host-side tools (`read_file`, `view_image`): by
+ * Reads a whole file the model named, for the host-side tools (`read`, `view_image`): by
  * the thread's layout from the run's bucket, or, for a path outside the mounts (the sandbox's
  * /tmp) and a thread that has a sandbox, through that sandbox. A missing file is refused with
  * the files that are in its folder, never with the store's own error.

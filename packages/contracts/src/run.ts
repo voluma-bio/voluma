@@ -11,6 +11,7 @@
  *                                  409 and 429: see Limits; 400 for a `selectedOutputs` id that is
  *                                  not a measurement or score of the study's workflow). `POST /api/run/studies`
  *                                  (`study.ts`) creates a study and starts its first runs.
+ *   GET  /api/run/models           → 200 `runModelsResponseSchema`: the models a start may pick
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runReadSchema`: the run plus what this caller may do now
  *   POST /api/run/runs/:id/cancel  → 200 `runReadSchema` with state `ended`/`cancelled`
@@ -104,6 +105,11 @@
  * start `visitor` runs: a start without `keys` is refused 403. Every run's sandbox
  * is on Voluma's Modal account; `keys` is the model key alone.
  *
+ * Model (`model`): the API picks the run's model when it creates the run (the request's
+ * `model` if it is in the caller's `GET /run/models` list, else the list's default, or the
+ * API's debug override for a `voluma` run) and records it; every role of the run uses it.
+ * Visitor runs only ever get a standard Meta model. A run without `model` predates this.
+ *
  * Visitor keys are the caller's own, kept in their browser. The server and the
  * runner hold them in memory for that run only: never in the database, on
  * disk, in logs or in any response (log no request body on these routes). The
@@ -137,7 +143,7 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import { inputIdSchema, runIdSchema, segmentSchema, studyIdSchema } from "./ids";
+import { inputIdSchema, modelRefSchema, runIdSchema, segmentSchema, studyIdSchema } from "./ids";
 import { relativePathSchema } from "./r2";
 import { reviewSummarySchema } from "./review";
 import { workflowPinSchema } from "./workflow";
@@ -252,6 +258,12 @@ export const runSchema = z
     /** Who pays for models and sandboxes; see the header. */
     credentials: z.enum(["voluma", "visitor"]),
     /**
+     * The model every role of the run uses, chosen by the API when the run is created (see the
+     * header). Absent on runs made before the choice existed: the runner then uses its own
+     * config, as it did.
+     */
+    model: modelRefSchema.optional(),
+    /**
      * A shared, read-only run every caller in the org can read, even under
      * `self`, set only by seeding (see the header). It always reads its org's
      * reference scan.
@@ -328,8 +340,33 @@ export const startRunRequestSchema = z.object({
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. Absent: a guest is refused (403). */
   keys: visitorKeysSchema.optional(),
+  /** One of `GET /run/models` for this run's credentials; absent: that list's default. Another is refused with 400. */
+  model: modelRefSchema.optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
+
+/** A model a person may pick for a run, as `GET /run/models` lists it. */
+export const modelChoiceSchema = z.object({
+  model: modelRefSchema,
+  label: z.string(),
+  /** A caution to show beside the choice. */
+  note: z.string().optional(),
+});
+const modelChoicesSchema = z.object({
+  choices: z.array(modelChoiceSchema).min(1),
+  default: modelRefSchema,
+});
+/**
+ * `GET /run/models`: the choices for a run on Voluma's keys (`voluma`, null for a guest, who
+ * has none) and on the starter's own (`visitor`). `forced`: the API is set to give every run
+ * on Voluma's keys this model whatever is picked (a debug setting); visitor runs keep their pick.
+ */
+export const runModelsResponseSchema = z.object({
+  voluma: modelChoicesSchema.nullable(),
+  visitor: modelChoicesSchema,
+  forced: z.object({ model: modelRefSchema, label: z.string() }).optional(),
+});
+export type RunModelsResponse = z.infer<typeof runModelsResponseSchema>;
 
 export const listRunsResponseSchema = z.object({ runs: z.array(runSchema) });
 export const listInputsResponseSchema = z.object({ inputs: z.array(inputSchema) });

@@ -350,6 +350,18 @@ is therefore not an independent image backup. Retaining those objects, remapping
 and rolling back to a runner that cannot decode `imageRef` need an operator policy before cleanup or rollback;
 there is no automatic conversion to inline rows.
 
+**Meta requests name images by file id.** Pi sends every image of a thread's history in every request as base64,
+so each call re-sent megabytes (about 3 GB of Render egress per full `wonder` run). `apps/runner/src/meta-images.ts`,
+Pi's `onPayload` hook on `meta/*` models only, uploads each image once per claim to Meta's Files API (`expires_after`
+24 h; reused until 2 h before it expires) and swaps `file_id` in for the `data:` URL in the outgoing request only:
+Pi's messages and stored history keep their bytes or `imageRef`s. Meta's prompt cache reads the image, not how it
+was sent (measured: base64 and `file_id` for the same bytes share a cached prefix), so nothing about ids outlives
+the claim, and every failure falls back to inline bytes without a cache miss: a failed upload goes inline for that
+call (retried after 5 min), a key the Files API refuses (401, 403) sends every image inline for the rest of the
+claim, and a request Meta refuses with a 4xx naming a file (`404 file_not_found` for a deleted one) is resent inline
+in the same `fetch` (the 4xx would otherwise read as fatal in `provider-error.ts`). The claim-end log line `model requests this
+claim:` gives bytes sent against bytes with every image inline. Images count against compaction's limits as before.
+
 **Context compaction.** `adapters/pi/compaction.ts`; nothing rewrites history between requests, so the provider's
 cache prefix stays intact. Token decisions use only what the last request used (the last reply's reported input, cache read and cache write
 tokens): nothing blocks or splits a request on an estimate, so a request may go past the budget. Only a thread with no
@@ -514,11 +526,13 @@ composes byte-identical text and an edited file reaches only new threads (a resu
 definitions it started with, run by the current tools; a tool whose input schema changed (a `.default`, a `.min`, a new field), or that is new to the role, is declared to it by a system message Pi appends to the transcript (`resumedTools`), stored with the history so a later resume does not append it again, and new calls use the current schema; it costs one uncached request per thread on Meta and DeepSeek and none on Anthropic's Opus 5, measured; a tool removed since is declared removed the same way; a description change (the tool's or a field's) changes nothing sent. It is `ThreadStale` only when a tool it has called no longer exists, or its model changed: switching the model under a live thread would replay another provider's reasoning blocks and ids, which nothing has measured). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
-A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
+A run's model is decided by the API when the run is created and arrives as `run.model` (optional: a run made before the choice has none; `run-models.ts` in the API's run domain holds the choices). Precedence: `RUNNER_MODEL` (the plumbing check), then `run.model` (every role uses it, and a visitor run too), then the role file's alias. A run whose model has no key here (`VOLUMA_<PROVIDER>_API_KEY`) or is unknown to Pi fails at claim with a message naming it, as does a visitor run whose model is not a Standard-mode Meta model (the API refuses that too; neither side trusts the other). The deploy overlap holds both ways: `runSchema` strips unknown keys, so a runner without this reads a claim that has `model`, and a claim without it is today's behaviour.
+
+Without `run.model`, a role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
 `RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
 (no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
 set, forces every alias to one model. Each configured alias's provider key is required at start. A
-visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
+visitor run without `run.model` uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
 A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
 levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a plumbing
@@ -530,7 +544,7 @@ role's set level against its model (the role files load per run); both use `thin
 only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
 guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
 DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
-without asking Muse for an unsupported effort. Visitor runs always use `"off"`. The level is
+without asking Muse for an unsupported effort. With `run.model`, the role file's level goes to the nearest level the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`), and `RUNNER_THINKING` is checked against the aliases only. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
