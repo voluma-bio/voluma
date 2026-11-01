@@ -634,6 +634,19 @@ function withoutDescriptions(schema: unknown, named = false): unknown {
 }
 
 /**
+ * DELETE one deploy after `read` ships (packages/harness/.context/TODO.md): `read` was `read_file`
+ * until then, and a live main thread that has called `read_file` would otherwise fail as stale
+ * on resume. A thread whose declared tools include `read_file` keeps it, running as `read`; no
+ * other thread is offered it.
+ */
+function withReadFileAlias(declared: { name: string }[], current: AgentTool[]): AgentTool[] {
+  const read = current.find((t) => t.name === "read");
+  return read && declared.some((d) => d.name === "read_file")
+    ? [...current, { ...read, name: "read_file" }]
+    : current;
+}
+
+/**
  * The tools a resumed thread offers. An unchanged tool keeps the definition the thread started
  * with, so the request stays byte-identical; a description change (the tool's or a field's,
  * `.describe()`) counts as unchanged. A tool whose input schema changed, or that is new, is
@@ -646,9 +659,10 @@ function withoutDescriptions(schema: unknown, named = false): unknown {
 function resumedTools(
   stored: AgentMessage[],
   compaction: Compaction | undefined,
-  current: AgentTool[],
+  offered: AgentTool[],
 ): AgentTool[] {
   const declared = getCurrentTools(stored);
+  const current = withReadFileAlias(declared, offered);
   const called = new Set(
     compactedView(stored, compaction).flatMap((m) =>
       m.role === "assistant"

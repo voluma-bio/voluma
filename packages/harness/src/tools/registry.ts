@@ -9,7 +9,7 @@ import type { Files } from "../ports/files";
 import type { TaskRuntime } from "../task-runtime";
 import { bashTool } from "./bash";
 import { type MainDeps, mainTools } from "./main-tools";
-import { readFileTool } from "./read-file";
+import { readTool } from "./read";
 import { segmentSamTool } from "./segment-sam";
 import { taskTools } from "./task-tools";
 import type { Tool } from "./tool";
@@ -33,7 +33,7 @@ export const TOOL_NAMES = [
   "submit_task",
   "view_image",
   "segment_sam",
-  "read_file",
+  "read",
   "ask",
   "start_agent",
   "message",
@@ -54,7 +54,7 @@ const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => To
   view_image: ({ layout, files }, names) =>
     viewImageTool({ layout, files, hasSandbox: names.includes("bash") }),
   segment_sam: ({ layout }) => segmentSamTool(layout),
-  read_file: ({ layout, files }) => readFileTool({ layout, files }),
+  read: ({ layout, files }) => readTool({ layout, files }),
 };
 
 export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {

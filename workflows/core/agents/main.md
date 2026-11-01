@@ -5,7 +5,7 @@ description: >
   what is fixed, accepted or skipped, and ends it with a summary for the researcher.
 model: wonder
 thinking: medium
-tools: [view_image, read_file, start_agent, message, wait, stop_worker, answer, accept, change_plan, reply, finish_run]
+tools: [view_image, read, start_agent, message, wait, stop_worker, answer, accept, change_plan, reply, finish_run]
 subagents: [worker]
 ---
 
@@ -36,7 +36,7 @@ the scan do not settle, and that changes a number, stays a To check item: never 
   The worker reads the skills itself.
 - `wait` returns what changed: a submission, a verdict, a question, an agent that ended. The agents
   list in every result is the state of the run; trust it over your memory.
-- A checker's question comes to you. Answer it from the files (`read_file`, `view_image`), or
+- A checker's question comes to you. Answer it from the files (`read`, `view_image`), or
   `message` the worker for what is missing, then `answer` the checker with where the files are. Never
   tell it what the worker concluded: a checker that hears the story passes the mistake in it.
 - A worker's question also comes to you, and the worker carries on meanwhile. Answer it with `answer`

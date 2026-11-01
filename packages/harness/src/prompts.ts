@@ -28,17 +28,17 @@ Check what you report against the files themselves, and say which file or header
 
 /**
  * The role's skills, progressively disclosed: name, description and path here, the skill and its
- * references and resources read with bash (or `read_file`, for a role without a shell) when
+ * references and resources read with `read` when
  * needed. The workflow's own skill comes first and is read first.
  */
-function skillList(def: WorkflowDefinition, role: AgentDefinition, shell: boolean): string {
+function skillList(def: WorkflowDefinition, role: AgentDefinition): string {
   const lines = def.skills
     .filter((s) => role.skills.includes(s.name))
     .map(
       (s) =>
         `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? " [read first]" : ""}`,
     );
-  return `Skills: read a skill's SKILL.md with ${shell ? "bash" : "`read_file`"} before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
+  return `Skills: read a skill's SKILL.md with \`read\` before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
 /** One line per script of the role's skills, from its docstring. */
@@ -48,7 +48,7 @@ function toolIndex(def: WorkflowDefinition, role: AgentDefinition, shell: boolea
     .map((t) => `- ${t.skill}/${t.script}: ${t.summary}`);
   const use = shell
     ? "Run `python <skill dir>/resources/<script> --help` before you use one."
-    : "Workers run them; read one with `read_file` to know what a worker's result rests on.";
+    : "Workers run them; read one with `read` to know what a worker's result rests on.";
   return `Scripts of those skills, at <skill dir>/resources/<script> (skill dirs are listed above). ${use}\n${lines.join("\n")}`;
 }
 
@@ -57,7 +57,7 @@ export function systemPrompt(def: WorkflowDefinition, thread: ThreadLayout): str
   const role = def.agents[thread.role];
   if (!role) throw new Error(`${thread.name} runs on ${thread.role}, which is not a role file`);
   const shell = role.tools.includes("bash");
-  const skills = `${skillList(def, role, shell)}\n\n${toolIndex(def, role, shell)}`;
+  const skills = `${skillList(def, role)}\n\n${toolIndex(def, role, shell)}`;
   if (!shell) return `${role.body}\n\n${skills}`;
   return `${role.body}\n\n${common(thread)}\n\n${skills}`;
 }

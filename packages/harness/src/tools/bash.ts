@@ -97,17 +97,16 @@ async function modelView(
   if (!output.cut) return { output: output.head + output.tail, truncated: false };
   const text = output.stored();
   const omitted = output.total - HEAD_CHARS - TAIL_CHARS;
-  let note = `${omitted} of ${output.total} characters omitted`;
+  let note = `${omitted} of ${output.total} characters omitted. read ${path} for the rest of the output`;
   let stored = true;
   try {
     await sandbox.writeFile(path, new TextEncoder().encode(text), ctx.signal);
-    note += `; full output at ${path}`;
     if (text.length < output.total)
       note += `, which holds only the first ${text.length} characters`;
   } catch (error) {
     // The command ran; its result must reach the model even when the copy is lost.
     stored = false;
-    note += `; full output not saved (${String(error)})`;
+    note = `${omitted} of ${output.total} characters omitted; full output not saved (${String(error)})`;
   }
   return { output: `${output.head}\n[${note}]\n${output.tail}`, truncated: stored };
 }
