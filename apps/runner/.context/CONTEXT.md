@@ -122,7 +122,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
 
 - **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
   whole log), minus files with an `assets.*` event; new events are polled once a second.
-  One file at a time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session: created at the first file, replaced when the provider ended it, metered by the runner's `createSandbox` like the others). A failed conversion is recorded and the worker moves on; a sandbox that
+  One file at a time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session: created at the first file, replaced when the provider ended it, metered by the runner's `createSandbox` like the others). A failed conversion is retried once (not after a timeout or bad arguments, not when stopped), then recorded, and the worker moves on; a sandbox that
   dies or cannot be created fails the file (the sandbox session replaces an ended sandbox on the next call, and runs a command the provider refused once more). `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
@@ -134,7 +134,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   and `superviseRun` adds `VOLUMA_REVIEW_RUNTIME` from the same run-pinned image as the sandbox spec).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
-  non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
+  non-zero exit from a sandbox that is gone counts as a sandbox failure (the sandbox session's retry, not the conversion retry), not a
   failed file.
 - **Reuse across runs.** The converter takes `VOLUMA_REVIEW_CACHE` (or `--cache`) and caches
   completed assets under a hash of its source code and `VOLUMA_REVIEW_RUNTIME` (the pinned
