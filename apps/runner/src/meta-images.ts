@@ -9,10 +9,12 @@
  * inline instead without a cache miss, and an id need not outlive the claim: a restart uploads
  * again. That makes every failure here safe to answer with the bytes:
  * - an upload that fails sends that image inline this call, and tries again after a pause;
- * - a request Meta answers `404 file_not_found` (an id expired or deleted) is resent with its
- *   images inline, and those ids are forgotten; `provider-error.ts` would take the 404 as fatal.
- * Uploads expire after `EXPIRES_S`, so the lab's images leave Meta's store a day after their
- * last use; an id is not sent within `REFRESH_MS` of its expiry.
+ * - a request Meta refuses with a 4xx that names a file (`404 file_not_found` for a deleted one)
+ *   is resent with its images inline, and those ids are forgotten; `provider-error.ts` would
+ *   take the 4xx as fatal;
+ * - a key the Files API refuses (401, 403) turns uploads off for the claim.
+ * Uploads expire `EXPIRES_S` after upload, so the lab's images leave Meta's store within a day
+ * of their last use; an id is not sent within `REFRESH_MS` of its expiry.
  */
 import { createHash } from "node:crypto";
 
@@ -28,6 +30,7 @@ type Part = { type?: unknown; image_url?: unknown; file_id?: unknown; [key: stri
 export function metaImages(baseUrl: string, apiKey: string, log: (line: string) => void) {
   const uploads = new Map<string, Promise<Uploaded | undefined>>();
   const failedAt = new Map<string, number>();
+  let refused = false; // the Files API refused the key: every image goes inline
   const stats = {
     requests: 0,
     sentBytes: 0,
@@ -37,7 +40,11 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
     resent: 0,
   };
 
-  async function upload(hash: string, dataUrl: string): Promise<Uploaded | undefined> {
+  async function upload(
+    hash: string,
+    dataUrl: string,
+    stop: AbortSignal | undefined,
+  ): Promise<Uploaded | undefined> {
     const comma = dataUrl.indexOf(",");
     const mimeType = dataUrl.slice(5, dataUrl.indexOf(";"));
     const bytes = Buffer.from(dataUrl.slice(comma + 1), "base64");
@@ -56,8 +63,16 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
-        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+        signal: AbortSignal.any([AbortSignal.timeout(UPLOAD_TIMEOUT_MS), ...(stop ? [stop] : [])]),
       });
+      if (res.status === 401 || res.status === 403) {
+        if (!refused)
+          log(
+            `meta-images: the Files API refused this key (HTTP ${res.status}); sending images inline for the rest of the claim`,
+          );
+        refused = true;
+        return undefined;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
       const { id } = (await res.json()) as { id?: string };
       if (!id) throw new Error("the reply had no file id");
@@ -65,6 +80,7 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
       stats.uploadBytes += bytes.length;
       return { fileId: id, usableUntil: started + EXPIRES_S * 1000 - REFRESH_MS };
     } catch (error) {
+      if (stop?.aborted) return undefined;
       log(
         `meta-images: upload of a ${bytes.length}-byte image failed, sending it inline: ${String(error)}`,
       );
@@ -74,7 +90,11 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
   }
 
   /** The image's live file id, uploading it if needed; `undefined` sends it inline. */
-  async function fileIdFor(dataUrl: string): Promise<string | undefined> {
+  async function fileIdFor(
+    dataUrl: string,
+    stop: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    if (refused) return undefined;
     const hash = createHash("sha256").update(dataUrl).digest("hex");
     const known = uploads.get(hash);
     if (known) {
@@ -85,7 +105,7 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
       const newer = uploads.get(hash);
       if (newer !== known) return (await newer)?.fileId;
     }
-    const next = upload(hash, dataUrl);
+    const next = upload(hash, dataUrl, stop);
     uploads.set(hash, next);
     return (await next)?.fileId;
   }
@@ -116,7 +136,7 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
 
   return {
     /** One model call's hooks: Pi's `onPayload`, and a wrap of the call's `fetch`. */
-    forCall(fetchFn: typeof globalThis.fetch) {
+    forCall(fetchFn: typeof globalThis.fetch, stop: AbortSignal | undefined) {
       // file id → the data URL it replaced in this call's request, for a resend.
       const swapped = new Map<string, string>();
       let inlineExtra = 0;
@@ -124,7 +144,9 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
         const p = params as { input?: unknown };
         const parts = inlineImages(p.input);
         if (parts.length === 0) return undefined;
-        const ids = await Promise.all(parts.map((part) => fileIdFor(part.image_url as string)));
+        const ids = await Promise.all(
+          parts.map((part) => fileIdFor(part.image_url as string, stop)),
+        );
         const replaced = new Map<Part, Part>();
         parts.forEach((part, i) => {
           const fileId = ids[i];
@@ -153,11 +175,13 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
           stats.inlineBytes += Buffer.byteLength(body) + inlineExtra;
         }
         const res = await fetchFn(input, init);
-        if (res.status !== 404 || body === undefined || swapped.size === 0) return res;
+        const refusedFile = res.status >= 400 && res.status < 500 && res.status !== 429;
+        if (!refusedFile || body === undefined || swapped.size === 0) return res;
         const text = await res.clone().text();
-        if (!text.includes("file_not_found")) return res;
+        if (!text.includes("file")) return res;
+        await res.body?.cancel();
         log(
-          `meta-images: Meta lost a file this request named (${text.slice(0, 200)}); resending its images inline`,
+          `meta-images: Meta refused a file this request named (HTTP ${res.status}: ${text.slice(0, 200)}); resending its images inline`,
         );
         forget(swapped.keys());
         let inline = body;
@@ -176,7 +200,7 @@ export function metaImages(baseUrl: string, apiKey: string, log: (line: string) 
     /** For the claim-end log: what went to Meta, against what all-inline images would have sent. */
     summary(): string {
       const mb = (n: number) => `${(n / 1e6).toFixed(1)} MB`;
-      return `${stats.requests} requests sent ${mb(stats.sentBytes)} (${mb(stats.inlineBytes)} with every image inline); ${stats.uploads} images uploaded once, ${mb(stats.uploadBytes)}${stats.resent ? `; ${stats.resent} resent inline after file_not_found` : ""}`;
+      return `${stats.requests} requests sent ${mb(stats.sentBytes)} (${mb(stats.inlineBytes)} with every image inline); ${stats.uploads} images uploaded once, ${mb(stats.uploadBytes)}${stats.resent ? `; ${stats.resent} resent inline after Meta refused a file` : ""}`;
     },
   };
 }

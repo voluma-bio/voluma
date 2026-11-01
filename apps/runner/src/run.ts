@@ -295,7 +295,7 @@ async function claimBody(
         const fetch = loggedFetch(role, log, options?.signal);
         // Meta requests name each image by an uploaded file id, not its bytes (`meta-images.ts`).
         if (m.provider === "meta" && apiKey) images ??= metaImages(m.baseUrl, apiKey, log);
-        const call = m.provider === "meta" ? images?.forCall(fetch) : undefined;
+        const call = m.provider === "meta" ? images?.forCall(fetch, options?.signal) : undefined;
         const stream = models.streamSimple(m, context, {
           ...options,
           apiKey,
