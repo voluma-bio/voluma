@@ -300,8 +300,8 @@ Tab focus refreshes the preference through the query's normal refetch behaviour.
 ## Deployment
 
 Staging runs on Render (region Virginia), defined in `render.yaml`: the API
-(`voluma-api`, which serves the built web app and `/api/*`), the gateway, the runner (suspended between runs after 2026-11-04) and,
-outside Render, Postgres on Neon's free tier. A merge to `main` deploys each service whose build filter it touches. Setup,
+(`voluma-api`, which serves the built web app and `/api/*`), the gateway, the runner (always on) and,
+outside Render, Postgres on Neon (Launch from 2026-11-04). A merge to `main` deploys each service whose build filter it touches. Setup,
 variables, secret rotation: [apps/api/.context/deploy.md](../apps/api/.context/deploy.md).
 
 ## Packages export source

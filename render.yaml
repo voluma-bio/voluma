@@ -9,10 +9,9 @@
 #
 # Prices are from https://render.com/pricing on 2026-10-30. The workspace is on the Hobby tier
 # ($0 plus compute); nothing here needs Pro. Always on: the API $7 + the gateway $7 = $14/month.
-# The runner is $25/month, billed per second (about $0.035/hour) while it is not suspended: it
-# stays on until 2026-11-04 (hackathon visitors start runs unattended), then is suspended between
-# runs (apps/runner/.context/deploy.md). Postgres is Neon's free tier ($0;
-# apps/api/.context/deploy.md), so it is not defined here.
+# The runner is $25/month, billed per second (about $0.035/hour): it stays on through the
+# 2026-11-04 freeze and judging, until about 2026-11-18 (apps/runner/.context/deploy.md).
+# Postgres is Neon (Launch from 2026-11-04; apps/api/.context/deploy.md), so it is not defined here.
 
 envVarGroups:
   - name: voluma-shared
@@ -138,9 +137,8 @@ services:
     name: voluma-runner
     runtime: node
     region: virginia
-    # $25 while running (1 CPU, 2 GB; the cheapest plan with 2 GB). Always on until 2026-11-04,
-    # then suspended between runs by hand (deploy.md; the Blueprint has no field for a suspended
-    # service). The runner is one Node thread and holds no volumes, so heavy work creeping back into it fails loudly
+    # $25 while running (1 CPU, 2 GB; the cheapest plan with 2 GB). Always on until about
+    # 2026-11-18 (deploy.md). The runner is one Node thread and holds no volumes, so heavy work creeping back into it fails loudly
     # instead of slowing heartbeats.
     plan: 1c-2g
     numInstances: 1 # more instances share the queue: claims are leased through the API
