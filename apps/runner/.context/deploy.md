@@ -74,8 +74,8 @@ Set it to one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; the 
 non-off level a model alias lacks (a role file's own `thinking` is checked when a run starts),
 and the boot line prints it. `off` means no requested effort, not guaranteed disabled reasoning:
 Muse uses its default; DeepSeek runs with thinking off. A role's explicit `thinking: off` overrides
-global `high`. With `RUNNER_MODEL` set (every role forced onto one model), the role files' levels
-are ignored and `RUNNER_THINKING` alone applies.
+global `high`. With `RUNNER_MODEL` set (every role forced onto one model), `RUNNER_THINKING` applies
+when set; otherwise each role keeps its file's level, at the nearest the forced model supports.
 
 Agents never start a run on staging, and never test on wonder (Jimmy). An agent's test run is a local runner: plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro` (Jimmy, 2 Nov).
 

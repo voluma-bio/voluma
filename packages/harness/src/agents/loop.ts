@@ -71,6 +71,9 @@ interface AgentIdentity {
   /** A worker's brief and the skills main named, read back from the `start_worker` call. */
   brief?: string;
   skills?: string[];
+  /** The closed worker it starts from, and the worker it is blind to (`start_worker`'s `from` and `blind`). */
+  from?: string;
+  blind?: string;
   /** Which main this is: 1 for the first, 2 for its replacement. */
   n: number;
 }
@@ -103,6 +106,8 @@ interface AgentLoopOptions {
   release(threadId: string): Promise<void>;
   /** Keeps what an agent leaves in its `/work` folder past the folder's expiry (`keep-notes.ts`). */
   keepNotes(agent: { name: string; role: string }): Promise<void>;
+  /** Renders the agent's conversation for `/work/<name>/transcript.md` (`transcript.ts`). */
+  prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
   config?: Partial<Pick<LoopConfig, "stuckLimit">>;
@@ -168,10 +173,20 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     limit: WORKER_LIMIT,
     skills: o.skills,
     catalog: o.catalog,
-    startWorker: async ({ name, brief, skills, spawnedBy, parentThreadId }) => {
+    prepareTranscript: o.prepareTranscript,
+    startWorker: async ({ name, brief, skills, from, blind, spawnedBy, parentThreadId }) => {
       const id = threadIdOf(runId, name);
       await begin(
-        { id, name, role: "worker", brief, skills, n: 1 },
+        {
+          id,
+          name,
+          role: "worker",
+          brief,
+          skills,
+          n: 1,
+          ...(from && { from }),
+          ...(blind && { blind }),
+        },
         startedId(id),
         parentThreadId,
         { spawnedBy },
@@ -193,6 +208,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         ? [...d.records.values()].filter((x) => x.place === "main").indexOf(r) + 1
         : 1,
     ...(r.place === "worker" && briefOf(d, r)),
+    ...(r.from && { from: r.from }),
+    ...(r.blind && { blind: r.blind }),
   });
 
   /**
@@ -231,6 +248,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         parentThreadId,
         kind: agent.role,
         role: agent.role,
+        ...(agent.from && { from: agent.from }),
+        ...(agent.blind && { blind: agent.blind }),
         model: `${s.model.provider}/${s.model.id}`,
         ...(extra.spawnedBy && { spawnedBy: extra.spawnedBy }),
         ...(extra.input && { input: extra.input }),

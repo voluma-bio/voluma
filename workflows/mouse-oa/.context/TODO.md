@@ -10,3 +10,18 @@
   the unflagged face columns of OA7-1L V=136/224 and OA6-1RK V=102 are still over 105 µm from his lines; the flags do not see a
   convincing sheet on the wrong structure, so the worker's look is the check. (2) The proposal is not yet scored on a traced section by a worker; judge the instructions on a run with the production
   model, not on a stand-in (`workflows/core/AGENTS.md`). (3) `iioc.py` cannot run on OA6-1RK's stored frame (old format): rerun `tibia_frame.py` for that scan. (4) The proposal comes from the search along U alone (the V-direction search was right on about half the hand-traced columns, the U search on two thirds to three quarters, and averaging them lost the arch); its coverage rule (`min_run_um` 315, `bridge_um` 1000, `max_surface_slope` 1.5, `off_tibia_margin_um` 105) comes from the first run's failures (OA6-2RK, local run 991c50b3), not from fitting hand lines (Jimmy: his traces are rough in height too). Judge it on the next production-model run: how far past the spans the worker has to trace, and whether it traces or fills. The search still cannot see the plate on the arch's outer sides (OA6-2RK V=220/225, U below ~100 and above ~285: it is a thin line inside bright bone and just outside the tibia mask, so the valley cost is empty there and the search goes flat; widening the band beyond the mask made OA6-1RK worse), and it proposes short fragments on the epiphyseal roof of some back sections (V=275, 305, 329); where the search is wrong inside a span (OA7-1L V=185 U 214 to 234: a different structure just above the plate), the render is still the only check.
+- **ROI-3's cortex edge is one depth all round.** `metaphysis_roi.py` keeps ROI-3 `cortex_estimate_mm` plus `cortex_clearance_um`
+  from the outer edge on every axial slice, the estimate being the wall just below the plate (OA6-2RK 0.147 mm), so where the wall
+  is locally thicker ROI-3 reaches into it. On OA6-2RK (the local Opus run's distal curves): the tibial tuberosity, V below 100 and
+  W 138 to 154, where 60% of ROI-3's bone is in structures at least 126 µm thick; and the ring 0.17 to 0.38 mm inside the edge,
+  which ROI-3 gained when the estimate fell from 0.357 mm: 62% bone, mean thickness 89 µm, against 29% and 64 µm deeper in (ROI-3
+  BV/TV 29.2 to 42.2%, Tb.Th 58 to 79 µm). Whether the lab's ROI-3 keeps that ring is open: ask for their ROI-3 on one scan. If it
+  does not, the direction is an inner (endocortical) edge found per slice, the thick bone joined to the outer edge, with the clearance
+  measured from it. Those curves also cross the solid tuberosity at V=50 and 71, where V=70 shows no plate band: ROI-3 there lies
+  inside that bone whatever the edge.
+- **The width check (#10) is set on two runs.** `iioc.py` refuses a width point more than `width_point_off_face_um` from the proximal
+  face's curve on its coronal section, or more than `off_tibia_margin_um` off the tibia mask there (past the curves' ends the face is
+  held flat across the grid, so a point beside the tibia would sit on it); 200 µm sits between OA6-2RK run 991c50b3's right points
+  (141 and 51 µm) and run f45f630f's wrong ones at the top of the epiphysis (669 and 575 µm). Re-judge it on the next runs. The check
+  does not judge where along the face the ends are: two points anywhere on the face over the tibia, on one section, pass, so whether
+  they are the fibula–tibia junction and the prominent point opposite is still judged by eye.

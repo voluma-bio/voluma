@@ -27,8 +27,8 @@ after it. A snapshot that has `checker.md` and no `check.md` (a run from before 
   the role's model lacks a non-off level set here or in `RUNNER_THINKING`. Explicit `off` overrides
   the runner's level and requests no effort; on Muse this uses the provider's default, not disabled
   reasoning. A visitor run is always `off`. When
-  `RUNNER_MODEL` forces every role onto one model (a plumbing check), the role files' levels are ignored
-  and `RUNNER_THINKING` alone sets the level. The level is not recorded in the
+  `RUNNER_MODEL` forces every role onto one model (a test run), `RUNNER_THINKING` sets the level when it is
+  set; otherwise the role keeps this level, at the nearest the forced model supports. The level is not recorded in the
   log, so a resumed thread takes it from the snapshotted file and the runner's current
   `RUNNER_THINKING`.
 - `tools`: every tool the role holds, base tools included, from the harness registry. A tool not

@@ -16,13 +16,13 @@ import {
   type Status,
   StatusMark,
 } from "@voluma/ui";
-import { liveStatus, plural } from "./run-status";
+import { liveStatus, needsYouText, plural } from "./run-status";
 
 type ScanStatus = { label: string; status: Status; open: number };
 
 /** What needs a person on a scan (`scanNeedsYou`), as Studies counts it too. */
 export const needsYouOf = (scan: StudyScanDetail) =>
-  scanNeedsYou(scan.runs[0]?.review ?? null, scan.acceptable.length);
+  scanNeedsYou(scan.review, scan.acceptable.length);
 
 /**
  * A scan's status: its newest run's (`runStatus`, which reads To check from the items that need
@@ -32,9 +32,10 @@ export const needsYouOf = (scan: StudyScanDetail) =>
 export function scanStatus(scan: StudyScanDetail): ScanStatus {
   const [run] = scan.runs;
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
-  const { label, status } = liveStatus(run);
+  // The scan's `review` is its newest run's, of either loop (a `Run` has one for the task loop only).
+  const { label, status } = liveStatus({ ...run, review: scan.review });
   const open = status === "check" ? needsYouOf(scan) : 0;
-  return { label: open > 0 ? `${open} to check` : label, status, open };
+  return { label: open > 0 ? needsYouText(open, run.harness) : label, status, open };
 }
 
 /** A scan's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */

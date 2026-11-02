@@ -8,7 +8,16 @@
  */
 import { runThumbnailUrl } from "@voluma/api-client";
 import type { StudyScanDetail } from "@voluma/contracts/study";
-import { kneeOf, liveStatus, needsYouOf, plural, scanStatus, useNow } from "@voluma/run-view";
+import {
+  kneeOf,
+  liveStatus,
+  needsYouOf,
+  needsYouText,
+  plural,
+  scanStatus,
+  useNow,
+  whenText,
+} from "@voluma/run-view";
 import {
   Button,
   Count,
@@ -39,7 +48,6 @@ import {
   segmentOf,
   stoppedLine,
   waitsOn,
-  whenText,
 } from "./study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study-side";
 
@@ -191,7 +199,7 @@ function StatusLine({
   let mark = <StatusMark {...status} />;
   let more: string | null = null;
   if (run && status.status === "check") {
-    mark = <StatusMark status="check" label={`${needsYouOf(scan)} to check`} />;
+    mark = <StatusMark status="check" label={needsYouText(needsYouOf(scan), run.harness)} />;
     more = waitsOn(scan, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
     mark = <StatusMark {...liveStatus(run)} />;

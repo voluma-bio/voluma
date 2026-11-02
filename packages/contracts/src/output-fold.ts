@@ -282,6 +282,41 @@ export function outputsFold(events: readonly RunEvent[]): OutputsFold {
 export const finalOutputs = (events: readonly RunEvent[]): OutputState[] =>
   outputsFold(events).outputs.filter((o) => o.final);
 
+/** Final outputs with a version, of all final outputs: what "1 of 2 in" counts. */
+export function outputsIn(fold: OutputsFold): { done: number; total: number } {
+  const final = fold.outputs.filter((o) => o.final);
+  return { done: final.filter((o) => o.latest).length, total: final.length };
+}
+
+/** Each final value's latest number and UCUM unit, by output id: what the run reported. */
+export function finalValues(fold: OutputsFold): Map<string, { number: number; unit: string }> {
+  return new Map(
+    fold.outputs.flatMap((o) => (o.final && o.latest?.value ? [[o.id, o.latest.value]] : [])),
+  );
+}
+
+/**
+ * The final outputs that need a person: each with an open To check item on its latest version or
+ * on one it was made from, through latest versions (a link to a label overlay with no version of
+ * its own goes to its map, as the run's list names it). What "Needs you" counts on the sample page
+ * and on every row that shows an agent-loop sample, so the number seen before opening a sample is
+ * the one found on it.
+ */
+export function needingYou(fold: OutputsFold): Set<string> {
+  const to = (id: string) => (fold.byId.get(id)?.latest ? id : (fold.labels.get(id) ?? id));
+  const open = (id: string) => fold.byId.get(id)?.latest?.toCheck.some((t) => !t.resolved);
+  const needs = (root: string) => {
+    // A final label overlay with no version of its own is its map's, as any link to it is.
+    const seen = new Set([to(root)]);
+    for (const id of seen) {
+      if (open(id)) return true;
+      for (const link of fold.byId.get(id)?.latest?.madeFrom ?? []) seen.add(to(link.id));
+    }
+    return false;
+  };
+  return new Set(fold.outputs.filter((o) => o.final && needs(o.id)).map((o) => o.id));
+}
+
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>
   finalOutputs(events)

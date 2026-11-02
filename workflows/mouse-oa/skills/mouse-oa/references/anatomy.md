@@ -102,8 +102,9 @@ a merged one shows on the 3D sheet as a bump or a disconnected piece. How to loo
 How `sam-segmentation`'s general strategies play out on the mouse knee. On OA6-1RK, small structures sent in the
 big-bone request cost the patella its track (Dice with the reference 0.95 to 0.86).
 
-- **Request 1, the four big bones together:** femur (1), tibia (2), patella (3), fibula (4), one box each, even though only the
-  first three are measured: the fibula box stops the tibia track from taking it. Put the fibula box on a slice where it is
+- **Request 1, the four big bones together:** femur (1), tibia (2), patella (3), fibula (4), one box each on the piece that is
+  that bone, even though only the first three are measured: the fibula box stops the tibia track from taking it. A bone
+  with no such piece gets no box and is reported missing (above). Put the fibula box on a slice where it is
   separate from the tibia: on OA6-1RK, oriented-stack slice 340 (a tibia plus fibula slice with no patella). That slice is not
   the keyframe, so name the fibula from the 3D sheet or from the component tracked from the keyframe. On another scan, scroll
   the oriented stack toward the shaft until the fibula separates.

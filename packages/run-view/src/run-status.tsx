@@ -5,7 +5,7 @@
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
  * reviewed, which is never inferred. Also where a run's row links (the scan review), how a scan
- * is named, and how its cost and time read.
+ * is named, and how its cost, time and age ("12 min ago") read.
  */
 import type { Run } from "@voluma/contracts/run";
 import type { StudyRunSummary, StudyScan } from "@voluma/contracts/study";
@@ -64,9 +64,20 @@ export const itemHref = ({
 
 export type RunStatus = { label: string; status: Status };
 
-/** A run's status, with "Task N of M" while it runs: what a row says about a live run. */
-export function liveStatus(run: Pick<StudyRunSummary, "state" | "review" | "tasks">): RunStatus {
-  const tasks = run.state.status === "running" ? run.tasks : null;
+/**
+ * A run's status, with "Task N of M" while a task-loop run runs and "Running · N of M in" (final
+ * outputs) while an agent-loop run does: what a row says about a live run.
+ */
+export function liveStatus(
+  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness">,
+): RunStatus {
+  const running = run.state.status === "running";
+  if (running && run.outputs)
+    return {
+      label: `Running · ${run.outputs.done} of ${run.outputs.total} in`,
+      status: "running",
+    };
+  const tasks = running ? run.tasks : null;
   return tasks
     ? {
         label: `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}`,
@@ -75,8 +86,19 @@ export function liveStatus(run: Pick<StudyRunSummary, "state" | "review" | "task
     : runStatus(run);
 }
 
-/** A run's status; a study's newest-run summary carries the same `state` and `review` fields. */
-export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
+/**
+ * What needs a person on a run, as its sample page says it: the agent loop counts final values
+ * ("1 needs you", as its Needs you), the task loop items ("3 to check", as its To check).
+ */
+export const needsYouText = (n: number, harness: StudyRunSummary["harness"]) =>
+  harness === "agents" ? `${n} ${n === 1 ? "needs" : "need"} you` : `${n} to check`;
+
+/** A run's status; a study's newest-run summary carries the same `state`, `review` and `harness`. */
+export function runStatus({
+  state,
+  review,
+  harness,
+}: Pick<StudyRunSummary, "state" | "review" | "harness">): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Waiting", status: "waiting" };
@@ -88,11 +110,32 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
       // To check means needs you: a card nobody can accept outranks Reviewed too.
       if (state.outcome === "completed")
         return review?.needsYou
-          ? { label: `${review.needsYou} to check`, status: "check" }
+          ? { label: needsYouText(review.needsYou, harness), status: "check" }
           : review?.reviewedAt
             ? { label: "Reviewed", status: "done" }
             : { label: "Checked", status: "done" };
       if (state.outcome === "failed") return { label: "Failed", status: "stopped" };
       return { label: "Stopped", status: "stopped" };
   }
+}
+
+const MINUTE = 60_000;
+
+/** "just now", "4 min ago", "3 h ago", "yesterday", "31 Oct" (with the year when not this one). */
+export function whenText(iso: string, now: number): string {
+  const then = new Date(iso);
+  const ago = now - then.getTime();
+  if (ago < MINUTE) return "just now";
+  if (ago < 60 * MINUTE) return `${Math.floor(ago / MINUTE)} min ago`;
+  const today = new Date(now);
+  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (sameDay(then, today)) return `${Math.floor(ago / (60 * MINUTE))} h ago`;
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (sameDay(then, yesterday)) return "yesterday";
+  return then.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    ...(then.getFullYear() !== today.getFullYear() && { year: "numeric" }),
+  });
 }

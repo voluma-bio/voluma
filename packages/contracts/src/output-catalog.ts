@@ -282,3 +282,21 @@ export const outputCatalogSchema = z
     for (const p of problemsOf(entries)) ctx.addIssue({ code: "custom", ...p });
   });
 export type OutputCatalog = z.infer<typeof outputCatalogSchema>;
+
+const SUPERSCRIPT: Record<string, string> = { "2": "²", "3": "³", "-1": "⁻¹", "-2": "⁻²" };
+
+/**
+ * A value's UCUM unit as people and `outputs.json` write it: `mm3` → `mm³`, `[hnsf'U]` → `HU`,
+ * `um` → `µm`, `1/mm3` → `1/mm³`; annotations in braces drop out.
+ */
+export const unitAsWritten = (ucum: string): string =>
+  ucum
+    .replaceAll("[hnsf'U]", "HU")
+    .replace(/\{[^}]*\}/g, "")
+    .replace(/\bu(?=[mgLl])/g, "µ")
+    .replace(
+      /([A-Za-zµ])(-?\d)/g,
+      (_, unit: string, power: string) => unit + (SUPERSCRIPT[power] ?? power),
+    )
+    .replaceAll(".", "·")
+    .trim();

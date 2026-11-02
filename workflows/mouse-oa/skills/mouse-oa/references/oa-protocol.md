@@ -92,11 +92,13 @@ schema is `regions-and-landmarks`'):
   eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. Where part of the tibia label is really femur or fibula
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
   only what lies below. The U index of each plateau compartment's middle (a height point outside ROI-1's footprint
-  stops the script: move it). The two width points (#10): the centre of the fibula–tibia junction on the tibial
-  surface, and the most prominent point on the other side. Optional: where "the middle of the growth plate" is for
-  #7 (default: midway between the width points), the coronal section the heights are measured on (default: where
-  the footprint's growth-plate-to-top distance is largest), and the plate patches per compartment (default: the spec's
-  `plate_patch_width_um` wide around the compartment midpoint).
+  stops the script: move it). The two width points (#10), within 2 sections of each other and on the growth plate's
+  proximal face, on the tibia (`iioc.py` stops on a point more than the spec's `width_point_off_face_um` from the face on
+  its section, or more than `off_tibia_margin_um` off the tibia): the centre of the fibula–tibia junction on the tibial
+  surface, and the most prominent point on the other side. Optional: where "the
+  middle of the growth plate" is for #7 (default: midway between the width points), the coronal section the heights
+  are measured on (default: where the footprint's growth-plate-to-top distance is largest), and the plate patches per
+  compartment (default: the spec's `plate_patch_width_um` wide around the compartment midpoint).
 - **B, for `tibial_trabecular.py`.** The boundary between the subchondral plate and the trabecular compartment,
   with the end points on the inner side of the cortex: the first and last point of each curve limit ROI-2 across.
   The V range it covers.
@@ -122,8 +124,9 @@ scan, not a starting point for another.
 
 ## What the deck says, and what replaces the old run
 
-- #10 tibial width: from the centre of the fibula–tibia junction on the tibial surface to the prominent point on
-  the other side. The old run used a chord between growth-plate junction points at one section: do not reuse it.
+- #10 tibial width: a chord on one coronal section with both ends on the growth plate's proximal face, from the centre
+  of the fibula–tibia junction on the tibial surface to the prominent point on the other side. The old run's chord
+  joined the two ends of its traced face: do not reuse those points.
 - #26 DFL: `a` to `b`. #27 DFW: `c` to `d`. The old run used an outer-edge chord at one plane for the width: do not
   carry it over. #28 is DFW / DFL.
 - #7 to #9 heights: from the middle of the growth plate (whole, medial compartment, lateral compartment) up to the
@@ -208,7 +211,8 @@ the measurements they check.
 - Every tibial region (#4–25) follows traces made on one scan; the old run labelled its values provisional and so
   do we. They are counted on the aligned grid, a linear resampling of HU (grid rule above).
 - ROI-3 (#16–23) depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported
-  as `cortex_estimate_mm`): a wrong depth moves ROI-3.
+  as `cortex_estimate_mm`, the wall's thickness just below the plate): a wrong depth moves ROI-3. The edge is that
+  one depth all round, so where the wall is locally thicker ROI-3 reaches into it (OA6-2RK: the tibial tuberosity).
 - A medial or lateral value (#8, #9, #11, #12) follows the aligned frame's +U medial, confirmed on the render.
 - Tb.Nd and Tb.Tm (#22, #23) are exploratory; Tb.Th, Tb.Sp, Tb.N and Ct.Th (#19–21, #24, #25) carry the
   sphere-method bias with the voxel size.

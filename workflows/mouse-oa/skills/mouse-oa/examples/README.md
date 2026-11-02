@@ -23,9 +23,9 @@ own label.
 
 `iioc/deck-roi1-heights-width.jpg`: the tibia opened along the shaft, the growth plate, and ROI-1 above it with the heights 7, 8, 9 and the width 10 drawn on. ROI-1 runs from the growth plate's proximal face up to the articular surface of the tibial plateau, over the whole
 plateau: on a coronal section the region sits on the traced face, includes the marrow, and excludes the femur
-and the growth-plate band. The width (#10) is a chord along the growth plate on a coronal section, from the
-centre of the fibula–tibia junction on the tibial surface to the point that sticks out furthest on the other side
-of the plateau. The heights (#7–9) run along the shaft axis from the growth plate's face up to the top of the
+and the growth-plate band. The width (#10) is a chord on one coronal section with both ends on the growth plate's
+proximal face, from the centre of the fibula–tibia junction on the tibial surface to the point that sticks out
+furthest on the other side of the plateau. The heights (#7–9) run along the shaft axis from the growth plate's face up to the top of the
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
 middle of the medial and the lateral compartment of the plateau.
 

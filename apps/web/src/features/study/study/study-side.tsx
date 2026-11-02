@@ -5,7 +5,7 @@
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import { groupNames, groupOf, kneeOf, plural, useNow } from "@voluma/run-view";
+import { groupNames, groupOf, kneeOf, plural, useNow, whenText } from "@voluma/run-view";
 import { Button, cx, Facts, INPUT_WORD, type Status, StatusGlyph, StripPlot } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight } from "lucide-react";
@@ -23,7 +23,6 @@ import {
   scanValue,
   unitOf,
   valuesOf,
-  whenText,
 } from "./study-model";
 
 /** A block of the side: a plain heading (with an optional count or link), then its content. */

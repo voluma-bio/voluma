@@ -16,13 +16,14 @@
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, acceptToCheck, saveView } from "@voluma/api-client";
-import { studiesQuery, studyQuery } from "@voluma/api-client/query";
+import { studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
 import { outputsFold } from "@voluma/contracts/output-fold";
 import type { RunRead } from "@voluma/contracts/run";
 import {
+  inViewOf,
   isLive,
   Markdown,
   type OutputItem,
@@ -31,9 +32,7 @@ import {
   outputName,
   outputsReview,
   reviewAssetsOf,
-  sampleTree,
   shownOf,
-  trailOf,
   undrawn,
   useEvents,
 } from "@voluma/run-view";
@@ -41,13 +40,11 @@ import {
   Button,
   Chip,
   EmptyState,
-  ErrorState,
   IconButton,
   INPUT_WORD,
   LoadingState,
   Menu,
   MenuItem,
-  SampleTree,
   SidePanel,
   StatusMark,
   useFoldWhile,
@@ -84,13 +81,15 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useOutletContext, useSearchParams } from "react-router";
+import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { describe, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
-import { FinalOutputs, needingYou, OUTPUT_STATUS } from "./outputs-panel";
+import { FinalOutputs, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
+import { RunNews } from "./run-news";
+import { Samples } from "./samples-tab";
 import { RunAlert, ScanHeading } from "./scan-header";
 import type { Accepting } from "./version-report";
 
@@ -174,8 +173,8 @@ export function OutputsReview({
   const finals = review.sections.flatMap((s) => s.rows);
   const listed = [...finals, ...review.undeclared];
   const restingOn = useCallback(
-    (id: string) => listed.find((r) => trailOf(fold, r.id).some((t) => t.id === id)),
-    [listed, fold],
+    (id: string) => listed.find((r) => r.trail.some((t) => t.id === id)),
+    [listed],
   );
   const asked = params.get("output") ?? "";
   const askedRow = listed.find((r) => r.id === asked);
@@ -187,7 +186,8 @@ export function OutputsReview({
     finals[0] ??
     review.undeclared[0];
   const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
-  const trailOpen = opened && opened.id !== selected?.id ? opened : undefined;
+  const live = run.state.status !== "ended";
+  const { trailOpen, standIn } = inViewOf(review, selected, opened, live);
   // Picking any output: a listed value opens in place; anything else under the value resting on it.
   const show = useCallback(
     (id: string) => {
@@ -199,7 +199,7 @@ export function OutputsReview({
     },
     [listed, restingOn, select],
   );
-  const inView = trailOpen ?? selected;
+  const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
   const centre: Centre | undefined =
     centreParam === "run" || centreParam === "agents" ? centreParam : undefined;
@@ -211,10 +211,9 @@ export function OutputsReview({
 
   const accepting = useAcceptToCheck(run, reopen);
   const [onlyNeeds, setOnlyNeeds] = useState(false);
-  const needing = needingYou(review).size;
+  const needing = review.needing.size;
   const [leftTab, setLeftTab] = useState("conversation");
   const waiting = useMemo(() => waitingApprovals(events), [events]);
-  const live = run.state.status !== "ended";
   const runMarks = useRunMarks({
     run,
     me: me.userId,
@@ -287,12 +286,18 @@ export function OutputsReview({
   }, [select, toggleRun]);
 
   let panes: React.ReactNode;
-  if (!inView)
+  if (live && inView?.state.status !== "missing" && !inView?.state.latest)
     panes = (
       <Centered>
-        <EmptyState title="No outputs yet">
-          {live ? "The outputs appear once the AI has set them up." : undefined}
+        <EmptyState title="The run is going">
+          The AI's plan is in the conversation. What it makes shows here as it is published.
         </EmptyState>
+      </Centered>
+    );
+  else if (!inView)
+    panes = (
+      <Centered>
+        <EmptyState title="No outputs yet" />
       </Centered>
     );
   else if (!inView.state.latest)
@@ -305,8 +310,7 @@ export function OutputsReview({
               : `${inView.name} isn't reported yet`
           }
         >
-          {inView.state.missingReason ??
-            (live ? "It shows here once the AI reports it." : "The run ended without it.")}
+          {inView.state.missingReason ?? "The run ended without it."}
         </EmptyState>
       </Centered>
     );
@@ -345,11 +349,7 @@ export function OutputsReview({
 
   return (
     <>
-      <ScanHeading
-        run={run}
-        study={study.data}
-        progress={{ ...review.progress, noun: "outputs reported" }}
-      />
+      <ScanHeading run={run} study={study.data} />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"
@@ -383,7 +383,9 @@ export function OutputsReview({
           <RunAlert run={run} userId={me.userId} stale={stale} />
           <SceneBar
             centre={centre}
+            live={live}
             root={selected}
+            standIn={!!standIn}
             inView={inView}
             trailOpen={!!trailOpen}
             onBack={() => select({ trail: null, item: null })}
@@ -399,7 +401,13 @@ export function OutputsReview({
               {panes}
             </div>
             {centre === "run" && (
-              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
+              <RunGraphView
+                fold={fold}
+                catalog={catalog}
+                selected={inView?.id}
+                rows={review.rows}
+                onPick={show}
+              />
             )}
             {centre === "agents" && (
               <RunAgents events={events} fold={fold} live={live} nameOf={nameOf} />
@@ -409,33 +417,43 @@ export function OutputsReview({
         <SidePanel
           side="right"
           title="Final outputs"
+          meta={
+            live && review.progress.total > 0
+              ? `${review.progress.done} of ${review.progress.total} in`
+              : undefined
+          }
           icon={<Sigma />}
           badge={needing || undefined}
           badgeLabel={`${needing} need you`}
           tools={
             <>
-              <Button
-                size="sm"
-                variant={onlyNeeds ? "secondary" : "ghost"}
-                aria-pressed={onlyNeeds}
-                disabled={needing === 0 && !onlyNeeds}
-                onClick={() => setOnlyNeeds(!onlyNeeds)}
-              >
-                Needs you <span className="font-semibold">{needing}</span>
-              </Button>
+              {(!live || needing > 0 || onlyNeeds) && (
+                <Button
+                  size="sm"
+                  variant={onlyNeeds ? "secondary" : "ghost"}
+                  aria-pressed={onlyNeeds}
+                  disabled={needing === 0 && !onlyNeeds}
+                  onClick={() => setOnlyNeeds(!onlyNeeds)}
+                >
+                  Needs you <span className="font-semibold">{needing}</span>
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant={centre === "run" ? "secondary" : "ghost"}
                 aria-pressed={centre === "run"}
                 aria-keyshortcuts="w"
                 onClick={toggleRun}
+                title={live ? "Whole run (W)" : undefined}
               >
                 <Workflow aria-hidden />
-                Whole run
+                {/* Its icon alone while the run goes: the head also counts what is in. */}
+                <span className={live ? "sr-only" : undefined}>Whole run</span>
               </Button>
             </>
           }
         >
+          {live && <RunNews events={events} state={run.state} />}
           <FinalOutputs
             review={review}
             selected={selected}
@@ -446,7 +464,6 @@ export function OutputsReview({
             live={live}
             runId={run.id}
             events={events}
-            fold={fold}
             nameOf={nameOf}
             item={item?.key}
             onItem={(i) => {
@@ -464,7 +481,9 @@ export function OutputsReview({
 /** Above the centre: what it shows, and the way to the whole run and the agents and back. */
 function SceneBar({
   centre,
+  live,
   root,
+  standIn,
   inView,
   trailOpen,
   onBack,
@@ -475,7 +494,10 @@ function SceneBar({
   onView,
 }: {
   centre: Centre | undefined;
+  live: boolean;
   root: OutputRow | undefined;
+  /** `inView` is what `root`, not in yet, rests on. */
+  standIn: boolean;
   inView: OutputRow | undefined;
   trailOpen: boolean;
   onBack: () => void;
@@ -502,7 +524,7 @@ function SceneBar({
       </header>
     );
   if (!inView || !root) return null;
-  const { status, word } = OUTPUT_STATUS[inView.state.status];
+  const { status, word } = statusOf(inView, live);
   // A reported value can still rest on something to check.
   const inherited =
     !trailOpen &&
@@ -519,6 +541,8 @@ function SceneBar({
         >
           {root.name} ›
         </button>
+      ) : standIn ? (
+        <span className="shrink-0 text-xs text-muted-foreground">{root.name} rests on</span>
       ) : (
         inView.state.section && (
           <span className="shrink-0 text-xs text-muted-foreground">{inView.state.section}</span>
@@ -861,32 +885,6 @@ function waitingApprovals(events: readonly RunEvent[]): number {
     else if (e.type === "approval.given" || e.type === "approval.declined")
       open.delete(e.payload.toolCallId);
   return open.size;
-}
-
-/** The Samples tab (`INPUT_WORD`): every study's samples, this run's study open and its sample highlighted. */
-function Samples({ studyId, runId }: { studyId: string; runId: string }) {
-  const studies = useQuery(studiesQuery());
-  const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);
-  if (studies.isError)
-    return (
-      <ErrorState
-        className="m-3"
-        title={`Couldn't load the ${INPUT_WORD.many}`}
-        onRetry={() => void studies.refetch()}
-      >
-        Check your connection, then try again.
-      </ErrorState>
-    );
-  if (!studies.data)
-    return <LoadingState label={`Loading the ${INPUT_WORD.many}`} rows={4} className="m-3" />;
-  return (
-    <SampleTree
-      studies={tree}
-      studyId={studyId}
-      sampleId={runId}
-      renderLink={(href, props) => <Link to={href} {...props} />}
-    />
-  );
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

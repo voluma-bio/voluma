@@ -95,7 +95,8 @@ export function agentList(
       const last = r.lastReport
         ? `, last report ${r.lastReport.outputId} v${r.lastReport.version}`
         : "";
-      return `- ${r.name}: ${state}${idle}${on ? `, on: ${clip(oneLine(on), ON_CHARS)}` : ""}${last}`;
+      const tie = `${r.blind ? `, blind to ${r.blind}` : ""}${r.from ? `, started from ${r.from}` : ""}`;
+      return `- ${r.name}: ${state}${tie}${idle}${on ? `, on: ${clip(oneLine(on), ON_CHARS)}` : ""}${last}`;
     });
   return rows.length > 0 ? rows.join("\n") : "(no workers started)";
 }
