@@ -20,6 +20,8 @@
  *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
  *                                   the snapshot is checked and stored here, the Run domain judges
  *                                   and stores the message
+ *   POST /runs/:runId/approvals/:requestId  the researcher's yes or no to a held call
+ *                                   (`answerApprovalRequestSchema`, the agent loop's runs)
  */
 import {
   acceptToCheckRequestSchema,
@@ -29,6 +31,7 @@ import {
   saveViewRequestSchema,
 } from "@voluma/contracts/agent-events";
 import {
+  answerApprovalRequestSchema,
   MAX_MESSAGE_SNAPSHOT_BYTES,
   type PersonMessage,
   type SendRunMessageResponse,
@@ -210,7 +213,7 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
   });
 
   app.post("/runs/:runId/messages", async (c) => {
-    const { id, snapshot, ...rest } = await parseJson(c, sendRunMessageRequestSchema);
+    const { id, snapshot, markIds, ...rest } = await parseJson(c, sendRunMessageRequestSchema);
     const { runId } = c.req.param();
     const user = c.var.user;
     const reader = readerOf(user);
@@ -228,7 +231,7 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
       ...rest,
       ...(png && { snapshotKey: messageSnapshotKey(runId, id) }),
     };
-    const message = { id, payload };
+    const message = { id, payload, ...(markIds && { markIds }) };
 
     const checked = await messages.check(reader, caller, runId, message);
     if (!checked.duplicate && png) {
@@ -237,6 +240,13 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     }
     const { eventId, state } = await messages.send(reader, caller, runId, message);
     return c.json({ eventId, state } satisfies SendRunMessageResponse);
+  });
+
+  app.post("/runs/:runId/approvals/:requestId", async (c) => {
+    const body = await parseJson(c, answerApprovalRequestSchema);
+    const { runId, requestId } = c.req.param();
+    await messages.answer(readerOf(c.var.user), callerOf(c.var.user), runId, requestId, body);
+    return c.json({});
   });
 
   /** Streams a stored file to the browser; the bytes decide whether it renders inline. */

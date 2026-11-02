@@ -287,6 +287,8 @@ export const markPlacedSchema = z.looseObject({
  * does not oblige a migration of stored messages; it carries only what the notice to main needs.
  */
 export const attachedMarkSchema = z.looseObject({
+  /** The mark's id: how a later message finds what main was last told of it (`was`). */
+  id: z.uuid().optional(),
   output: outputRefSchema,
   tag: nonEmpty,
   volume: nonEmpty,
