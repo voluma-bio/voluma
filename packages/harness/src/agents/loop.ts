@@ -43,7 +43,7 @@ import {
   receipts,
   STUCK_REASON,
   STUCK_SUMMARY,
-  WRAP_UP_RESUME,
+  wrapUpResumeText,
   wrapUpText,
 } from "./deliveries";
 import {
@@ -326,7 +326,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     if (!r) return false;
     const tool = [...r.openCalls.values()].at(-1);
     const line = cutOffText(d.after as ClaimEndReason | undefined, tool);
-    const wrap = r.closeAt !== undefined ? `\n\n${WRAP_UP_RESUME}` : "";
+    const wrap = r.closeAt !== undefined ? `\n\n${wrapUpResumeText(r.name)}` : "";
     // A start cut off before its input landed gives that input again, after the line; it keeps
     // the input's sender so the log still names what was delivered.
     const pending = r.inputPending;

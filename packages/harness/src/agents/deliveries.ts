@@ -20,8 +20,8 @@ export const wrapUpText = (name: string) =>
   `Wrap up. Write /work/${name}/NOTES.md so that someone starting from it can carry on without you: what you did, where the files are, what you found, what is left and what you would try next. Then repeat the note as your last message and end your turn. Messages to you are refused from now on.`;
 
 /** A cut-off agent that was winding up. */
-export const WRAP_UP_RESUME =
-  "You were asked to wrap up: finish /work/<your name>/NOTES.md, repeat the note as your last message and end your turn.";
+export const wrapUpResumeText = (name: string) =>
+  `You were asked to wrap up: finish /work/${name}/NOTES.md, repeat the note as your last message and end your turn.`;
 
 export const PROVIDER_FAILED_RESUME = "The model provider failed during your last reply; continue.";
 
