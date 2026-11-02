@@ -59,6 +59,8 @@ export interface Recorder {
   ): Promise<void>;
   /** The stored events: those the recorder started with and those it has since delivered. */
   events(): readonly RunEvent[];
+  /** Calls `listener` with each event once it joins the view (not the events the recorder started with). */
+  onStored(listener: (event: RunEvent) => void): void;
   /** Resolves once every event queued so far is stored or given up on. */
   flush(): Promise<void>;
   /** The first error that made `emit` give up on an event; undefined while none has. */
@@ -86,6 +88,7 @@ export function recorder(
   const ids = new Set(held.map((e) => e.id)); // held, and queued for delivery
   const storedIds = new Set(ids);
   let failure: unknown;
+  const listeners: ((event: RunEvent) => void)[] = [];
 
   /** Stores the event (the log retries it) and adds it to the view, or throws. */
   async function deliver(event: EventInput): Promise<void> {
@@ -98,8 +101,10 @@ export function recorder(
         if (error instanceof LeaseLost || error instanceof EventLogUnavailable) stopped = true;
         throw error;
       }
-      held.push({ ...event, seq: held.length + 1 });
+      const stored = { ...event, seq: held.length + 1 };
+      held.push(stored);
       storedIds.add(event.id);
+      for (const listener of listeners) listener(stored);
     } catch (error) {
       ids.delete(event.id); // the id can be written again
       throw error;
@@ -169,6 +174,9 @@ export function recorder(
         throw new Error(`the ${type} event ${id} is invalid: ${parsed.error.message}`);
       }
       await enqueue(parsed.data);
+    },
+    onStored: (listener) => {
+      listeners.push(listener);
     },
     flush: async () => {
       await queue;

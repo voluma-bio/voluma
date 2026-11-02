@@ -578,6 +578,12 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   }
 
   o.bash.wake = shell.nudge;
+  // A delivery stored for a running main frees the next one, which `deliverToMain` holds back
+  // until then; no thread settling or tool call wakes the loop for it.
+  recorder.onStored((e) => {
+    if (e.type !== "message" || e.payload.role !== "user") return;
+    if (e.payload.sender.kind === "runtime" && e.payload.sender.covers) shell.nudge();
+  });
   await shell.run(step);
 }
 
