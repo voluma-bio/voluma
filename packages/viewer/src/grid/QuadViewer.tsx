@@ -508,6 +508,7 @@ export function QuadViewer({
                 marks={marks}
                 onMark={markIn(view)}
                 note={note}
+                clickLines
               />
             );
           else {
@@ -533,6 +534,7 @@ export function QuadViewer({
                 onTilt={tilts[axis]}
                 note={note}
                 planeToken={planeToken}
+                clickLines
               />
             );
           }

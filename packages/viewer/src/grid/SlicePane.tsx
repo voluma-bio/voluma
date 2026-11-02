@@ -3,15 +3,10 @@
  * drawn by three.js with an orthographic camera in pane mm (`basis.right` across, `basis.down`
  * down). Untilted (the grid's own axes, the default), it reads whole slices of the grid, opening
  * on the coarsest level and refining to the level the zoom needs. Tilted, it is resliced in the
- * browser from the level the 3D pane loads (`reslice.ts`), so it is softer. Left drag moves the
- * crosshair, the wheel steps slices along the normal, Ctrl or ⌘ + wheel zooms at the pointer,
- * Shift, middle or right drag pans. With `onTilt`, the dots near both ends of the other planes'
- * crosshair lines turn those planes about this pane's normal; this pane stays still.
- *
- * With a marking tool, left click or drag marks instead (`marks.ts` draws them): Point a voxel
- * (and the crosshair moves to it), Box a drag's rectangle, Line a drag's two ends or two clicks,
- * Angle three clicks (the vertex second), Outline a freehand loop, Probe reads the value under the
- * pointer and keeps it as a point on click. Esc drops a mark being drawn.
+ * browser from the level the 3D pane loads (`reslice.ts`), so it is softer. The gestures (moving
+ * the crosshair, stepping, zooming, panning, marking) are `slice-gestures.ts`; `marks.ts` draws
+ * the marks. With `onTilt`, the dots near both ends of the other planes' crosshair lines turn
+ * those planes about this pane's normal; this pane stays still. Esc drops a mark being drawn.
  */
 import { cx } from "@voluma/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -30,7 +25,6 @@ import {
 } from "three";
 import { type Contrast, compose, composeSampled, type OverlayPlane } from "./compose";
 import {
-  angleAbout,
   type Basis,
   cross,
   dot,
@@ -58,11 +52,11 @@ import {
   type PaneHandle,
   type PaneStatus,
   type PaneView,
-  type ProbeValue,
   planeAxes,
   type ShownMark,
   type Zyx,
 } from "./scene";
+import { type PaneCamera, type Probe, useSliceGestures } from "./slice-gestures";
 import { tokenColor } from "./token-color";
 import { volumeLevel } from "./volume";
 
@@ -70,24 +64,11 @@ import { volumeLevel } from "./volume";
 export const axisToken = (axis: Axis) =>
   axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x";
 
-/** Another plane through the crosshair, drawn as a line across this pane in its colour. */
-export type Cut = { axis: Axis; normal: Vec3; token?: string };
-
-/** Pixels per mm, the zoom that fits the grid in the pane, and the pane centre in mm. */
-type View = { zoom: number; fit: number; center: [number, number] };
-
-/** A drag shorter than this (CSS px) is a click. */
-const CLICK_PX = 4;
-/** An outline takes a point when the pointer has moved this far (CSS px) since the last. */
-const OUTLINE_STEP_PX = 3;
-/** The contract's cap on an outline's points. */
-const OUTLINE_MAX = 500;
-/** How near a tilt handle a press must land (CSS px), and how far out the handles sit (of the pane's half size). */
-const HANDLE_HIT_PX = 9;
+/** How far out the tilt handles sit, of the pane's half size. */
 const HANDLE_REACH = 0.85;
 
-/** What a probe reads at a source voxel, from what the pane has loaded. */
-type Probe = (p: Zyx) => ProbeValue | null;
+/** Another plane through the crosshair, drawn as a line across this pane in its colour. */
+export type Cut = { axis: Axis; normal: Vec3; token?: string };
 
 export function SlicePane({
   axis,
@@ -105,6 +86,7 @@ export function SlicePane({
   onTilt,
   note,
   planeToken = axisToken,
+  clickLines = false,
 }: {
   /** The grid axis the pane holds when untilted; a tilted pane names the axis it started on. */
   axis: Axis;
@@ -130,6 +112,8 @@ export function SlicePane({
   onStatus(status: PaneStatus): void;
   /** Each plane's colour token, for the crosshair lines; stable, or the lines redraw each render. */
   planeToken?: (axis: Axis) => string | undefined;
+  /** Line also takes two clicks, not only a drag (the outputs review's). */
+  clickLines?: boolean;
 }) {
   const [ra, ca] = planeAxes(axis);
   const basis = useStable(given ?? gridBasis(axis));
@@ -150,7 +134,7 @@ export function SlicePane({
     drawings: Group;
     render(): void;
   } | null>(null);
-  const view = useRef<View | null>(null);
+  const view = useRef<PaneCamera | null>(null);
   // A saved view shown before the pane had a size: applied when it gets one.
   const pending = useRef<{ zoom: number; center: [number, number] } | null>(null);
   const [level, setLevel] = useState(scene.image.levels.length - 1);
@@ -163,15 +147,7 @@ export function SlicePane({
   const [error, setError] = useState<string>();
   const [traceError, setTraceError] = useState<string>();
   const [traces, setTraces] = useState<Map<string, BufferGeometry>>(new Map());
-  // `x` from the pane's left, or (`left` false: the pointer is in its right half) its right.
-  const [readout, setReadout] = useState<{
-    x: number;
-    y: number;
-    left: boolean;
-    text: string;
-  } | null>(null);
   const probe = useRef<Probe | null>(null);
-  const [hovering, setHovering] = useState(false);
 
   // Pane mm: columns run along `right`, rows along `down`.
   const toPane = (p: Zyx): [number, number] => {
@@ -255,9 +231,8 @@ export function SlicePane({
       })),
     );
   };
-  const showHandles = useRef(false);
-  showHandles.current = hovering && !tool && !!onTilt;
 
+  const showHandles = useRef(false);
   const layer = useMarkLayer(
     host,
     () => {
@@ -279,7 +254,6 @@ export function SlicePane({
     tool,
     marks,
   );
-  useEffect(() => layer.redraw(), [hovering, tool, layer]);
 
   // The renderer lives as long as the pane; resizing only changes its size.
   useEffect(() => {
@@ -769,341 +743,21 @@ export function SlicePane({
     noteField.current?.focus({ preventScroll: true });
   }, [note]);
 
-  // Pointer and wheel.
-  useEffect(() => {
-    const element = host.current!;
-    const paneMm = (event: { clientX: number; clientY: number }) => {
-      const rect = element.getBoundingClientRect();
-      const v = view.current!;
-      return [
-        v.center[0] + (event.clientX - rect.left - rect.width / 2) / v.zoom,
-        v.center[1] - (event.clientY - rect.top - rect.height / 2) / v.zoom,
-      ] as const;
-    };
-    const inside = (p: readonly number[]) =>
-      p.map((v, k) => Math.max(0, Math.min(scene.shapeZyx[k]! - 1, v))) as unknown as Zyx;
-    // The voxel under the pointer on this slice: an untilted pane keeps the crosshair's own value
-    // across the slice, so moving in one pane never changes its slice.
-    const toVoxel = (event: { clientX: number; clientY: number }): Zyx => {
-      const [x, y] = paneMm(event);
-      const { point: at, fromPane: from, whole: w } = latest.current;
-      const p = from(x, y, at);
-      if (!w) return inside(p);
-      const q = [...at];
-      q[ca] = clamp(Math.round(p[ca]), scene.shapeZyx[ca]);
-      q[ra] = clamp(Math.round(p[ra]), scene.shapeZyx[ra]);
-      return q as unknown as Zyx;
-    };
-    // Where the pointer is on this slice, between voxel centres: a line's or an outline's points.
-    const toPosition = (event: { clientX: number; clientY: number }): Zyx => {
-      const [x, y] = paneMm(event);
-      const { point: at, fromPane: from, whole: w } = latest.current;
-      const p = inside(from(x, y, at)).map(hundredths);
-      if (w) p[axis] = Math.round(at[axis]);
-      return p as unknown as Zyx;
-    };
-    // Clicks made so far toward a line (two) or an angle (three); the layer's draft shows them.
-    let clicks: Zyx[] = [];
-    // The gesture's pointer is the mark layer's; the rest of it is the pane's.
-    let drag: {
-      mode: "cross" | "pan" | "tilt" | MarkTool;
-      x: number;
-      y: number;
-      from: Zyx;
-      moved: boolean;
-      /** An outline's points, and the screen position of the last. */
-      path: Zyx[];
-      last: [number, number];
-      /** A tilt's direction from the crosshair, in mm, at the last move. */
-      toward?: Vec3;
-    } | null = null;
-    const stopReset = layer.onCancel(() => {
-      drag = null;
-      clicks = [];
-    });
-    /** The direction from the crosshair to the pointer, in the grid's mm, on this plane. */
-    const towardPointer = (event: PointerEvent): Vec3 => {
-      const [x, y] = paneMm(event);
-      const { point: at, toPane: tp, basis: b } = latest.current;
-      const [cxMm, cyMm] = tp(at);
-      return unit(
-        [0, 1, 2].map((k) => (x - cxMm) * b.right[k]! - (y - cyMm) * b.down[k]!) as unknown as Vec3,
-      );
-    };
-    // The draft of a mark made by clicks, its last end at `to`.
-    const clickDraft = (tool: MarkTool, to: Zyx): GridMark | null => {
-      const sp = scene.spacingZyx;
-      if (tool === "line" && clicks.length === 1)
-        return { line: { aZyx: clicks[0]!, bZyx: to, lengthMm: lengthMm(clicks[0]!, to, sp) } };
-      if (tool === "angle" && clicks.length === 1)
-        return { line: { aZyx: clicks[0]!, bZyx: to, lengthMm: lengthMm(clicks[0]!, to, sp) } };
-      if (tool === "angle" && clicks.length === 2)
-        return {
-          angle: {
-            aZyx: clicks[0]!,
-            vertexZyx: clicks[1]!,
-            bZyx: to,
-            degrees: angleDegrees(clicks[0]!, clicks[1]!, to, sp),
-          },
-        };
-      return null;
-    };
-    const down = (event: PointerEvent) => {
-      if (drag || !view.current) return;
-      element.focus({ preventScroll: true });
-      const pan = event.button === 1 || event.button === 2 || event.shiftKey;
-      const tool = latest.current.tool;
-      // A press on a tilt handle turns the other planes.
-      const rect = element.getBoundingClientRect();
-      const hit =
-        !pan && !tool && latest.current.onTilt
-          ? handlesNow(rect.width, rect.height).find(
-              (h) =>
-                Math.hypot(h.x - (event.clientX - rect.left), h.y - (event.clientY - rect.top)) <=
-                HANDLE_HIT_PX,
-            )
-          : undefined;
-      layer.start(event);
-      const from = toPosition(event);
-      drag = {
-        mode: pan ? "pan" : hit ? "tilt" : (tool ?? "cross"),
-        x: event.clientX,
-        y: event.clientY,
-        from,
-        moved: false,
-        path: [from],
-        last: [event.clientX, event.clientY],
-        ...(hit && { toward: towardPointer(event) }),
-      };
-      if (drag.mode === "cross") latest.current.onPoint(toVoxel(event));
-    };
-    const move = (event: PointerEvent) => {
-      const tool = latest.current.tool;
-      if (!drag) {
-        if (tool === "point" || tool === "line" || tool === "angle") {
-          layer.hover = toVoxel(event);
-          if (clicks.length) layer.draft = clickDraft(tool, toPosition(event));
-          layer.redraw();
-        }
-        if (tool === "probe") showProbe(event);
-        return;
-      }
-      if (!layer.owns(event)) return;
-      if (drag.mode === "cross") latest.current.onPoint(toVoxel(event));
-      else if (drag.mode === "tilt") {
-        const toward = towardPointer(event);
-        const angle = angleAbout(drag.toward!, toward, latest.current.basis.normal);
-        drag.toward = toward;
-        if (angle) latest.current.onTilt?.(angle);
-      } else if (drag.mode !== "pan") {
-        if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
-          return;
-        drag.moved = true;
-        // On the slice the gesture began on, even if the wheel stepped since.
-        const to = toPosition(event);
-        if (drag.mode === "box") layer.draft = boxMark(round(drag.from), round(to));
-        else if (drag.mode === "line" && !clicks.length) {
-          layer.hover = null;
-          layer.draft = {
-            line: {
-              aZyx: [...drag.from],
-              bZyx: [...to],
-              lengthMm: lengthMm(drag.from, to, scene.spacingZyx),
-            },
-          };
-        } else if (drag.mode === "outline") {
-          if (
-            Math.hypot(event.clientX - drag.last[0], event.clientY - drag.last[1]) < OUTLINE_STEP_PX
-          )
-            return;
-          drag.last = [event.clientX, event.clientY];
-          drag.path.push(to);
-          layer.draft = {
-            outline: {
-              zyx: drag.path.map((p) => [...p] as unknown as Zyx),
-              areaMm2: areaMm2(drag.path, scene.spacingZyx),
-            },
-          };
-        }
-        layer.redraw();
-      } else {
-        const v = view.current!;
-        v.center = [
-          v.center[0] - (event.clientX - drag.x) / v.zoom,
-          v.center[1] + (event.clientY - drag.y) / v.zoom,
-        ];
-        drag.x = event.clientX;
-        drag.y = event.clientY;
-        three.current?.render();
-      }
-    };
-    const up = (event: PointerEvent) => {
-      if (!drag || !layer.owns(event)) return;
-      move(event);
-      const d = drag;
-      // A click toward a line or an angle: keep going until the mark has all its ends.
-      if ((d.mode === "line" && (!d.moved || clicks.length)) || d.mode === "angle") {
-        clicks.push(toPosition(event));
-        const [a, b, c] = clicks;
-        const sp = scene.spacingZyx;
-        const made: GridMark | null =
-          d.mode === "line"
-            ? b
-              ? { line: { aZyx: a!, bZyx: b, lengthMm: lengthMm(a!, b, sp) } }
-              : null
-            : c
-              ? {
-                  angle: { aZyx: a!, vertexZyx: b!, bZyx: c, degrees: angleDegrees(a!, b!, c, sp) },
-                }
-              : null;
-        if (!made) {
-          drag = null;
-          layer.release();
-          layer.draft = clickDraft(d.mode, clicks.at(-1)!);
-          layer.redraw();
-          return;
-        }
-        layer.cancel();
-        if (!("line" in made) || made.line.lengthMm > 0) latest.current.onMark(made);
-        return;
-      }
-      const made = finish(d, event);
-      layer.cancel();
-      if (!made) return;
-      latest.current.onMark(made);
-      // A point moves the crosshair to it, so every pane shows it.
-      if ("point" in made) latest.current.onPoint(made.point);
-    };
-    // The mark a finished gesture makes, if any: a click marks only with Point and Probe.
-    const finish = (d: NonNullable<typeof drag>, event: PointerEvent): GridMark | null => {
-      if (d.mode === "cross" || d.mode === "pan" || d.mode === "tilt") return null;
-      if (d.mode === "point")
-        return d.moved ? null : { point: [...round(d.from)] as unknown as Zyx };
-      if (d.mode === "probe") {
-        if (d.moved) return null;
-        const at = round(toVoxel(event));
-        const read = probe.current?.(at);
-        return read ? { point: at, probe: read } : null;
-      }
-      const made = layer.draft;
-      if (made && "line" in made && made.line.lengthMm > 0) return made;
-      if (made && "box" in made) return made;
-      if (made && "outline" in made) {
-        const zyx = thin(made.outline.zyx, OUTLINE_MAX);
-        const area = areaMm2(zyx, scene.spacingZyx);
-        if (zyx.length >= 3 && area > 0) return { outline: { zyx, areaMm2: area } };
-      }
-      return null;
-    };
-    const showProbe = (event: PointerEvent) => {
-      const rect = element.getBoundingClientRect();
-      const at = round(toVoxel(event));
-      const read = probe.current?.(at);
-      setReadout(
-        read
-          ? {
-              ...(event.clientX - rect.left < rect.width / 2
-                ? { x: event.clientX - rect.left, left: true }
-                : { x: rect.right - event.clientX, left: false }),
-              y: event.clientY - rect.top,
-              text: [
-                probeText(read),
-                `x ${at[2]} y ${at[1]} z ${at[0]}`,
-                ...(read.inside.length ? [`in ${read.inside.join(", ")}`] : []),
-              ].join("  ·  "),
-            }
-          : null,
-      );
-    };
-    const enter = () => setHovering(true);
-    const leave = () => {
-      setHovering(false);
-      setReadout(null);
-      if (!layer.hover) return;
-      layer.hover = null;
-      layer.redraw();
-    };
-    // A box dragged on one slice spans that slice's two axes; across the held axis it takes the
-    // smaller of the two dragged sides in mm, centred on the slice, so it reads as a region.
-    const boxMark = (a: Zyx, b: Zyx): GridMark => {
-      const sr = scene.spacingZyx[ra];
-      const sc = scene.spacingZyx[ca];
-      const min = [0, 0, 0];
-      const max = [0, 0, 0];
-      for (const i of [ra, ca]) {
-        min[i] = Math.min(a[i], b[i]);
-        max[i] = Math.max(a[i], b[i]);
-      }
-      const depthMm = Math.min((max[ra]! - min[ra]! + 1) * sr, (max[ca]! - min[ca]! + 1) * sc);
-      const half = Math.floor(depthMm / scene.spacingZyx[axis] / 2);
-      min[axis] = clamp(a[axis] - half, scene.shapeZyx[axis]);
-      max[axis] = clamp(a[axis] + half, scene.shapeZyx[axis]);
-      return {
-        box: { min: min as unknown as Zyx, max: max as unknown as Zyx },
-      };
-    };
-    const wheel = (event: WheelEvent) => {
-      event.preventDefault();
-      if (event.ctrlKey || event.metaKey) {
-        const v = view.current!;
-        const rect = element.getBoundingClientRect();
-        const dx = event.clientX - rect.left - rect.width / 2;
-        const dy = event.clientY - rect.top - rect.height / 2;
-        const before = [v.center[0] + dx / v.zoom, v.center[1] - dy / v.zoom];
-        v.zoom = Math.min(
-          v.fit * 64,
-          Math.max(v.fit / 2, v.zoom * Math.exp(-event.deltaY * 0.002)),
-        );
-        v.center = [before[0]! - dx / v.zoom, before[1]! + dy / v.zoom];
-        three.current?.render();
-        pickLevel();
-        return;
-      }
-      step(Math.sign(event.deltaY));
-    };
-    // An untilted pane steps whole slices; a tilted one steps the grid's finest spacing along its normal.
-    const step = (by: number) => {
-      const { point: at, whole: w, basis: b } = latest.current;
-      const p = [...at];
-      if (w) p[axis] = clamp(Math.round(p[axis]!) + by, scene.shapeZyx[axis]);
-      else {
-        const h = Math.min(...scene.spacingZyx) * by;
-        for (const k of [0, 1, 2]) p[k] = p[k]! + (h * b.normal[k]!) / scene.spacingZyx[k]!;
-        if (p.some((v, k) => v < 0 || v > scene.shapeZyx[k]! - 1)) return;
-      }
-      latest.current.onPoint(p as unknown as Zyx);
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.target !== element) return;
-      const by = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key];
-      if (by === undefined) return;
-      event.preventDefault();
-      step(by);
-    };
-    const menu = (event: Event) => event.preventDefault();
-    element.addEventListener("pointerdown", down);
-    element.addEventListener("pointermove", move);
-    element.addEventListener("pointerup", up);
-    element.addEventListener("pointerenter", enter);
-    element.addEventListener("pointerleave", leave);
-    element.addEventListener("wheel", wheel, { passive: false });
-    element.addEventListener("keydown", key);
-    element.addEventListener("contextmenu", menu);
-    return () => {
-      stopReset();
-      element.removeEventListener("pointerdown", down);
-      element.removeEventListener("pointermove", move);
-      element.removeEventListener("pointerup", up);
-      element.removeEventListener("pointerenter", enter);
-      element.removeEventListener("pointerleave", leave);
-      element.removeEventListener("wheel", wheel);
-      element.removeEventListener("keydown", key);
-      element.removeEventListener("contextmenu", menu);
-    };
-  }, []);
-  useEffect(() => {
-    if (tool !== "probe") setReadout(null);
-  }, [tool]);
+  const { readout, hovering } = useSliceGestures({
+    host,
+    view,
+    render: () => three.current?.render(),
+    layer,
+    latest,
+    probe,
+    scene,
+    axis,
+    clickLines,
+    handlesNow,
+    pickLevel,
+  });
+  showHandles.current = hovering && !tool && !!onTilt;
+  useEffect(() => layer.redraw(), [hovering, tool, layer]);
 
   const total = scene.shapeZyx[axis];
   // Another slice or level on its way: the picture shown is a stand-in.
@@ -1184,11 +838,6 @@ export function SlicePane({
     </div>
   );
 }
-
-const clamp = (n: number, size: number) => Math.max(0, Math.min(size - 1, n));
-const round = (p: Zyx) => p.map(Math.round) as unknown as Zyx;
-/** A position to 0.01 voxel: finer says nothing and only lengthens the message. */
-const hundredths = (n: number) => Math.round(n * 100) / 100;
 
 /** The same object while its value is the same, so effects keyed on it run only on a change. */
 function useStable<T>(value: T): T {
