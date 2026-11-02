@@ -242,6 +242,7 @@ async function lateWrite(tx: Tx, runId: string, readSeq: number | undefined) {
         inArray(events.type, [
           "thread.started",
           "thread.ended",
+          "run.reopened",
           "person.message",
           "approval.given",
           "approval.declined",

@@ -71,12 +71,19 @@ export function lateResearcherWrite(rows: readonly LateRow[], readSeq: number | 
         : [],
     ),
   );
-  const seen =
+  // A write before the latest `run.reopened` already reopened the run: a reclaim must not do it twice.
+  const reopenedAt = Math.max(
+    0,
+    ...rows.filter((r) => r.type === "run.reopened").map((r) => r.seq),
+  );
+  const seen = Math.max(
+    reopenedAt,
     readSeq ??
-    Math.max(
-      0,
-      ...rows.filter((r) => r.type === "thread.ended" && roots.has(r.threadId)).map((r) => r.seq),
-    );
+      Math.max(
+        0,
+        ...rows.filter((r) => r.type === "thread.ended" && roots.has(r.threadId)).map((r) => r.seq),
+      ),
+  );
   if (seen === 0 && readSeq === undefined) return null;
   return (
     rows.find(
