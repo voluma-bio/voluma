@@ -143,6 +143,19 @@ saying which row it feeds). A row there opens its report under it and frames the
 the value's items carried by that row shrink to one line. Reports and items are
 `version-report.tsx`.
 
+While the run goes, Final outputs adds what a run going shows and nothing after it ends: on top,
+Running, "last news <age>" (the newest stored event, on a timer) and the latest `activity` sentence
+(`run-news.tsx`, unnamed, mounted by `OutputsReview`); each value's "rests on" chain
+(`OutputRow.chain`), hollow links ticking as they are published, under its row (under an opened value only until its trail is published, then
+its Rests on); "not yet" for nothing published; "N of M in" in the panel head (the scan header
+says only Running), with Needs you only once something does; and "Other outputs so far" under the
+values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
+stays open until Esc. A section's tick waits for every value in it. The centre says the run is going and the
+AI's plan is in the conversation until the value has a version, is marked missing, or something
+on its chain has a version; then it shows the nearest such link, the scene bar saying "<value>
+rests on". `studiesQuery` refetches while a run is live, so the Samples tab
+(`samples-tab.tsx`) keeps up.
+
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item` and
 `centre` (`run` for the whole run, `agents`). An `output` that isn't a listed value opens under
 the first value resting on it (`show`, also what a click in the whole run does). The panes'

@@ -20,6 +20,7 @@ import { useStudy } from "./study-layout";
 import {
   digitsFor,
   farFromGroup,
+  hasBar,
   keyOutput,
   kneeWord,
   otherUnit,
@@ -251,10 +252,10 @@ function ValuesTable({
                             i === s.columns.length - 1 && "border-r",
                           )}
                         >
-                          {/* The row's sample link is the keyboard way in; a cell is a mouse shortcut to its task. */}
+                          {/* The row's sample link is the keyboard way in; a cell is a mouse shortcut to its task, or the agent loop's value. */}
                           {run ? (
                             <Link
-                              to={`${runHref({ runId: run.id })}?task=${o.task}`}
+                              to={`${runHref({ runId: run.id })}?${run.harness === "agents" ? `output=${o.id}` : `task=${o.task}`}`}
                               tabIndex={-1}
                               className="block px-2 py-1.5"
                             >
@@ -294,7 +295,7 @@ function Cell({
   digits: number;
   far: boolean;
 }) {
-  if (!scan.runs[0] || Object.keys(scan.taskState).length === 0) return null;
+  if (!scan.runs[0] || !hasBar(scan)) return null;
   const state = segmentOf(scan, output);
   const value = scanValue(scan, output);
   const unit = otherUnit(scan, output);

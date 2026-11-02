@@ -5,6 +5,8 @@
  * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
  * scans' values, checks and states are read from each fold here. Writes are the queue's.
  */
+import { unitAsWritten } from "@voluma/contracts/output-catalog";
+import { finalValues, needingYou } from "@voluma/contracts/output-fold";
 import { latestRevision, scanNeedsYou, shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
@@ -50,10 +52,15 @@ function newestOf(results: RunResult[]) {
   return { newest, newestCompleted };
 }
 
-/** A completed run's measurement values and acceptable checks, from its latest revision. */
+/**
+ * A completed run's values and acceptable checks: the task loop's from its latest revision, the
+ * agent loop's final values from its output fold (it has no checks to accept here).
+ */
 function resultOf({ run, results }: RunResult) {
   const values: StudyScanDetail["values"] = {};
   const acceptable: StudyScanDetail["acceptable"] = [];
+  for (const [id, { number, unit }] of finalValues(results.outputs))
+    values[id] = { value: number, unit: unitAsWritten(unit), confidence: null };
   for (const task of results.revisions.at(-1)?.tasks ?? []) {
     for (const m of task.measurements) {
       // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
@@ -78,6 +85,22 @@ function resultOf({ run, results }: RunResult) {
   return { values, acceptable };
 }
 
+/** A run's review in brief (`runReviewBriefSchema`), of either loop. */
+function reviewOf({ run, results }: RunResult): StudyRunSummary["review"] {
+  if (run.review) {
+    const { acceptable, needsYou, reviewedAt } = run.review;
+    return { acceptable, needsYou, reviewedAt };
+  }
+  if (!completed(run) || run.harness !== "agents") return null;
+  return { acceptable: 0, needsYou: needingYou(results.outputs).size, reviewedAt: null };
+}
+
+/** The newest run's final outputs' status, for a run of the agent loop; empty otherwise. */
+const outputStatusOf = (newest: RunResult | undefined): StudyScanDetail["outputStatus"] =>
+  Object.fromEntries(
+    (newest?.results.outputs.outputs ?? []).flatMap((o) => (o.final ? [[o.id, o.status]] : [])),
+  );
+
 /** The newest run's tasks as the scan review shows them (`shownTasks`); none without a run. */
 const tasksOf = (newest: RunResult | undefined) =>
   shownTasks(newest && { ...newest, state: newest.run.state, revision: latestRevision(newest) });
@@ -95,8 +118,11 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
     }
   }
   let needsYou = 0;
-  for (const [id, { run }] of newest)
-    needsYou += scanNeedsYou(run.review, newestCompleted.get(id)?.run.review?.acceptable ?? 0);
+  // Each scan as the study page counts it (`needsYouOf`): the same function on the same fields.
+  for (const [id, result] of newest) {
+    const done = newestCompleted.get(id);
+    needsYou += scanNeedsYou(reviewOf(result), done ? resultOf(done).acceptable.length : 0);
+  }
   return {
     ...study,
     scanCount,
@@ -104,18 +130,16 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
     needsYou,
     lastActivityAt,
     newestRuns: [...newest.values()].map(
-      ({ run }): StudyRunSummary => ({
-        runId: run.id,
-        inputId: run.input.id,
-        inputName: run.input.name,
-        state: run.state,
-        tasks: run.tasks,
-        review: run.review && {
-          acceptable: run.review.acceptable,
-          needsYou: run.review.needsYou,
-          reviewedAt: run.review.reviewedAt,
-        },
-        example: run.example,
+      (result): StudyRunSummary => ({
+        runId: result.run.id,
+        inputId: result.run.input.id,
+        inputName: result.run.input.name,
+        state: result.run.state,
+        tasks: result.run.tasks,
+        ...(result.run.outputs && { outputs: result.run.outputs }),
+        ...(result.run.harness && { harness: result.run.harness }),
+        review: reviewOf(result),
+        example: result.run.example,
       }),
     ),
   };
@@ -193,6 +217,8 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 } satisfies StudyScan,
                 input: toInput(input),
                 runs: runsOf.get(scan.inputId) ?? [],
+                review: newestRun ? reviewOf(newestRun) : null,
+                outputStatus: outputStatusOf(newestRun),
                 resultRunId: result?.run.id ?? null,
                 ...(result ? resultOf(result) : { values: {}, acceptable: [] }),
                 ...tasksOf(newestRun),

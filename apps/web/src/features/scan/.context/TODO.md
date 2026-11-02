@@ -71,3 +71,8 @@ None of these stops a review; each makes it slower.
 - Per-event costs: `savedViews(events)` runs twice per durable event, each zod-parsing every saved
   view; `marksOf`, `waitingApprovals` and `conversation` each rescan the whole log. Compute
   `savedViews` once and pass it down.
+
+## Outputs review while a run goes (#466)
+
+- No screenshot yet of values in while the run still goes: run 0b502d18 closed seconds after its
+  one value. Take it on the next live run.

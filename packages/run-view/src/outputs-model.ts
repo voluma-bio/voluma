@@ -13,8 +13,14 @@
  * line overlay's ends, world mm). Grid shapes come from the converted levels.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import type { OutputCatalog } from "@voluma/contracts/output-catalog";
-import type { OutputState, OutputsFold, OutputVersion } from "@voluma/contracts/output-fold";
+import { type OutputCatalog, unitAsWritten } from "@voluma/contracts/output-catalog";
+import {
+  needingYou,
+  type OutputState,
+  type OutputsFold,
+  type OutputVersion,
+  outputsIn,
+} from "@voluma/contracts/output-fold";
 import { outputsPrefix } from "@voluma/contracts/r2";
 import type {
   Annotation,
@@ -24,7 +30,7 @@ import type {
   Surface,
   Volume,
 } from "@voluma/contracts/review";
-import { trailOf } from "./outputs-trail";
+import { type ChainLink, chainOf, type TrailRow, trailOf } from "./outputs-trail";
 import { formatNumber } from "./run-model";
 
 /** One To check item, on the version it was raised on. */
@@ -51,6 +57,10 @@ export type OutputRow = {
   /** The overlays a value is measured on and drawn with, by id. */
   on: string[];
   context: string[];
+  /** What its latest version was made from, recursively (`trailOf`); the root alone before one. */
+  trail: TrailRow[];
+  /** A final output's chain, nearest first (`chainOf`); empty for any other. */
+  chain: ChainLink[][];
   /** The open and resolved items of its latest version and of what that was made from. */
   items: OutputItem[];
 };
@@ -60,8 +70,13 @@ export type OutputsReview = {
   /** Published outputs the workflow does not declare (a worker's own mask). */
   undeclared: OutputRow[];
   rows: Map<string, OutputRow>;
-  /** Unresolved items across every output's latest version. */
-  open: number;
+  /**
+   * Published outputs that are neither final nor on a final output's chain (each shows there), nor
+   * undeclared: what "Other outputs so far" lists while the run goes.
+   */
+  others: OutputRow[];
+  /** The final outputs that need a person (`needingYou`): what Needs you counts. */
+  needing: Set<string>;
   /** Final outputs with a version, of all final outputs. */
   progress: { done: number; total: number };
 };
@@ -83,31 +98,8 @@ export function outputName(catalog: OutputCatalog, id: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-const SUPERSCRIPT: Record<string, string> = { "2": "²", "3": "³", "-1": "⁻¹", "-2": "⁻²" };
-
-/**
- * A UCUM unit as people write it: `mm3` → `mm³`, `[hnsf'U]` → `HU`, `um` → `µm`; annotations in
- * braces drop out, and a dimensionless `1` shows nothing.
- */
-export function unitText(ucum: string): string {
-  if (ucum === "1") return "";
-  return ucum
-    .replaceAll("[hnsf'U]", "HU")
-    .replace(/\{[^}]*\}/g, "")
-    .replace(/\bu(?=[mgLl])/g, "µ")
-    .replace(
-      /([A-Za-zµ])(-?\d)/g,
-      (_, unit: string, power: string) => unit + (SUPERSCRIPT[power] ?? power),
-    )
-    .replaceAll(".", "·")
-    .trim();
-}
-
-function itemsOf(fold: OutputsFold, id: string): OutputItem[] {
-  return trailOf(fold, id).flatMap(({ id: output, state }) =>
-    state?.latest ? itemsOfVersion(output, state.latest) : [],
-  );
-}
+/** A UCUM unit as a value shows it (`unitAsWritten`); a dimensionless `1` shows nothing. */
+export const unitText = (ucum: string): string => (ucum === "1" ? "" : unitAsWritten(ucum));
 
 /** The To check items version `v` of output `id` raised; `key` is the URL's `item`. */
 export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
@@ -136,6 +128,8 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
   const latest = state.latest;
   const links = (role: string) =>
     latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
+  const on = [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])];
+  const trail = trailOf(fold, catalog, state.id);
   return {
     id: state.id,
     name: outputName(catalog, state.id),
@@ -146,9 +140,13 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
     }),
     provisional:
       latest?.provisional === true || (value?.provisional ?? loose?.provisional === true),
-    on: [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])],
+    on,
     context: [...new Set([...(value?.context ?? strings(loose?.context)), ...links("context")])],
-    items: itemsOf(fold, state.id),
+    trail,
+    chain: state.final ? chainOf(fold, catalog, state.id, on) : [],
+    items: trail.flatMap(({ id: output, state }) =>
+      state?.latest ? itemsOfVersion(output, state.latest) : [],
+    ),
   };
 }
 
@@ -158,19 +156,39 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     title: s.title,
     rows: s.outputs.flatMap((o) => rows.get(o.id) ?? []),
   }));
-  const final = fold.outputs.filter((o) => o.final);
-  const open = new Set(
-    fold.outputs.flatMap((o) =>
-      (o.latest?.toCheck ?? []).flatMap((t, i) => (t.resolved ? [] : [`${o.id}/${i}`])),
-    ),
-  ).size;
+  const onChain = new Set(
+    [...rows.values()].flatMap((r) => r.chain.flatMap((step) => step.map((l) => l.id))),
+  );
   return {
     sections,
     undeclared: fold.outputs.filter((o) => !o.declared).flatMap((o) => rows.get(o.id) ?? []),
     rows,
-    open,
-    progress: { done: final.filter((o) => o.latest).length, total: final.length },
+    others: [...rows.values()].filter(
+      (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
+    ),
+    needing: needingYou(fold),
+    progress: outputsIn(fold),
   };
+}
+
+/**
+ * What the centre shows besides the selected value: `opened`, else while the run goes `standIn`,
+ * the nearest published link of the value's chain when the value is pending. One opened from Other
+ * outputs stays open after the run ends (until Esc): the whole run opens outputs the same way.
+ */
+export function inViewOf(
+  review: OutputsReview,
+  selected: OutputRow | undefined,
+  opened: OutputRow | undefined,
+  live: boolean,
+): { trailOpen?: OutputRow; standIn?: OutputRow } {
+  if (opened && opened.id !== selected?.id) return { trailOpen: opened };
+  if (!live || selected?.state.status !== "pending") return {};
+  const standIn = selected.chain
+    .flat()
+    .map((l) => review.rows.get(l.id))
+    .find((r) => r?.state.latest);
+  return standIn ? { standIn } : {};
 }
 
 // ---------------------------------------------------------------------------------------------
