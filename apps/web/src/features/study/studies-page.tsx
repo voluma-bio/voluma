@@ -61,29 +61,26 @@ function marksOf(study: StudySummary): Status[] {
 function placeCounts(study: StudySummary): Map<Place, number> {
   const counts = new Map<Place, number>();
   const add = (p: Place, n = 1) => counts.set(p, (counts.get(p) ?? 0) + n);
-  for (const run of study.newestRuns) add(placeOfStatus(liveStatus(run).status, study.example));
+  for (const run of study.newestRuns)
+    add(placeOfStatus(liveStatus(run).status, run.waiting, study.example));
   if (study.inputCount > study.newestRuns.length)
     add("not-started", study.inputCount - study.newestRuns.length);
   return counts;
 }
 
-/** The samples whose newest run waits on the researcher; they are counted here, not under "need you". */
-function takeWaiting(study: StudySummary, counts: Map<Place, number>): number {
-  const waiting = study.newestRuns.filter((r) => r.waiting > 0).length;
-  const rest = (counts.get("needs-you") ?? 0) - waiting;
-  if (rest > 0) counts.set("needs-you", rest);
-  else counts.delete("needs-you");
-  return waiting;
-}
-
 const COUNT_WORD: Record<Place, string> = {
+  "waiting-on-you": "waiting on you",
   "needs-you": "need you",
   running: "running",
   done: "done",
   "not-started": "not started",
 };
 
+/** The places the researcher has to act on: counted in bold, without a mark. */
+const ACT_ON = new Set<Place>(["waiting-on-you", "needs-you"]);
+
 const COUNT_MARK: Record<Place, Status> = {
+  "waiting-on-you": "check",
   "needs-you": "check",
   running: "running",
   done: "done",
@@ -199,7 +196,6 @@ function StudyRow({
 }) {
   const workflow = workflowById(study.workflowId);
   const counts = placeCounts(study);
-  const waiting = takeWaiting(study, counts);
   return (
     // The listbox owns the keys (aria-activedescendant); a row is chosen by pointer.
     // biome-ignore lint/a11y/useKeyWithClickEvents: the listbox handles the keys.
@@ -233,14 +229,13 @@ function StudyRow({
       <div className="grid justify-items-end gap-1.5">
         <Progress states={marksOf(study)} className="max-w-60" />
         <span className="flex gap-3 text-sm whitespace-nowrap">
-          {waiting > 0 && <Count n={waiting} word="waiting on you" emphasis />}
           {PLACES.filter((p) => counts.has(p.place)).map((p) => (
             <Count
               key={p.place}
               n={counts.get(p.place) ?? 0}
               word={COUNT_WORD[p.place]}
-              mark={p.place !== "needs-you" ? COUNT_MARK[p.place] : undefined}
-              emphasis={p.place === "needs-you"}
+              mark={ACT_ON.has(p.place) ? undefined : COUNT_MARK[p.place]}
+              emphasis={ACT_ON.has(p.place)}
             />
           ))}
         </span>

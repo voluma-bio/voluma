@@ -156,26 +156,30 @@ function SampleRow({
   return (
     <li
       className={cx(
-        "group/row relative grid min-h-14 grid-cols-[2.5rem_10rem_7rem_auto_minmax(0,1fr)_5.5rem_1rem] items-center gap-x-4 rounded-md px-2",
+        "group/row relative grid min-h-14 grid-cols-[2.5rem_minmax(0,1fr)_auto_5.5rem_1rem] items-center gap-x-4 rounded-md px-2",
         href && "hover:bg-accent",
       )}
     >
       <Thumbnail src={input.runs[0] && runThumbnailUrl(input.runs[0].id)} />
-      {href ? (
-        <Link
-          to={href}
-          className="truncate after:absolute after:inset-0 after:rounded-md focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
-        >
-          {name}
-        </Link>
-      ) : (
-        name
-      )}
-      <span className="truncate text-sm text-muted-foreground">{about}</span>
+      <div className="grid min-w-0 gap-0.5 py-2">
+        <p className="m-0 flex min-w-0 items-baseline gap-3">
+          {href ? (
+            <Link
+              to={href}
+              className="truncate after:absolute after:inset-0 after:rounded-md focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
+            >
+              {name}
+            </Link>
+          ) : (
+            name
+          )}
+          <span className="truncate text-sm text-muted-foreground">{about}</span>
+        </p>
+        <StatusLine input={input} workflow={workflow} sections={sections} />
+      </div>
       <span className="min-w-0">
         {hasBar(input) && <SampleBar input={input} sections={sections} />}
       </span>
-      <StatusLine input={input} workflow={workflow} sections={sections} />
       <span className="text-right text-sm whitespace-nowrap text-fg-subtle tabular-nums">
         {changed && whenText(changed, now)}
       </span>
@@ -217,7 +221,7 @@ function StatusLine({
       more = missing.length > 2 ? `${missing.length} missing` : `${missing.join(", ")} missing`;
   }
   return (
-    <span className="flex min-w-0 items-baseline gap-2 text-sm">
+    <span className="flex min-w-0 items-baseline gap-2 overflow-hidden text-sm">
       {mark}
       {more && (
         <span className="truncate text-muted-foreground" title={more}>

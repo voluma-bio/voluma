@@ -231,6 +231,7 @@ export function segmentOf(input: StudyInputDetail, output: OutputEntry): Segment
 export type Place = SampleGroup | "not-started";
 
 export const PLACES: { place: Place; title: string }[] = [
+  { place: "waiting-on-you", title: "Waiting on you" },
   { place: "needs-you", title: "Needs you" },
   { place: "running", title: "Running" },
   { place: "done", title: "Done" },
@@ -243,7 +244,9 @@ export const PLACES: { place: Place; title: string }[] = [
  * tree leaves out.
  */
 export function placeOf(input: StudyInputDetail, example: boolean): Place {
-  return input.runs[0] ? placeOfStatus(inputStatus(input).status, example) : "not-started";
+  return input.runs[0]
+    ? placeOfStatus(inputStatus(input).status, input.waiting, example)
+    : "not-started";
 }
 
 export const placeParam = (value: string | null): Place | null =>

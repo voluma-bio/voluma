@@ -13,7 +13,7 @@ import { cx } from "./cx";
 import { STATUS_WORD, type Status, StatusGlyph } from "./status-mark";
 import { INPUT_WORD } from "./words";
 
-export type SampleGroup = "needs-you" | "running" | "done";
+export type SampleGroup = "waiting-on-you" | "needs-you" | "running" | "done";
 
 export type TreeSample = {
   id: string;
@@ -56,6 +56,7 @@ export type SampleTreeProps = {
 };
 
 const GROUPS: [SampleGroup, string][] = [
+  ["waiting-on-you", "Waiting on you"],
   ["needs-you", "Needs you"],
   ["running", "Running"],
   ["done", "Done"],

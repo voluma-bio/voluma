@@ -207,6 +207,5 @@ answer to an ended run reopens it: the page reconnects the stream and reads the 
 A run with a call open that you can answer (`openApprovals`) reads "Waiting on you" in the heading
 (from the log, not the row); a No is final and ends the call. The Samples tree, the Studies list and the
 study rows say it too, from `waiting` on the study reads (`studyRunSummarySchema`, `studyInputDetailSchema`): the open calls
-(`openApprovals`) counted in the run fold, kept only when the caller can answer (`cannotMessage` null). A study's row counts
-the samples waiting. An answer invalidates the study reads (`useAnswers`), since the run ended and nothing polls them.
+(`openApprovals`) counted in the run fold, kept only when the caller can answer (`cannotMessage` null). Waiting on you is its own group, ahead of Needs you, in the Samples tree, the Studies row counts and the study page (`placeOfStatus`, run-view `samples.ts`: one rule, so every count agrees). An answer invalidates the study reads (`useAnswers`), since the run ended and nothing polls them.
 
