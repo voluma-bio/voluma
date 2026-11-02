@@ -53,6 +53,7 @@ import {
   viewSavedSchema,
 } from "./agent-events";
 import {
+  harnessSchema,
   modelRefSchema,
   runIdSchema,
   taskIdSchema,
@@ -227,7 +228,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * first one decides it, so a resume keeps the loop the run began on (`pinnedImageOf` pins the
          * sandbox image the same way). Absent means the task loop.
          */
-        harness: z.enum(["tasks", "agents"]).optional(),
+        harness: harnessSchema.optional(),
       })
       .refine((p) => p.parentThreadId !== null || p.workflows !== undefined, {
         path: ["workflows"],

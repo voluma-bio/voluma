@@ -107,11 +107,6 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 
 export interface RunLayout {
   /**
-   * The review-asset converter's sandbox, outside the threads: reads the evidence, the published versions and the
-   * workflow, writes the run's review prefix and the input's conversion cache, no network.
-   */
-  convert: SandboxLayout;
-  /**
    * The layout of a thread. `cited` says whether the attempt a check reviews cites a scratch
    * file (the path after `/scratch/`); it gates the check's host-side reads of the rest of the
    * run's scratch, and without it a check reads none.
@@ -186,6 +181,34 @@ function lookup(table: readonly SandboxMount[], path: string, access: "read" | "
   return { mount, relative, key: `${mount.prefix}${relative}` };
 }
 
+/**
+ * The review-asset converter's sandbox, outside the threads and the same for every loop: reads
+ * the evidence, the published versions (`/outputs`, the agent loop's) and the workflow, writes the
+ * run's review prefix and the input's conversion cache, no network. The converter imports
+ * `sidecar` through the run's PYTHONPATH.
+ */
+export function convertLayout(o: {
+  runId: string;
+  inputId: string;
+  skills: readonly Skill[];
+}): SandboxLayout {
+  return {
+    name: "convert",
+    mounts: [
+      { path: EVIDENCE, prefix: evidencePrefix(o.runId), access: "read-only" },
+      { path: OUTPUTS, prefix: outputsPrefix(o.runId), access: "read-only" },
+      { path: WORKFLOW, prefix: workflowSnapshotPrefix(o.runId), access: "read-only" },
+      { path: REVIEW, prefix: reviewAssetPrefix(o.runId), access: "read-write" },
+      { path: INPUT_REVIEW, prefix: inputReviewPrefix(o.inputId), access: "read-write" },
+    ],
+    env: { PYTHONPATH: pythonPathOf(o.skills), VOLUMA_REVIEW_CACHE: INPUT_REVIEW },
+    gateway: false,
+  };
+}
+
+const pythonPathOf = (skills: readonly Skill[]) =>
+  skills.map((s) => `${s.path}/resources`).join(":");
+
 export function runLayout({
   runId,
   inputId,
@@ -196,7 +219,7 @@ export function runLayout({
 }: RunLayoutOptions): RunLayout {
   const reviewers = new Set(Object.values(roles).map((a) => a.checkedBy));
   const scratch = scratchPrefix(runId);
-  const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
+  const pythonPath = pythonPathOf(skills);
   const inputs = (copy: boolean): SandboxMount => ({
     path: INPUTS,
     prefix: inputPrefix,
@@ -263,23 +286,7 @@ export function runLayout({
     };
   };
 
-  const convert: SandboxLayout = {
-    name: "convert",
-    // Read by the converter, which imports `sidecar` through the run's PYTHONPATH. `/outputs`
-    // holds the agent loop's published versions.
-    mounts: [
-      { path: EVIDENCE, prefix: evidencePrefix(runId), access: "read-only" },
-      { path: OUTPUTS, prefix: outputsPrefix(runId), access: "read-only" },
-      { path: WORKFLOW, prefix: workflowSnapshotPrefix(runId), access: "read-only" },
-      { path: REVIEW, prefix: reviewAssetPrefix(runId), access: "read-write" },
-      { path: INPUT_REVIEW, prefix: inputReviewPrefix(inputId), access: "read-write" },
-    ],
-    env: { PYTHONPATH: pythonPath, VOLUMA_REVIEW_CACHE: INPUT_REVIEW },
-    gateway: false,
-  };
-
   return {
-    convert,
     forAgent({ name, role, tools, peers, others = "all" }) {
       const folder = role === "main" ? "main" : name;
       const dir = `${WORK}/${folder}`;

@@ -10,7 +10,7 @@ only `createSandbox(spec, signal)` (Modal) and the gateway's URL and token. Tags
 |---|---|---|---|
 | worker thread (main too, when its file grants `bash`) | `/inputs`, `/workflow` read-only; `/outputs` and its scratch writable | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist, only if the role holds `segment_sam`; else none | `<taskId>.worker[.n]` |
 | check thread | `/inputs`, `/workflow`, `/outputs` read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
-| `RunLayout.convert` | `/evidence`, `/workflow` read-only, `/review` writable | none | `convert` |
+| `convertLayout` | `/evidence`, `/outputs`, `/workflow` read-only, `/review` writable | none | `convert` |
 
 `VOLUMA_GATEWAY_IPV4` selects a single-address CIDR policy instead of SNI, never both (Modal
 unions them). It must be an exclusive inbound IPv4, not a resolved shared Render/Cloudflare IP.
@@ -122,7 +122,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
 
 - **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
   whole log), minus files with an `assets.*` event; new events are polled once a second.
-  One file at a time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session: created at the first file, replaced when the provider ended it, metered by the runner's `createSandbox` like the others). A failed conversion is retried once (not after a timeout or bad arguments, not when stopped), then recorded, and the worker moves on; a sandbox that
+  One file at a time, in the run's `convert` sandbox (`convertLayout`, from the sandbox session: created at the first file, replaced when the provider ended it, metered by the runner's `createSandbox` like the others). A failed conversion is retried once (not after a timeout or bad arguments, not when stopped), then recorded, and the worker moves on; a sandbox that
   dies or cannot be created fails the file (the sandbox session replaces an ended sandbox on the next call, and runs a command the provider refused once more). `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
@@ -130,7 +130,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   no network. Only the trusted conversion sandbox mounts the input cache; agents do not.
   The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
-  the converter imports `sidecar` through; `RunLayout.convert` supplies `PYTHONPATH` and the cache path,
+  the converter imports `sidecar` through; `convertLayout` supplies `PYTHONPATH` and the cache path,
   and `superviseRun` adds `VOLUMA_REVIEW_RUNTIME` from the same run-pinned image as the sandbox spec).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
@@ -249,10 +249,8 @@ An agent in its own worktree tries a workflow change on the real system like thi
    (this worktree's database, a per-launch secret) and a Cloudflare quick tunnel to it, and writes the
    tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
    `gateway https://…trycloudflare.com` line before starting the runner.
-2. `RUNNER_MODEL=deepseek/deepseek-v4-pro pnpm --filter @voluma/runner start` (set in `.env` or the shell:
-   one cheap model for every role; `RUNNER_THINKING` as usual). Agents test on `deepseek/deepseek-v4-pro` or
-   `meta/muse-spark-1.3-contributor` only, never on wonder, and never start a run on staging (Jimmy;
-   `deepseek/deepseek-flash` is too slow for a full run). Meta SAM is the only Meta call here, about $0.10 each.
+2. `RUNNER_MODEL=deepseek/deepseek-flash RUNNER_THINKING=low pnpm --filter @voluma/runner start` (set in `.env`
+   or the shell: one model for every role). Agents run plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`, never wonder, and never a run on staging (Jimmy). Meta SAM is the only Meta call here, about $0.10 each.
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
    follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
