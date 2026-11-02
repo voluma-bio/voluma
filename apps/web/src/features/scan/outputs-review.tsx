@@ -1,8 +1,8 @@
 /**
- * The scan review of a run of the agent loop: it opens on the run's final outputs (left, Outputs),
- * the output in view fills the main area in the 3D scene, on its base with the overlays it is
- * measured on and drawn with, and the conversation with the run's main AI sits on the right,
- * read-only until researchers can write to it on this kind of run. Everything comes from the
+ * The scan review of a run of the agent loop: the conversation with the run's main AI on the left
+ * (read-only until researchers can write to it on this kind of run), the run's final outputs on
+ * the right (Outputs), and the output in view filling the main area in the 3D scene, on its base
+ * with the overlays it is measured on and drawn with. Everything comes from the
  * run's stream as it arrives: the output fold (`outputsFold`), its converted assets and the
  * conversation, so statuses and values update live. The URL keeps `output` (the output in view)
  * and `item` (the To check item whose place the scene shows).
@@ -53,7 +53,7 @@ export function OutputsReview({
   reopen: () => void;
 }) {
   const me = useOutletContext<Me>();
-  // Under 1440 px, two panels leave the scene too narrow: The AI waits for i.
+  // Under 1440 px, two panels leave the scene too narrow: the conversation waits for i.
   const [wide] = useState(() => globalThis.innerWidth >= 1440);
   const study = useQuery({
     ...studyQuery(run.studyId),
@@ -156,9 +156,19 @@ export function OutputsReview({
         progress={{ ...review.progress, noun: "outputs reported" }}
       />
       <ShellPanel
-        id="scan-outputs"
+        id="scan-ai"
         side="left"
         group="scan"
+        label="The AI"
+        icon={<MessagesSquare />}
+        shortcut="i"
+        defaultOpen={wide}
+      >
+        <MainConversation live={live} />
+      </ShellPanel>
+      <ShellPanel
+        id="scan-outputs"
+        side="right"
         label="Outputs"
         icon={<ListTree />}
         count={review.open}
@@ -178,16 +188,6 @@ export function OutputsReview({
           }}
           accepting={accepting}
         />
-      </ShellPanel>
-      <ShellPanel
-        id="scan-ai"
-        side="right"
-        label="The AI"
-        icon={<MessagesSquare />}
-        shortcut="i"
-        defaultOpen={wide}
-      >
-        <MainConversation live={live} />
       </ShellPanel>
       <div className="flex min-h-0 flex-1 flex-col bg-background">
         <RunAlert run={run} userId={me.userId} stale={stale} />
