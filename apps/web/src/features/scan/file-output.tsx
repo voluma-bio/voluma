@@ -16,35 +16,34 @@ const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 export function FileOutput({ runId, version }: { runId: string; version: OutputVersion }) {
   const file = version.files[0];
   const images = version.evidence.filter((e) => IMAGE.test(e.name));
+  const text = (
+    <div className="min-h-0 overflow-auto p-4">
+      {file ? (
+        <FileText runId={runId} path={`${version.path}/${file.name}`} name={file.name} />
+      ) : (
+        <p className="text-sm text-muted-foreground">This version has no file.</p>
+      )}
+    </div>
+  );
+  // With no images, the file takes the whole centre.
+  if (images.length === 0) return <div className="grid h-full min-h-0 bg-card">{text}</div>;
   return (
-    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] bg-background">
-      <div className="min-h-0 overflow-auto p-4">
-        {file ? (
-          <FileText runId={runId} path={`${version.path}/${file.name}`} name={file.name} />
-        ) : (
-          <p className="text-sm text-muted-foreground">This version has no file.</p>
-        )}
-      </div>
-      <div className="min-h-0 overflow-auto bg-viewer-well p-3">
-        {images.length === 0 ? (
-          <p className="p-3 text-sm text-viewer-chip-fg">No images came with this version.</p>
-        ) : (
-          <div className="grid gap-3">
-            {images.map((e) => (
-              <figure key={e.name} className="grid gap-1">
-                <img
-                  src={outputFileUrl(runId, `${version.path}/${e.name}`)}
-                  alt={e.name}
-                  loading="lazy"
-                  className="w-full object-contain"
-                />
-                <figcaption className="font-mono text-xs text-viewer-chip-fg">
-                  {e.name.replace(/^evidence\//, "")}
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        )}
+    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] bg-card">
+      {text}
+      <div className="grid min-h-0 content-start gap-3 overflow-auto bg-viewer-well p-3">
+        {images.map((e) => (
+          <figure key={e.name} className="grid gap-1">
+            <img
+              src={outputFileUrl(runId, `${version.path}/${e.name}`)}
+              alt={e.name}
+              loading="lazy"
+              className="w-full object-contain"
+            />
+            <figcaption className="font-mono text-xs text-viewer-chip-fg">
+              {e.name.replace(/^evidence\//, "")}
+            </figcaption>
+          </figure>
+        ))}
       </div>
     </div>
   );
@@ -69,11 +68,13 @@ function FileText({ runId, path, name }: { runId: string; path: string; name: st
     return <ErrorState title={`Couldn't load ${name}`}>{text.error.message}</ErrorState>;
   const cut = text.data.length > MAX_TEXT;
   const shown = cut ? text.data.slice(0, MAX_TEXT) : text.data;
-  let body = <pre className="font-mono text-xs whitespace-pre-wrap">{shown}</pre>;
+  let body = (
+    <pre className="font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">{shown}</pre>
+  );
   if (/\.json$/i.test(name) && !cut)
     try {
       body = (
-        <pre className="font-mono text-xs whitespace-pre-wrap">
+        <pre className="font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
           {JSON.stringify(JSON.parse(shown), null, 2)}
         </pre>
       );

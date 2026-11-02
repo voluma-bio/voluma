@@ -115,9 +115,9 @@ export type RunGraph = {
   columns: number;
 };
 
-/** The whole run's made-from graph: every output with a version, by column. */
+/** The whole run's made-from graph: every output with a version, and every final output, by column. */
 export function runGraph(fold: OutputsFold): RunGraph {
-  const published = fold.outputs.filter((o) => o.latest);
+  const published = fold.outputs.filter((o) => o.latest || o.final);
   const has = new Set(published.map((o) => o.id));
   const memo = new Map<string, number>();
   const visiting = new Set<string>();

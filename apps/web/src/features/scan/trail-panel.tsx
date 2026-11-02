@@ -21,7 +21,7 @@ import {
   trailOf,
   versionWords,
 } from "@voluma/run-view";
-import { Button, cx, StatusGlyph } from "@voluma/ui";
+import { Button, cx, Disclosure, StatusGlyph } from "@voluma/ui";
 import { Crosshair } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type Accepting, OUTPUT_STATUS } from "./outputs-panel";
@@ -262,16 +262,24 @@ function Report({
   const head = "pt-2 text-xs font-medium text-muted-foreground";
   return (
     <div className="grid gap-1.5 text-sm">
-      {!rootItems && <VersionLine v={v} />}
+      {!rootItems && v.kept && (
+        <p className="text-xs text-muted-foreground">Kept: {v.kept.reason}</p>
+      )}
       {row.state?.outOfDate && (
         <p>Something it was made from has changed since. The AI keeps it or redoes it.</p>
       )}
-      {words && (
-        <>
-          <h5 className={head}>In its words</h5>
-          <Markdown text={words} className="text-sm" />
-        </>
-      )}
+      {/* On the root the words wait behind a click, so the rows it rests on stay in view. */}
+      {words &&
+        (rootItems ? (
+          <Disclosure label="In its words">
+            <Markdown text={words} className="text-sm" />
+          </Disclosure>
+        ) : (
+          <>
+            <h5 className={head}>In its words</h5>
+            <Markdown text={words} className="text-sm" />
+          </>
+        ))}
       {v.evidence.length > 0 && (
         <>
           <h5 className={head}>Checked on</h5>

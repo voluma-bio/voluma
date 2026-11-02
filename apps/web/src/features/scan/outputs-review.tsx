@@ -321,7 +321,7 @@ export function OutputsReview({
           onBack={() => select({ trail: null, item: null })}
           onCentre={(c) => select({ centre: c })}
         />
-        <div className="min-h-0 flex-1">
+        <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
           {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
           <div className="h-full [&[hidden]]:hidden" hidden={!!centre}>
             {panes}

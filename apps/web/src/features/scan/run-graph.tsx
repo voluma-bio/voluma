@@ -1,5 +1,5 @@
 /**
- * The whole run (W), in the panes' place: every output with a version in columns, from what was
+ * The whole run (W), in the panes' place: every output with a version, and every final output, in columns, from what was
  * made from nothing on the left to the final outputs, grouped by section, on the right; links
  * from what an output was made from to it. The output in Final outputs is in the spotlight with
  * what it rests on and what rests on it; the rest is dimmed. Out-of-date outputs are marked.
@@ -81,7 +81,7 @@ export function RunGraphView({
       </p>
       <div className="min-h-0 flex-1 overflow-auto">
         {graph.nodes.length === 0 ? (
-          <p className="p-6 text-sm text-muted-foreground">No output has a version yet.</p>
+          <p className="p-6 text-sm text-muted-foreground">No outputs yet.</p>
         ) : (
           <div className="relative" style={{ width, height: height + PAD }}>
             <svg
