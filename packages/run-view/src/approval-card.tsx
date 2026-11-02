@@ -53,6 +53,12 @@ export function ApprovalCard({
 }: ApprovalCardProps) {
   const [words, setWords] = useState("");
   const open = !answer && !settled;
+  const quiet =
+    settled === "withdrawn"
+      ? "withdrawn"
+      : !settled && answer?.answer === "no"
+        ? "declined"
+        : undefined;
   return (
     <article
       aria-label={title}
@@ -62,12 +68,10 @@ export function ApprovalCard({
         <h3 className="font-semibold">{title}</h3>
         {open ? (
           <span className="text-xs text-muted-foreground">waits for your answer</span>
-        ) : settled === "withdrawn" || (!settled && answer?.answer === "no") ? (
+        ) : quiet ? (
           // Neither is a failure: main moved on without it, or you said no, which is final.
-          <span className="text-xs text-muted-foreground">
-            {settled === "withdrawn" ? "withdrawn" : "declined"}
-          </span>
-        ) : settled ? (
+          <span className="text-xs text-muted-foreground">{quiet}</span>
+        ) : settled && settled !== "withdrawn" ? (
           <StatusMark status={SETTLED[settled].status} label={SETTLED[settled].label} />
         ) : (
           <span className="text-xs text-muted-foreground">answered</span>

@@ -75,8 +75,6 @@ export type ConversationItem =
       settled?: { outcome: "done" | "refused" | "withdrawn"; at: string };
     };
 
-// TODO: once #491 (R3c) is on main, build this from `approvalAnswerId` and `approvalSettledId`
-// (`agents.ts`) instead of spelling the suffixes here.
 /** The id of a held call's answer (`approval.given`, `approval.declined`) or its outcome (`approval.settled`). */
 export const approvalIdOf = (requestId: string, of: "answer" | "settled") => `${requestId}:${of}`;
 

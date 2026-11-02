@@ -18,7 +18,7 @@ import {
 } from "@voluma/contracts/agent-events";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Volume } from "@voluma/contracts/review";
-import { changeOf, markStatesOf, marksOf, toldMarks } from "@voluma/contracts/review-state";
+import { canon, changeOf, markStatesOf, marksOf, toldMarks } from "@voluma/contracts/review-state";
 import { markPoints, worldOf } from "@voluma/viewer/grid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gridKeyOf, type MarkChange, type MarkStore, type YourMark } from "./marks-panel";
@@ -26,9 +26,14 @@ import { NotSent } from "./message-send";
 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
 
-/** A write as the log will hold it once the API adds its author. */
-const asLogged = (body: PlaceMarkRequest, by: string): Placed =>
-  markPlacedSchema.parse({ ...body, by });
+/**
+ * A write as the log will hold it once the API adds its author; undefined when the log couldn't
+ * hold it. Checked, not cast: a pane's mark is readonly, the log's type isn't.
+ */
+const asLogged = (body: object, by: string): Placed | undefined => {
+  const parsed = markPlacedSchema.safeParse({ ...body, by });
+  return parsed.success ? parsed.data : undefined;
+};
 
 const yours = (p: Placed, me: string): YourMark => ({
   id: p.id,
@@ -74,7 +79,7 @@ export function useRunMarks({
     if (pending.size === 0) return;
     const seen = [...pending].filter(([id, m]) => {
       const l = logged.get(id);
-      return m === null ? !l : l && JSON.stringify(l.mark) === JSON.stringify(m.mark);
+      return m === null ? !l : l && canon(l.mark) === canon(m.mark);
     });
     if (seen.length)
       setPending((had) => {
@@ -183,7 +188,9 @@ export function useRunMarks({
           down: m.plane.down,
         },
       };
-      write(m.id, asLogged(body, latest.current.me), () => placeMark(r.id, body));
+      const logged = asLogged(body, latest.current.me);
+      if (!logged) return setError("Couldn't save the mark: its position couldn't be worked out.");
+      write(m.id, logged, () => placeMark(r.id, body));
     },
     [write],
   );
@@ -199,9 +206,11 @@ export function useRunMarks({
       const t = latestTold.current.get(id);
       if (!t || t.change === "delete") return erase(id);
       // The frozen copy is stored JSON: parsed back into the request it was placed with.
-      const body = placeMarkRequestSchema.parse({ ...t.mark, id });
-      const { run: r, me } = latest.current;
-      write(id, asLogged(body, me), () => placeMark(r.id, body));
+      const body = placeMarkRequestSchema.safeParse({ ...t.mark, id });
+      const logged = body.success && asLogged(body.data, latest.current.me);
+      if (!body.success || !logged)
+        return setError(`Couldn't put ${t.mark.tag} back as main last saw it.`);
+      write(id, logged, () => placeMark(latest.current.run.id, body.data));
     },
     [write, erase],
   );
