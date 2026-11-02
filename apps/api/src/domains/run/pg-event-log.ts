@@ -76,8 +76,45 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  * the log consistent, whether a runner holds the run or none does (a recovered or queued run).
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
+  const { rows, log } = await cancelRows(tx, runId);
+  for (const ended of cancelEnds(runId, log, new Date(), openCorrectionOf(rows)?.seq)) {
+    await insertEvent(tx, ended);
+  }
+}
+
+/**
+ * The end of an agent-loop claim in review (a run with a `run.reopened`) that failed or was
+ * cancelled. The workers end `cancelled`, and so does the root for this claim, but main is left
+ * cut off, as a deploy leaves it: the researcher's next message resumes it, so nothing of the
+ * review is discarded and no `correction.ended` is written (`cancelOpenThreads` is the task
+ * loop's). A user's cancel (`withdraw`) also settles an approval given but not yet settled as
+ * withdrawn, so the next unrelated message does not restart its job.
+ */
+export async function cancelReviewWorkers(tx: Tx, runId: string, withdraw: boolean) {
+  const { rows, log, mains, requests } = await cancelRows(tx, runId);
+  for (const ended of cancelEnds(runId, log, new Date(), undefined)) {
+    if (!mains.has(ended.threadId)) await insertEvent(tx, ended);
+  }
+  if (!withdraw) return;
+  const ids = new Set(rows.map((r) => r.id));
+  for (const r of requests) {
+    if (!ids.has(`${r.id}:answer`) || ids.has(`${r.id}:settled`)) continue;
+    const given = rows.find((x) => x.id === `${r.id}:answer`);
+    if (given?.type !== "approval.given") continue;
+    await insertEvent(tx, {
+      id: `${r.id}:settled`,
+      runId,
+      threadId: r.threadId,
+      type: "approval.settled",
+      payload: { toolCallId: r.toolCallId, outcome: "withdrawn", text: "The run was cancelled." },
+      createdAt: new Date().toISOString(),
+    });
+  }
+}
+
+async function cancelRows(tx: Tx, runId: string) {
   await eventLock(tx, runId);
-  // Row columns, plus the raw payload of the two types `cancelEnds` reads fields of. No json
+  // Row columns, plus the raw payload of the types whose fields are read. No json
   // operator touches it: Postgres errors on `\u0000` anywhere in the document, which would
   // fail the claim, sweep or report this cancel runs in. The fields are picked in JS, so an
   // event that no longer parses cannot stop or change a cancel.
@@ -87,23 +124,37 @@ export async function cancelOpenThreads(tx: Tx, runId: string) {
       type: events.type,
       threadId: events.threadId,
       seq: events.seq,
-      payload: sql<unknown>`CASE WHEN ${events.type} IN ('thread.started', 'thread.ended') THEN ${events.payload} END`,
+      payload: sql<unknown>`CASE WHEN ${events.type} IN ('thread.started', 'thread.ended', 'approval.requested') THEN ${events.payload} END`,
     })
     .from(events)
     .where(eq(events.runId, runId))
     .orderBy(asc(events.seq));
+  const fields = (payload: unknown) =>
+    (payload ?? {}) as {
+      parentThreadId?: unknown;
+      status?: unknown;
+      role?: unknown;
+      toolCallId?: unknown;
+    };
   const log = rows.map(({ payload, ...row }): CancelRow => {
-    const fields = (payload ?? {}) as { parentThreadId?: unknown; status?: unknown };
+    const f = fields(payload);
     return {
       ...row,
-      ...(row.type === "thread.started" && { root: fields.parentThreadId === null }),
-      ...(row.type === "thread.ended" &&
-        typeof fields.status === "string" && { status: fields.status }),
+      ...(row.type === "thread.started" && { root: f.parentThreadId === null }),
+      ...(row.type === "thread.ended" && typeof f.status === "string" && { status: f.status }),
     };
   });
-  for (const ended of cancelEnds(runId, log, new Date(), openCorrectionOf(rows)?.seq)) {
-    await insertEvent(tx, ended);
-  }
+  const mains = new Set(
+    rows
+      .filter((r) => r.type === "thread.started" && fields(r.payload).role === "main")
+      .map((r) => r.threadId),
+  );
+  const requests = rows.flatMap((r) =>
+    r.type === "approval.requested" && typeof fields(r.payload).toolCallId === "string"
+      ? [{ id: r.id, threadId: r.threadId, toolCallId: fields(r.payload).toolCallId as string }]
+      : [],
+  );
+  return { rows, log, mains, requests };
 }
 
 export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {

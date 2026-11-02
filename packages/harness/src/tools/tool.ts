@@ -63,5 +63,15 @@ export interface Tool<S extends z.ZodType = z.ZodType> {
   prepare?(args: unknown): unknown;
   /** Runs one call at a time within its thread (the task tools, whose appends must not interleave). */
   sequential?: boolean;
+  /**
+   * Agent loop: the tool changes results. While the run is reviewing, main's call is held for the
+   * researcher (`agents/tools/gate.ts`). `preflight` throws a `Refusal` for a call the tool would
+   * refuse, so nothing is held that could not run; `files` names the files the call publishes
+   * (sandbox path, and its key relative to the run), whose hashes the request binds.
+   */
+  changesResults?: {
+    preflight(input: z.infer<S>, ctx: ToolContext): Promise<void>;
+    files?(input: z.infer<S>, ctx: ToolContext): { path: string; key: string }[];
+  };
   execute(input: z.infer<S>, ctx: ToolContext): Promise<ToolResult>;
 }

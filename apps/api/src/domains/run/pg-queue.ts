@@ -45,7 +45,7 @@ import {
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { cancelOpenThreads, lockRun } from "./pg-event-log";
+import { cancelOpenThreads, cancelReviewWorkers, lockRun } from "./pg-event-log";
 import {
   loadRun,
   loadRuns,
@@ -194,7 +194,8 @@ const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, 
  * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
  * person's message, `messages.ts`) is never left worse than `completed`: its open threads end
  * `cancelled`, `correction.ended` records what happened, and the run ends `completed` with its
- * earlier results. `set` adds columns to the update (a recovery's lease reset).
+ * earlier results. On the agent loop only the workers and the root end, and main stays cut off
+ * (`cancelReviewWorkers`). `set` adds columns to the update (a recovery's lease reset).
  */
 async function endUnfinished(
   tx: Tx,
@@ -205,8 +206,16 @@ async function endUnfinished(
 ) {
   const reopenId = await openCorrection(tx, runId);
   const correcting = reopenId !== null;
-  if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
-  if (correcting) await endCorrection(tx, runId, reopenId, status, error);
+  const [{ harness } = { harness: null }] = correcting
+    ? await tx.select({ harness: runs.harness }).from(runs).where(eq(runs.id, runId))
+    : [];
+  if (correcting && harness === "agents") {
+    // Review on the agent loop (`cancelReviewWorkers`): main is cut off, not ended, and no correction span exists.
+    await cancelReviewWorkers(tx, runId, status === "cancelled");
+  } else {
+    if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
+    if (correcting) await endCorrection(tx, runId, reopenId, status, error);
+  }
   await tx
     .update(runs)
     .set({

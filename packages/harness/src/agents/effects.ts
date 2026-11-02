@@ -35,3 +35,7 @@ export const returnedId = (messageId: string) => `${messageId}:returned`;
 export const pingId = (threadId: string, n: number) => `${threadId}:ping:${n}`;
 /** The wrap-up request code makes for a worker two pings found idle. */
 export const pingCloseId = (threadId: string) => `${threadId}:ping-close`;
+
+/** The held call of a tool call: `approval.requested`. The answer is `<id>:answer`, the outcome `<id>:settled`, a leave `<id>:left:<output>`. */
+export const approvalRequestId = (threadId: string, toolCallId: string) =>
+  `${threadId}:approval:${toolCallId}`;

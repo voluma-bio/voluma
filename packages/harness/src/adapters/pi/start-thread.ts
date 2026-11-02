@@ -74,6 +74,12 @@ export type StartThreadOptions = ThreadIdentity & {
    * the call did). `undefined` keeps the cautious default text.
    */
   interrupted?: (toolName: string, toolCallId: string) => string | undefined;
+  /**
+   * Whether a batch of calls (their tool names) ends the turn although some of its calls do not
+   * themselves: every call that is not `changesResults` terminates (the agent loop's review gate,
+   * `agents/tools/gate.ts`). Pi ends the turn only when every result of the batch terminates.
+   */
+  endsBatch?: (callNames: string[]) => boolean;
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   prompt: string;
   /** The delivery cursor of a main agent's first message built from the log (`message.sender.covers`). */
@@ -135,13 +141,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     recorder.emit(threadId, type, payload, id);
 
   // The reply holding the call is in the agent's messages before any of its tools runs.
-  const batchSize = (toolCallId: string): number => {
+  const batchOf = (toolCallId: string): string[] => {
     for (const m of agent.state.messages.slice().reverse()) {
       if (m.role !== "assistant") continue;
       const calls = m.content.filter((b) => b.type === "toolCall");
-      if (calls.some((b) => b.id === toolCallId)) return calls.length;
+      if (calls.some((b) => b.id === toolCallId)) return calls.map((b) => b.name);
     }
-    return 1;
+    return [];
   };
 
   // `compacting` is built before the agent but needs `persistRow`, declared below with the history cursor.
@@ -166,7 +172,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     },
   });
 
-  const agentTools = options.tools.map((tool) => toAgentTool(tool, options, batchSize));
+  const agentTools = options.tools.map((tool) => toAgentTool(tool, options, batchOf));
   const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
@@ -559,8 +565,8 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { threadId, kind, taskId, agent, sandbox, recorder }: StartThreadOptions,
-  batchSize: (toolCallId: string) => number,
+  { threadId, kind, taskId, agent, sandbox, recorder, endsBatch }: StartThreadOptions,
+  batchOf: (toolCallId: string) => string[],
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
@@ -572,6 +578,7 @@ function toAgentTool(
     ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
       let result: ToolResult;
+      const batch = batchOf(toolCallId);
       try {
         result = await tool.execute(tool.input.parse(params), {
           threadId,
@@ -579,7 +586,7 @@ function toAgentTool(
           ...(taskId && { taskId }),
           ...(agent && { agent }),
           toolCallId,
-          batchSize: batchSize(toolCallId),
+          batchSize: Math.max(1, batch.length),
           signal: signal ?? new AbortController().signal,
           sandbox: () => sandbox(threadId),
           output: (stream, text) =>
@@ -591,6 +598,9 @@ function toAgentTool(
         if (!(error instanceof SandboxUnavailableError)) throw error;
         result = { output: error.message, isError: true, infrastructure: true, truncated: false };
       }
+      // A call that changes results ends the turn only by holding (its own result says so); the others follow it.
+      const terminate =
+        result.terminate === true || (!tool.changesResults && endsBatch?.(batch) === true);
       return {
         content: [
           { type: "text" as const, text: result.output },
@@ -599,11 +609,11 @@ function toAgentTool(
         // `details` is stored with the message: a terminating batch is told from it on resume (`isFinished`).
         details: {
           truncated: result.truncated,
-          terminate: result.terminate === true,
+          terminate,
           ...(result.infrastructure && { infrastructure: true }),
         },
         isError: result.isError,
-        ...(result.terminate && { terminate: true }),
+        ...(terminate && { terminate: true }),
       };
     },
   };

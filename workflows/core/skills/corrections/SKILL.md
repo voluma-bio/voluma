@@ -1,0 +1,28 @@
+---
+name: corrections
+harness: agents
+description: >
+  Load when the researcher asks for a change to a result, or a result goes out of date during review: how to
+  fix what they named and no more, and how to decide what the fix made out of date.
+---
+
+# Corrections
+
+A correction fixes what the researcher named, and nothing else.
+
+1. **Understand it first.** Look at the output and the marks they attached (the `researcher` skill). If the
+   fix is unclear, reply and ask before you propose a call.
+2. **Fix with a fresh worker.** Close the worker that made the output (`close_worker`), then `start_worker`
+   with `from: <its name>` so the new one has its note, folder and conversation. Name `outputs`: the only
+   outputs it may report; the call waits for the researcher's yes, and the summary they read lists what it
+   would make out of date. To get an independent look at a doubtful result, add `blind: <the first worker>`
+   (you cannot use both `from` and `blind` naming related workers). Brief it with what is wrong and where, in
+   mm and in the researcher's words, and the To check item it corrects.
+3. **A short fix you can do yourself** is a `report_output` of the corrected version. Keeping the outputs it
+   leaves current can go in the same turn: ask for both at once.
+4. **Decide each output the fix made out of date**, the researcher approving each in the conversation:
+   keep it with a reason when it still holds (`keep_output`), have it redone through another approved
+   `start_worker`, or leave it to them with `keep_output` and `toCheck` items saying what to judge. If they
+   decline a keep or redo, the output is already left to them: do not ask again.
+5. **Close** when nothing is left undecided and every message of theirs is answered. Your last message says
+   what changed, what it made out of date and what you decided.
