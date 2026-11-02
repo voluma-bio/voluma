@@ -124,6 +124,16 @@ export function useRunMarks({
     [all, gridKeys],
   );
   const told = useMemo(() => toldOf(events), [events]);
+  // Deleted marks keep their tags: a message may name them.
+  const tags = useMemo(
+    () => [
+      ...new Set([
+        ...events.flatMap((e) => (e.type === "mark.placed" ? [e.payload.tag] : [])),
+        ...[...pending.values()].flatMap((m) => (m ? [m.tag] : [])),
+      ]),
+    ],
+    [events, pending],
+  );
   const changes = useMemo(() => {
     const out: MarkChange[] = [];
     for (const m of all.values()) {
@@ -208,5 +218,5 @@ export function useRunMarks({
     },
     [place, erase],
   );
-  return { marks, full: false, place, erase, error, changes, discard };
+  return { marks, tags, full: false, place, erase, error, changes, discard };
 }

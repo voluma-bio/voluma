@@ -46,6 +46,8 @@ export type YourMark = {
  */
 export type MarkStore = {
   marks: readonly YourMark[];
+  /** Every tag given out so far, deleted marks' too, so a new mark never reuses one; `marks`' when absent. */
+  tags?: readonly string[];
   full: boolean;
   place(mark: YourMark): void;
   erase(id: string): void;
@@ -344,7 +346,11 @@ export function useMarking(tools: readonly Tool[], store: MarkStore) {
         if (capped) return undefined;
         const id = crypto.randomUUID();
         if (issued.current.of !== kept.marks) issued.current = { of: kept.marks, tags: [] };
-        const tag = nextTag([...kept.marks.map((m) => m.tag), ...issued.current.tags], mark, made);
+        const tag = nextTag(
+          [...(kept.tags ?? kept.marks.map((m) => m.tag)), ...issued.current.tags],
+          mark,
+          made,
+        );
         issued.current.tags.push(tag);
         kept.place({
           id,
