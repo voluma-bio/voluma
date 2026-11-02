@@ -29,16 +29,26 @@ of the plateau. The heights (#7–9) run along the shaft axis from the growth pl
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
 middle of the medial and the lateral compartment of the plateau.
 
-`plate_faces.py` proposes both faces of the growth plate for the iioc step, and the metaphyseal-roi step checks them again. A worker
-checks the proposal against these: each proposed face lies on the plate's two edges, a few voxels apart, on every section; every
-flagged stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has your own dense points from its first to its last
-column, traced on a zoomed view; no straight line crosses a flagged stretch. `iioc.py` and `metaphysis_roi.py` stop on a stretch left
-sparse; a To check item never replaces the retrace. The plate is a thin sheet of lower density between denser bone, and it is not
-always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong.
+`plate_faces.py` proposes both faces of the growth plate for the iioc step, where the search finds the plate (a part of the tibia: its V
+range and each section's U span are in `plate-faces.json`), and the metaphyseal-roi step checks them again. The proposal is where the worker
+starts: the faces must follow the plate over the whole tibia at plate level, past each span end and on the sections with no span, out to the V
+ends. A worker checks its faces against these: each lies on the plate's two edges, a few voxels apart, on every section; every flagged
+stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has been looked at on a zoomed view and retraced where wrong, with points the worker read off the view
+wherever it opens a gap wider than `max_gap_um`. The positions are read by looking: code may write them down, but a detector or interpolator choosing them is not tracing, and
+`iioc.py` and `metaphysis_roi.py` passing (they stop on points or sections more than `max_gap_um` apart over bone, or short of its ends, in U or V, and on points off the tibia) does not mean the face is on the plate.
+The plate is a thin sheet of lower density between denser bone, and it is not
+always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong. The right face follows the
+same visible plate band end to end, including where it wraps down the condyles at the sides of the arch (OA6-2RK V=220 and 225); it is wrong
+where it switches onto the cortex or the marrow. Where a single-valued face cannot represent the anatomy (OA6-2RK V=185, the notch nearly in
+the section's plane) the worker has read the neighbouring sections and raised it in a To check item, not flattened it or called it eroded.
+The check opens every `qc-faces-<n>.jpg` of the step, sheet by sheet: `iioc.py` writes them, one panel per traced section, the proximal face as the
+worker delivered it (solid between traced points, dotted where held constant past them) over the tibia's outline, the crop reaching 0.8 mm beyond the faces' height range (a band farther from the faces than that is not in the
+sheet: look at the zoomed views for it). On each: the line lies on the plate band, including down a condylar wrap, stays on the bone from end to end, and does not
+leave the plate for cortex or marrow; a dotted stretch over the plate longer than `max_gap_um` is untraced plate, which is a failure; a sheet not opened is a check not done.
 
 **Eroded plate.** `iioc/eroded-plate-oa6-1rk-v231.jpg`: OA6-1RK, coronal section V=231, the lab's reading of the plate, traced by Jimmy.
 Left of U~296 two thin lines run along the plate, some 20 to 90 µm apart; to the right the plate has been destroyed, the two lines meet
-and the face follows the remaining bone. Trace what remains with both faces, densely like any flagged stretch, mark the U range where the plate is gone in `plate_eroded` (every traced section it reaches, flagged or not) with a reason (the mark
+and the face follows the remaining bone. Trace what remains with both faces, densely, mark the U range where the plate is gone in `plate_eroded` (every traced section it reaches, flagged or not) with a reason (the mark
 never replaces the points), and raise a To check item naming it ("V=231, U 296 to 338: plate eroded, faces traced on the remaining bone"); a search for a plate there finds another structure. OA6-1RK is eroded
 (bone destruction, possibly age-related) and is not representative: OA6-2RK's plate is the typical one, and a thickness measured
 on OA6-1RK is not a thickness of the plate.
@@ -62,6 +72,8 @@ only, and never reaches the fibula.
 The distal face it starts from is the one `plate_faces.py` proposed, checked and retraced where flagged or wrong (see iioc,
 above); where the plate is eroded and the range marked so, the two faces meet, `metaphysis_roi.py` accepts that, ROI-3 starts below the
 remaining bone, and the result record lists the marked ranges and their share: report them with the To check item.
+The check opens every `qc-faces-<n>.jpg` of the step too: `metaphysis_roi.py` draws the distal face (magenta) and the proximal one (orange)
+as delivered on every traced section over the tibia's outline, and the distal line must lie on the plate's lower edge, on the bone, following the same band through any condylar wrap and not leaving it for cortex or marrow.
 
 ## cortical
 
