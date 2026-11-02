@@ -139,6 +139,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const derive = () => agentLog(recorder.events());
   const stateOf = (r: AgentRecord): AgentState =>
     agentState(r, threads.running(r.id) || o.bash.busy(r.id));
+  /** The state by turns alone: an agent busy only with a background command takes a delivery like an idle one. */
+  const turnState = (r: AgentRecord): AgentState => agentState(r, threads.running(r.id));
   /** Inbox items given to a running thread whose user message is not stored yet, by thread. */
   const handed = new Map<string, Set<string>>();
   const dealtWith = new Set<string>();
@@ -342,15 +344,22 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     return true;
   }
 
-  /** A closing agent whose wrap-up turn ended: its note is its last reply. */
+  /** A closing agent whose wrap-up turn ended is closed: its note is its last reply, or the error that ended the turn. */
   async function finishClosings(d: AgentLog): Promise<boolean> {
     for (const r of d.records.values()) {
-      if (r.place !== "worker" || stateOf(r) !== "closing" || threads.running(r.id)) continue;
-      if (r.end?.status !== "completed" || r.endedAt < (r.closeAt ?? Infinity)) continue;
+      if (r.place !== "worker" || threads.running(r.id) || r.closeAt === undefined) continue;
+      const state = stateOf(r);
+      const wrappedUp = state === "closing" && r.end?.status === "completed";
+      // A failed wrap-up turn ends the worker too: it is not resumed to try again.
+      const failedWrapUp = state === "failed" && r.endedAt > r.closeAt;
+      if (!(wrappedUp && r.endedAt > r.closeAt) && !failedWrapUp) continue;
+      const note = failedWrapUp
+        ? `The wrap-up turn failed: ${r.end?.error ?? "unknown error"}${r.reply ? `\n\n${r.reply}` : ""}`
+        : r.reply;
       await recorder.append(
         r.id,
         "thread.ended",
-        { status: "closed", ...(r.reply && { note: r.reply }) },
+        { status: "closed", ...(note && { note }) },
         closedEndId(r.id),
       );
       await o.release(r.id);
@@ -388,7 +397,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   /** An agent that is not running has background-command notices waiting: it starts a turn with them. */
   async function deliverBashNotices(d: AgentLog): Promise<boolean> {
     for (const r of d.records.values()) {
-      if (threads.running(r.id) || !["idle", "closing"].includes(stateOf(r))) continue;
+      if (threads.running(r.id) || !["idle", "closing"].includes(turnState(r))) continue;
       const notices = o.bash.takeNotices(r.id);
       if (notices.length > 0) {
         await resume(r, notices.join("\n\n"), BASH_NOTICE);
@@ -409,14 +418,14 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
 
   /**
    * Gives each agent the messages it has not received: to a working one with its next tool result,
-   * to an idle one as the start of its turn. A failed worker is woken only by main (or a wrap-up).
+   * to an idle one (or one busy only with a background command) as the start of its turn. A failed worker is woken only by main (or a wrap-up).
    */
   async function deliverInboxes(d: AgentLog): Promise<boolean> {
     let acted = false;
     for (const [id, items] of d.inbox) {
       const r = d.records.get(id);
       if (!r || r.place === "main") continue;
-      const state = stateOf(r);
+      const state = turnState(r);
       const held = handed.get(id) ?? new Set<string>();
       const todo = items.filter(
         (i) =>
@@ -452,7 +461,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   /** Main is idle and has notices: refresh the run files and deliver them. */
   async function deliverToMain(d: AgentLog): Promise<boolean> {
     const m = d.main;
-    if (!m || stateOf(m) !== "idle" || d.undelivered.length === 0) return false;
+    if (!m || turnState(m) !== "idle" || d.undelivered.length === 0) return false;
     await o.runFiles.refresh();
     const events = recorder.events();
     const cut = d.cursor ? (d.written.get(d.cursor) ?? -1) : -1;
