@@ -12,6 +12,12 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
 or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections
+  plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
+                          of the curve, any U range (integers, first <= last). It never replaces points: every stretch of --plate-faces
+                          and every marked range needs the curve's points inside it, from its first to its last column, at most
+                          `max_gap_um` of the spec (entry plate-faces) apart, or the script stops naming the section and U range; inside
+                          a marked range they follow the remaining bone. The marked ranges and their share of the footprint are in
+                          the result record
   articular_corrections   optional list of {"u_range": [lo, hi], "v_range": [lo, hi], "curves": curves}: where part of the
                           tibia label is really femur or fibula above the articular surface, `curves` mark the true
                           articular surface inside the U and V ranges; ROI-1 keeps only what lies below it
@@ -39,8 +45,8 @@ Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sid
   roi-iioc.npy  ROI-1 cropped to its bounding box, uint8 (the mask object; iioc-tissue.npy is the same voxels for the next scripts)
   iioc.json  the result record (every value with its definition: heights, width, diagnostics; `objects`: roi-iioc, the two surfaces
   and the four rulers, in the shapes `report_output` takes)   qc-coronal.jpg, qc-heights.jpg  QC images
-Prints: the result record {out, values: {id: {value, unit, definition, kind}}, objects} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels)
-Example: python iioc.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
+Prints: the result record {out, values: {id: {value, unit, definition, kind}}, objects} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels) and eroded_stretches ([{v, u, reason, width_fraction}]; report them)
+Example: python iioc.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --plate-faces plate/ --out iioc/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -52,7 +58,13 @@ import numpy as np
 import objects
 import sidecar
 import viewlib as vl
-from annotations import load_annotations, need, traced_surface
+from annotations import (
+    cleared_stretches,
+    load_annotations,
+    load_plate_stretches,
+    need,
+    traced_surface,
+)
 from envelope import close_and_fill, footprint
 from scipy import ndimage as ndi
 
@@ -130,6 +142,7 @@ def main():
     ap.add_argument('--frame', type=sidecar.existing, required=True, help='tibia-frame.json from tibia_frame.py')
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: its grid, and the calibration the lab threshold in HU comes from')
     ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
+    ap.add_argument('--plate-faces', type=sidecar.existing, required=True, help='the directory plate_faces.py wrote: its plate-faces.json lists the flagged stretches the curves must trace')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument(
@@ -154,6 +167,7 @@ def main():
     gp = gp + a.gp_shift_mm / vox
     v_traced = sorted(int(k) for k in gp_spec['slices'])
     gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
+    _, plate = cleared_stretches(ann, load_plate_stretches(a.plate_faces, frame), 'growth_plate_curves', a.spec, h.shape, vox, footprint(tib))
     env = envelope(tib, gp, vox)
     w = np.arange(h.shape[0])[:, None, None]
     roi = env & (w < gp[None])
@@ -167,7 +181,12 @@ def main():
     roi, removed = largest(roi)
     bone = roi & (np.asarray(h) > a.threshold)
     scan_roi = fr.to_scan(roi, frame, g['shape'])
-    values = {'voxel-size': sidecar.value(vox, 'mm', 'voxel edge of the aligned grid, which every length here is a multiple of', kind='diagnostic')}
+    values = {
+        'voxel-size': sidecar.value(vox, 'mm', 'voxel edge of the aligned grid, which every length here is a multiple of', kind='diagnostic'),
+        'plate-eroded-fraction': sidecar.value(
+            plate['eroded_fraction'], 'fraction', 'share of the tibia\'s (V, U) footprint, over the V range of the traced proximal face, that the worker marked eroded in plate_eroded: '
+            'the face there follows the remaining bone, not a plate', kind='diagnostic'),
+    }
     valid = roi.any(axis=0)
     top = np.argmax(roi, axis=0).astype(float)
     local_height = np.where(valid, gp - top, np.nan)
@@ -294,6 +313,7 @@ def main():
         'height_section_v': v_star,
         'growth_plate_mid_u': u_mid,
         'grid_id': frame['grid_id'],
+        'eroded_stretches': plate['eroded_stretches'],
     }
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -338,6 +358,7 @@ def main():
         articular_top=str(out / 'articular-top-surface.npy'),
         plate_runs=[str(out / f'{s}-plate-run.npy') for s in plates],
         removed_disconnected_voxels=removed,
+        eroded_stretches=plate['eroded_stretches'],
     )
 
 
