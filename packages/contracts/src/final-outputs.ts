@@ -165,6 +165,21 @@ export function labelOverlaysUnder(
 }
 
 /**
+ * `add` with the catalog's own label put on each entry the catalog lists as a label overlay and
+ * the entry lacks: the fold reads a label's map from the entry, so a writer fills it in.
+ */
+export function withCatalogLabels<E extends { id: string }>(
+  catalog: readonly OutputEntry[],
+  add: readonly E[],
+): E[] {
+  return add.map((e) => {
+    const own = catalog.find((x) => x.id === e.id);
+    const missing = !("label" in e) || (e as { label?: unknown }).label === undefined;
+    return own?.kind === "overlay" && own.label && missing ? { ...e, label: own.label } : e;
+  });
+}
+
+/**
  * Why `change` must not be written, or undefined. For the writer (the runner's opening change,
  * `change_outputs`), which has the run's catalog: an id the catalog declares keeps its kind, one
  * it does not is a worker's own (`<worker>/<id>`), and the links of an added entry (`base`, `on`,
@@ -188,6 +203,11 @@ export function refuseOutputsChange(
     const own = declared.get(entry.id);
     if (own && own.kind !== entry.kind)
       return `${entry.id} is ${own.kind} in the catalog, not ${entry.kind}`;
+    if (own?.kind === "overlay" && own.label) {
+      const given = entry.label as { of?: unknown; value?: unknown } | undefined;
+      if (given && (given.of !== own.label.of || given.value !== own.label.value))
+        return `${entry.id} is label ${own.label.value} of ${own.label.of} in the catalog; leave label off or give that one`;
+    }
     if (!own && !entry.id.includes("/"))
       return `${entry.id} is not in the catalog; a worker's own output is <worker>/<id>`;
   }

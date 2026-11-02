@@ -16,6 +16,7 @@ import {
   entriesOf,
   labelOverlaysUnder,
   refuseOutputsChange,
+  withCatalogLabels,
 } from "@voluma/contracts/final-outputs";
 import {
   type OutputCatalog,
@@ -408,7 +409,7 @@ const changeOutputsTool = (api: AgentsApi): Tool =>
           const change = { by: "main" as const, ...input };
           if (input.add)
             change.add = [
-              ...input.add,
+              ...withCatalogLabels(api.catalog, input.add),
               ...labelOverlaysUnder(
                 api.catalog,
                 input.add,

@@ -77,10 +77,9 @@ export function answerOf(p: OutputEvent) {
 }
 
 /**
- * The id a link resolves to: a label overlay is its map (`output-fold.ts`), found in the catalog
- * or in the log's `outputs.changed` entries.
+ * The id a link resolves to: a label overlay is its map, in the order the fold resolves it
+ * (`output-fold.ts`): the log's `outputs.changed` entries first, else the catalog.
  */
 export function resolvedId(deps: OutputToolDeps, id: string): string {
-  const map = labelMapOf(deps.catalog, id);
-  return map !== id ? map : (foldOf(deps).labels.get(id) ?? id);
+  return foldOf(deps).labels.get(id) ?? labelMapOf(deps.catalog, id);
 }
