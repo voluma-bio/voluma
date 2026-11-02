@@ -44,6 +44,7 @@ export function ComparePage() {
   const only = placeParam(search.get("status"));
   const outputs = measurementsOf(workflow);
   const plotted = workflow.headline.filter((o) => valuesOf(detail, o).length > 0);
+  const anyValues = outputs.some((o) => valuesOf(detail, o).length > 0);
   const finished = detail.inputs.filter((s) => s.resultRunId !== null).length;
   return (
     <div className="min-w-0 flex-1 overflow-y-auto">
@@ -63,7 +64,9 @@ export function ComparePage() {
         </section>
       ) : (
         <p className="m-0 border-b border-border px-6 py-4 text-sm text-muted-foreground">
-          No values to compare yet. Each {INPUT_WORD.one}'s values appear when its run finishes.
+          {anyValues
+            ? "No headline measurement has a value yet; the table lists the ones that do."
+            : `No values to compare yet. Each ${INPUT_WORD.one}'s values appear when its run finishes.`}
         </p>
       )}
       <ValuesTable
