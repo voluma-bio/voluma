@@ -1,8 +1,15 @@
 /** The app's rail as `SignedIn` builds it, with plain links: shared by the shell's stories. */
-import { Layers, Settings, Workflow } from "lucide-react";
+import { Layers, LogIn, Settings, Workflow } from "lucide-react";
 import { Rail, RailButton, RailLink } from "./rail";
 
-export function StoryRail({ place = "studies" }: { place?: "studies" | "workflows" }) {
+export function StoryRail({
+  place = "studies",
+  guest = false,
+}: {
+  place?: "studies" | "workflows";
+  /** A guest: Sign in sits on the rail above Settings. */
+  guest?: boolean;
+}) {
   return (
     <Rail
       home={
@@ -14,7 +21,12 @@ export function StoryRail({ place = "studies" }: { place?: "studies" | "workflow
           V
         </a>
       }
-      end={<RailButton label="Settings" icon={<Settings />} />}
+      end={
+        <>
+          {guest && <RailButton variant="primary" label="Sign in" icon={<LogIn />} />}
+          <RailButton label="Settings" icon={<Settings />} />
+        </>
+      }
     >
       <RailLink label="Studies" icon={<Layers />} active={place === "studies"} to="#studies" />
       <RailLink

@@ -9,7 +9,8 @@ import { StoryRail } from "./story-rail";
  *
  * Icons only; each names itself in a tooltip (hover or focus) and to screen readers. The place
  * you are in is pressed, with a bar at the edge. Settings opens a popover in the app (theme and
- * account).
+ * account). A guest also sees a labelled Sign in above Settings, so it is found without opening
+ * Settings.
  */
 const meta = {
   title: "Shell/Rail",
@@ -22,3 +23,4 @@ type Story = StoryObj<typeof meta>;
 
 export const InStudies: Story = { render: () => <StoryRail /> };
 export const InWorkflows: Story = { render: () => <StoryRail place="workflows" /> };
+export const Guest: Story = { render: () => <StoryRail guest /> };

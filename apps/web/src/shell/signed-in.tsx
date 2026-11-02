@@ -21,7 +21,7 @@ import { AppShell, Button, LoadingState, Rail, RailLink } from "@voluma/ui";
 import { Layers, Workflow } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
-import { RailMark, SettingsMenu } from "./account";
+import { RailMark, RailSignIn, SettingsMenu } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
 
 type Session =
@@ -151,7 +151,12 @@ function Shell({ me }: { me: Me }) {
                 <RailMark />
               </Link>
             }
-            end={<SettingsMenu me={me} />}
+            end={
+              <>
+                {me.kind === "visitor" && <RailSignIn />}
+                <SettingsMenu me={me} />
+              </>
+            }
           >
             <RailLink
               label="Studies"

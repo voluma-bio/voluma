@@ -299,7 +299,9 @@ atomically upserts just the supplied fields. The client exports
 `useUpdateUserSettings(userId)`; the id scopes the query cache, never the API
 request. The shell's identity-keyed QueryClient keeps accounts separate.
 Settings at the foot of the rail (`shell/account.tsx`, a popover) holds the theme (Light /
-Dark) and who is signed in, with Sign in or Sign out; there is no settings page. It shows
+Dark) and who is signed in, with Sign in or Sign out. A guest also gets a labelled Sign in on
+the rail itself, above Settings: judges land as guests and are told only to "sign in". There is
+no settings page; `/settings` redirects to `/` with the popover open. It shows
 loading and failure; only a successful save changes the selected theme. The shell reads the same query and
 applies it to the document and frame on every route, defaulting to light while
 loading or when settings cannot be loaded. Settings failures never block the app.

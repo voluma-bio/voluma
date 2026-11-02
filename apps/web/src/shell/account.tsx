@@ -1,6 +1,7 @@
 /**
- * The brand lockup (the sign-in screen), the rail's mark, and Settings at the rail's foot: the
- * theme and who is signed in, with Sign in or Sign out.
+ * The brand lockup (the sign-in screen), the rail's mark, and the rail's foot: a guest's Sign in,
+ * and Settings (the theme and who is signed in, with Sign in or Sign out). Settings opens by itself
+ * when the location's state carries `openSettings` (the old `/settings` page redirects so).
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -8,8 +9,9 @@ import { signIn, signOut } from "@voluma/api-client";
 import { userSettingsQuery, useUpdateUserSettings } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { Button, Popover, RailButton, SegmentedControl } from "@voluma/ui";
-import { Settings } from "lucide-react";
-import { useState } from "react";
+import { LogIn, Settings } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 
 // The mark beside the wordmark, as in the mockups' top bar. The mark alone
 // reads as a face at large sizes, so it never appears without the wordmark.
@@ -40,7 +42,28 @@ export function RailMark() {
   );
 }
 
+/** On the rail for a guest, so Sign in needs no hunting. */
+export function RailSignIn() {
+  return (
+    <RailButton
+      variant="primary"
+      label="Sign in"
+      icon={<LogIn />}
+      onClick={() => signIn(location.pathname + location.search)}
+    />
+  );
+}
+
 export function SettingsMenu({ me }: { me: Me }) {
+  const [open, setOpen] = useState(false);
+  const { pathname, search, state } = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!(state as { openSettings?: boolean } | null)?.openSettings) return;
+    setOpen(true);
+    // Drop the state so a reload or Back doesn't reopen it.
+    navigate(pathname + search, { replace: true, state: null });
+  }, [state, pathname, search, navigate]);
   const who = me.name ?? (me.kind === "member" ? me.email : "Guest");
   const settings = useQuery(userSettingsQuery(me.userId));
   const save = useUpdateUserSettings(me.userId);
@@ -51,8 +74,10 @@ export function SettingsMenu({ me }: { me: Me }) {
       align="end"
       label="Settings"
       className="w-64 p-3"
-      onOpenChange={(open) => {
-        if (!open && signOutState === "failed") setSignOutState("idle");
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next && signOutState === "failed") setSignOutState("idle");
       }}
       trigger={<RailButton label="Settings" icon={<Settings />} />}
     >
