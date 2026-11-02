@@ -7,7 +7,7 @@
  *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
  *                                   a presigned GET, the browser fetches the bytes from storage
  *   GET /runs/:runId/thumbnail      a small WebP of the run, rendered once and kept (`thumbnail.ts`);
- *                                   204 while the run has no converted image yet
+ *                                   204 while the run has no converted intensity image yet
  *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
  *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
  *                                   the snapshot is checked and stored here, the Run domain judges
@@ -223,7 +223,7 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
     const webp = await runThumbnail(store, runId, async () => {
       const record = await runs.load(reader, runId);
-      return record && reviewRun(record);
+      return record?.results.assets ?? null;
     });
     // Nothing to show yet: a list asks again on its next load, so this is not cached.
     if (!webp) {
