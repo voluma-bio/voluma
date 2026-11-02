@@ -217,7 +217,6 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       covers?: string;
     } = {},
   ) {
-    const d = derive();
     const s = o.setup(agent, api);
     const { systemPrompt, prompt, tools, labelOf, interrupted, ...model } = s;
     const spec = {
