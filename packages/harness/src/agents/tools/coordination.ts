@@ -10,13 +10,12 @@ import {
   type AgentLog,
   type AgentRecord,
   type AgentState,
+  approvalSettledId,
+  givenApprovals,
+  openApprovals,
   openWorkers,
 } from "@voluma/contracts/agents";
-import {
-  entriesOf,
-  labelOverlaysUnder,
-  refuseOutputsChange,
-} from "@voluma/contracts/final-outputs";
+import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
 import {
   type OutputCatalog,
   outputKindSchema,
@@ -60,6 +59,7 @@ export interface AgentsApi {
     skills: string[];
     from?: string;
     blind?: string;
+    outputs?: string[];
     spawnedBy: string;
     parentThreadId: string;
   }): Promise<void>;
@@ -73,7 +73,7 @@ export interface AgentsApi {
   changed(): void;
 }
 
-const RESERVED = ["main", "researcher", "supervisor"];
+const RESERVED = ["main", "researcher", "supervisor", "person"];
 const NAME = /^[a-z][a-z0-9-]*$/;
 
 /** Types a tool's `execute` from its `input` schema, then erases the schema for the registry. */
@@ -183,13 +183,15 @@ const activityTool = (api: AgentsApi): Tool =>
 /** The run is closed only when nothing is open, undecided, unanswered or pending. */
 function mainCloseRefusal(api: AgentsApi, d: AgentLog): string | undefined {
   const events = api.recorder.events();
+  if (givenApprovals(d.approvals).length > 0)
+    return "A call the researcher approved is still running; close once it has finished.";
   const open = openWorkers(d, (id) => api.state(d.records.get(id) as AgentRecord) === "working");
   if (open.length > 0)
     return `Workers are still open: ${open.map((r) => r.name).join(", ")}. Close each with close_worker first.`;
   const stale = undecidedOutOfDate(events);
   if (stale.length > 0)
     return `These outputs are out of date and you have not decided them: ${stale.join(", ")}. Keep each with keep_output if it still holds, or have it redone.`;
-  if (d.hasUnansweredPerson)
+  if (d.unansweredPerson.length > 0)
     return "The researcher wrote and you have not answered them: message researcher first.";
   const pending = pendingFinal(events);
   if (pending.length > 0)
@@ -223,6 +225,14 @@ const closeTool = (api: AgentsApi): Tool =>
           if (!d.written.has(id)) {
             const why = mainCloseRefusal(api, d);
             if (why) throw new Refusal(why);
+            // The researcher's buttons for what was never answered go with the run.
+            for (const a of openApprovals(d.approvals))
+              await api.recorder.append(
+                a.threadId,
+                "approval.settled",
+                { toolCallId: a.toolCallId, outcome: "withdrawn", text: "The run was closed." },
+                approvalSettledId(a.requestId),
+              );
             await api.recorder.append(
               api.rootThreadId,
               "thread.ended",
@@ -236,23 +246,105 @@ const closeTool = (api: AgentsApi): Tool =>
       ),
   });
 
+const startWorkerInput = z.object({
+  name: z.string().min(1).describe("Lowercase letters, digits and dashes; never reused in a run."),
+  brief: z.string().min(1),
+  skills: z.array(z.string().min(1)).optional(),
+  from: z.string().min(1).optional(),
+  blind: z.string().min(1).optional(),
+  outputs: z
+    .array(outputRefSchema)
+    .min(1)
+    .optional()
+    .describe(
+      "The outputs the worker may report; it cannot report any other (its own <name>/... intermediates aside). Required once the researcher is reviewing the run.",
+    ),
+});
+type StartWorkerInput = z.infer<typeof startWorkerInput>;
+
+/**
+ * The refusals of `start_worker`, in order, read from `d` inside the section. True: this very call
+ * already started the worker.
+ */
+function startRefusals(
+  api: AgentsApi,
+  d: AgentLog,
+  role: string,
+  toolCallId: string,
+  { name, skills = [], from, blind, outputs }: StartWorkerInput,
+): boolean {
+  if (role !== "main") throw new Refusal("Only main starts workers: message main.");
+  if (![...d.messages.values()].some((m) => m.from === "main" && m.to === "researcher"))
+    throw new Refusal(
+      "Send your plan note to the researcher first: message `researcher` with the text of /work/main/plan.md, then start workers.",
+    );
+  const started = d.records.get(threadIdOf(api.runId, name));
+  if (started?.spawnedBy === toolCallId) return true;
+  if (!NAME.test(name) || RESERVED.includes(name))
+    throw new Refusal(
+      "A worker's name is lowercase letters, digits and dashes, starts with a letter, and is not main, researcher, supervisor or person.",
+    );
+  if (started) throw new Refusal(`The name ${name} was used in this run; pick another.`);
+  const unknown = skills.find((s) => !api.skills.includes(s));
+  if (unknown) throw new Refusal(`No skill is named ${unknown}. Skills: ${api.skills.join(", ")}.`);
+  if (d.reviewing && !outputs)
+    throw new Refusal(
+      "The researcher is reviewing the run: name with outputs the outputs this worker may report.",
+    );
+  const known = outputsFold(api.recorder.events()).byId;
+  const missing = outputs?.find((id) => !api.catalog.some((e) => e.id === id) && !known.has(id));
+  if (missing) throw new Refusal(`No output is named ${missing}; see /run/outputs.yaml.`);
+  const worker = (n: string) => {
+    const r = byName(d, n);
+    if (!r || r.place !== "worker")
+      throw new Refusal(`No worker is named ${n}. Workers: ${names(d).join(", ")}.`);
+    return r;
+  };
+  if (blind) worker(blind);
+  const source = from ? worker(from) : undefined;
+  if (source && api.state(source) !== "closed")
+    throw new Refusal(
+      `${from} is ${api.state(source)}: start from a closed worker (close_worker it first).`,
+    );
+  if (from && blind && (from === blind || lineage(d, from).includes(blind)))
+    throw new Refusal(
+      `${from} ${from === blind ? "is the worker the new one is blind to" : `was started from ${blind}`}: its folder and conversation would show the new worker what it must not see.`,
+    );
+  const open = openWorkers(d, (id) => api.state(d.records.get(id) as AgentRecord) === "working");
+  if (open.length >= api.limit) {
+    const list = open
+      .map((r) => {
+        const state = api.state(r);
+        return state === "closing" ? `${r.name} (closing)` : r.name;
+      })
+      .join(", ");
+    throw new Refusal(
+      `${open.length} workers are open (${list}), the most allowed. Close one with close_worker first.`,
+    );
+  }
+  return false;
+}
+
 const startWorkerTool = (api: AgentsApi): Tool =>
   define({
     name: "start_worker",
     description:
-      "Start a worker: a colleague with its own sandbox and its own context that keeps what it learns. Give it a name and a brief that scopes what it owns. `skills` names extra skills to load into its first message. `from` names a closed worker to carry on from: the new worker gets its note, its folder and its conversation (`/work/<name>/transcript.md`). `blind` names a worker whose reasoning the new worker must not see: it reads only its own folder and exchanges messages with main only; its brief is your question and where the published outputs are, never what the other worker concluded. `from` cannot name the blind worker or one started from it.",
-    input: z.object({
-      name: z
-        .string()
-        .min(1)
-        .describe("Lowercase letters, digits and dashes; never reused in a run."),
-      brief: z.string().min(1),
-      skills: z.array(z.string().min(1)).optional(),
-      from: z.string().min(1).optional(),
-      blind: z.string().min(1).optional(),
-    }),
-    execute: ({ name, brief, skills = [], from, blind }, ctx) =>
+      "Start a worker: a colleague with its own sandbox and its own context that keeps what it learns. Give it a name and a brief that scopes what it owns. `skills` names extra skills to load into its first message. `from` names a closed worker to carry on from: the new worker gets its note, its folder and its conversation (`/work/<name>/transcript.md`). `blind` names a worker whose reasoning the new worker must not see: it reads only its own folder and exchanges messages with main only; its brief is your question and where the published outputs are, never what the other worker concluded. `from` cannot name the blind worker or one started from it. `outputs` limits what the worker may report to those outputs; the researcher must approve a worker started while they review.",
+    input: startWorkerInput,
+    changesResults: {
+      preflight: (input, ctx) =>
+        api.section(async () => {
+          const { role, d } = caller(api, ctx);
+          startRefusals(api, d, role, ctx.toolCallId, input);
+        }),
+      outputs: (input) => input.outputs ?? [],
+      summary: (input, titleOf) =>
+        `Start an AI worker to redo ${(input.outputs ?? []).map(titleOf).join(", ")}.`,
+      makesStale: true,
+    },
+    execute: (input, ctx) =>
       run(async () => {
+        const { name, brief, skills = [], from, blind, outputs } = input;
         // A closed worker's history no longer changes: render it before the lock, write it inside.
         const closed = from ? byName(api.log(), from) : undefined;
         const writeTranscript =
@@ -261,53 +353,7 @@ const startWorkerTool = (api: AgentsApi): Tool =>
             : undefined;
         return api.section(async () => {
           const { role, d } = caller(api, ctx);
-          if (role !== "main") throw new Refusal("Only main starts workers: message main.");
-          if (![...d.messages.values()].some((m) => m.from === "main" && m.to === "researcher"))
-            throw new Refusal(
-              "Send your plan note to the researcher first: message `researcher` with the text of /work/main/plan.md, then start workers.",
-            );
-          const workerId = threadIdOf(api.runId, name);
-          const started = d.records.get(workerId);
-          if (started?.spawnedBy === ctx.toolCallId) return text(`Started ${name}.`);
-          if (!NAME.test(name) || RESERVED.includes(name))
-            throw new Refusal(
-              "A worker's name is lowercase letters, digits and dashes, starts with a letter, and is not main, researcher or supervisor.",
-            );
-          if (started) throw new Refusal(`The name ${name} was used in this run; pick another.`);
-          const unknown = skills.find((s) => !api.skills.includes(s));
-          if (unknown)
-            throw new Refusal(`No skill is named ${unknown}. Skills: ${api.skills.join(", ")}.`);
-          const worker = (n: string) => {
-            const r = byName(d, n);
-            if (!r || r.place !== "worker")
-              throw new Refusal(`No worker is named ${n}. Workers: ${names(d).join(", ")}.`);
-            return r;
-          };
-          if (blind) worker(blind);
-          const source = from ? worker(from) : undefined;
-          if (source && api.state(source) !== "closed")
-            throw new Refusal(
-              `${from} is ${api.state(source)}: start from a closed worker (close_worker it first).`,
-            );
-          if (from && blind && (from === blind || lineage(d, from).includes(blind)))
-            throw new Refusal(
-              `${from} ${from === blind ? "is the worker the new one is blind to" : `was started from ${blind}`}: its folder and conversation would show the new worker what it must not see.`,
-            );
-          const open = openWorkers(
-            d,
-            (id) => api.state(d.records.get(id) as AgentRecord) === "working",
-          );
-          if (open.length >= api.limit) {
-            const list = open
-              .map((r) => {
-                const state = api.state(r);
-                return state === "closing" ? `${r.name} (closing)` : r.name;
-              })
-              .join(", ");
-            throw new Refusal(
-              `${open.length} workers are open (${list}), the most allowed. Close one with close_worker first.`,
-            );
-          }
+          if (startRefusals(api, d, role, ctx.toolCallId, input)) return text(`Started ${name}.`);
           await writeTranscript?.();
           await api.startWorker({
             name,
@@ -315,6 +361,7 @@ const startWorkerTool = (api: AgentsApi): Tool =>
             skills,
             ...(from && { from }),
             ...(blind && { blind }),
+            ...(outputs && { outputs }),
             spawnedBy: ctx.toolCallId,
             parentThreadId: ctx.threadId,
           });
@@ -376,54 +423,60 @@ const closeWorkerTool = (api: AgentsApi): Tool =>
       ),
   });
 
-const changeOutputsTool = (api: AgentsApi): Tool =>
-  define({
+const changeOutputsInput = z
+  .object({
+    reason: z.string().min(1),
+    add: z.array(z.looseObject({ id: outputRefSchema, kind: outputKindSchema })).optional(),
+    drop: z.array(outputRefSchema).optional(),
+    missing: z.array(z.object({ id: outputRefSchema, reason: z.string().min(1) })).optional(),
+    sections: z
+      .array(z.object({ title: z.string().min(1), outputs: z.array(outputRefSchema).min(1) }))
+      .optional(),
+    expect: z
+      .array(z.object({ id: outputRefSchema, lines: z.array(z.string().min(1)).min(1) }))
+      .optional(),
+  })
+  .refine((p) => Object.keys(p).some((k) => k !== "reason"), {
+    message: "a change changes something",
+  });
+
+const changeOutputsTool = (api: AgentsApi): Tool => {
+  /** The change as `outputs.changed` stores it, or the refusal. Read inside the section. */
+  const changeOf = (role: string, input: z.infer<typeof changeOutputsInput>) => {
+    if (role !== "main") throw new Refusal("Only main changes the final outputs.");
+    const list = outputsFold(api.recorder.events()).list;
+    const change = { by: "main" as const, ...input };
+    const why = refuseOutputsChange(list, change, api.catalog);
+    if (why) throw new Refusal(why);
+    return change;
+  };
+  return define({
     name: "change_outputs",
     description:
       "Change the run's final outputs (the list in /run/final-outputs.yaml): add outputs from the workflow's catalog or your workers' own (`<worker>/<id>`), drop some, mark some missing with a reason, regroup sections, or append `expect` lines. Say why in `reason`.",
-    input: z
-      .object({
-        reason: z.string().min(1),
-        add: z.array(z.looseObject({ id: outputRefSchema, kind: outputKindSchema })).optional(),
-        drop: z.array(outputRefSchema).optional(),
-        missing: z.array(z.object({ id: outputRefSchema, reason: z.string().min(1) })).optional(),
-        sections: z
-          .array(z.object({ title: z.string().min(1), outputs: z.array(outputRefSchema).min(1) }))
-          .optional(),
-        expect: z
-          .array(z.object({ id: outputRefSchema, lines: z.array(z.string().min(1)).min(1) }))
-          .optional(),
-      })
-      .refine((p) => Object.keys(p).some((k) => k !== "reason"), {
-        message: "a change changes something",
-      }),
+    input: changeOutputsInput,
+    changesResults: {
+      preflight: (input, ctx) =>
+        api.section(async () => {
+          changeOf(caller(api, ctx).role, input);
+        }),
+      outputs: () => [],
+      summary: (input) => `Change which outputs the run delivers: ${input.reason}.`,
+    },
     execute: (input, ctx) =>
       run(() =>
         api.section(async () => {
           const { role, d } = caller(api, ctx);
-          if (role !== "main") throw new Refusal("Only main changes the final outputs.");
           const id = changeOutputsId(ctx.threadId, ctx.toolCallId);
           if (d.written.has(id)) return text("The final outputs are changed.");
-          const list = outputsFold(api.recorder.events()).list;
-          const change = { by: "main" as const, ...input };
-          if (input.add)
-            change.add = [
-              ...input.add,
-              ...labelOverlaysUnder(
-                api.catalog,
-                input.add,
-                new Set(entriesOf(list).map((e) => e.id)),
-              ),
-            ];
-          const why = refuseOutputsChange(list, change, api.catalog);
-          if (why) throw new Refusal(why);
-          await api.recorder.append(ctx.threadId, "outputs.changed", change, id);
+          await api.recorder.append(ctx.threadId, "outputs.changed", changeOf(role, input), id);
           await api.refreshRunFiles();
           api.changed();
           return text("The final outputs are changed; /run/final-outputs.yaml is updated.");
         }),
       ),
   });
+};
 
 export const coordinationTools = (api: AgentsApi): Record<string, Tool> => ({
   message: messageTool(api),

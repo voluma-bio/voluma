@@ -51,7 +51,7 @@ import {
   compactor,
   foldHistory,
 } from "./compaction";
-import { interruptedResult } from "./history-repair";
+import { type Interrupted, interruptedResult } from "./history-repair";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -73,7 +73,7 @@ export type StartThreadOptions = ThreadIdentity & {
    * Builds the result of a tool call that a crash cut off, from the log (the caller knows what
    * the call did). `undefined` keeps the cautious default text.
    */
-  interrupted?: (toolName: string, toolCallId: string) => string | undefined;
+  interrupted?: Interrupted;
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   prompt: string;
   /** The delivery cursor of a main agent's first message built from the log (`message.sender.covers`). */
@@ -135,13 +135,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     recorder.emit(threadId, type, payload, id);
 
   // The reply holding the call is in the agent's messages before any of its tools runs.
-  const batchSize = (toolCallId: string): number => {
+  const batchOf = (toolCallId: string): string[] => {
     for (const m of agent.state.messages.slice().reverse()) {
       if (m.role !== "assistant") continue;
       const calls = m.content.filter((b) => b.type === "toolCall");
-      if (calls.some((b) => b.id === toolCallId)) return calls.length;
+      if (calls.some((b) => b.id === toolCallId)) return calls.map((b) => b.name);
     }
-    return 1;
+    return [];
   };
 
   // `compacting` is built before the agent but needs `persistRow`, declared below with the history cursor.
@@ -166,7 +166,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     },
   });
 
-  const agentTools = options.tools.map((tool) => toAgentTool(tool, options, batchSize));
+  const agentTools = options.tools.map((tool) => toAgentTool(tool, options, batchOf));
   const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
@@ -560,7 +560,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 function toAgentTool(
   tool: Tool,
   { threadId, kind, taskId, agent, sandbox, recorder }: StartThreadOptions,
-  batchSize: (toolCallId: string) => number,
+  batchOf: (toolCallId: string) => string[],
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
@@ -579,7 +579,7 @@ function toAgentTool(
           ...(taskId && { taskId }),
           ...(agent && { agent }),
           toolCallId,
-          batchSize: batchSize(toolCallId),
+          batch: batchOf(toolCallId),
           signal: signal ?? new AbortController().signal,
           sandbox: () => sandbox(threadId),
           output: (stream, text) =>
@@ -688,7 +688,7 @@ function resumedTools(
  */
 function interruptedToolResults(
   messages: AgentMessage[],
-  interrupted: StartThreadOptions["interrupted"],
+  interrupted: Interrupted | undefined,
 ): ToolResultMessage[] {
   const kept = messages.filter(
     (m) => !(m.role === "assistant" && (m.stopReason === "error" || m.stopReason === "aborted")),

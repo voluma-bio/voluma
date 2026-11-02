@@ -80,7 +80,7 @@ import { storePublish } from "./store-publish.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
-import { usageMeter } from "./usage.ts";
+import { RunStopped, usageMeter } from "./usage.ts";
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -157,7 +157,7 @@ async function claimBody(
   scope: RunScope,
 ): Promise<void> {
   const { config, models, objects } = ctx;
-  const { run, leaseToken, keys } = claim;
+  const { run, leaseToken, keys, budgetUsd } = claim;
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
@@ -191,7 +191,13 @@ async function claimBody(
   shutdown.addEventListener("abort", onShutdown);
   if (shutdown.aborted) stop("shutdown");
 
-  const meter = usageMeter();
+  const meter = usageMeter({
+    runId,
+    capUsd: Math.min(budgetUsd ?? Number.POSITIVE_INFINITY, config.stop.maxRunCostUsd),
+    priorUsd: run.usage.modelCostUsd,
+    cacheMissLimit: config.stop.cacheMissLimit,
+  });
+  let stopReason: RunStopped | undefined;
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -286,6 +292,8 @@ async function claimBody(
     // the queue delivers them: a stall must name the call that caused it.
     const track = (threadId: string, type: string, payload: unknown) => {
       if (type === "thread.started") names.set(threadId, (payload as { name: string }).name);
+      if (type === "message")
+        meter.addMessage(threadId, payload as { role: string; text: string; compaction?: true });
       const { toolCallId, name } = payload as { toolCallId: string; name?: string };
       if (type === "tool.call") scope.inFlight.set(toolCallId, `${nameOf(threadId)} ${name}`);
       else if (type === "tool.result") scope.inFlight.delete(toolCallId);
@@ -333,7 +341,14 @@ async function claimBody(
           ...(m.provider === "meta" && { cacheRetention: "long" }),
         });
         stream.result().then(
-          (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
+          (reply) => {
+            const reason = meter.addModelCall(role, threadId, usageOf(reply));
+            // Fails the run once; `scope.fail` is final, so the prompt is not sent again.
+            if (!reason || stopReason) return;
+            stopReason = new RunStopped(reason);
+            log(reason.message);
+            scope.fail?.(stopReason);
+          },
           () => {},
         );
         return stream;

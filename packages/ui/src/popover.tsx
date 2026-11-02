@@ -11,7 +11,7 @@ import { Popover as P } from "radix-ui";
 import { type ReactElement, type ReactNode, useRef } from "react";
 import { IconButton } from "./button";
 import { cx } from "./cx";
-import { floatingClass, useThemedPortal } from "./portal";
+import { floatingClass, useTheme } from "./portal";
 
 export type PopoverProps = {
   /** The element that opens it, usually a Button. */
@@ -38,13 +38,11 @@ export function Popover({
   label,
   className,
 }: PopoverProps) {
-  const portal = useThemedPortal(onOpenChange);
+  const theme = useTheme();
   const content = useRef<HTMLDivElement>(null);
   return (
-    <P.Root open={open} onOpenChange={portal.onOpenChange}>
-      <P.Trigger asChild ref={portal.ref}>
-        {trigger}
-      </P.Trigger>
+    <P.Root open={open} onOpenChange={onOpenChange}>
+      <P.Trigger asChild>{trigger}</P.Trigger>
       <P.Portal>
         <P.Content
           ref={content}
@@ -53,7 +51,7 @@ export function Popover({
             event.preventDefault();
             content.current?.focus();
           }}
-          data-theme={portal.theme}
+          data-theme={theme}
           align={align}
           side={side}
           sideOffset={6}

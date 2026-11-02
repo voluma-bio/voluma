@@ -104,7 +104,7 @@ export function taskTools(runtime: TaskRuntime, changed: () => void) {
   const caller = (ctx: ToolContext) => ({
     threadId: ctx.threadId,
     toolCallId: ctx.toolCallId,
-    batchSize: ctx.batchSize,
+    batch: ctx.batch,
     kind: ctx.kind,
     signal: ctx.signal,
     ...(ctx.taskId && { taskId: ctx.taskId }),
