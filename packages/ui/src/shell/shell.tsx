@@ -31,6 +31,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../cx";
+import { ThemeScope } from "../portal";
 
 export type ShellSide = "left" | "right";
 
@@ -467,7 +468,7 @@ export function AppShell({
   return (
     <ShellContext.Provider value={state}>
       <HeadingContext.Provider value={heading}>
-        <div data-theme={theme} className="flex h-dvh flex-col bg-background text-foreground">
+        <ThemeScope theme={theme} className="flex h-dvh flex-col bg-background text-foreground">
           <header className="flex h-[var(--header-h)] shrink-0 items-center border-b border-border bg-card px-3.5">
             <div ref={setHeading} className="flex min-w-0 flex-1 items-center gap-3" />
           </header>
@@ -481,7 +482,7 @@ export function AppShell({
             {dock("right")}
             {strip("right")}
           </div>
-        </div>
+        </ThemeScope>
       </HeadingContext.Provider>
     </ShellContext.Provider>
   );

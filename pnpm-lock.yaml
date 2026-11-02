@@ -248,6 +248,9 @@ importers:
       '@voluma/run-view':
         specifier: workspace:*
         version: link:../../packages/run-view
+      '@voluma/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       react:
         specifier: 'catalog:'
         version: 19.3.1
