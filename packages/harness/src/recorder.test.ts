@@ -74,7 +74,10 @@ test("a pull queued behind the runner's own appends reads nothing when they cove
   const rec = recorder(
     {
       append: log.append,
-      eventsAfter: (after, upTo) => (reads.push(after), log.eventsAfter(after, upTo)),
+      eventsAfter: (after, upTo) => {
+        reads.push(after);
+        return log.eventsAfter(after, upTo);
+      },
     },
     "r",
     () => {},
