@@ -172,6 +172,8 @@ export interface ThreadLog {
   fixRounds: Map<string, number>;
   /** Every notice, in log order. */
   notices: Notice[];
+  /** The id of the last event this fold read: what a delivery built from it covers. */
+  lastEventId: string | undefined;
   /** The latest delivery to main: the id of the last event it accounted for. */
   cursor: string | undefined;
   /** Notices after the cursor. */
@@ -289,6 +291,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     holders: new Map(),
     fixRounds: new Map(),
     notices: [],
+    lastEventId: events.at(-1)?.id,
     cursor: undefined,
     undelivered: [],
     emptyDeliveries: 0,

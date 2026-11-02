@@ -73,6 +73,8 @@ export interface AgentLog {
   inbox: Map<string, InboxItem[]>;
   /** Every notice, in log order; those after `cursor` are undelivered. */
   notices: Notice[];
+  /** The id of the last event this fold read: what a delivery built from it covers. */
+  lastEventId: string | undefined;
   /** The last event id the latest delivery to main accounted for. */
   cursor: string | undefined;
   undelivered: Notice[];
@@ -295,6 +297,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     messages,
     inbox,
     notices,
+    lastEventId: events.at(-1)?.id,
     cursor,
     undelivered,
     emptyDeliveries: empty,

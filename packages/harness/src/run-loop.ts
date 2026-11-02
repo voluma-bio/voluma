@@ -221,7 +221,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     // that message is still undelivered: it was never told the run had finished.
     const message = corrections(recorder.events()).open?.message;
     const inCorrection = d.undelivered.some((u) => u.kind === "person" && u.eventId === message);
-    const covers = { promptCovers: recorder.events().at(-1)?.id };
+    const covers = { promptCovers: d.lastEventId };
     const restart = mainRestartPrompt(
       view,
       stateBlock(d, view, stateOf),
@@ -628,7 +628,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       : "";
     return {
       text: `${deliveryText(d, d.undelivered, agentsList(d, stateOf), changed)}${intro}`,
-      covers: events.at(-1)?.id,
+      covers: d.lastEventId,
     };
   }
 
@@ -675,7 +675,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       return true;
     }
     if (anyRunning(d)) return false;
-    const covers = recorder.events().at(-1)?.id;
+    const covers = d.lastEventId;
     if (d.emptyDeliveries < config.stuckLimit) {
       const asking = [...d.threads.values()].some((r) => openAsk(d, r));
       await resume(m, livenessNudge(asking, stateBlock(d, view, stateOf)), {

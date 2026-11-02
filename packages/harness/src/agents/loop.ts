@@ -278,7 +278,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     while (threads.stale(threadIdOf(runId, nameOf(n)))) n++;
     const id = threadIdOf(runId, nameOf(n));
     return begin({ id, name: nameOf(n), role: "main", n }, startedId(id), root, {
-      ...(n > 1 && { covers: recorder.events().at(-1)?.id }),
+      ...(n > 1 && { covers: d.lastEventId }),
     });
   }
 
@@ -463,7 +463,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       outOfDate: outOfDateIds(),
       pending: pendingFinal(events),
     });
-    await resume(m, text, { kind: "runtime", covers: events.at(-1)?.id });
+    await resume(m, text, { kind: "runtime", covers: d.lastEventId });
     return true;
   }
 
@@ -480,7 +480,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const events = recorder.events();
     if (d.emptyDeliveries < config.stuckLimit) {
       const state = `Agents:\n${agentList(d, stateOf, now())}`;
-      await resume(m, livenessNudge(state), { kind: "runtime", covers: events.at(-1)?.id });
+      await resume(m, livenessNudge(state), { kind: "runtime", covers: d.lastEventId });
       return true;
     }
     const pending = pendingFinal(events);
