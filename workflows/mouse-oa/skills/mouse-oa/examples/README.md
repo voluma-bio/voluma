@@ -33,18 +33,18 @@ middle of the medial and the lateral compartment of the plateau.
 range and each section's U span are in `plate-faces.json`), and the metaphyseal task checks them again. The proposal is where the worker
 starts: the faces must follow the plate over the whole tibia at plate level, past each span end and on the sections with no span, out to the V
 ends. A worker checks its faces against these: each lies on the plate's two edges, a few voxels apart, on every section; every flagged
-stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has points the worker read off a zoomed view, from its first to its
-last column. The positions are read by looking: code may write them down, but a detector or interpolator choosing them is not tracing, and
-`iioc.py` and `metaphysis_roi.py` passing (they stop on a stretch of the plate left untraced over `max_gap_um`, and on points off the tibia) does not mean the face is on the plate.
+stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has been looked at on a zoomed view and retraced where wrong, with points the worker read off the view
+wherever it opens a gap wider than `max_gap_um`. The positions are read by looking: code may write them down, but a detector or interpolator choosing them is not tracing, and
+`iioc.py` and `metaphysis_roi.py` passing (they stop on a bone column bridged or held over more than `max_gap_um`, in U or V, and on points off the tibia) does not mean the face is on the plate.
 The plate is a thin sheet of lower density between denser bone, and it is not
 always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong. The right face follows the
 same visible plate band end to end, including where it wraps down the condyles at the sides of the arch (OA6-2RK V=220 and 225); it is wrong
 where it switches onto the cortex or the marrow. Where a single-valued face cannot represent the anatomy (OA6-2RK V=185, the notch nearly in
 the section's plane) the worker has read the neighbouring sections and raised it in a To check item, not flattened it or called it eroded.
 The check opens every `qc-faces-<n>.jpg` of the task, sheet by sheet: `iioc.py` writes them, one panel per traced section, the proximal face as the
-worker delivered it (solid between traced points, dotted where held constant past them) over the tibia's outline, the crop taking in the whole
-tibia on the section. On each: the line lies on the plate band, including down a condylar wrap, stays on the bone from end to end, and does not
-leave the plate for cortex or marrow; dotted stretches over the plate are untraced plate, which is a failure; a sheet not opened is a check not done.
+worker delivered it (solid between traced points, dotted where held constant past them) over the tibia's outline, the crop reaching 0.8 mm beyond the faces' height range (a band farther from the faces than that is not in the
+sheet: look at the zoomed views for it). On each: the line lies on the plate band, including down a condylar wrap, stays on the bone from end to end, and does not
+leave the plate for cortex or marrow; a dotted stretch over the plate longer than `max_gap_um` is untraced plate, which is a failure; a sheet not opened is a check not done.
 
 **Eroded plate.** `iioc/eroded-plate-oa6-1rk-v231.jpg`: OA6-1RK, coronal section V=231, the lab's reading of the plate, traced by Jimmy.
 Left of U~296 two thin lines run along the plate, some 20 to 90 µm apart; to the right the plate has been destroyed, the two lines meet

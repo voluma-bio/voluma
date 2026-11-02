@@ -69,9 +69,9 @@ schema is `regions-and-landmarks`'):
   no points where it is flagged. The proposal covers only part of the tibia (the V range and each section's U span are in `plate-faces.json`
   and the script's output) and is where you start, not where you stop: you trace the plate over the whole tibia at plate level, on zoomed
   views, past every span end, on the sections with no span, and out to the V ends. `iioc.py` and `metaphysis_roi.py` stop on a face whose
-  curves leave a column of the tibia at plate level uncovered: points on a section more than the spec's `max_gap_um` apart over bone (a span over
-  columns with no tibia does not count), or a bone column more than `max_gap_um` in V from a section that covers that U, past the first and last
-  section included, and name the V rows and U ranges; they also stop on a point more than
+  curves leave a column of the tibia at plate level uncovered: a bone column the surface would bridge or hold over more than the spec's `max_gap_um`: points on a section more than that
+  apart along U, neighbouring sections more than that apart in V (about 24 rows), or a curve's end or the first or last section more than that short
+  of it. A short section among full ones does not make up for itself: the rows beside it rest on its missing stretch. They name the V rows and U ranges; they also stop on a point more than
   `off_tibia_margin_um` off the tibia mask. Say where the proposal covered and where you traced. Copy its two curve keys
   (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
   The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in two known ways, jumping up into
@@ -84,7 +84,7 @@ schema is `regions-and-landmarks`'):
   switch onto cortex or marrow. Where one height per (V, U) cannot represent what you see (OA6-2RK V=185, where the notch runs nearly in
   the section's plane), read the neighbouring sections and a view across them, trace the nearest single-valued face, and raise it as a To
   check item; do not flatten it and do not call it eroded. Look at every proposed section's render, and every `qc-faces-<n>.jpg` sheet (the
-  faces as delivered, solid where your points define them, dotted where the surface is held past them, over the whole tibia's outline). Where
+  faces as delivered, solid where your points define them, dotted where the surface is held past them, over the tibia's outline, cropped to the faces' height range and 0.8 mm beyond it). Where
   the plate is destroyed, mark the U range where it is gone in
   `plate_eroded` (`{"<V>": [{"u": [first, last], "eroded": "<why>"}]}`, integer U) on every traced section it reaches, flagged or not
   (add a section beside the span if it spills over), and trace the remaining bone there with both faces, the section's curve reaching both ends of the range: the mark

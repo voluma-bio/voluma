@@ -3,7 +3,7 @@
 Library, not a script. A face is drawn as the surface the script cut with, not as the proposal: solid between the points the
 worker traced, dotted where the surface is held constant past them, over the tibia's outline, on every traced section, so a line
 that runs over empty space or up a cortical wall shows. The crop takes in the tibia 80 voxels (0.8 mm) beyond the faces' height range
-each way, so a face put in the wrong place does not crop away the plate it missed.
+each way, so a face put in the wrong place does not crop away a plate band within that reach. A band farther away is not shown.
 """
 
 import numpy as np

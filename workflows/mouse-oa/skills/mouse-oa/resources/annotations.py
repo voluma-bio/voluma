@@ -162,7 +162,7 @@ def traced_surface(spec, key, shape):
                      '{"<v>": [[w, u], ...]}} (a point is [row = W, column = U])')
     if len(spec.get('slices', {})) < 2:
         sidecar.fail(f'"{key}" needs curves on at least two coronal sections (V indices): trace more sections')
-    H, *_, valid = surface_from_curves(spec, shape)
+    H, *_, valid, _ = surface_from_curves(spec, shape)
     return H, valid
 
 
@@ -183,44 +183,30 @@ def refuse_off_tibia(ann, key, tib, spec_path, vox):
 
 
 def refuse_gaps(ann, key, tib, spec_path, vox):
-    """Refuse a face that leaves tibia at plate level untraced. Along U, neighbouring points on a section lie at most the spec's
-    `max_gap_um` (entry plate-faces) apart over bone columns (a span over columns with no tibia at plate level does not count) and the
-    first and last lie within it of the bone's ends; along V, every bone column at plate level lies within `max_gap_um` of a traced
-    section that covers that U. A surface is linear between a curve's points and between sections, and held constant past their ends, so an uncovered
-    column is a straight bridge over whatever the plate does there. Columns with no tibia at plate level (the notch between the
-    condyles) are not demanded. "At plate level" is the tibia between the section's lowest and highest curve points, widened by the
-    gap, so an epiphysis that overhangs the plate is not demanded. The stop names each row range and the uncovered U ranges."""
+    """Refuse a face that leaves tibia at plate level untraced: a bone column whose `support` (surface_from_curves: the span of the
+    straight bridge its W lies on, along U within a section and along V between the two sections it is interpolated between, or
+    its distance from the end point or end section where it is held constant) exceeds the spec's `max_gap_um` (entry plate-faces).
+    Columns with no tibia at plate level (the notch between the condyles) are not demanded. "At plate level" is the tibia between
+    the section's lowest and highest curve points, widened by the gap, so an epiphysis that overhangs the plate is not demanded.
+    The stop names each row range and the uncovered U ranges."""
     gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
     um = vox * 1000
     slices = {int(k): np.asarray(pts, float) for k, pts in ann[key]['slices'].items()}
     levels = sorted(slices)
-    cols = np.arange(tib.shape[2])
     rows = np.arange(tib.shape[1])
     wlo = np.interp(rows, levels, [slices[v][:, 0].min() for v in levels]) - gap
     whi = np.interp(rows, levels, [slices[v][:, 0].max() for v in levels]) + gap
-    plate = lambda v: tib[max(int(wlo[v]), 0) : int(whi[v]) + 1, v].any(0)  # tibia columns at plate level on row v
-    reach = {}  # section -> bool U: columns it traces. Not: bone in a span over the gap between neighbouring points, or past an end by over the gap
-    for s in levels:
-        us = np.sort(slices[s][:, 1])
-        i = np.searchsorted(us, cols)
-        prev = us[np.maximum(i - 1, 0)]
-        nxt = us[np.minimum(i, len(us) - 1)]
-        inside = (i > 0) & (i < len(us))
-        ends = np.minimum(np.abs(cols - prev), np.abs(nxt - cols)) <= gap
-        reach[s] = np.where(inside, (nxt - prev <= gap) | ~plate(s), ends)
-    missing = np.zeros(tib.shape[1:], bool)  # (V, U) columns of tibia at plate level with no traced section in reach
-    for v in rows:
-        covered = np.zeros(tib.shape[2], bool)
-        for s in levels:
-            if abs(s - v) <= gap:
-                covered |= reach[s]
-        missing[v] = plate(v) & ~covered
+    plate = np.array([tib[max(int(wlo[v]), 0) : int(whi[v]) + 1, v].any(0) for v in rows])  # (V, U) tibia columns at plate level
+    # A traced section need not support a column where the tibia is absent on it: the other section the row is interpolated between must.
+    *_, support = surface_from_curves(ann[key], tib.shape, ~plate)  # callers have run traced_surface, so the spec is valid
+    missing = plate & (support > gap)
     labels, count = ndi.label(missing)
     if count:
         boxes = sorted((sl[0].start, sl[0].stop - 1, sl[1].start, sl[1].stop - 1, int((labels[sl] == i + 1).sum())) for i, sl in enumerate(ndi.find_objects(labels)))
         shown = '; '.join(f'V={v0}..{v1}, U={u0}..{u1} ({n} columns)' for v0, v1, u0, u1, n in boxes[:6]) + (f'; and {count - 6} more stretches' if count > 6 else '')
-        sidecar.fail(f'"{key}" leaves {int(missing.sum())} columns of the plate more than {gap * um:.0f} um from a traced point, where the surface would be '
-                     f'a straight line or held constant: {shown}. Trace the plate there (traced sections: V={levels[0]}..{levels[-1]}, {len(levels)} of them)')
+        sidecar.fail(f'"{key}" leaves {int(missing.sum())} columns of the plate not traced at {gap * um:.0f} um spacing or closer (points on a section, '
+                     f'sections in V, or the end of a curve or of the traced sections), where the surface would be a straight line or held constant: {shown}. '
+                     f'Trace the plate there (traced sections: V={levels[0]}..{levels[-1]}, {len(levels)} of them)')
 
 
 def eroded_marks(ann, key, shape, on_bone):
