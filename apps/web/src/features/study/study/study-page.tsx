@@ -1,14 +1,15 @@
 /**
  * A study's page (`/studies/:id`): which sample needs me. Its samples grouped Needs you, Running,
- * Done (then Not started), each row with its group and knee, its bar of measurements,
+ * Done (then Not started), each row with its picture, group and knee, its bar of measurements,
  * one line of status and when it last changed; a row opens the scan review at the first item that
  * needs you, else the scan. `?status=<place>` shows one group. On the right: the study's details,
  * its headline measurement with the way to Compare, and recent activity. Nothing here judges or
  * changes a result.
  */
+import { runThumbnailUrl } from "@voluma/api-client";
 import type { StudyScanDetail } from "@voluma/contracts/study";
 import { kneeOf, liveStatus, needsYouOf, plural, scanStatus, useNow } from "@voluma/run-view";
-import { Button, Count, cx, PageHead, SidePanel, StatusMark } from "@voluma/ui";
+import { Button, Count, cx, PageHead, SidePanel, StatusMark, Thumbnail } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight, PanelRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
@@ -129,10 +130,11 @@ function SampleRow({
   return (
     <li
       className={cx(
-        "group/row relative grid min-h-11 grid-cols-[10rem_7rem_auto_minmax(0,1fr)_5.5rem_1rem] items-center gap-x-4 rounded-md px-2",
+        "group/row relative grid min-h-14 grid-cols-[2.5rem_10rem_7rem_auto_minmax(0,1fr)_5.5rem_1rem] items-center gap-x-4 rounded-md px-2",
         href && "hover:bg-accent",
       )}
     >
+      <Thumbnail src={scan.runs[0] && runThumbnailUrl(scan.runs[0].id)} />
       {href ? (
         <Link
           to={href}

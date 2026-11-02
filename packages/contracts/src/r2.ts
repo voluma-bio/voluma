@@ -92,6 +92,12 @@ export const reviewAssetKey = (runId: string, sha256: string, path: string) =>
   `${reviewAssetPrefix(runId)}${sha256Schema.parse(sha256)}/${rel(path)}`;
 
 /**
+ * The run's picture for lists: one small WebP the review domain renders once from the run's
+ * first converted image volume (`GET /api/review/runs/:runId/thumbnail`).
+ */
+export const runThumbnailKey = (runId: string) => `${runPrefix(runId)}thumbnail.webp`;
+
+/**
  * Completed conversions reused by runs of one input. Outside `inputPrefix`: raw inputs
  * stay immutable and agents never mount this writable cache. The converter partitions it
  * by its code, conversion mode and source hash; geometry remains in each run's outputs.

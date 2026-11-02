@@ -116,4 +116,5 @@ export {
   type StripPoint,
 } from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
+export { Thumbnail, type ThumbnailProps } from "./thumbnail";
 export { Tooltip, type TooltipProps } from "./tooltip";

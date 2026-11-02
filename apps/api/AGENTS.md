@@ -198,5 +198,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run's own prefix, so the read check on the run is the whole scope check, and the route reads
   no event log (a viewer sends one request per chunk). The tail goes through `relativePathSchema`;
   the route does not check the object exists, so a missing chunk is R2's 404 on the redirect.
+- `runs.ts` also serves `GET /runs/:runId/thumbnail` (`thumbnail.ts`): a ≤192 px WebP of the run
+  for lists, kept at `runThumbnailKey`. The first request renders it from the coarse OME-Zarr
+  levels of the latest revision's first converted `image` volume (the review converter's own
+  output, read with zarrita through the store; the plane through the middle of the shortest axis,
+  windowed to the 1st to 99.5th percentile) and stores it; later requests read the store and no
+  event log. Concurrent first requests share one render. 204 (`no-store`) while the run has no
+  converted image volume; a failed render is a 500 and not stored.
 - Deferred work:
   [.context/TODO.md](src/domains/review/.context/TODO.md).
