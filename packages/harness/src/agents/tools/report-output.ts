@@ -117,7 +117,9 @@ function detailOf(entry: OutputEntry): Pick<Plan, "detail" | "shape"> {
 /**
  * What the review converter reads of a `.npy` that the sidecar beside it (`<name>.json`,
  * `workflows/core/skills/*\/resources/sidecar.py`) states: `dtype`; `gridId` of the grid it lives
- * on; a surface's `axis`; a base's `unit`. Nothing is refused for a missing sidecar.
+ * on; `affine` (voxel (x, y, z) to mm, diagonal from `spacing_zyx_mm`: the sidecar knows no
+ * rotation); a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is
+ * refused for a missing sidecar.
  */
 async function detailFromSidecar(
   deps: OutputToolDeps,
@@ -136,7 +138,24 @@ async function detailFromSidecar(
   const unit = str(side.units) ?? str(side.unit);
   const dtype = str(side.dtype);
   const gridId = str(side.grid_id);
+  const triple = (v: unknown) =>
+    Array.isArray(v) &&
+    v.length === 3 &&
+    v.every((n) => typeof n === "number" && Number.isFinite(n))
+      ? (v as number[])
+      : undefined;
+  const spacing = triple(side.spacing_zyx_mm);
+  const offset = triple(side.offset_zyx);
   return {
+    ...(spacing && {
+      affine: [
+        [spacing[2], 0, 0, 0],
+        [0, spacing[1], 0, 0],
+        [0, 0, spacing[0], 0],
+        [0, 0, 0, 1],
+      ],
+    }),
+    ...(offset && { offsetZyx: offset }),
     ...(dtype && { dtype }),
     ...(gridId && { gridId }),
     ...(shape === "surface" &&
