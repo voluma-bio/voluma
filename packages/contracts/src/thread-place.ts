@@ -9,11 +9,15 @@ export type ThreadPlace = "root" | "main" | "worker" | "check";
 
 type Started = Extract<RunEvent, { type: "thread.started" }>["payload"];
 
-/** Root has no parent; a check records the attempt it checks; a worker has a task and no attempt; the main agent has none of these. */
+/**
+ * Root has no parent; an agent-loop thread says its `role`; a check records the attempt it
+ * checks; a worker has a task and no attempt; the main agent has none of these.
+ */
 export function threadPlace(
-  p: Pick<Started, "parentThreadId" | "task" | "attemptId">,
+  p: Pick<Started, "parentThreadId" | "task" | "attemptId" | "role">,
 ): ThreadPlace {
   if (p.parentThreadId === null) return "root";
+  if (p.role !== undefined) return p.role;
   if (p.attemptId !== undefined) return "check";
   return p.task !== undefined ? "worker" : "main";
 }

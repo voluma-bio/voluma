@@ -54,7 +54,7 @@ import {
   type ModelSetup,
   type Outcome,
   type Prepared,
-  pinnedImageOf,
+  pinOf,
   type Supervised,
   superviseRun,
 } from "@voluma/harness/supervise-run";
@@ -256,9 +256,12 @@ async function claimBody(
     const stored = await client.storedEvents();
     // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
     // run to different dependencies. A run made before this was recorded is refused here.
-    const pinnedImage = pinnedImageOf(runId, stored);
-    const sandboxImage = pinnedImage ?? config.sandbox.image;
-    log(`sandbox image: ${sandboxImage} (${pinnedImage ? "the run's own" : "this runner's"})`);
+    const pin = pinOf(runId, stored);
+    const sandboxImage = pin?.image ?? config.sandbox.image;
+    const harness = pin?.harness ?? run.harness ?? "tasks";
+    log(
+      `sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"}); loop: ${harness}`,
+    );
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {
@@ -347,6 +350,7 @@ async function claimBody(
           root: REPO_ROOT,
           commit: config.commit,
           knownTools: TOOL_NAMES,
+          harness,
         }),
       );
       // The model every role uses: `RUNNER_MODEL` (a plumbing check) over the run's own model
@@ -433,6 +437,7 @@ async function claimBody(
     };
     supervised = superviseRun({
       runId,
+      harness,
       prepare: (signal) =>
         prepare(signal).catch((e) => {
           logStack(e);
