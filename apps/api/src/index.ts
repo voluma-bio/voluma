@@ -93,9 +93,10 @@ const db = drizzle(client, { casing: "snake_case" });
 
 // The organizations and what each may run. Members sign in to `members`; the guest
 // organization (auth.ts) is separate, and unset means the sign-in wall.
+const labOrganizationId = required("WORKOS_LAB_ORGANIZATION_ID");
 const members = [
   {
-    id: required("WORKOS_LAB_ORGANIZATION_ID"),
+    id: labOrganizationId,
     scope: "lab" as const,
     limits: limitsFromEnv("LAB"),
   },
@@ -154,6 +155,7 @@ const queue = pgRunQueue(
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
   harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "tasks"),
+  labOrganizationId,
 );
 const eventLog = pgEventLog(db, notifier);
 
