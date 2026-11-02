@@ -1,40 +1,100 @@
 /**
- * The prompts of an agent-model thread. PLACEHOLDER of the spine lane: the roles lane replaces
- * this file with the real system prompt (role body, words, environment, mounts, skill list) and
- * first messages. The spine needs only `systemPromptOf` and `firstMessageOf`.
+ * The agent loop's prompts. A thread's system prompt is fixed for its life: its role file, the
+ * words and environment text every role shares, the mounts of its layout and the skill list. What
+ * varies goes in its first message, built from the run's snapshot and the log, so a thread that
+ * never stored its prompt rebuilds it identically. Everything here is generic: a workflow's
+ * words come only from its skill, `outputs.yaml` and the notes it is handed.
  */
-
-import type { RunEvent } from "@voluma/contracts/events";
-import { renderFinalOutputs } from "@voluma/contracts/output-files";
-import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import type { AgentsDefinition, Skill } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
+import { skillList, toolIndex } from "../prompts";
 
-export interface PromptAgent {
-  name: string;
-  role: "main" | "worker";
+/** The paths every agent reads; the layout (`layout.ts`) and the run files writer make them true. */
+const FINAL_OUTPUTS = "/run/final-outputs.yaml";
+const OUTPUTS_INDEX = "/run/outputs.yaml";
+const PLAN = "/work/main/plan.md";
+
+export function systemPromptOf({
+  definition,
+  layout,
+}: {
+  definition: AgentsDefinition;
   layout: ThreadLayout;
-  brief?: string;
-  skills?: string[];
+}): string {
+  const role = definition.agents[layout.role];
+  if (!role) throw new Error(`${layout.name} runs on ${layout.role}, which is not a role file`);
+  const skills = `${skillList(definition, role, " [in your first message]")}\n\n${toolIndex(definition, role, role.tools.includes("bash"))}`;
+  return [role.body, definition.words, definition.environment, layout.description, skills].join(
+    "\n\n",
+  );
 }
 
-export function systemPromptOf(def: WorkflowDefinition, agent: PromptAgent): string {
-  const role = def.agents[agent.role];
-  if (!role) throw new Error(`${agent.name} runs on ${agent.role}, which is not a role file`);
-  const skills = def.skills
-    .map((s) => `- ${s.name}: ${s.description} (${s.path}/SKILL.md)`)
-    .join("\n");
-  return `${role.body}\n\nYou work in a sandbox. Your files:\n${agent.layout.description}\n\nSkills (read a SKILL.md with read before you rely on it):\n${skills}`;
+export type AgentStart =
+  | {
+      role: "main";
+      /** `/run/final-outputs.yaml` as rendered for this run. */
+      finalOutputs: string;
+      /** How many outputs the researcher selected. */
+      selected: number;
+      /** The most workers main may have open (X). */
+      limit: number;
+      notes?: string;
+    }
+  | {
+      role: "worker";
+      name: string;
+      brief: string;
+      /** Skills main named in `start_worker`, beyond the workflow's and its companions. */
+      skills?: readonly string[];
+    };
+
+const skillBlock = (s: Skill) => `### Skill ${s.name} (${s.path})\n\n${s.text}`;
+
+/** The skill, then its companions, once each, in that order; then `extra`. */
+function skillsOf(definition: AgentsDefinition, extra: readonly string[] = []): Skill[] {
+  const own = definition.skills[0] as Skill;
+  const byName = (name: string) => {
+    const skill = definition.skills.find((s) => s.name === name);
+    if (!skill) throw new Error(`skill "${name}" is not a skill of this workflow`);
+    return skill;
+  };
+  return [...new Set([own.name, ...own.companions, ...extra])].map(byName);
 }
 
-export function firstMessageOf(
-  def: WorkflowDefinition,
-  agent: PromptAgent,
-  events: readonly RunEvent[],
-  notes: string | undefined,
-): string {
-  const notesBlock = notes ? `\n\nThe researcher's notes:\n${notes}` : "";
-  if (agent.role === "main") {
-    return `Your run starts. The final outputs the researcher asked for (/run/final-outputs.yaml):\n\n${renderFinalOutputs(events)}${notesBlock}`;
+export function firstMessageOf({
+  definition,
+  start,
+}: {
+  definition: AgentsDefinition;
+  start: AgentStart;
+}): string {
+  const own = definition.skills[0] as Skill;
+  if (start.role === "worker") {
+    const loaded = skillsOf(definition, start.skills);
+    return `You are ${start.name}, a worker on this run. Main's brief:
+
+${start.brief}
+
+Read ${FINAL_OUTPUTS} (what the run delivers and what correct looks like), ${OUTPUTS_INDEX} (every output made so far and where its files are) and ${PLAN} (main's plan). The input is in /inputs.
+
+## Skills
+
+Loaded for you, so you need not read them again: ${loaded.map((s) => s.name).join(", ")}. Each one's other files sit beside it, at its path.
+
+${loaded.map(skillBlock).join("\n\n")}`;
   }
-  return `You are ${agent.name}. Final outputs: /run/final-outputs.yaml; published versions: /run/outputs.yaml; the plan: /work/main/plan.md.\n\nFrom main:\n${agent.brief ?? ""}${notesBlock}`;
+  const plan = definition.suggestedPlan
+    ? `\n\n### Suggested plan (${own.path}/references/suggested-plan.md)\n\n${definition.suggestedPlan}`
+    : "";
+  return `You are running the workflow ${own.name}: ${own.description} The researcher selected ${start.selected} outputs.
+
+## Final outputs (${FINAL_OUTPUTS})
+
+${start.finalOutputs.trim()}
+
+## The workflow's skill
+
+${skillBlock(own)}${plan}
+
+The input is in /inputs. Write your plan in ${PLAN}. Outputs made so far are listed in ${OUTPUTS_INDEX}. You may have up to ${start.limit} workers open.${start.notes ? `\n\nThe researcher's notes: ${start.notes}` : ""}`;
 }

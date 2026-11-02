@@ -5,17 +5,18 @@
  */
 import type { ThreadLayout } from "../../layout";
 import type { Files } from "../../ports/files";
-import { sharedFactories } from "../../tools/registry";
+import { bashTool } from "../../tools/bash";
+import { segmentSamTool } from "../../tools/segment-sam";
 import type { Tool } from "../../tools/tool";
 import { type AgentsApi, coordinationTools } from "./coordination";
 import { keepOutput } from "./keep-output";
 import type { OutputToolDeps } from "./output-shared";
+import { readTool } from "./read";
 import { reportOutput } from "./report-output";
 
 export const AGENT_TOOL_NAMES = [
   "bash",
   "read",
-  "view_image",
   "segment_sam",
   "message",
   "close",
@@ -25,6 +26,13 @@ export const AGENT_TOOL_NAMES = [
   "report_output",
   "keep_output",
 ] as const;
+
+const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) => Tool> = {
+  bash: ({ layout }) => bashTool(layout, true),
+  segment_sam: ({ layout }) => segmentSamTool(layout),
+  read: ({ layout, files }, names) =>
+    readTool({ layout, files, hasSandbox: names.includes("bash") }),
+};
 
 export interface AgentToolDeps {
   layout: ThreadLayout;
@@ -44,8 +52,8 @@ export function buildAgentTools(names: readonly string[], deps: AgentToolDeps): 
       ? coordination[name]
       : Object.hasOwn(outputs, name)
         ? outputs[name]
-        : Object.hasOwn(sharedFactories, name)
-          ? sharedFactories[name]?.(deps, names)
+        : Object.hasOwn(factories, name)
+          ? factories[name]?.(deps, names)
           : undefined;
     if (!tool) throw new Error(`tool "${name}" is not a tool of the agent loop`);
     return tool;
