@@ -59,10 +59,11 @@ export const outputsBackupPrefix = (runId: string, reopenId: string) =>
   `${runPrefix(runId)}corrections/${seg(reopenId)}/`;
 /**
  * A published output version's folder (the agent model), `<id>/<toolCallId>` under `outputs/`, `id` being
- * a catalog id or `<worker>/<id>`. Keyed by the tool call so a repeated call writes the same keys.
+ * a catalog id or `<worker>/<id>`. Keyed by the tool call so a repeated call writes the same keys. A provider's
+ * call id may hold a `|` (OpenAI Responses: `call_x|fc_x`), which a shell would take for a pipe: the folder name keeps only shell-safe characters.
  */
 export const versionPath = (outputId: string, toolCallId: string) =>
-  `${outputId.split("/").map(seg).join("/")}/${seg(toolCallId)}`;
+  `${outputId.split("/").map(seg).join("/")}/${seg(toolCallId.replace(/[^\w.-]/g, "_"))}`;
 export const versionPrefix = (runId: string, outputId: string, toolCallId: string) =>
   `${outputsPrefix(runId)}${versionPath(outputId, toolCallId)}/`;
 export const taskOutputPrefix = (runId: string, task: string) =>

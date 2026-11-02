@@ -256,11 +256,14 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     }
   }
 
+  /** A path as one shell word: a version's folder carries the tool call id, which has a `|`. */
+  const quoted = (path: string) => `'${path.replaceAll("'", "'\\''")}'`;
+
   /** One conversion's result, or a throw when the sandbox failed. */
   async function convertInSandbox(job: Job): Promise<ConvertResult> {
     const box = await options.sandbox();
     const command =
-      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${job.source} ` +
+      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${quoted(job.source)} ` +
       `${job.flags} --out ${REVIEW}`;
     let stdout = "";
     let stderr = "";
