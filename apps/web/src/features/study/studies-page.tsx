@@ -41,12 +41,10 @@ import {
 } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
 import { ChevronRight, Info, Plus } from "lucide-react";
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { PLACES, type Place, placeOf } from "./study/study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study/study-side";
-
-const LIVE = 5000;
 
 /** Where a study opens: its page, or a study of one's scan once it has a run. */
 const hrefOf = (study: StudySummary) => {
@@ -280,14 +278,16 @@ function Latest({ study, now }: { study: StudySummary; now: number }) {
 
 /** The selected study, described: what you came to do first, then what it is and what moved. */
 function StudyPane({ study }: { study: StudySummary }) {
-  // Polls like the study page while a run is live; the list (polling too) notices a new one.
-  const detail = useQuery({
-    ...studyQuery(study.id),
-    refetchInterval: (q) =>
-      study.newestRuns.some(isLive) || q.state.data?.scans.some((s) => isLive(s.runs[0]))
-        ? LIVE
-        : false,
-  });
+  const detail = useQuery(studyQuery(study.id));
+  // The detail polls only once it holds a live run; the list (polling too) notices a new one first.
+  const liveRuns = study.newestRuns
+    .filter(isLive)
+    .map((r) => r.runId)
+    .join();
+  const { refetch } = detail;
+  useEffect(() => {
+    if (liveRuns) void refetch();
+  }, [liveRuns, refetch]);
   const workflow = workflowById(study.workflowId);
   return (
     <div className="grid content-start gap-7 px-4 pt-3 pb-6">

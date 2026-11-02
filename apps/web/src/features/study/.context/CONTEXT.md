@@ -15,7 +15,9 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `q24/c-quad-graph/study.html`) is a list with a details pane, like a file browser: a click
   selects a study and the right side describes it; the chevron, a double-click, Enter or "Open
   study" opens it. The list reads `listStudies` alone (each scan's newest run in brief), refetched
-  every 5 s while a run is live; the pane reads the selected study's `getStudy`. A scan's
+  every 5 s while a run is live; the pane reads the selected study's `getStudy`, which polls the
+  same way once it holds a live run (both rules live in `studiesQuery`/`studyQuery`), and refetches
+  when the list shows a new live run. A scan's
   picture is `Thumbnail` on its newest run's `runThumbnailUrl`, in the study's rows and the
   pane's Scans block (not in the Studies list rows). The API renders it once per run generation
   (`apps/api/src/domains/review/thumbnail.ts`), so a row costs one cached image request, never a

@@ -150,7 +150,7 @@ Running, "last news <age>" (the newest stored event, on a timer) and the latest 
 its Rests on); "not yet" for nothing published; "N of M in" in the panel head (the scan header
 says only Running), with Needs you only once something does; and "Other outputs so far" under the
 values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
-closes. A section's tick waits for every value in it. The centre says the run is going and the
+stays open until Esc. A section's tick waits for every value in it. The centre says the run is going and the
 AI's plan is in the conversation until the value has a version, is marked missing, or something
 on its chain has a version; then it shows the nearest such link, the scene bar saying "<value>
 rests on". `studiesQuery` refetches while a run is live, so the Samples tab
