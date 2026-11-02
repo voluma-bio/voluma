@@ -1,54 +1,37 @@
 /**
- * A study (`/studies/:id/*`): loads it once for every section, declares the study's pages on the
- * left strip (Dashboard, To check, Scans, Results, Details) and the Study panel, and shows the
- * section in the main area. Sections read the study through `useStudy`. A study of one has no
- * dashboard: it opens its scan. While a scan is still running the study refetches every 5 s.
+ * A study (`/studies/:id/*`): loads it once for its two pages (the samples, and Compare), puts
+ * "Studies › <study> (› Compare)" and "Next sample that needs you" in the header line, and the
+ * Samples tree on the left side (this study open, the lab's other studies below). Pages read the
+ * study through `useStudy` and render the centre, and a right side if they have one, beside the
+ * tree. A study of one has no study page: it opens its scan. While a sample is still running the
+ * study refetches every 5 s.
  */
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
-import { studyQuery } from "@voluma/api-client/query";
+import { studiesQuery, studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { isLive, needsYouOf, plural, StudyPanel } from "@voluma/run-view";
+import { isLive, sampleTree } from "@voluma/run-view";
 import {
   Breadcrumb,
   Button,
   ErrorState,
   LoadingState,
+  SampleTree,
   ShellHeading,
-  ShellLink,
-  ShellPanel,
+  SidePanel,
 } from "@voluma/ui";
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
-import { ChartScatter, CircleAlert, Info, Layers, LayoutGrid, PanelLeft } from "lucide-react";
+import { ChevronRight, ListTree } from "lucide-react";
 import type { ReactNode } from "react";
-import {
-  Link,
-  Navigate,
-  Outlet,
-  useLocation,
-  useNavigate,
-  useOutletContext,
-  useParams,
-} from "react-router";
+import { Link, Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router";
 import { linkTo } from "../link";
-import { scanHref } from "./study-model";
+import { byMostToCheck, reviewHref, scanHref } from "./study-model";
 
 export type StudyContext = { detail: StudyDetail; workflow: BundledWorkflow; me: Me };
 
-/** The study every section renders, with its workflow and the signed-in user. */
+/** The study every page renders, with its workflow and the signed-in user. */
 export const useStudy = () => useOutletContext<StudyContext>();
-
-const SECTIONS = [
-  { path: "", label: "Dashboard", icon: <LayoutGrid /> },
-  { path: "check", label: "To check", icon: <CircleAlert /> },
-  { path: "scans", label: "Scans", icon: <Layers /> },
-  { path: "results", label: "Results", icon: <ChartScatter /> },
-  { path: "details", label: "Details", icon: <Info /> },
-] as const;
-
-/** The section a path is on; the Workflow page (the dashboard's graph, expanded) is under Dashboard. */
-const sectionOf = (rest: string) => SECTIONS.find((s) => s.path === rest) ?? SECTIONS[0];
 
 export function StudyLayout() {
   const me = useOutletContext<Me>();
@@ -87,7 +70,7 @@ export function StudyLayout() {
 
   return (
     <>
-      <StudyChrome detail={detail} workflow={workflow} />
+      <StudyHeading detail={detail} />
       {study.isError && (
         <p
           role="status"
@@ -99,62 +82,75 @@ export function StudyLayout() {
           </Button>
         </p>
       )}
-      {/* The main area is a flex column; a page must not shrink to fit it, or its graph clips. */}
-      <div className="shrink-0">
+      <div className="flex min-h-0 flex-1">
+        <SamplesSide studyId={detail.study.id} />
         <Outlet context={{ detail, workflow, me } satisfies StudyContext} />
       </div>
     </>
   );
 }
 
-/** The study's strip pages, its Study panel and the header line's breadcrumb. */
-function StudyChrome({ detail, workflow }: { detail: StudyDetail; workflow: BundledWorkflow }) {
-  const navigate = useNavigate();
+/** The header line: where you are, and the next sample that needs you. */
+function StudyHeading({ detail }: { detail: StudyDetail }) {
   const { pathname } = useLocation();
   const base = `/studies/${detail.study.id}`;
-  const rest = pathname.slice(base.length).replace(/^\//, "");
-  const here = sectionOf(rest);
-  const toCheck = detail.scans.reduce((n, s) => n + needsYouOf(s), 0);
-  const knees = detail.scans.some((s) => typeof s.scan.attributes.knee === "string");
+  const compare = pathname.startsWith(`${base}/compare`);
+  const [next] = byMostToCheck(detail.study.example ? [] : detail.scans);
+  const nextHref = next && reviewHref(next);
   return (
-    <>
-      <ShellHeading>
-        <Breadcrumb
-          trail={[{ label: detail.study.name, to: linkTo(base) }]}
-          current={rest === "workflow" ? "Workflow" : here.label}
-        />
-      </ShellHeading>
-      <ShellPanel
-        id="study"
-        side="left"
-        group="study"
-        label="Study"
-        icon={<PanelLeft />}
-        shortcut="s"
-        defaultOpen
-      >
-        <StudyPanel
-          detail={detail}
-          about={`${plural(detail.scans.length, knees ? "knee" : "scan")}, ${workflow.name}`}
-          scanLink={(scan) => {
-            const href = scanHref(scan);
-            return href ? linkTo(href) : undefined;
-          }}
-        />
-      </ShellPanel>
-      {SECTIONS.map((s) => (
-        <ShellLink
-          key={s.path}
-          id={`study-${s.path || "dashboard"}`}
-          group="study-pages"
-          label={s.label}
-          icon={s.icon}
-          count={s.path === "check" ? toCheck : undefined}
-          active={here === s && (rest !== "workflow" || s.path === "")}
-          go={() => navigate(s.path ? `${base}/${s.path}` : base)}
-        />
-      ))}
-    </>
+    <ShellHeading>
+      <Breadcrumb
+        trail={[
+          { label: "Studies", to: linkTo("/") },
+          ...(compare ? [{ label: detail.study.name, to: linkTo(base) }] : []),
+        ]}
+        current={compare ? "Compare" : detail.study.name}
+      />
+      {nextHref && (
+        <Button asChild variant="secondary" size="sm" className="ml-auto">
+          <Link to={nextHref}>
+            Next sample that needs you:
+            <span className="font-mono font-semibold">{next.scan.subject}</span>
+            <ChevronRight aria-hidden />
+          </Link>
+        </Button>
+      )}
+    </ShellHeading>
+  );
+}
+
+/** The left side: the Samples tree, from the lab's study list (the scan page builds the same). */
+function SamplesSide({ studyId }: { studyId: string }) {
+  const studies = useQuery({
+    ...studiesQuery(),
+    refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? 5000 : false),
+  });
+  return (
+    <SidePanel
+      side="left"
+      tab="samples"
+      onTabChange={() => {}}
+      tabs={[
+        {
+          id: "samples",
+          label: "Samples",
+          icon: <ListTree />,
+          content: studies.data ? (
+            <SampleTree
+              studies={sampleTree(studies.data)}
+              studyId={studyId}
+              renderLink={(href, props) => <Link to={href} {...props} />}
+            />
+          ) : studies.isError ? (
+            <p className="m-0 px-4 py-3 text-sm text-muted-foreground">
+              Couldn't load the samples.
+            </p>
+          ) : (
+            <LoadingState label="Loading the samples" rows={4} className="px-3 py-2" />
+          ),
+        },
+      ]}
+    />
   );
 }
 
@@ -172,11 +168,14 @@ function PageState({
 }) {
   return (
     <div className="mx-auto w-full max-w-2xl px-6 py-8">
+      <ShellHeading>
+        <Breadcrumb trail={[{ label: "Studies", to: linkTo("/") }]} current="Study" />
+      </ShellHeading>
       {title ? (
         <ErrorState title={title} onRetry={retry}>
           {children}{" "}
           <Button asChild variant="link">
-            <Link to="/">Go to Home</Link>
+            <Link to="/">Go to Studies</Link>
           </Button>
         </ErrorState>
       ) : (

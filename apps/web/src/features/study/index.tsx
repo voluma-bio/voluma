@@ -1,33 +1,25 @@
 /**
- * Study feature: Home (`/`), Run on new scans (`/new`), Workflows (`/workflows`) and a study's
- * pages (`/studies/:id`: Dashboard, To check, Scans, Results, Details, and the workflow
- * expanded). Owns its routes; the shell mounts them and applies the user's theme.
+ * Study feature: Studies (`/`), Run on new scans (`/new`), Workflows (`/workflows`) and a study's
+ * pages (`/studies/:id`: its samples, and `/compare`). Owns its routes; the shell mounts them and
+ * applies the user's theme.
  */
 import type { RouteObject } from "react-router";
-import { HomePage } from "./home-page";
 import { NewPage } from "./new-page";
-import { Dashboard } from "./study/dashboard";
-import { DetailsPage } from "./study/details";
-import { ResultsPage } from "./study/results";
-import { ScansPage } from "./study/scans";
+import { StudiesPage } from "./studies-page";
+import { ComparePage } from "./study/compare-page";
 import { StudyLayout } from "./study/study-layout";
-import { ToCheckPage } from "./study/to-check";
-import { WorkflowPage } from "./study/workflow-page";
+import { StudyPage } from "./study/study-page";
 import { WorkflowsPage } from "./workflows-page";
 
 export const studyRoutes: RouteObject[] = [
-  { path: "/", element: <HomePage /> },
+  { path: "/", element: <StudiesPage /> },
   { path: "/new", element: <NewPage /> },
   {
     path: "/studies/:id",
     element: <StudyLayout />,
     children: [
-      { index: true, element: <Dashboard /> },
-      { path: "check", element: <ToCheckPage /> },
-      { path: "scans", element: <ScansPage /> },
-      { path: "results", element: <ResultsPage /> },
-      { path: "details", element: <DetailsPage /> },
-      { path: "workflow", element: <WorkflowPage /> },
+      { index: true, element: <StudyPage /> },
+      { path: "compare", element: <ComparePage /> },
     ],
   },
   { path: "/workflows", element: <WorkflowsPage /> },

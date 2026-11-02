@@ -41,7 +41,6 @@ export {
   runHref,
   runStatus,
   scanLabel,
-  studyStatus,
 } from "./run-status";
 export {
   RunStoreProvider,
@@ -63,7 +62,6 @@ export {
 export {
   type GraphTask,
   type ScanGraphTask,
-  type StudyGraphTask,
   shownStatus,
   TASK_STATUS,
   TaskGraph,
