@@ -187,7 +187,7 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
     """Refuse a face that leaves bone at plate level untraced. "Bone at plate level" is the tibia within the spec's `max_gap_um`
     (entry plate-faces) of the curve's W at that column. On each traced section, neighbouring points are at most that far apart
     over the section's bone (a span over columns without bone does not count: the notch between the condyles) and the first and last
-    point are within it of the bone's ends. Across V, traced sections are at most that far apart over the rows where the tibia exists
+    point are within it of the bone's ends (past the end points, bone is any tibia within the section's own W band). Across V, traced sections are at most that far apart over the rows where the tibia exists
     at plate level, and the first and last one are within it of those rows' ends. The stop names each stretch."""
     gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
     um = vox * 1000
@@ -209,6 +209,11 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
         v = int(k)
         pts = np.array(sorted(pts, key=lambda p: p[1]), float)
         bone = near_tibia(v, np.interp(np.arange(tib.shape[2]), pts[:, 1], pts[:, 0]))
+        # past the end points the curve has no height: any tibia in the section's own W band counts
+        lo, hi = int(max(np.floor(pts[:, 0].min() - gap), 0)), int(np.floor(pts[:, 0].max() + gap)) + 1
+        outside = np.arange(tib.shape[2])
+        outside = (outside < pts[0, 1]) | (outside > pts[-1, 1])
+        bone[outside] = tib[lo:hi, v, :].any(axis=0)[outside]
         cols = np.flatnonzero(bone)
         if not len(cols):
             continue
