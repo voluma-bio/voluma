@@ -1,7 +1,7 @@
 /**
  * A file output in the panes' place: its own file as it reads (JSON laid out, Markdown rendered,
  * an image shown, other text as is), beside the evidence it was checked on. The file comes from
- * the run's outputs (`outputFileUrl`); a large one shows its start.
+ * the run's outputs (`outputFileUrl`); of a large one only the first 200 KB is read and shown.
  */
 import { useQuery } from "@tanstack/react-query";
 import { outputFileUrl } from "@voluma/api-client";
@@ -9,8 +9,8 @@ import type { OutputVersion } from "@voluma/contracts/output-fold";
 import { Markdown } from "@voluma/run-view";
 import { ErrorState, LoadingState } from "@voluma/ui";
 
-/** The most of a file's text shown, in characters. */
-const MAX_TEXT = 200_000;
+/** The most of a file read and shown, in bytes. */
+const MAX_BYTES = 200_000;
 const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 
 export function FileOutput({ runId, version }: { runId: string; version: OutputVersion }) {
@@ -59,15 +59,14 @@ function FileText({ runId, path, name }: { runId: string; path: string; name: st
       const res = await fetch(url, { signal });
       if (!res.ok)
         throw new Error(res.status === 404 ? "The file isn't there." : `HTTP ${res.status}`);
-      return res.text();
+      return start(res);
     },
   });
   if (IMAGE.test(name)) return <img src={url} alt={name} className="max-w-full" />;
   if (text.isPending) return <LoadingState label={`Loading ${name}`} rows={6} />;
   if (text.isError)
     return <ErrorState title={`Couldn't load ${name}`}>{text.error.message}</ErrorState>;
-  const cut = text.data.length > MAX_TEXT;
-  const shown = cut ? text.data.slice(0, MAX_TEXT) : text.data;
+  const { text: shown, cut } = text.data;
   let body = (
     <pre className="font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">{shown}</pre>
   );
@@ -88,7 +87,7 @@ function FileText({ runId, path, name }: { runId: string; path: string; name: st
       {body}
       {cut && (
         <p className="text-xs text-muted-foreground">
-          The first {MAX_TEXT.toLocaleString()} characters.{" "}
+          The first {(MAX_BYTES / 1000).toLocaleString()} KB.{" "}
           <a href={url} download className="underline">
             Download the whole file
           </a>
@@ -96,4 +95,28 @@ function FileText({ runId, path, name }: { runId: string; path: string; name: st
       )}
     </div>
   );
+}
+
+/** The file's text up to `MAX_BYTES`, read from the stream and no further. */
+async function start(res: Response): Promise<{ text: string; cut: boolean }> {
+  const reader = res.body!.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size <= MAX_BYTES) {
+    const next = await reader.read();
+    if (next.done) break;
+    chunks.push(next.value);
+    size += next.value.length;
+  }
+  const cut = size > MAX_BYTES;
+  if (cut) await reader.cancel();
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  // A cut can split a character, which decodes as U+FFFD at the end: dropped.
+  const text = new TextDecoder().decode(cut ? bytes.subarray(0, MAX_BYTES) : bytes);
+  return { text: cut ? text.replace(/\uFFFD$/, "") : text, cut };
 }
