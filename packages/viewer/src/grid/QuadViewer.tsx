@@ -278,17 +278,24 @@ export function QuadViewer({
 
   // The layout holds across grids and saved views, so it can name GP on a grid that has no fitted
   // plane (or whose fit failed): there the slot shows the view GP replaced, the one it leaves out.
+  // Every write goes back as `given`, so the substitution never reaches the caller's layout.
   const gpFailed = fitted?.id === plateTarget?.id && !!fitted?.error;
+  const spare =
+    plateTarget?.load && !gpFailed
+      ? undefined
+      : (VIEW_ORDER.find((v) => v !== "gp" && !given.views.includes(v)) ?? "3d");
   const layout = useMemo(() => {
-    if (plateTarget?.load && !gpFailed) return given;
-    const spare = VIEW_ORDER.find((v) => v !== "gp" && !given.views.includes(v)) ?? "3d";
+    if (!spare) return given;
     const swap = (v: QuadView) => (v === "gp" ? spare : v);
     return { ...given, views: given.views.map(swap), full: given.full && swap(given.full) };
-  }, [given, !!plateTarget?.load, gpFailed]);
+  }, [given, spare]);
+  /** The caller's name for a view shown here: the spare is GP's slot. */
+  const givenView = (v: QuadView) => (v === spare && given.views.includes("gp") ? "gp" : v);
   const shown: readonly QuadView[] = layout.full
     ? [layout.full]
     : layout.views.slice(0, layout.count);
-  const wantsPlate = shown.includes("gp") && !plate;
+  const showsGp = shown.includes("gp");
+  const wantsPlate = showsGp && !plate;
   useEffect(() => {
     const target = plateTarget;
     if (!wantsPlate || !target?.load) return;
@@ -321,19 +328,19 @@ export function QuadViewer({
     onLayout(restore.layout);
     setRestoring(restore);
   }, [restore]);
-  // GP mounts once its plane is fitted; its saved view waits for it.
+  // GP mounts once its plane is fitted; its saved view waits for it while GP is shown.
   useEffect(() => {
     if (!restoring) return;
     const waiting: QuadState["views"] = {};
     for (const [view, saved] of Object.entries(restoring.views) as [QuadView, PaneView][]) {
       const h = handles[view]?.current;
       if (h) h.show(saved);
-      else if (view === "gp" && plateTarget?.load && !gpFailed) waiting.gp = saved;
+      else if (view === "gp" && showsGp) waiting.gp = saved;
     }
     if (!waiting.gp) setRestoring(undefined);
     else if (Object.keys(restoring.views).length > 1)
       setRestoring({ ...restoring, views: waiting });
-  }, [restoring, plate, gpFailed]);
+  }, [restoring, plate, showsGp]);
 
   const save = () =>
     onSave?.({
@@ -341,7 +348,7 @@ export function QuadViewer({
       aligned,
       point,
       contrast,
-      layout,
+      layout: given,
       views: Object.fromEntries(
         VIEW_ORDER.flatMap((v) => {
           const h = handles[v]?.current;
@@ -352,7 +359,7 @@ export function QuadViewer({
 
   // GP while its plane is being fitted holds its cell with a loading pane.
   const mounted: readonly QuadView[] =
-    plate || shown.includes("gp") ? VIEW_ORDER : VIEW_ORDER.filter((v) => v !== "gp");
+    plate || showsGp ? VIEW_ORDER : VIEW_ORDER.filter((v) => v !== "gp");
   const ready = shown.every(
     (v) => !!contrast && status[v] !== undefined && status[v] !== "loading",
   );
@@ -385,11 +392,11 @@ export function QuadViewer({
     const slot = layout.views.indexOf(view);
     return `${slot < 2 ? 1 : 2} / ${(slot % 2) + 1}`;
   };
-  const setFull = (view: QuadView | null) => onLayout({ ...layout, full: view });
+  const setFull = (view: QuadView | null) => onLayout({ ...given, full: view && givenView(view) });
   /** Puts `view` in `slot`; GP after a failed fit tries the fit again. */
   const pick = (slot: number, view: QuadView) => {
     if (view === "gp" && gpFailed) setFitted(undefined);
-    onLayout(showIn(view === "gp" ? given : layout, slot, view));
+    onLayout(showIn(given, slot, view));
   };
 
   const seam = (dir: "col" | "row") => {
@@ -720,7 +727,7 @@ export function QuadViewer({
               label={label}
               aria-pressed={layout.count === count && !layout.full}
               className="aria-pressed:bg-secondary aria-pressed:text-foreground"
-              onClick={() => onLayout({ ...layout, count, full: null })}
+              onClick={() => onLayout({ ...given, count, full: null })}
             >
               {icon}
             </IconButton>
