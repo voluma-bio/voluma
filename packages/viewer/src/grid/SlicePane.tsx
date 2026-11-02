@@ -48,6 +48,7 @@ import {
   type GridScene,
   levelFor,
   levelIndex,
+  type MarkEdit,
   type MarkTool,
   type PaneHandle,
   type PaneStatus,
@@ -87,6 +88,8 @@ export function SlicePane({
   marks,
   onMark,
   onTilt,
+  onEdit,
+  onPick,
   note,
   planeToken = axisToken,
   clickLines = false,
@@ -106,6 +109,10 @@ export function SlicePane({
   tool: MarkTool | null;
   marks: readonly ShownMark[];
   onMark(mark: GridMark): void;
+  /** With no tool, an end of a movable mark or a published ruler dragged; absent, none can be. */
+  onEdit?(edit: MarkEdit): void;
+  /** A movable mark's end clicked. */
+  onPick?(id: string): void;
   /** Turns the cut planes by `angle` radians about this pane's normal; absent, no handles. */
   onTilt?(angle: number): void;
   /** A point waiting for its note: a field at the point, Enter keeps the text, Esc none. */
@@ -186,6 +193,9 @@ export function SlicePane({
     cuts,
     whole,
     slab,
+    annotations: scene.annotations,
+    onEdit,
+    onPick,
   });
   latest.current = {
     point,
@@ -201,6 +211,9 @@ export function SlicePane({
     cuts,
     whole,
     slab,
+    annotations: scene.annotations,
+    onEdit,
+    onPick,
   };
 
   /** Where each cut crosses the crosshair, as a unit direction in pane mm (right, up). */

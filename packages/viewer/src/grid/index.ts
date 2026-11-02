@@ -10,6 +10,7 @@ export {
   type QuadState,
   type QuadView,
   QuadViewer,
+  type QuadViewerHandle,
 } from "./QuadViewer";
 export {
   type Blocks,
@@ -25,6 +26,7 @@ export type {
   GridMark,
   GridMesh,
   GridScene,
+  MarkEdit,
   MarkTool,
   Overlay,
   PaneView,

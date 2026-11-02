@@ -1,7 +1,7 @@
 /**
  * The input review of a run of the agent loop (Q24, mockup C), in the shell's two side panels. The
- * left side's tabs: the conversation with the run's main AI (the default; read-only until
- * researchers can write to it on this kind of run, badged while main waits on an approval) and
+ * left side's tabs: the conversation with the run's main AI (the default, and the only place
+ * anything on the run changes: `main-conversation.tsx`; badged while main waits on your yes) and
  * the inputs (the shared tree, named by `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with
  * the tool bar docked under them, or a file output, the whole run's graph (W) or the run's agents
  * in the panes' place. On the right, Final outputs: the picked value opens in place with what it
@@ -15,17 +15,15 @@
  * is page state: it holds while another output, on another grid, is shown.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, acceptToCheck, saveView } from "@voluma/api-client";
+import { ApiError, acceptToCheck } from "@voluma/api-client";
 import { studyQuery } from "@voluma/api-client/query";
+import { openApprovals } from "@voluma/contracts/agents";
 import type { Me } from "@voluma/contracts/auth";
-import { conversation } from "@voluma/contracts/conversation";
-import type { RunEvent } from "@voluma/contracts/events";
 import { outputsFold } from "@voluma/contracts/output-fold";
 import type { RunRead } from "@voluma/contracts/run";
 import {
   inViewOf,
   isLive,
-  Markdown,
   type OutputItem,
   type OutputRow,
   outputBlocks,
@@ -38,9 +36,7 @@ import {
 } from "@voluma/run-view";
 import {
   Button,
-  Chip,
   EmptyState,
-  IconButton,
   INPUT_WORD,
   LoadingState,
   Menu,
@@ -52,13 +48,11 @@ import {
 } from "@voluma/ui";
 import {
   type GridPlanes,
+  type MarkEdit,
+  type MarkPlane,
   type PlaneFit,
   QUAD_START,
   type QuadLayout,
-  type QuadState,
-  readView,
-  storedWords,
-  storeView,
 } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
 import {
@@ -69,29 +63,23 @@ import {
   MessageSquare,
   Sigma,
   Workflow,
-  X,
 } from "lucide-react";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
-import { describe, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
+import { MainConversation } from "./main-conversation";
+import { QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
 import { FinalOutputs, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
 import { RunNews } from "./run-news";
 import { Samples } from "./samples-tab";
+import { type SavedView, savedViews, useSavedViews } from "./saved-views";
+import { useAnswers, useMainMessage } from "./use-main-message";
 import type { Accepting } from "./version-report";
+import type { SceneHandle } from "./viewer";
 
 // three.js and the zarr reader load only once there is an output to show.
 const SceneViewer = lazy(() => import("./viewer").then((m) => ({ default: m.SceneViewer })));
@@ -101,11 +89,14 @@ type Centre = "run" | "agents";
 export function OutputsReview({
   run,
   stale,
+  refetchRun,
   reopen,
 }: {
   run: RunRead;
   /** The last poll failed: what is shown may be out of date. */
   stale: boolean;
+  /** Reads the run again: a message or an answer reopens an ended one. */
+  refetchRun: () => void;
   /** Reconnects the run's stream, to catch what a write of yours added to the log. */
   reopen: () => void;
 }) {
@@ -209,11 +200,11 @@ export function OutputsReview({
   const focusKey = item?.focus && JSON.stringify(item.focus);
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
-  const accepting = useAcceptToCheck(run, reopen);
   const [onlyNeeds, setOnlyNeeds] = useState(false);
   const needing = review.needing.size;
   const [leftTab, setLeftTab] = useState("conversation");
-  const waiting = useMemo(() => waitingApprovals(events), [events]);
+  // Calls main holds for your yes: while one is open the run waits on you, whatever its row says.
+  const waiting = useMemo(() => openApprovals(events).length, [events]);
   const runMarks = useRunMarks({
     run,
     me: me.userId,
@@ -223,8 +214,70 @@ export function OutputsReview({
   });
   // An example run keeps no marks (its writes are refused): they are the page's, uncapped.
   const exampleMarks = useLocalMarks();
-  const marking = useMarking(QUAD_TOOLS, run.example ? exampleMarks : runMarks);
-  const views = useSavedViews(run, reopen);
+  const store = run.example ? exampleMarks : runMarks;
+  const marking = useMarking(QUAD_TOOLS, store);
+  const allViews = useMemo(() => savedViews(events), [events]);
+  const views = useSavedViews(run, allViews, reopen);
+  const scene = useRef<SceneHandle>(null);
+  const sent = useCallback(() => {
+    reopen();
+    refetchRun();
+  }, [reopen, refetchRun]);
+  // The panes show the output: a picture of them can go with a message.
+  const pictured =
+    inView?.state.latest && inView.state.kind !== "file" && inView.state.kind !== "collection"
+      ? inView.name
+      : undefined;
+  const message = useMainMessage({
+    run,
+    events,
+    changes: run.example ? [] : runMarks.changes,
+    inView,
+    picture: pictured,
+    scene,
+    onSent: sent,
+  });
+  const answers = useAnswers(run, sent);
+  const accepting: Accepting = {
+    ...useAcceptToCheck(run, reopen),
+    ...(!run.example && {
+      tell: (i: OutputItem) => {
+        message.setAbout({ item: i, name: nameOf(i.output) });
+        setLeftTab("conversation");
+      },
+    }),
+  };
+  // An edit is a correction: the mark is written now, and waits for your next message with a line
+  // about it in the box.
+  const latestEdit = useRef({ marks: marking.marks, store, add: marking.add, say: message.say });
+  latestEdit.current = { marks: marking.marks, store, add: marking.add, say: message.say };
+  const onEdit = useCallback(
+    (edit: MarkEdit, volumeId: string, gridKey: string, plane: MarkPlane) => {
+      const { marks, store: kept, add, say } = latestEdit.current;
+      if (edit.from === "mark") {
+        const m = marks.find((x) => x.id === edit.id);
+        if (!m || m.theirs) return;
+        kept.place({ ...m, mark: edit.mark, plane });
+        say(`I moved ${m.tag}.`);
+      } else if (add(edit.mark, volumeId, gridKey, edit.id, plane)) {
+        const name = nameOf(edit.id);
+        say(`I moved an end of ${/ruler/i.test(name) ? "the " : ""}${name}.`);
+      }
+    },
+    [nameOf],
+  );
+  // Delete takes away the mark you picked; one main was told of waits as a deletion.
+  const deleteMark = useCallback(
+    (id: string) => {
+      const { marks, store: kept, say } = latestEdit.current;
+      const m = marks.find((x) => x.id === id);
+      if (!m || m.theirs) return;
+      kept.erase(id);
+      if (!run.example && !runMarks.changes.some((c) => c.id === id && c.change === "place"))
+        say(`I deleted ${m.tag}.`);
+    },
+    [run.example, runMarks.changes],
+  );
 
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
   // leaving Full view (Esc, F, opening a panel) puts the panes back. The page keeps only which
@@ -257,8 +310,15 @@ export function OutputsReview({
     () => select({ centre: keys.current.centre === "run" ? null : "run" }),
     [select],
   );
-  const keys = useRef({ layout, centre, trailOpen, shellFull });
-  keys.current = { layout, centre, trailOpen, shellFull };
+  const keys = useRef({
+    layout,
+    centre,
+    trailOpen,
+    shellFull,
+    picked: marking.selected,
+    deleteMark,
+  });
+  keys.current = { layout, centre, trailOpen, shellFull, picked: marking.selected, deleteMark };
   // W: the whole run and back. Esc, once a mark and the tool are put away (`useMarking`, on the
   // document, first) and Full view is left (the shell's): the whole run or the agents, then an
   // open trail item.
@@ -276,6 +336,9 @@ export function OutputsReview({
       if (event.key.toLowerCase() === "w") {
         event.preventDefault();
         toggleRun();
+      } else if ((event.key === "Delete" || event.key === "Backspace") && k.picked) {
+        event.preventDefault();
+        k.deleteMark(k.picked);
       } else if (event.key === "Escape" && !k.shellFull) {
         if (k.centre) select({ centre: null });
         else if (k.trailOpen) select({ trail: null, item: null });
@@ -343,13 +406,16 @@ export function OutputsReview({
           onNote: marking.note,
           onSave: views.save && ((state, grid) => views.save!(inView, state, grid)),
           restore: views.restore,
+          onEdit,
+          onPick: marking.select,
+          ref: scene,
         }}
       />
     );
 
   return (
     <>
-      <InputHeading run={run} study={study.data} />
+      <InputHeading run={run} study={study.data} waitingOnYou={waiting > 0} />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"
@@ -364,10 +430,15 @@ export function OutputsReview({
               badgeLabel: "main is waiting on you",
               content: (
                 <MainConversation
+                  events={events}
+                  views={allViews}
                   live={live}
                   nameOf={nameOf}
-                  marking={marking}
+                  message={message}
+                  answers={answers}
                   markError={runMarks.error}
+                  onMark={marking.select}
+                  onDiscard={run.example ? exampleMarks.erase : runMarks.discard}
                 />
               ),
             },
@@ -687,204 +758,6 @@ function useAcceptToCheck(run: { id: string; example: boolean }, reopen: () => v
     pending: mutation.isPending ? mutation.variables?.key : undefined,
     error,
   };
-}
-
-/**
- * The conversation with the run's main AI, read-only: researchers write to it on runs of this kind
- * once corrections arrive. The views you saved show in it, where they fall. Under it, your marks
- * are kept in the run and wait for the message that will carry them: a chip goes to its mark, × removes it.
- */
-function MainConversation({
-  live,
-  nameOf,
-  marking,
-  markError,
-}: {
-  live: boolean;
-  nameOf: (id: string) => string;
-  marking: ReturnType<typeof useMarking>;
-  markError: string | undefined;
-}) {
-  const events = useEvents();
-  const mine = marking.marks.filter((m) => !m.theirs);
-  // A run of this kind has no corrections, so no correction outcomes: messages, and saved views.
-  const items = useMemo(() => {
-    const said = conversation(events)
-      .filter((m): m is Exclude<typeof m, { from: "outcome" }> => m.from !== "outcome")
-      .map((m) => ({ ...m, kind: "message" as const }));
-    const saved = savedViews(events).map((v) => ({ ...v, kind: "view" as const }));
-    return [...said, ...saved].sort((a, b) => a.seq - b.seq);
-  }, [events]);
-  const log = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = log.current;
-    if (el && items.length > 0) el.scrollTop = el.scrollHeight;
-  }, [items.length]);
-  return (
-    <div className="flex h-full flex-col">
-      <div ref={log} role="log" className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {items.length === 0 ? (
-          <EmptyState title="No messages yet">
-            {live ? "The AI writes here when it has something for you." : undefined}
-          </EmptyState>
-        ) : (
-          <ol className="grid gap-3">
-            {items.map((m) =>
-              m.kind === "view" ? (
-                <li key={m.id} className="flex gap-2 text-xs text-muted-foreground">
-                  <Bookmark aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-                  <span>
-                    You saved {m.title.toLowerCase()} of {nameOf(m.output)}
-                    {m.words && `, ${m.words.charAt(0).toLowerCase()}${m.words.slice(1)}`}.
-                  </span>
-                </li>
-              ) : m.from === "person" ? (
-                <li key={m.id} className="ml-6 grid gap-1 rounded-lg bg-muted px-3 py-2">
-                  <span className="text-xs text-muted-foreground">You</span>
-                  <p className="text-sm whitespace-pre-wrap">{m.text}</p>
-                </li>
-              ) : (
-                <li key={m.id} className="grid gap-1">
-                  <span className="text-xs text-muted-foreground">The AI</span>
-                  <Markdown text={m.text} className="text-sm" />
-                </li>
-              ),
-            )}
-          </ol>
-        )}
-      </div>
-      <div className="grid gap-2 border-t border-border p-3 text-xs text-muted-foreground">
-        {markError && <p role="alert">{markError}</p>}
-        {mine.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1">
-            <span>With your next message:</span>
-            {mine.map((m) => {
-              const { title, measure } = describe(m.mark, marking.tools);
-              return (
-                <Chip key={m.id} className="gap-0.5 pr-0.5 text-mark-mine-text">
-                  <button
-                    type="button"
-                    className="cursor-pointer font-mono"
-                    title={measure ? `${title}: ${measure}` : title}
-                    onClick={() => marking.select(m.id)}
-                  >
-                    {m.tag}
-                  </button>
-                  <IconButton
-                    size="sm"
-                    label={`Remove ${m.tag}`}
-                    onClick={() => marking.remove(m.id)}
-                  >
-                    <X />
-                  </IconButton>
-                </Chip>
-              );
-            })}
-          </div>
-        )}
-        <p>
-          You can't write to the AI on this run yet. Corrections through the AI come in a later
-          version; until then, accept To check items in Final outputs.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/** A view saved of an output: its title ("View 2"), when, and how its planes lay in words. */
-type SavedView = {
-  id: string;
-  seq: number;
-  output: string;
-  view: unknown;
-  title: string;
-  time: string;
-  words?: string;
-};
-
-/** The run's saved views, oldest first, each numbered among its output's. */
-function savedViews(events: ReturnType<typeof useEvents>): SavedView[] {
-  const count = new Map<string, number>();
-  return events.flatMap((e) => {
-    if (e.type !== "view.saved") return [];
-    const n = (count.get(e.payload.output) ?? 0) + 1;
-    count.set(e.payload.output, n);
-    return [
-      {
-        id: e.id,
-        seq: e.seq,
-        output: e.payload.output,
-        view: e.payload.view,
-        title: `View ${n}`,
-        time: new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        words: storedWords(e.payload.view),
-      },
-    ];
-  });
-}
-
-/**
- * Saving a view (`view.saved`, which the stream brings back) and opening one. Example runs can't
- * be changed, so they have no Save view.
- */
-function useSavedViews(run: { id: string; example: boolean }, reopen: () => void) {
-  const events = useEvents();
-  const all = useMemo(() => savedViews(events), [events]);
-  const [restore, setRestore] = useState<{ grid: string; state: QuadState }>();
-  const [shown, setShown] = useState<string>();
-  const [error, setError] = useState<string>();
-  const mutation = useMutation<void, Error, { output: string; view: ReturnType<typeof storeView> }>(
-    {
-      mutationFn: (body) => saveView(run.id, body),
-      onMutate: () => setError(undefined),
-      onSuccess: reopen,
-      onError: (e) =>
-        setError(
-          e instanceof ApiError && e.serverMessage ? e.serverMessage : "Couldn't save the view.",
-        ),
-    },
-  );
-  // The newest saved view of what was just saved is the one shown.
-  const pendingFor = useRef<string>(undefined);
-  useEffect(() => {
-    const output = pendingFor.current;
-    if (!output) return;
-    const newest = all.filter((v) => v.output === output).at(-1);
-    if (newest) setShown(newest.id);
-  }, [all]);
-  return {
-    of: (output: string) => all.filter((v) => v.output === output),
-    shown,
-    error,
-    restore,
-    save: run.example
-      ? undefined
-      : (row: OutputRow, state: QuadState, grid: string) => {
-          pendingFor.current = row.id;
-          mutation.mutate({ output: row.id, view: storeView(state, grid, shownOf(row)) });
-        },
-    open: (v: SavedView) => {
-      const grid = (v.view as { review?: { grid?: string } }).review?.grid;
-      const state = grid ? readView(v.view, grid) : undefined;
-      if (!grid || !state) {
-        setError("This view can't be opened here.");
-        return;
-      }
-      setError(undefined);
-      setShown(v.id);
-      setRestore({ grid, state });
-    },
-  };
-}
-
-/** Gated calls main is holding for the researcher: requested, not yet given or declined. */
-function waitingApprovals(events: readonly RunEvent[]): number {
-  const open = new Set<string>();
-  for (const e of events)
-    if (e.type === "approval.requested") open.add(e.payload.toolCallId);
-    else if (e.type === "approval.given" || e.type === "approval.declined")
-      open.delete(e.payload.toolCallId);
-  return open.size;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

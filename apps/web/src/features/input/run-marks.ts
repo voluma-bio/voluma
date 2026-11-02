@@ -4,13 +4,17 @@
  * sees them. A write shows at once and is dropped from `pending` when the stream carries it back.
  * The wire shape is `markPlacedSchema`, which also holds the mark in world mm with its pane's
  * frame, for sending it to main as a correction.
+ *
+ * Every change of yours waits for your next message to main (`changes`): a mark no message has
+ * carried, one moved or edited since main was told of it (the last `person.message` that froze
+ * it), and one main was told of that you deleted. A change undone (`discard`) is no change.
  */
 import { deleteMark, placeMark } from "@voluma/api-client";
 import type { PlaceMarkRequest } from "@voluma/contracts/agent-events";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Volume } from "@voluma/contracts/review";
 import { marksOf } from "@voluma/contracts/review-state";
-import { markPoints, worldOf } from "@voluma/viewer/grid";
+import { type GridMark, type MarkPlane, markPoints, worldOf } from "@voluma/viewer/grid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gridKeyOf, type MarkStore, type YourMark } from "./marks-panel";
 
@@ -26,6 +30,45 @@ const yours = (p: Placed, me: string): YourMark => ({
   plane: p.plane,
   theirs: p.by !== me,
 });
+
+/** A change of yours to a mark that your next message carries: its id is the `markIds` entry. */
+export type MarkChange = {
+  id: string;
+  tag: string;
+  /** `move`: its ends moved; `edit`: something else (a note); `delete`: deleted since main saw it. */
+  change: "place" | "move" | "edit" | "delete";
+};
+
+type Told = { change: string; mark: YourMark };
+
+/** What the last message to carry each mark told main of it, by mark id. */
+function toldOf(events: readonly RunEvent[]): Map<string, Told> {
+  const told = new Map<string, Told>();
+  for (const e of events)
+    if (e.type === "person.message")
+      for (const a of e.payload.attached ?? []) {
+        const { id, output, tag, volume, gridKey, mark, plane } = a.mark;
+        if (typeof id === "string")
+          told.set(id, {
+            change: a.change,
+            mark: {
+              id,
+              tag,
+              taskId: output,
+              gridKey,
+              volumeId: volume,
+              mark: mark as GridMark,
+              plane: plane as MarkPlane | null,
+            },
+          });
+      }
+  return told;
+}
+
+const sameEnds = (a: GridMark, b: GridMark) =>
+  JSON.stringify(markPoints(a)) === JSON.stringify(markPoints(b));
+const sameMark = (a: GridMark, b: GridMark) =>
+  sameEnds(a, b) && ("point" in a ? a.note : undefined) === ("point" in b ? b.note : undefined);
 
 /**
  * The marks of a run whose log is `events`, for the outputs review (`useMarking`'s store). A mark
@@ -44,7 +87,11 @@ export function useRunMarks({
   volumes: readonly Volume[];
   /** Reconnects the stream, to catch what a write added to the log. */
   reopen: () => void;
-}): MarkStore & { error: string | undefined } {
+}): MarkStore & {
+  error: string | undefined;
+  changes: MarkChange[];
+  discard: (id: string) => void;
+} {
   const logged = useMemo(() => marksOf(events), [events]);
   // id → the mark as written and not yet seen in the log; null for a deletion.
   const [pending, setPending] = useState<ReadonlyMap<string, YourMark | null>>(new Map());
@@ -64,13 +111,37 @@ export function useRunMarks({
   }, [logged, pending, me]);
 
   const gridKeys = useMemo(() => new Set(volumes.map(gridKeyOf)), [volumes]);
-  const marks = useMemo(() => {
-    const all = new Map([...logged].map(([id, p]) => [id, yours(p, me)] as const));
+  // Every mark as you see it now: the log's, with your writes not back yet.
+  const all = useMemo(() => {
+    const now = new Map([...logged].map(([id, p]) => [id, yours(p, me)] as const));
     for (const [id, m] of pending)
-      if (m) all.set(id, m);
-      else all.delete(id);
-    return [...all.values()].filter((m) => gridKeys.has(m.gridKey));
-  }, [logged, pending, gridKeys, me]);
+      if (m) now.set(id, m);
+      else now.delete(id);
+    return now;
+  }, [logged, pending, me]);
+  const marks = useMemo(
+    () => [...all.values()].filter((m) => gridKeys.has(m.gridKey)),
+    [all, gridKeys],
+  );
+  const told = useMemo(() => toldOf(events), [events]);
+  const changes = useMemo(() => {
+    const out: MarkChange[] = [];
+    for (const m of all.values()) {
+      if (m.theirs) continue;
+      const t = told.get(m.id);
+      if (!t || t.change === "delete") out.push({ id: m.id, tag: m.tag, change: "place" });
+      else if (!sameMark(t.mark.mark, m.mark))
+        out.push({
+          id: m.id,
+          tag: m.tag,
+          change: sameEnds(t.mark.mark, m.mark) ? "edit" : "move",
+        });
+    }
+    for (const [id, t] of told)
+      if (t.change !== "delete" && !all.has(id))
+        out.push({ id, tag: t.mark.tag, change: "delete" });
+    return out;
+  }, [all, told]);
 
   const latest = useRef({ volumes, run, reopen });
   latest.current = { volumes, run, reopen };
@@ -126,5 +197,16 @@ export function useRunMarks({
     (id: string) => write(id, null, () => deleteMark(latest.current.run.id, id)),
     [write],
   );
-  return { marks, full: false, place, erase, error };
+  const latestTold = useRef(told);
+  latestTold.current = told;
+  // Puts a mark back as main was last told of it; one no message carried goes.
+  const discard = useCallback(
+    (id: string) => {
+      const t = latestTold.current.get(id);
+      if (t && t.change !== "delete") place(t.mark);
+      else erase(id);
+    },
+    [place, erase],
+  );
+  return { marks, full: false, place, erase, error, changes, discard };
 }

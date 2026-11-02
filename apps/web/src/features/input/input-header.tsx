@@ -65,7 +65,11 @@ type Progress = { done: number; total: number };
  * 2 in line" (also a run that lost its runner and waits for another); otherwise the word every
  * list uses (`runStatus`). How long it took is in Run details.
  */
-function where(run: Run, progress: Progress | undefined): { status?: Status; text: string } {
+function where(
+  run: Run,
+  progress: Progress | undefined,
+  waitingOnYou: boolean,
+): { status?: Status; text: string } {
   const { state } = run;
   if (state.status === "queued")
     return { status: "waiting", text: `Waiting, place ${state.position} in line` };
@@ -77,7 +81,8 @@ function where(run: Run, progress: Progress | undefined): { status?: Status; tex
           ? `Running, ${progress.done} of ${progress.total} tasks done`
           : "Running",
     };
-  if (state.status === "ended" && state.outcome === "completed") return { text: "Finished" };
+  if (state.status === "ended" && state.outcome === "completed")
+    return waitingOnYou ? { status: "check", text: "Waiting on you" } : { text: "Finished" };
   const { label, status } = runStatus(run);
   return { status, text: label };
 }
@@ -86,14 +91,17 @@ export function InputHeading({
   run,
   study,
   progress,
+  waitingOnYou = false,
 }: {
   run: Run;
   study: StudyDetail | undefined;
   /** A task-loop run's; an agent-loop run's count is in Final outputs. */
   progress?: Progress;
+  /** An agent-loop run's main holds a call for your yes: its ended run waits on you. */
+  waitingOnYou?: boolean;
 }) {
   const { title, group } = inputTitle(run, study);
-  const now = where(run, progress);
+  const now = where(run, progress, waitingOnYou);
   return (
     <ShellHeading>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-2 text-sm">

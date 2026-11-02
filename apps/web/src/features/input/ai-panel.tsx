@@ -31,7 +31,7 @@ import { describe, gridMark, messageMark, type YourMark } from "./marks-panel";
  * The box's text, kept in this tab's sessionStorage so a reload (by hand, or onto a new deploy)
  * keeps it. A send clears the box and with it the draft.
  */
-function useDraft(key: string) {
+export function useDraft(key: string) {
   const [text, setText] = useState(() => {
     try {
       return sessionStorage.getItem(key) ?? "";
@@ -260,7 +260,14 @@ export function AiPanel({
   message: ReturnType<typeof useMessage>;
 }) {
   const events = useEvents();
-  const items = useMemo(() => conversation(events), [events]);
+  // A task run holds no calls for approval: those are the agent loop's.
+  const items = useMemo(
+    () =>
+      conversation(events).filter(
+        (m): m is Exclude<ConversationItem, { from: "approval" }> => m.from !== "approval",
+      ),
+    [events],
+  );
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (about || answer) form.current?.querySelector("textarea")?.focus();

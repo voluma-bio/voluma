@@ -31,7 +31,15 @@ export type ShownMark = {
   /** A short name drawn beside it ("P1"). */
   tag?: string;
   selected?: boolean;
+  /** Its ends can be dragged in a slice (`MarkEdit`): yours, not someone else's. */
+  movable?: boolean;
 };
+
+/**
+ * An end dragged in a slice: of your mark `id` (`from: "mark"`, its new shape), or of the published
+ * ruler `id` (`from: "annotation"`), which stays as published: `mark` is the line as you left it.
+ */
+export type MarkEdit = { from: "mark" | "annotation"; id: string; mark: GridMark };
 
 /** One OME-Zarr level: `scaleZyx` source voxels per level voxel (2^k on every axis). */
 export type AssetLevel = { path: string; shapeZyx: Zyx; scaleZyx: Zyx };
@@ -148,6 +156,32 @@ export type PaneHandle = {
    */
   layers(): HTMLCanvasElement[];
 };
+
+/** Picture widths, in pixels, a snapshot tries in turn until one fits. */
+const SNAPSHOT_WIDTHS = [1600, 1200, 800, 560, 400];
+
+/**
+ * A frozen picture of panes as a PNG of at most `maxBytes`, at the widest of `SNAPSHOT_WIDTHS`
+ * that fits; null when none does.
+ */
+export async function pngWithin(frozen: HTMLCanvasElement, maxBytes: number): Promise<Blob | null> {
+  let tried = 0;
+  for (const width of SNAPSHOT_WIDTHS) {
+    const size = Math.min(frozen.width, width);
+    if (size === tried) continue;
+    tried = size;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = Math.round((size / frozen.width) * frozen.height);
+    canvas.getContext("2d")!.drawImage(frozen, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/png"));
+    if (blob && blob.size <= maxBytes) return blob;
+  }
+  return null;
+}
+
+/** The widest picture a snapshot is drawn at, in pixels. */
+export const SNAPSHOT_WIDTH = SNAPSHOT_WIDTHS[0]!;
 
 /** Draws the pane now and reads its canvas, before the browser clears the drawing buffer. */
 export function capturePane(canvas: HTMLCanvasElement, draw: () => void) {
