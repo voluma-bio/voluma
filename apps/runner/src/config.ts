@@ -13,7 +13,6 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { modelRefSchema } from "@voluma/contracts/ids";
 import { parseTokenSecrets } from "@voluma/provider-calls/token";
 import { THINKING_LEVELS } from "@voluma/workflow/definition";
-import type { Harness } from "@voluma/workflow/load";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -37,13 +36,6 @@ function positiveInt(name: string, fallback: number, min = 1): number {
   if (!Number.isInteger(value) || value < min) {
     throw new Error(`${name} must be an integer of at least ${min}`);
   }
-  return value;
-}
-
-function harnessSetting(): Harness {
-  const value = optional("RUN_HARNESS") ?? "tasks";
-  if (value !== "tasks" && value !== "agents")
-    throw new Error("RUN_HARNESS must be tasks or agents");
   return value;
 }
 
@@ -273,8 +265,6 @@ export function runnerConfig() {
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),
-    /** The loop a new run starts on; a resumed run keeps its own (`pinOf`). */
-    harness: harnessSetting(),
     sandbox: {
       image: SANDBOX_IMAGE,
       lifetimeSeconds: positiveInt("VOLUMA_SANDBOX_LIFETIME_SECONDS", 14400),

@@ -34,7 +34,7 @@ import {
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { RunLayout, ThreadLayout } from "./layout";
-import { loopShell, type Step } from "./loop-shell";
+import { loopShell, type Section, type Step } from "./loop-shell";
 import {
   agentsList,
   answerText,
@@ -118,6 +118,8 @@ export interface RunLoopOptions {
   rootThreadId: string;
   recorder: Recorder;
   runtime: TaskRuntime;
+  /** The run's lock, the one the runtime holds. */
+  section: Section;
   threads: Threads;
   layout: RunLayout;
   /** The role files, skills and task files that write each thread's system prompt and first message. */
@@ -161,7 +163,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     rootThreadId: root,
     recorder,
     threads,
-    section: runtime.section,
+    section: o.section,
     startup: runtime.start,
     log: derive,
     stop: runtime.stop,

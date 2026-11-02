@@ -12,6 +12,18 @@ import type { ThreadSpec, Threads } from "./threads";
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
 export type Step = "acted" | "idle" | "done";
 
+/** The per-run critical section: decisions run one at a time, each seeing every earlier write. */
+export type Section = <T>(fn: () => Promise<T>) => Promise<T>;
+
+export function runLock(): Section {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (fn) => {
+    const result = tail.then(fn);
+    tail = result.catch(() => {});
+    return result;
+  };
+}
+
 /** How long the main agent gets to end its turn after the run ended. */
 const MAIN_GRACE_MS = 15_000;
 
@@ -20,7 +32,7 @@ export interface LoopShellOptions {
   recorder: Recorder;
   threads: Threads;
   /** The per-run critical section: each step, and each stop of a thread, runs inside it. */
-  section<T>(fn: () => Promise<T>): Promise<T>;
+  section: Section;
   /** Runs once before the first step. */
   startup(): Promise<unknown>;
   /** The log as the loop reads it: the main thread's id and every thread's record. */

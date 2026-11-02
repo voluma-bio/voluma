@@ -88,6 +88,10 @@ export type OutputKind = z.infer<typeof outputKindSchema>;
 export const isObjectKind = (kind: OutputKind) =>
   kind === "volume" || kind === "structure" || kind === "surface" || kind === "annotation";
 
+/** The loop that drives a run: today's task loop, or the agent loop. A run keeps the one it began on. */
+export const harnessSchema = z.enum(["tasks", "agents"]);
+export type Harness = z.infer<typeof harnessSchema>;
+
 /** A model as the runner names it: `provider/id`, e.g. `meta/muse-spark-1.3`. */
 export const modelRefSchema = z
   .string()

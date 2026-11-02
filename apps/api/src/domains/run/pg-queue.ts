@@ -10,6 +10,7 @@
  * so that holder is `lease-lost` (lease.ts).
  */
 import { randomBytes } from "node:crypto";
+import type { Harness } from "@voluma/contracts/ids";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
@@ -229,6 +230,8 @@ type Starts = {
   keys?: VisitorKeys;
   /** The model the caller asked for; `pickModel` decides the run's. */
   model?: string;
+  /** The loop the caller asked for; absent: `defaultHarness`. */
+  harness?: Harness;
 };
 
 /** A limit reached is 429, except the per-caller one: the web branches on its 409. */
@@ -248,6 +251,8 @@ export function pgRunQueue(
   workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputEntry[] } | undefined,
   /** `RUN_MODEL_OVERRIDE`, validated by `modelOverride`. */
   modelOverride: string | null,
+  /** `DEFAULT_RUN_HARNESS`: the loop of a run whose start names none. */
+  defaultHarness: Harness,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
@@ -343,6 +348,7 @@ export function pgRunQueue(
     if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
+    const harness = starts.harness ?? defaultHarness;
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limitsOf(reader.labId), used, { credentials });
@@ -359,6 +365,7 @@ export function pgRunQueue(
         inputId,
         credentials,
         model,
+        harness,
         state: "queued",
       });
       used.callerUnfinished++;

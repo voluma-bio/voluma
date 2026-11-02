@@ -13,6 +13,7 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Harness } from "@voluma/contracts/ids";
 import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
@@ -43,8 +44,6 @@ export interface LoadOptions {
   harness?: Harness;
 }
 
-export type Harness = "tasks" | "agents";
-
 /** Every run's shared directory: the role files and the generic skills. */
 const CORE = "workflows/core";
 
@@ -63,8 +62,10 @@ const frontmatterSchema = z.strictObject({
 });
 
 /** Where the role files live in the checkout and the snapshot; `AGENTS.md` there is for people. */
+/** Both loops' role folders are snapshotted; the pin picks one when the snapshot is read. */
+const ROLE_DIRS = [`${CORE}/agents`, `${CORE}/roles`];
 const rolesDirOf = (harness: Harness = "tasks") =>
-  harness === "agents" ? `${CORE}/roles` : `${CORE}/agents`;
+  ROLE_DIRS[harness === "agents" ? 1 : 0] as string;
 const agentSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -178,8 +179,7 @@ async function* walk(root: string, rel: string): AsyncGenerator<string> {
 }
 
 /** Writes the snapshot unless the run has one; true when it was already there. */
-async function snapshot(dir: string, { store, prefix, root, commit, harness }: LoadOptions) {
-  const rolesDir = rolesDirOf(harness);
+async function snapshot(dir: string, { store, prefix, root, commit }: LoadOptions) {
   if (await store.head(`${prefix}${DONE}`)) return true;
   // No marker: an earlier attempt was cut off. Its files may be ones this checkout no longer
   // has, so start from an empty prefix instead of copying over them.
@@ -197,10 +197,15 @@ async function snapshot(dir: string, { store, prefix, root, commit, harness }: L
     if (d === CORE && names.includes("convert"))
       for await (const p of walk(root, `${d}/convert`)) await put(p);
   }
-  for (const name of await readdir(join(root, rolesDir)).catch(() => {
-    throw new WorkflowParseError(rolesDir, "directory not found");
-  })) {
-    if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${rolesDir}/${name}`);
+  // `roles/` exists once the agent loop does; a checkout without it snapshots `agents/` alone.
+  for (const rolesDir of ROLE_DIRS) {
+    const names = await readdir(join(root, rolesDir)).catch(() => {
+      if (rolesDir === ROLE_DIRS[0]) throw new WorkflowParseError(rolesDir, "directory not found");
+      return [];
+    });
+    for (const name of names) {
+      if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${rolesDir}/${name}`);
+    }
   }
   await store.put(`${prefix}${DONE}`, new TextEncoder().encode(commit));
   return false;

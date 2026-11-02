@@ -258,10 +258,17 @@ async function claimBody(
     // run to different dependencies. A run made before this was recorded is refused here.
     const pin = pinOf(runId, stored);
     const sandboxImage = pin?.image ?? config.sandbox.image;
-    const harness = pin?.harness ?? config.harness;
+    const harness = pin?.harness ?? run.harness ?? "tasks";
     log(
       `sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"}); loop: ${harness}`,
     );
+    // This runner has no agent loop yet: give the claim back rather than end or half-run the run,
+    // so a runner that has one can take it.
+    if (harness === "agents") {
+      log("the run is pinned to the agent loop, which this runner does not have; releasing it");
+      stop("shutdown");
+      return;
+    }
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {

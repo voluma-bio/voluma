@@ -5,18 +5,18 @@
  * by every loop (`supervise-run.ts`).
  */
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
-import { withImageRefs } from "./adapters/pi/image-refs";
-import type { RunLayout, RunLayoutOptions } from "./layout";
+import { type RunLayout, type RunLayoutOptions, runLayout, type ThreadLayout } from "./layout";
+import type { Section } from "./loop-shell";
 import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
-import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
 import type { Recorder } from "./recorder";
 import { type LoopConfig, type ModelSetup, type ProviderError, runLoop } from "./run-loop";
 import type { SandboxSession } from "./sandbox-session";
 import { type PlanTask, taskRuntime } from "./task-runtime";
-import { threads } from "./threads";
+import { threadLog } from "./thread-log";
+import type { Threads } from "./threads";
 import { buildTools } from "./tools/registry";
 
 /**
@@ -35,45 +35,72 @@ function rolesOf(def: WorkflowDefinition, gateway: boolean): RunLayoutOptions["r
   );
 }
 
-/** The workflow-dependent options of the run's layout. */
-export function tasksLayoutOptions(
-  definition: WorkflowDefinition,
-  gateway: boolean,
-): Pick<RunLayoutOptions, "roles" | "copiesInputs"> {
+export interface TasksWireOptions {
+  runId: string;
+  inputId: string;
+  inputPrefix: string;
+  recorder: Recorder;
+  definition: WorkflowDefinition;
+  /** Whether a gateway is configured (`segment_sam` is held only where it can be used). */
+  gateway: boolean;
+}
+
+/**
+ * The task loop's half of the run: its layout (sandbox of each thread, from the thread's record)
+ * and `run`, which assembles the task runtime and the loop on the shared shell's pool and lock.
+ */
+export function tasksWire(o: TasksWireOptions) {
+  const { recorder, definition } = o;
   const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
-  return {
-    roles: rolesOf(definition, gateway),
+  const layout = runLayout({
+    runId: o.runId,
+    inputId: o.inputId,
+    inputPrefix: o.inputPrefix,
+    skills: definition.skills,
+    roles: rolesOf(definition, o.gateway),
     // From the workflow's task, so a task the main agent adds from it keeps the flag.
     copiesInputs: (id) => copyInputs.has(id),
+  });
+  const recordOf = (threadId: string) => {
+    const record = threadLog(recorder.events()).threads.get(threadId);
+    if (!record) throw new Error(`${threadId} has no thread.started`);
+    return record;
+  };
+  return {
+    /** The review-asset converter's sandbox. */
+    convert: layout.convert,
+    /** A thread's sandbox; its `thread.started` is stored before its first sandbox call. */
+    sandboxOf: (threadId: string): ThreadLayout => layout.forThread(recordOf(threadId)),
+    nameOf: (threadId: string) => recordOf(threadId).name,
+    run: (r: TasksRun) => runTasks(r, layout),
   };
 }
 
-export interface TasksLoopOptions {
+export type TasksWire = ReturnType<typeof tasksWire>;
+
+/** What the shell hands the task loop, and the host's settings it passes through. */
+export interface TasksRun {
   runId: string;
   rootThreadId: string;
   recorder: Recorder;
   definition: WorkflowDefinition;
   plan: readonly PlanTask[];
-  layout: RunLayout;
   selectedOutputs: readonly string[] | undefined;
   notes: string | undefined;
   model(role: string, recorded: string | undefined): ModelSetup;
   config?: Partial<LoopConfig>;
   providerError?(error: string): ProviderError | undefined;
-  history: History;
-  evidence: Evidence;
   files: Files;
+  evidence: Evidence;
   outputs: Outputs;
   session: SandboxSession;
-  /** A thread's name, from its `thread.started`. */
-  nameOf(id: string): string;
-  log(line: string): void;
+  pool: Threads;
+  section: Section;
   signal: AbortSignal;
 }
 
-/** Runs the task loop to the end of the run. */
-export async function runTasksLoop(o: TasksLoopOptions): Promise<void> {
-  const { runId, rootThreadId, recorder, definition, session, signal } = o;
+async function runTasks(o: TasksRun, layout: RunLayout): Promise<void> {
+  const { runId, rootThreadId, recorder, definition, session, pool, signal } = o;
   const main = definition.agents.main;
   // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
   await keepOutputs({
@@ -84,21 +111,12 @@ export async function runTasksLoop(o: TasksLoopOptions): Promise<void> {
     mainWorks: main.tools.includes("bash") && main.outputs === "write",
     signal,
   });
-  const pool = threads(
-    {
-      recorder,
-      history: withImageRefs(o.history, o.files, runId, o.nameOf),
-      sandbox: (id) => session.get(id),
-      release: (id) =>
-        session.release(id).catch((e) => o.log(`releasing ${o.nameOf(id)} failed: ${e}`)),
-    },
-    signal,
-  );
   const runtime = taskRuntime({
     recorder,
+    section: o.section,
     evidence: o.evidence,
     runId,
-    layoutOf: o.layout.forThread,
+    layoutOf: layout.forThread,
     sandbox: (id, opts) => session.get(id, opts),
     rootThreadId,
     plan: o.plan,
@@ -111,8 +129,9 @@ export async function runTasksLoop(o: TasksLoopOptions): Promise<void> {
     rootThreadId,
     recorder,
     runtime,
+    section: o.section,
     threads: pool,
-    layout: o.layout,
+    layout,
     definition,
     selectedOutputs: o.selectedOutputs,
     notes: o.notes,

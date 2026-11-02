@@ -15,12 +15,14 @@
  * destroys the sandboxes, which the host orders after the lease and the report.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { Harness } from "@voluma/contracts/ids";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
-import type { Harness } from "@voluma/workflow/load";
+import { withImageRefs } from "./adapters/pi/image-refs";
 import { errorText } from "./error-text";
-import { runLayout, type SandboxLayout } from "./layout";
+import type { SandboxLayout } from "./layout";
+import { runLock } from "./loop-shell";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
@@ -32,12 +34,10 @@ import type { LoopConfig, ModelSetup, ProviderError } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import type { PlanTask } from "./task-runtime";
-import { runTasksLoop, tasksLayoutOptions } from "./tasks-wire";
+import { tasksWire } from "./tasks-wire";
 import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
-
-/** Why a run pinned to the agent loop ends: the loop is not built yet. */
-export const AGENTS_NOT_BUILT = "the agent loop is not built yet";
+import { threads } from "./threads";
 
 export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
 
@@ -165,30 +165,19 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   // Everything that needs the workflow, the conversion worker included: it starts once `prepare`
   // has resolved. When `prepare` fails there is no worker, and the end records the outputs itself.
   let worker: ReviewAssetsWorker | undefined; // set once `prepare` has resolved
-  // Until the agent loop exists a run pinned to it ends here, before the workflow is read: its
-  // role files are not there either.
-  const prepared =
-    options.harness === "agents"
-      ? Promise.reject(new Error(AGENTS_NOT_BUILT))
-      : options.prepare(loopSignal);
-  const world = prepared.then((prepared) => {
+  const world = options.prepare(loopSignal).then((prepared) => {
     const { definition } = prepared;
-    const layout = runLayout({
+    const wire = tasksWire({
       runId,
       inputId: options.inputId,
       inputPrefix: options.inputPrefix,
-      skills: definition.skills,
-      ...tasksLayoutOptions(definition, options.gateway !== undefined),
+      recorder,
+      definition,
+      gateway: options.gateway !== undefined,
     });
-    const recordOf = (threadId: string) => {
-      const record = threadLog(recorder.events()).threads.get(threadId);
-      if (!record) throw new Error(`${threadId} has no thread.started`);
-      return record;
-    };
-    // The sandboxes of the run: one per thread, and the review-asset converter's. A thread's
-    // `thread.started` is stored before its first sandbox call, so its layout is found by id.
+    // The sandboxes of the run: one per thread, and the review-asset converter's.
     const sandboxLayout = (id: string): SandboxLayout =>
-      id === CONVERT ? layout.convert : layout.forThread(recordOf(id));
+      id === CONVERT ? wire.convert : wire.sandboxOf(id);
     const settings = { runId, ...options.sandbox };
     const session: SandboxSession = sandboxSession(
       (id) => {
@@ -207,7 +196,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
           recorder.emit(id, "sandbox", { name: sandboxLayout(id).name, state, detail });
       },
       // The convert sandbox's commands run with `note: false`, so its note is never read.
-      (id) => (id === CONVERT ? "" : layout.forThread(recordOf(id)).restartNote),
+      (id) => (id === CONVERT ? "" : wire.sandboxOf(id).restartNote),
     );
     const conversion = reviewAssetsWorker({
       runId,
@@ -219,12 +208,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       log: options.log,
     });
     worker = conversion;
-    return { prepared, layout, recordOf, session, conversion };
+    return { prepared, wire, session, conversion };
   });
   world.catch(() => {}); // the loop and the end read its failure
 
   const loop = async (): Promise<void> => {
-    const { prepared, layout, recordOf, session } = await world;
+    const { prepared, wire, session } = await world;
     const { definition } = prepared;
     // Not a derived id: each invocation of the root is a thread start of its own.
     recorder.emit(rootThreadId, "thread.started", {
@@ -245,15 +234,27 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       ...(options.previousClaim && { after: options.previousClaim }),
       ...(reopened && { reopened }),
     });
-    await runTasksLoop({
+    const pool = threads(
+      {
+        recorder,
+        history: withImageRefs(options.history, options.files, runId, wire.nameOf),
+        sandbox: (id) => session.get(id),
+        release: (id) =>
+          session
+            .release(id)
+            .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`)),
+      },
+      loopSignal,
+    );
+    await wire.run({
       ...options,
       rootThreadId,
       definition,
       plan: prepared.plan,
-      layout,
       model: prepared.model,
       session,
-      nameOf: (id) => recordOf(id).name,
+      pool,
+      section: runLock(),
       signal: loopSignal,
     });
   };
