@@ -210,7 +210,7 @@ export function useMarkLayer(
 
 /** What one mark draws, in source voxels: polylines, dots and a measure. */
 type Shape = {
-  lines: { points: Zyx[]; closed: boolean }[];
+  lines: { points: readonly Zyx[]; closed: boolean }[];
   dots: Zyx[];
   measure?: { at: Zyx; text: string };
 };

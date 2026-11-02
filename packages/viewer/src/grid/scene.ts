@@ -4,24 +4,21 @@
  * position is a source voxel (z, y, x) of the grid; the viewer never resamples between grids.
  */
 
+import type { MarkShape } from "@voluma/contracts/agent-events";
+
 export type Zyx = readonly [number, number, number];
 
 /**
  * A mark on the grid in source voxels (z, y, x): a voxel (with a note, or the value a probe read
  * there), an inclusive box, a line, an angle (its vertex between two ends), or a closed outline on
- * one plane, which may be tilted. The task review sends these as the contract's `Mark`
- * (`@voluma/contracts/messages`), which has no notes, values or angles and whose outlines lie on a
- * grid axis.
+ * one plane, which may be tilted: the contract's `MarkShape`, which the outputs review stores. The
+ * task review sends these as the message's `Mark` (`@voluma/contracts/messages`), which has no
+ * notes, values or angles and whose outlines lie on a grid axis.
  */
-export type GridMark =
-  | { point: Zyx; note?: string; probe?: ProbeValue }
-  | { box: { min: Zyx; max: Zyx } }
-  | { line: { aZyx: Zyx; bZyx: Zyx; lengthMm: number } }
-  | { angle: { aZyx: Zyx; vertexZyx: Zyx; bZyx: Zyx; degrees: number } }
-  | { outline: { zyx: Zyx[]; areaMm2: number } };
+export type GridMark = MarkShape;
 
 /** What a probe read: the image's value at a source position, approximate when read off a coarser level. */
-export type ProbeValue = { value: number; unit: string | null; approx: boolean; inside: string[] };
+export type ProbeValue = NonNullable<Extract<GridMark, { point: unknown }>["probe"]>;
 
 /** What a marking gesture makes; none is the viewer's own navigation. Probe reads values and keeps a point on click. */
 export type MarkTool = "point" | "box" | "line" | "angle" | "outline" | "probe";

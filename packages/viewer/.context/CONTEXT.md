@@ -75,8 +75,9 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   camera; a new `focus` voxel (a check's) moves the crosshair. A pane with no size (hidden) draws
   nothing; showing it resizes it, which draws, so a caller may keep a viewer mounted and hidden.
 - **Marks.** With `tool` set, left clicks and drags mark instead of moving the crosshair, and
-  `onMark` gets a `GridMark`: the contract's `Mark` (`messages.ts`) without `volumeId`, which the
-  caller adds from `ReviewGrid.imageId`. The caller holds the marks and passes them back as
+  `onMark` gets a `GridMark`: the contract's `MarkShape` (`agent-events.ts`, read-only), which a
+  task review's message turns into a `Mark` (`messages.ts`) with the `volumeId` the caller adds
+  from `ReviewGrid.imageId`. The caller holds the marks and passes them back as
   `ShownMark`s. Point: a click; on a slice the voxel under the pointer, in 3D the nearer of the
   first shown mesh (a see-through shell included) and the volume where it turns half opaque by
   `volume.ts`'s opacity (a CPU march of the shown byte texture, with the shader's trilinear

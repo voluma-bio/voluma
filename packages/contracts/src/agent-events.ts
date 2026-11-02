@@ -226,6 +226,16 @@ const markShapeSchema = z.union([
   z.looseObject({ outline: z.object({ zyx: z.array(vec3), areaMm2: z.number() }) }),
 ]);
 
+/** A mark's shape as code holds it (the viewer's `GridMark`): read-only, the known keys only. */
+export type MarkShape = Known<z.infer<typeof markShapeSchema>>;
+
+/** `T` read-only throughout, without the index signature a loose object adds. */
+type Known<T> = T extends readonly unknown[]
+  ? { readonly [K in keyof T]: Known<T[K]> }
+  : T extends object
+    ? { readonly [K in keyof T as string extends K ? never : K]: Known<T[K]> }
+    : T;
+
 /**
  * A mark the researcher placed or changed, written by the API (`by` is the caller). The mark is
  * the researcher's, not an output. `id` is the client's: a later `mark.placed` with the same id
@@ -259,7 +269,7 @@ export const markDeletedSchema = z.object({ id: z.uuid(), by: userIdSchema });
  * doesn't have; 403: an example run; 413: over `MAX_MARK_BYTES` of JSON. Allowed while the run goes.
  */
 export const placeMarkRequestSchema = markPlacedSchema.omit({ by: true });
-export type PlaceMarkRequest = z.infer<typeof placeMarkRequestSchema>;
+export type PlaceMarkRequest = Known<z.infer<typeof placeMarkRequestSchema>>;
 export const placeMarkResponseSchema = z.object({});
 export const MAX_MARK_BYTES = 64 * 1024;
 
