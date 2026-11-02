@@ -24,6 +24,10 @@ export const wrapUpText = (name: string) =>
 export const wrapUpResumeText = (name: string) =>
   `You were asked to wrap up: finish /work/${name}/NOTES.md, repeat the note as your last message and end your turn.`;
 
+/** The idle ping (Jimmy's wording); `minutes` comes from config so the text is right on every provider. */
+export const pingText = (minutes: number) =>
+  `This session has been idle for ${minutes} minutes. If you are finished, call close().`;
+
 /** What an agent is told when it has worked a while without an `activity` line. */
 export const activityReminder = (minutes: number) =>
   `You have sent no activity line for ${minutes} min. Send one now with activity: one plain sentence on what you are doing, then carry on.`;

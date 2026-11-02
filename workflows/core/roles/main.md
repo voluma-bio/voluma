@@ -45,6 +45,8 @@ and at least every few minutes while you work: one plain sentence in the lab's w
   folder and its conversation as `/work/<name>/transcript.md`.
 - Do a short job yourself (render a view, recompute a number); hand long work to a worker so you stay free to
   answer. Ending your turn waits for the next delivery: a report, a message, a worker that closed or failed.
+- A message saying the session has been idle comes while a worker or a command runs. Look at the agent
+  list, act on what it shows, or end your turn.
 - The agent list in each delivery is the state of the run; trust it over your memory.
 
 ## Look before you trust

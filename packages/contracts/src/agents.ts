@@ -38,6 +38,12 @@ export interface AgentRecord extends ThreadBase {
   spoke: boolean;
   /** When it last said what it is doing (`activity`), or else when it last started. */
   activityAt: number;
+  /** Pings recorded since it last received a real input or made a tool call (0: none). */
+  pings: number;
+  /** When its latest turn that came from a real input ended: where its idle time counts from. */
+  idleFrom: number;
+  /** A recorded ping not yet delivered (id), until a delivery or any other input follows. */
+  pendingPing: string | undefined;
   /** The later of `activityAt` and its latest tool result: when it last showed progress. */
   progressAt: number;
   /** Time in turn outside tool calls before `markAt`, since `activityAt`; `markAt` is 0 inside a tool call. */
@@ -95,6 +101,9 @@ export interface AgentLog {
   hasUnansweredPerson: boolean;
 }
 
+/** Calls that say nothing was done, so a ping turn made of them is not an answer to the ping. */
+const NOT_AN_ANSWER = ["activity", "read", "bash_manage"];
+
 /** Minutes since the agent last showed progress (an activity line or a tool result); 0 while it is inside a tool call or not in a turn. */
 export function stalledMinutes(r: AgentRecord, inTurn: boolean, now: number): number {
   return inTurn && r.openCalls.size === 0 ? Math.max(0, (now - r.progressAt) / 60_000) : 0;
@@ -130,6 +139,9 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       fromMain: prev === undefined || (continues && prev.fromMain),
       spoke: continues ? prev.spoke : false,
       activityAt: 0,
+      pings: prev?.pings ?? 0,
+      idleFrom: prev?.idleFrom ?? 0,
+      pendingPing: prev?.pendingPing,
       progressAt: 0,
       outsideMs: 0,
       markAt: 0,
@@ -142,6 +154,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   const notices: Notice[] = [];
   const deliveries: { at: number }[] = [];
   const idByName = new Map<string, string>();
+  const pingIds = new Set<string>();
   let cursor: string | undefined;
   let rootId: string | undefined;
   let rootEnded = false;
@@ -151,6 +164,16 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   let main: AgentRecord | undefined;
   let personAt = -1;
   let answeredAt = -1;
+
+  /** An input reached `record`: a ping's own delivery clears the pending ping; any other input also restarts the count of pings in a row. */
+  const receive = (record: AgentRecord, covers: string | undefined) => {
+    if (covers !== undefined && pingIds.has(covers)) {
+      if (record.pendingPing === covers) record.pendingPing = undefined;
+      return;
+    }
+    record.pings = 0;
+    record.pendingPing = undefined;
+  };
 
   for (const [at, e] of events.entries()) {
     written.set(e.id, at);
@@ -187,12 +210,16 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         }
         if (sender?.kind === "thread" && sender.messageId) delivered.add(sender.messageId);
         if (sender?.kind === "runtime" && sender.covers) delivered.add(sender.covers);
+        // A start that continues a cut-off turn received nothing new: the first start counted the input.
+        if (e.payload.input && !(before && before.end === undefined))
+          receive(record, sender?.kind === "runtime" ? sender.covers : undefined);
         break;
       }
       case "thread.ended":
         if (!record) break;
         record.endedAt = at;
         record.endedTime = e.createdAt;
+        if (record.pings === 0) record.idleFrom = Date.parse(e.createdAt);
         if (record.place === "worker") {
           const { status, error, note, summary } = e.payload;
           if (status === "cancelled" && summary) {
@@ -256,17 +283,29 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         if (record) {
           if (record.markAt > 0) record.outsideMs += Date.parse(e.createdAt) - record.markAt;
           record.markAt = 0;
+          // A ping turn that did work was answered: the next idle stretch starts from zero.
+          if (!NOT_AN_ANSWER.includes(e.payload.name)) record.pings = 0;
         }
         break;
       case "tool.result":
         if (record) record.progressAt = record.markAt = Date.parse(e.createdAt);
         break;
+      case "ping": {
+        const target = fold.threads.get(e.payload.threadId);
+        if (target) {
+          target.pings += 1;
+          target.pendingPing = e.id;
+        }
+        pingIds.add(e.id);
+        break;
+      }
       case "person.message":
         personAt = at;
         break;
       case "message": {
         if (!record || e.payload.role !== "user") break;
         const { sender } = e.payload;
+        receive(record, sender.kind === "runtime" ? sender.covers : undefined);
         if (sender.kind === "thread") {
           if (sender.messageId) delivered.add(sender.messageId);
           if (record.place === "worker" && fold.threads.get(sender.threadId)?.place === "main") {
@@ -274,7 +313,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
           }
         } else if (sender.kind === "runtime" && sender.covers) {
           delivered.add(sender.covers);
-          if (record.place === "main") {
+          if (record.place === "main" && !pingIds.has(sender.covers)) {
             cursor = sender.covers;
             deliveries.push({ at: written.get(sender.covers) ?? -1 });
           }
