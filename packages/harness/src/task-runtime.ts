@@ -31,6 +31,7 @@ import type {
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import type { ThreadLayout } from "./layout";
+import type { Section } from "./loop-shell";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
 import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/evidence";
 import type { Sandbox } from "./ports/sandbox";
@@ -73,6 +74,8 @@ function isJson(text: string): boolean {
 
 export interface TaskRuntimeOptions {
   recorder: Recorder;
+  /** The per-run critical section (`runLock`): decisions run one at a time, each seeing every earlier write. */
+  section: Section;
   evidence: Evidence;
   runId: string;
   /**
@@ -156,15 +159,8 @@ async function storedOutput(
 }
 
 export function taskRuntime(options: TaskRuntimeOptions) {
-  const { recorder, evidence, runId, layoutOf, sandbox, rootThreadId, abortThread } = options;
-
-  let tail: Promise<unknown> = Promise.resolve();
-  /** The per-run critical section: decisions run one at a time, each seeing every earlier write. */
-  const section = <T>(fn: () => Promise<T>): Promise<T> => {
-    const result = tail.then(fn);
-    tail = result.catch(() => {});
-    return result;
-  };
+  const { recorder, evidence, runId, layoutOf, sandbox, rootThreadId, abortThread, section } =
+    options;
 
   const log = () => threadLog(recorder.events());
   const view = (): Folded => log().view;

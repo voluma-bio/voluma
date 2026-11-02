@@ -12,6 +12,7 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (self|lab, default self) to let anyone in as a guest (the repo .env).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
+ * DEFAULT_RUN_HARNESS (tasks|agents, default tasks): the loop of a run whose start names none.
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
  * _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
@@ -21,6 +22,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { harnessSchema } from "@voluma/contracts/ids";
 import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
 import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
 import { directoryStore } from "@voluma/object-store/directory";
@@ -151,6 +153,7 @@ const queue = pgRunQueue(
     );
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
+  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "tasks"),
 );
 const eventLog = pgEventLog(db, notifier);
 

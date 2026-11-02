@@ -155,6 +155,7 @@ function toRun({ run, input, position, calls }: Row, { summary, revisions }: Res
     input: toInput(input),
     credentials: run.credentials,
     ...(run.model !== null && { model: run.model }),
+    ...(run.harness !== null && { harness: run.harness }),
     example: run.example,
     createdAt: run.createdAt.toISOString(),
     state,

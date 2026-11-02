@@ -246,6 +246,10 @@ export function NewPage() {
         start: table.filter((r) => startIds.includes(r.id)).map((r) => (r.input as Input).id),
         keys,
         model,
+        // Hidden switch for the agent loop (no UI): /new?harness=agents.
+        ...(new URLSearchParams(location.search).get("harness") === "agents" && {
+          harness: "agents" as const,
+        }),
       };
       // A deploy's reload waits for the answer: leaving mid-request would hide whether it started.
       const release = holdLeave();
