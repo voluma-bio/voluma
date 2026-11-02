@@ -10,7 +10,7 @@ height faster than a plate can along U or V, the centre is more than `flag_min_d
 lies farther than `face_reach_um` from the centre (every threshold is in the spec, entry `plate-faces`). Flags test what the
 script delivers: the centre and both faces. A flagged stretch gets no curve points, and `iioc.py` and `metaphysis_roi.py`
 refuse it until you trace it: your points inside it, from its first to its last column, at most `max_gap_um` apart. Where the plate
-is eroded the trace follows the remaining bone and you also mark the stretch eroded, with a reason.
+is eroded the trace follows the remaining bone and you also mark the U range where the plate is gone as eroded, with a reason.
 
 `plate-annotations.json` is JSON in the annotations schema: "grid_id", `growth_plate_curves` (annotation A, for iioc.py) and
 `growth_plate_distal_curves` (annotation C, for metaphysis_roi.py), one curve per proposed section, many points each, none in a
@@ -20,11 +20,12 @@ flagged stretch. Copy both keys into your annotations.json. The flagged stretche
   - trace every flagged stretch: add your points to the section's curve in both curve keys, from the stretch's first to its last
     column, at most `max_gap_um` apart (a stretch inside a curve is bridged by a straight line between its neighbouring points,
     so a gap is wrong geometry, not a hole);
-  - where the plate is destroyed, the points follow the remaining bone, and you also list the stretch in your annotations as
-    `plate_eroded`: {"<V>": [{"u": [first U, last U], "eroded": "<why>"}]}, the section and U range exactly as `stretches` has them.
-    The mark never replaces the points. `metaphysis_roi.py` then accepts the distal face at or above the proximal one there, and
-    both scripts report the eroded stretches and their share of the plate. If the faces cross onto a neighbouring section,
-    trace that section's remaining bone so they meet there too; a mark names only flagged stretches.
+  - where the plate is destroyed, mark the U range where it is gone, on every traced section it reaches, flagged or not
+    (a section you add beside the eroded span too), in your annotations as `plate_eroded`:
+    {"<V>": [{"u": [first U, last U], "eroded": "<why>"}]}, integer U. Trace the remaining bone there with both faces, densely
+    like a flagged stretch: a marked range needs your points from its first to its last column, at most `max_gap_um` apart.
+    The mark never replaces points. `metaphysis_roi.py` then accepts the distal face at or above the proximal one in the marked
+    range (on the rows between two sections that both mark it), and both scripts report the marked ranges and their share of the plate.
 Retrace any stretch that sits off the plate even if it is not flagged. Edit the curves, not the surface, so what the later
 scripts cut is what you traced.
 

@@ -38,7 +38,7 @@ always visible: a proposal that rides a dark marrow space above it, or a sheet w
 
 **Eroded plate.** `iioc/eroded-plate-oa6-1rk-v231.jpg`: OA6-1RK, coronal section V=231, the lab's reading of the plate, traced by Jimmy.
 Left of U~296 two thin lines run along the plate, some 20 to 90 µm apart; to the right the plate has been destroyed, the two lines meet
-and the face follows the remaining bone. Trace what remains with both faces, densely like any flagged stretch, list the stretch in `plate_eroded` with a reason (the mark
+and the face follows the remaining bone. Trace what remains with both faces, densely like any flagged stretch, mark the U range where the plate is gone in `plate_eroded` (every traced section it reaches, flagged or not) with a reason (the mark
 never replaces the points), and raise a To check item naming it ("V=231, U 296 to 338: plate eroded, faces traced on the remaining bone"); a search for a plate there finds another structure. OA6-1RK is eroded
 (bone destruction, possibly age-related) and is not representative: OA6-2RK's plate is the typical one, and a thickness measured
 on OA6-1RK is not a thickness of the plate.
@@ -61,8 +61,8 @@ cortex all round: on a coronal section it is a band in the marrow under the plat
 wall; on an axial slice it is the marrow space with a clear margin to the cortex. The cortex mask is the wall
 only, and never reaches the fibula.
 The distal face it starts from is the one `plate_faces.py` proposed, checked and retraced where flagged or wrong (see iioc,
-above); where the plate is eroded and the stretch marked so, the two faces meet, `metaphysis_roi.py` accepts that (if they cross onto a neighbouring section instead, trace that section's remaining bone so they meet there), ROI-3 starts below the
-remaining bone, and the result record lists the eroded stretches and their share: report them with the To check item.
+above); where the plate is eroded and the range marked so, the two faces meet, `metaphysis_roi.py` accepts that, ROI-3 starts below the
+remaining bone, and the result record lists the marked ranges and their share: report them with the To check item.
 
 ## cortical
 

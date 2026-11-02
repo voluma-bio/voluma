@@ -9,4 +9,4 @@
   (it was set on OA6-1RK V=231 right side only; a positive threshold flagged 45 to 70% of the columns) and the face-distance flag is new: re-tune when more hand traces exist. About 15 to 38% of
   the unflagged face columns of OA7-1L V=136/224 and OA6-1RK V=102 are still over 105 µm from his lines; the flags do not see a
   convincing sheet on the wrong structure, so the worker's look is the check. (2) The proposal is not yet scored on a traced section by a worker; judge the instructions on a run with the production
-  model, not on a stand-in (`workflows/core/AGENTS.md`). (3) An eroded mark is the whole flagged stretch, which the search can merge with plate on both sides (OA6-1RK V=229 U=190..316), so the reported eroded share is an upper bound: let the worker split a stretch if that matters. (4) `iioc.py` cannot run on OA6-1RK's stored frame (old format): rerun `tibia_frame.py` for that scan.
+  model, not on a stand-in (`workflows/core/AGENTS.md`). (3) `iioc.py` cannot run on OA6-1RK's stored frame (old format): rerun `tibia_frame.py` for that scan.

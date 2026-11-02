@@ -131,7 +131,7 @@ def check_bounds(ann, shape):
             mapping('plate_eroded', run, f'marks as {{"u": [first, last], "eroded": "<why>"}} on section {k}')
             if 'u' not in run or 'eroded' not in run:
                 malformed('plate_eroded', f'every mark on section {k} to have "u": [first, last] and "eroded": "<why>"')
-            listof('plate_eroded', run['u'], 2, f'"u": [first, last], the stretch\'s U range as plate_faces.py wrote it, on section {k}')
+            listof('plate_eroded', run['u'], 2, f'"u": [first, last], the U range where the plate is gone, on section {k}')
             for x in run['u']:
                 if isinstance(x, bool) or not isinstance(x, int):
                     malformed('plate_eroded', f'"u": [first, last] with two integers on section {k}')
@@ -178,28 +178,23 @@ def load_plate_stretches(plate_dir, grid):
 
 
 def cleared_stretches(ann, stretches, key, spec_path, shape, vox, on_bone):
-    """Refuse a flagged stretch (`stretches`, from plate_faces.py) the curves `key` do not trace, and report the eroded ones.
+    """Refuse a U range the curves `key` do not trace, and report the eroded ones.
 
-    A stretch is cleared when its section has a curve with points inside the stretch, the first and last within `max_gap_um`
-    of its ends and none farther apart than that (points outside count for nothing: a line from one to another is an invented
-    face). Eroded or not, every stretch needs them; an eroded one (`ann["plate_eroded"]`, naming a listed stretch by section
-    and U range) needs them on the remaining bone, and the unflagged columns between two of them closer than `max_gap_um` count as
-    eroded too. Returns (eroded, record): `eroded`, bool (V, U): where the plate is marked
-    eroded on the sections either side along V (a face is linear in V between traced sections), and `record`, the dict the
-    script reports: the eroded stretches with the share of the tibia's width on their section, and the eroded share of the
-    footprint `on_bone` over the traced V range.
+    The ranges to trace are the flagged stretches (`stretches`, from plate_faces.py) and the worker's `ann["plate_eroded"]`
+    ranges, on any section. A range is cleared when its section has a curve with points inside it, the first and last within
+    `max_gap_um` of its ends and none farther apart than that (points outside count for nothing: a line from one to another is
+    an invented face). A mark never replaces points; inside a marked range they follow the remaining bone. Returns
+    (eroded, record): `eroded`, bool (V, U): the marked ranges, on the rows between two traced sections where both
+    mark (a face is linear in V between traced sections), and `record`, the dict the script reports: the marked ranges with
+    their share of the tibia's width on their section, and the eroded share of the footprint `on_bone` over the traced V range.
     """
     gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
     slices = ann[key]['slices']
-    listed = {(int(k), *run['u']) for k, runs in stretches.items() for run in runs}
     reasons = {(int(k), *run['u']): run['eroded'] for k, runs in ann.get('plate_eroded', {}).items() for run in runs}
-    unknown = [f'V={v}, U={a}..{b}' for v, a, b in reasons if (v, a, b) not in listed]
-    if unknown:
-        sidecar.fail(f'annotations.json "plate_eroded" names no flagged stretch of plate-faces.json at {"; ".join(unknown)}: '
-                     'copy the stretch\'s section and U range exactly from there')
-    refused, eroded_runs = [], []
-    marked = {}  # V -> bool U array of the eroded stretches on that traced section
-    for v, a, b in sorted(listed):
+    listed = {(int(k), *run['u']) for k, runs in stretches.items() for run in runs}
+    refused = []
+    marked = {}  # V -> bool U array of the marked ranges on that section
+    for v, a, b in sorted(listed | reasons.keys()):
         pts = sorted(p[1] for p in slices.get(str(v), []) if a <= p[1] <= b)
         if str(v) not in slices:
             refused.append(f'V={v}, U={a}..{b}: the section has no curve')
@@ -211,17 +206,10 @@ def cleared_stretches(ann, stretches, key, spec_path, shape, vox, on_bone):
                 refused.append(f'V={v}, U={a}..{b}: points up to {widest * vox * 1000:.0f} um apart, ends included')
         if (v, a, b) in reasons:
             marked.setdefault(v, np.zeros(shape[2], bool))[a : b + 1] = True
-            eroded_runs.append({'v': v, 'u': [a, b], 'reason': reasons[v, a, b], 'width_fraction': (b - a + 1) / max(on_bone[v].sum(), 1)})
     if refused:
         shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more' if len(refused) > 6 else '')
-        sidecar.fail(f'"{key}" leaves {len(refused)} flagged stretch(es) of plate-faces.json untraced: {shown}. Trace each densely '
-                     'from its first to its last column (points at most the spec\'s max_gap_um apart); where the plate is gone, trace '
-                     'the remaining bone and add the stretch to "plate_eroded" with a reason')
-    for m in marked.values():  # the unflagged columns between two eroded stretches closer than max_gap_um are eroded too
-        on = np.flatnonzero(m)
-        for lo, hi in itertools.pairwise(on):
-            if 1 < hi - lo <= gap + 1:
-                m[lo:hi] = True
+        sidecar.fail(f'"{key}" leaves {len(refused)} flagged or marked range(s) untraced: {shown}. Trace the bone in each densely '
+                     'from its first to its last column (points at most the spec\'s max_gap_um apart)')
     sections = sorted(int(k) for k in slices)
     eroded = np.zeros(shape[1:], bool)
     for v in range(sections[0], sections[-1] + 1):
@@ -229,6 +217,7 @@ def cleared_stretches(ann, stretches, key, spec_path, shape, vox, on_bone):
         hi = min(s for s in sections if s >= v)
         eroded[v] = marked.get(lo, False) & marked.get(hi, False) if lo != hi else marked.get(lo, False)
     eroded &= on_bone
+    eroded_runs = [{'v': v, 'u': [a, b], 'reason': r, 'width_fraction': (b - a + 1) / max(on_bone[v].sum(), 1)} for (v, a, b), r in sorted(reasons.items())]
     rows = on_bone[sections[0] : sections[-1] + 1]
     record = {'eroded_stretches': eroded_runs, 'eroded_fraction': float(eroded[sections[0] : sections[-1] + 1].sum() / max(rows.sum(), 1))}
     return eroded, record

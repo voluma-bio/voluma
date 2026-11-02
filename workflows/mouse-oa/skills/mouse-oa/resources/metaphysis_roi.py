@@ -18,11 +18,11 @@ It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, 
 or from another grid is refused). This script reads these keys; any other unknown key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_distal_curves  required: the distal face of the growth-plate band (the side facing the shaft), curves (below),
                               traced on the coronal sections of tibia-hu.npy
-  plate_eroded                optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: the section and U range
-                              of a stretch of --plate-faces exactly as plate-faces.json lists it (anything else is refused), U integers.
-                              It never replaces points: every stretch of --plate-faces, eroded or not, needs the distal curve's points inside
-                              it, from its first to its last column, at most `max_gap_um` of the spec (entry plate-faces) apart, or the script
-                              stops naming the section and U range; on an eroded stretch they follow the remaining bone
+  plate_eroded                optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
+                              of the curve, any U range (integers, first <= last). It never replaces points: every stretch of --plate-faces
+                              and every marked range needs the distal curve's points inside it, from its first to its last column, at most
+                              `max_gap_um` of the spec (entry plate-faces) apart, or the script stops naming the section and U range;
+                              inside a marked range they follow the remaining bone
 Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
 V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
 is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
@@ -35,7 +35,7 @@ inside the tibia: the band between them cannot be thinner than nothing. Where bo
 wrong; where either is held constant past its curves' ends it means the curves must reach further, and the message says
 which face and sections. It also stops on an empty ROI-3.
 
-Eroded stretches. Inside a stretch marked eroded (on the sections either side of a row along V) the faces may meet or cross: the
+Eroded ranges. Inside a range marked eroded (on both sections either side of a row along V) the faces may meet or cross: the
 check above does not apply, because the plate there is gone and both curves follow the remaining bone. ROI-3 is cut as everywhere
 else, `start_um` below the traced distal face, so in an eroded stretch it lies below the remaining bone, not below a plate. The
 eroded stretches and the fraction of the tibia's footprint they cover are in the result record (`eroded_stretches`,
@@ -97,7 +97,7 @@ def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox, eroded):
         sidecar.fail(f'the traced distal face lies at or above the proximal face at {int(bad.sum())} traced (V, U) positions, '
                      f'V={vi.min()}..{vi.max()}, U={ui.min()}..{ui.max()} (worst {float((prox - gd)[bad].max()) * vox * 1000:.0f} um): '
                      'retrace the distal face lower, or the proximal face higher, on sections in that V range; where the plate is gone there, '
-                     'mark those stretches in "plate_eroded" (on the sections either side) and trace the remaining bone instead')
+                     'mark the U range where the plate is gone in "plate_eroded" (on the traced sections either side, flagged or not) and trace the remaining bone there')
     needs = []
     for name, known in (('distal', dv), ('proximal', pv)):
         held = cross & ~known

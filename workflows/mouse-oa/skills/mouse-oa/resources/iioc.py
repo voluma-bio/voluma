@@ -12,12 +12,12 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
 or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections
-  plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: the section and U range of a
-                          stretch of --plate-faces exactly as plate-faces.json lists it (anything else is refused), U integers. It never
-                          replaces points: every stretch of --plate-faces, eroded or not, needs the curve's points inside it, from its first to
-                          its last column, at most `max_gap_um` of the spec (entry plate-faces) apart, or the script stops naming the section
-                          and U range; on an eroded stretch they follow the remaining bone. The eroded stretches and their share of the
-                          footprint are in the result record
+  plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
+                          of the curve, any U range (integers, first <= last). It never replaces points: every stretch of --plate-faces
+                          and every marked range needs the curve's points inside it, from its first to its last column, at most
+                          `max_gap_um` of the spec (entry plate-faces) apart, or the script stops naming the section and U range; inside
+                          a marked range they follow the remaining bone. The marked ranges and their share of the footprint are in
+                          the result record
   articular_corrections   optional list of {"u_range": [lo, hi], "v_range": [lo, hi], "curves": curves}: where part of the
                           tibia label is really femur or fibula above the articular surface, `curves` mark the true
                           articular surface inside the U and V ranges; ROI-1 keeps only what lies below it
