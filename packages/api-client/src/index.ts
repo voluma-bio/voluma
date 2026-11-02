@@ -237,7 +237,7 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on a scan of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
+/** Starts a run on an input of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return read(runSchema, await request("/run/runs", { method: "POST", body: req }));
 }
@@ -257,7 +257,7 @@ export async function listStudies(): Promise<StudySummary[]> {
   return (await read(listStudiesResponseSchema, await request("/run/studies"))).studies;
 }
 
-/** A study with its scans, their runs, and the workflow's headline values. */
+/** A study with its inputs, their runs, and the workflow's headline values. */
 export async function getStudy(id: string): Promise<StudyDetail> {
   return read(studyDetailSchema, await request(`/run/studies/${encodeURIComponent(id)}`));
 }

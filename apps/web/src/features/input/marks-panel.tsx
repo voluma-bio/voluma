@@ -1,5 +1,5 @@
 /**
- * Marks: your marks on the scan, held by the page until a message to the AI carries them. Each
+ * Marks: your marks on the input, held by the page until a message to the AI carries them. Each
  * has a short tag (P1, B1, L1, O1) drawn beside it in the views and belongs to the image it was
  * made on (`gridKeyOf`); a redo that replaces that image drops it. A row selects it (the views
  * move to it, opening its task when it is on another grid) or deletes it. The tools that make

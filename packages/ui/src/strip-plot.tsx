@@ -1,9 +1,9 @@
 /**
- * Strip plot: one measurement compared across groups of scans, for the small
- * groups a study has (n = 1-8), where a bar would hide the scans. Each scan is
+ * Strip plot: one measurement compared across groups of inputs, for the small
+ * groups a study has (n = 1-8), where a bar would hide the inputs. Each input is
  * a dot on its group's row, a tick marks the group mean, and dots that share a
  * value spread around it so none hides another. A dot is a button: hover or
- * focus names the scan and its value, and `onSelect` decides what it opens.
+ * focus names the input and its value, and `onSelect` decides what it opens.
  * The plot is one tab stop: arrow keys move between dots (left and right in
  * value order, up and down between groups). Scans without a value yet are
  * counted beside their group, not drawn. Dots and the mean tick are ink; only
@@ -22,7 +22,7 @@ import { cx } from "./cx";
 export type StripPoint = {
   id: string;
   label: string;
-  /** null while the scan has no result yet. */
+  /** null while the input has no result yet. */
   value: number | null;
   /** Far from its group: drawn amber, with its label above it. */
   far?: boolean;

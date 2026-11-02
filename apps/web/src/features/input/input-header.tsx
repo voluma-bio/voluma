@@ -1,5 +1,5 @@
 /**
- * What the header line says in the scan review: the study and the scan, its group, where the run
+ * What the header line says in the input review: the study and the input, its group, where the run
  * stands, and Run details: what the researcher may ask (how long it took, its workflow and models,
  * its cost, Stop while it goes), then what someone fixing a run needs (times, ids, commits, keys, failures,
  * gateway requests). Below the header,
@@ -15,13 +15,13 @@ import { failedThreads } from "@voluma/contracts/threads";
 import {
   formatDuration,
   formatUsd,
+  inputLabel,
   KeysForm,
   loadKeys,
   runCost,
   runModels,
   runStatus,
   runWork,
-  scanLabel,
   stoppedText,
   useEvents,
   useNow,
@@ -42,11 +42,11 @@ import { Check, ChevronDown, Copy } from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
-/** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
-export function scanTitle(run: Run, study: StudyDetail | undefined) {
-  const scan = study?.scans.find((s) => s.scan.inputId === run.input.id)?.scan;
-  if (!scan) return { title: run.input.name, group: null };
-  return { title: scanLabel(scan), group: scan.group };
+/** "OA6-1, right knee", from the study's input; the input's file name when the study can't say. */
+export function inputTitle(run: Run, study: StudyDetail | undefined) {
+  const input = study?.inputs.find((s) => s.member.inputId === run.input.id)?.member;
+  if (!input) return { title: run.input.name, group: null };
+  return { title: inputLabel(input), group: input.group };
 }
 
 /** The study's workflow by its name; a run pinned to an older path still names it. */
@@ -82,7 +82,7 @@ function where(run: Run, progress: Progress | undefined): { status?: Status; tex
   return { status, text: label };
 }
 
-export function ScanHeading({
+export function InputHeading({
   run,
   study,
   progress,
@@ -92,12 +92,12 @@ export function ScanHeading({
   /** A task-loop run's; an agent-loop run's count is in Final outputs. */
   progress?: Progress;
 }) {
-  const { title, group } = scanTitle(run, study);
+  const { title, group } = inputTitle(run, study);
   const now = where(run, progress);
   return (
     <ShellHeading>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-2 text-sm">
-        {(!study || study.scans.length > 1) && (
+        {(!study || study.inputs.length > 1) && (
           <>
             <Link
               to={study ? `/studies/${study.study.id}` : "/"}
@@ -154,7 +154,7 @@ const clock = (iso: string) =>
     timeZoneName: "short",
   });
 
-/** Mounted only while Run details is open, so its clock and the log scan run only then. */
+/** Mounted only while Run details is open, so its clock and the log input run only then. */
 function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
   const { state, providerCalls } = run;
   const live = state.status !== "ended";

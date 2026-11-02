@@ -1,5 +1,5 @@
 /**
- * Facts about a thing, one click away (Run details, a scan's facts, an agent's or a task's info).
+ * Facts about a thing, one click away (Run details, an input's facts, an agent's or a task's info).
  * Radix underneath: the trigger toggles it, Escape and a click outside close it, and focus moves
  * in and back. `Facts` is the label and value list most popovers hold, `FactSections` several of
  * them under titles, and `InfoButton` the quiet (i) that opens them beside what they describe.

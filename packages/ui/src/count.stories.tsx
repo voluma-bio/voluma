@@ -3,7 +3,7 @@ import { Count } from "./count";
 
 /**
  * **What:** a small mono number after a title or on a row. **Why:** one format for counts
- * (today there are eight). **Where:** strip icons (18, 5), panel heads, study panel rows, scan
+ * (today there are eight). **Where:** strip icons (18, 5), panel heads, study panel rows, input
  * rows and box heads. The tone says what it counts when that matters: amber for items to check,
  * red for stopped, violet for running.
  */

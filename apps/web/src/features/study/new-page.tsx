@@ -17,10 +17,10 @@ import type { CreateStudyRequest } from "@voluma/contracts/study";
 import {
   formatDuration,
   formatUsd,
+  inputHref,
   loadKeys,
   RunKeyLine,
   runCost,
-  runHref,
 } from "@voluma/run-view";
 import {
   Breadcrumb,
@@ -39,9 +39,9 @@ import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import { holdLeave } from "../../shell/deploys";
+import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./input-files";
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
 import { linkTo } from "./link";
-import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./scan-files";
 import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
 import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
 
@@ -238,7 +238,7 @@ export function NewPage() {
       const request: CreateStudyRequest = {
         name: several ? studyName.trim() : table[0]?.name || "Scan",
         workflowId: workflow.id,
-        scans: table.map(({ input, sample }) => ({
+        inputs: table.map(({ input, sample }) => ({
           inputId: (input as Input).id,
           ...(sample.subject.trim() && { subject: sample.subject.trim() }),
           ...(sample.group.trim() && { group: sample.group.trim() }),
@@ -263,10 +263,10 @@ export function NewPage() {
     onSuccess: (detail) => {
       void queryClient.invalidateQueries({ queryKey: studiesQuery().queryKey });
       void queryClient.invalidateQueries({ queryKey: runsQuery().queryKey });
-      const run = detail.scans[0]?.runs[0];
+      const [only] = detail.inputs;
       navigate(
-        detail.scans.length === 1 && run
-          ? runHref({ runId: run.id })
+        detail.inputs.length === 1 && only?.runs[0]
+          ? inputHref(detail.study.id, only.member.inputId)
           : `/studies/${detail.study.id}`,
       );
     },

@@ -42,13 +42,13 @@ export const studiesQuery = () =>
         ? 5000
         : false,
   });
-/** One study, refetched every 5 s while any of its scans' newest run is still going. */
+/** One study, refetched every 5 s while any of its inputs' newest run is still going. */
 export const studyQuery = (id: string) =>
   queryOptions({
     queryKey: ["study", id],
     queryFn: () => getStudy(id),
     refetchInterval: (q) =>
-      q.state.data?.scans.some((s) => s.runs[0] && s.runs[0].state.status !== "ended")
+      q.state.data?.inputs.some((s) => s.runs[0] && s.runs[0].state.status !== "ended")
         ? 5000
         : false,
   });

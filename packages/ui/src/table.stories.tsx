@@ -6,7 +6,7 @@ import { Table, type TableColumn } from "./table";
  * **What:** a list with a head: the Row look on a real table, so columns size to their content.
  * Comfortable rows are 40 px, compact 30 px. Rows can go somewhere (`rowLink`, arrow on hover),
  * open in place (`rowDetail`) or both, and sit under group heads (`groupOf`). **Why:** one table
- * for values and scan lists, in place of six table-like grids. **Where:** Scans, Results, a
+ * for values and input lists, in place of six table-like grids. **Where:** Scans, Results, a
  * task's values, the runs list.
  */
 type Scan = {
@@ -18,7 +18,7 @@ type Scan = {
   bvtv?: number;
 };
 
-const scans: Scan[] = [
+const inputs: Scan[] = [
   { id: "OA7-4", group: "DMM", knee: "left", state: "check", checks: 2, bvtv: 55.1 },
   { id: "OA7-6", group: "DMM", knee: "left", state: "running" },
   { id: "OA7-11", group: "Sham", knee: "right", state: "done", bvtv: 61.4 },
@@ -27,7 +27,7 @@ const scans: Scan[] = [
 
 const columns: TableColumn<Scan>[] = [
   {
-    key: "scan",
+    key: "input",
     header: "Sample",
     cell: (s) => <span className="font-mono whitespace-nowrap">{s.id}</span>,
   },
@@ -55,7 +55,7 @@ const columns: TableColumn<Scan>[] = [
 const meta = {
   title: "Parts/Table",
   component: Table<Scan>,
-  args: { label: "Samples", columns, rows: scans, rowKey: (s: Scan) => s.id },
+  args: { label: "Samples", columns, rows: inputs, rowKey: (s: Scan) => s.id },
 } satisfies Meta<typeof Table<Scan>>;
 export default meta;
 type Story = StoryObj<typeof meta>;

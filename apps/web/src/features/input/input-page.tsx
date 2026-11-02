@@ -1,5 +1,5 @@
 /**
- * The scan review (`/scans/:runId`): one scan's run, live or finished, in the light shell. The main
+ * The input review (`/studies/:studyId/inputs/:inputId`): one input's run, live or finished, in the light shell. The main
  * area is the task in view on its grid; the left side holds Study, To check, Report and Agents, the
  * right side View, Marks and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
  * `item` (the To check item open) and `agent` (the agent whose steps show; none follows the one
@@ -8,7 +8,7 @@
  * views, values, files and human decisions). Your marks are page state, until a message to the
  * AI carries them.
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
@@ -51,6 +51,7 @@ import {
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel, useMessage } from "./ai-panel";
+import { InputHeading, inputTitle, RunAlert } from "./input-header";
 import {
   gridKeyOf,
   MarksPanel,
@@ -60,7 +61,6 @@ import {
   type YourMark,
 } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
-import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { StudyDock } from "./study-dock";
 import { ToCheckPanel } from "./to-check-panel";
 import { useRunStream } from "./use-run-stream";
@@ -73,17 +73,71 @@ const OutputsReview = lazy(() =>
 );
 const TaskViewer = lazy(() => import("./viewer").then((m) => ({ default: m.TaskViewer })));
 
-/** Keyed on the run: nothing of one run's stream, selection or decisions carries over. */
-export function ScanPage() {
-  const { runId = "" } = useParams();
+/** The state that stands in for the page while a read is pending, refused or failed; null once it has data. */
+export function Unavailable({ query }: { query: UseQueryResult<unknown> }) {
+  // Laid out as the study page's own loading and not-found states.
+  const page = "mx-auto w-full max-w-2xl px-6 py-8";
+  if (query.isPending)
+    return (
+      <div className={page}>
+        <LoadingState label={`Loading the ${INPUT_WORD.one}`} rows={4} />
+      </div>
+    );
+  if (query.data) return null;
+  const missing = query.error instanceof ApiError && query.error.status === 404;
+  return (
+    <div className={page}>
+      <ErrorState
+        title={
+          missing ? `This ${INPUT_WORD.one} isn't here` : `Couldn't load the ${INPUT_WORD.one}`
+        }
+        onRetry={missing ? undefined : () => void query.refetch()}
+      >
+        {missing
+          ? "It may have been removed, or it belongs to another lab."
+          : "Check your connection, then try again."}{" "}
+        <Button asChild variant="link">
+          <Link to="/">Go to Studies</Link>
+        </Button>
+      </ErrorState>
+    </div>
+  );
+}
+
+/**
+ * The input in a study, on its newest run, or on `?run=` (an earlier run of it). Keyed on the run:
+ * nothing of one run's stream, selection or decisions carries over.
+ */
+export function InputPage() {
+  const { studyId = "", inputId = "" } = useParams();
+  const [params] = useSearchParams();
+  const study = useQuery(studyQuery(studyId));
+  const unavailable = <Unavailable query={study} />;
+  const member = study.data?.inputs.find((i) => i.member.inputId === inputId);
+  if (!study.data) return unavailable;
+  const runId = params.get("run") ?? member?.runs[0]?.id;
+  // The run must be one of this input's in this study: a run id from elsewhere is not found.
+  if (!member || !runId || !member.runs.some((r) => r.id === runId))
+    return (
+      <div className="mx-auto w-full max-w-2xl px-6 py-8">
+        <ErrorState title={`This ${INPUT_WORD.one} isn't here`}>
+          {member && !runId
+            ? "It has no run yet."
+            : "It may have been removed, or it belongs to another lab."}{" "}
+          <Button asChild variant="link">
+            <Link to={`/studies/${encodeURIComponent(studyId)}`}>Go to the study</Link>
+          </Button>
+        </ErrorState>
+      </div>
+    );
   return (
     <RunStoreProvider key={runId}>
-      <Scan runId={runId} />
+      <Input runId={runId} />
     </RunStoreProvider>
   );
 }
 
-function Scan({ runId }: { runId: string }) {
+function Input({ runId }: { runId: string }) {
   const run = useQuery({
     ...runQuery(runId),
     // Queue place and state changes aren't events; the stream is the source for the rest. Also in
@@ -97,35 +151,8 @@ function Scan({ runId }: { runId: string }) {
         : 3000,
     refetchIntervalInBackground: true,
   });
-  // Laid out as the study page's own loading and not-found states.
-  const page = "mx-auto w-full max-w-2xl px-6 py-8";
-  if (run.isPending)
-    return (
-      <div className={page}>
-        <LoadingState label={`Loading the ${INPUT_WORD.one}`} rows={4} />
-      </div>
-    );
-  if (!run.data) {
-    const missing = run.error instanceof ApiError && run.error.status === 404;
-    return (
-      <div className={page}>
-        <ErrorState
-          title={
-            missing ? `This ${INPUT_WORD.one} isn't here` : `Couldn't load the ${INPUT_WORD.one}`
-          }
-          onRetry={missing ? undefined : () => void run.refetch()}
-        >
-          {missing
-            ? "It may have been removed, or it belongs to another lab."
-            : "Check your connection, then try again."}{" "}
-          <Button asChild variant="link">
-            <Link to="/">Go to Studies</Link>
-          </Button>
-        </ErrorState>
-      </div>
-    );
-  }
-  return <ScanStream run={run.data} stale={run.isError} refetchRun={() => void run.refetch()} />;
+  if (!run.data) return <Unavailable query={run} />;
+  return <InputStream run={run.data} stale={run.isError} refetchRun={() => void run.refetch()} />;
 }
 
 type ReviewProps = {
@@ -141,7 +168,7 @@ type ReviewProps = {
  * The run's stream, and the review it opens in: a run of the agent loop (`run.harness`) on its
  * outputs, any other in today's per-task review.
  */
-function ScanStream({ run, stale, refetchRun }: Omit<ReviewProps, "reopen">) {
+function InputStream({ run, stale, refetchRun }: Omit<ReviewProps, "reopen">) {
   const [reopened, setReopened] = useState(0);
   useRunStream(run.id, {
     reopened,
@@ -156,7 +183,7 @@ function ScanStream({ run, stale, refetchRun }: Omit<ReviewProps, "reopen">) {
       <OutputsReview {...props} />
     </Suspense>
   ) : (
-    <ScanReview {...props} />
+    <InputReview {...props} />
   );
 }
 
@@ -244,7 +271,7 @@ function useAccepting(run: RunRead, revision: Revision | undefined) {
 }
 export type Accepting = ReturnType<typeof useAccepting>;
 
-function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
+function InputReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   const me = useOutletContext<Me>();
   const openPanel = useOpenPanel();
   // Under 1440 px, two panels leave the views too narrow: The AI waits for i or Something's wrong.
@@ -252,7 +279,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   const study = useQuery({
     ...studyQuery(run.studyId),
     refetchInterval: (query) =>
-      isLive(run) || query.state.data?.scans.some((scan) => isLive(scan.runs[0])) ? 5000 : false,
+      isLive(run) || query.state.data?.inputs.some((input) => isLive(input.runs[0])) ? 5000 : false,
   });
   const store = useRunStore();
   const events = useEvents();
@@ -367,7 +394,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   const openAgent = useCallback(
     (threadId: string | null) => {
       select({ agent: threadId });
-      openPanel("scan-agents");
+      openPanel("input-agents");
     },
     [select, openPanel],
   );
@@ -375,7 +402,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   const [about, setAbout] = useState<{ taskId: string; at: number }>();
   const tellAi = (taskOf: string) => {
     setAbout({ taskId: taskOf, at: Date.now() });
-    openPanel("scan-ai");
+    openPanel("input-ai");
   };
   // It holds until the reader moves to another task or the message is sent.
   useEffect(() => setAbout(undefined), [taskId]);
@@ -408,7 +435,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   });
 
   const open = items.filter((n) => !n.accepted).length;
-  const { title } = scanTitle(run, study.data);
+  const { title } = inputTitle(run, study.data);
 
   let main: React.ReactNode;
   if (!review.data) {
@@ -472,12 +499,12 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   return (
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openAgent}>
-        <ScanHeading run={run} study={study.data} progress={view.progress} />
+        <InputHeading run={run} study={study.data} progress={view.progress} />
         <StudyDock run={run} study={study} />
         <ShellPanel
-          id="scan-to-check"
+          id="input-to-check"
           side="left"
-          group="scan"
+          group="input"
           label="To check"
           icon={<CircleAlert />}
           count={open}
@@ -498,9 +525,9 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
           />
         </ShellPanel>
         <ShellPanel
-          id="scan-report"
+          id="input-report"
           side="left"
-          group="scan"
+          group="input"
           label="Report"
           icon={<Network />}
           shortcut="r"
@@ -513,16 +540,16 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
             onTask={(id) => select({ task: id, item: null })}
             onItem={(n) => {
               pickItem(n);
-              openPanel("scan-to-check");
+              openPanel("input-to-check");
             }}
             onAgent={openAgent}
             items={items}
           />
         </ShellPanel>
         <ShellPanel
-          id="scan-agents"
+          id="input-agents"
           side="left"
-          group="scan"
+          group="input"
           label="Agents"
           icon={<Users />}
           shortcut="a"
@@ -535,13 +562,13 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
             ended={run.state.status === "ended"}
           />
         </ShellPanel>
-        <ShellPanel id="scan-view" side="right" label="View" icon={<Layers />} shortcut="v">
+        <ShellPanel id="input-view" side="right" label="View" icon={<Layers />} shortcut="v">
           <ViewPanel revision={latest} task={reviewTask} display={display} onDisplay={setDisplay} />
         </ShellPanel>
         {/* Marks has a place only once there is a mark: an empty list would take the views' width. */}
         {marking.marks.length > 0 && (
           <ShellPanel
-            id="scan-marks"
+            id="input-marks"
             side="right"
             label="Marks"
             icon={<ListChecks />}
@@ -564,7 +591,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
           </ShellPanel>
         )}
         <ShellPanel
-          id="scan-ai"
+          id="input-ai"
           side="right"
           label="The AI"
           icon={<MessagesSquare />}
@@ -573,7 +600,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
         >
           <AiPanel
             run={run}
-            scan={title}
+            input={title}
             tasks={tasks}
             inView={task?.id}
             onTask={(id) => select({ task: id, item: null })}

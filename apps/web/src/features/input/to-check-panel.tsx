@@ -1,7 +1,7 @@
 /**
- * To check: this scan's items, one open at a time. The open item's card (`ItemToCheck`) holds the
- * decision; Next names the next open item; the list below is the scan's open items in task
- * order. "Looks right" moves on to the next open item of the same task, else of the scan, and the
+ * To check: this input's items, one open at a time. The open item's card (`ItemToCheck`) holds the
+ * decision; Next names the next open item; the list below is the input's open items in task
+ * order. "Looks right" moves on to the next open item of the same task, else of the input, and the
  * handled item leaves the list. Picking an item sets up the views on its task and place.
  */
 import { reviewFileUrl } from "@voluma/api-client";
@@ -9,7 +9,7 @@ import { ItemToCheck, type NeedItem, type TaskView } from "@voluma/run-view";
 import { Disclosure, EmptyState, IconButton, Lightbox, List, Row, StatusGlyph } from "@voluma/ui";
 import { ChevronLeft, ChevronRight, ImageOff } from "lucide-react";
 import { useRef, useState } from "react";
-import type { Accepting } from "./scan-page";
+import type { Accepting } from "./input-page";
 
 export function ToCheckPanel({
   runId,
@@ -24,7 +24,7 @@ export function ToCheckPanel({
   live,
 }: {
   runId: string;
-  /** Every item of the scan in task order, reconciled with authoritative human decisions. */
+  /** Every item of the input in task order, reconciled with authoritative human decisions. */
   items: NeedItem[];
   tasks: TaskView[];
   /** The open item: one of the task in view's, none when that task has none. */
@@ -64,7 +64,7 @@ export function ToCheckPanel({
   const waiting = (n: NeedItem) => !n.accepted && n !== current;
   // Next, as the arrows go: none after the last.
   const next = queue.slice(at + 1).find(waiting);
-  // Where "Looks right" moves: the same task's next open item, else the scan's, round to the
+  // Where "Looks right" moves: the same task's next open item, else the input's, round to the
   // first still open.
   const after = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].filter(waiting);
   const then = after.find((n) => n.taskId === current?.taskId) ?? after[0];
@@ -157,9 +157,9 @@ export function ToCheckPanel({
           <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
         </button>
       )}
-      <section aria-labelledby="scan-open-items">
+      <section aria-labelledby="input-open-items">
         <h3
-          id="scan-open-items"
+          id="input-open-items"
           className="flex items-baseline gap-2 px-1 pt-1 pb-1.5 text-sm font-semibold"
         >
           {open.length > 0 ? `${open.length} left to check` : "Nothing left to check"}

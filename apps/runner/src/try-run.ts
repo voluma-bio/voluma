@@ -101,7 +101,7 @@ const study = studyDetailSchema.parse(
       body: {
         name: `try-run ${new Date().toISOString().slice(0, 16)}`,
         workflowId: workflow.id,
-        scans: [{ inputId: input.id }],
+        inputs: [{ inputId: input.id }],
         start: [input.id],
         ...(outputs && { selectedOutputs: outputs }),
         ...(values.notes && { notes: values.notes }),
@@ -110,7 +110,7 @@ const study = studyDetailSchema.parse(
     })
   ).json(),
 );
-const runId = study.scans.flatMap((s) => s.runs).at(0)?.id;
+const runId = study.inputs.flatMap((s) => s.runs).at(0)?.id;
 if (!runId) throw new Error("the study started no run");
 say(`started run ${runId} on ${input.name} (${workflow.id}); waiting for a runner to claim it`);
 say("(none running? start one: pnpm --filter @voluma/runner start)");
@@ -204,5 +204,5 @@ console.log(
   `\ncost: $${total.costUsd.toFixed(2)} (${total.calls} model calls` +
     `${run.providerCalls ? `, ${run.providerCalls.calls} gateway requests $${run.providerCalls.costUsd.toFixed(2)}` : ""})`,
 );
-console.log(`page: ${origin}/scans/${runId}`);
+console.log(`page: ${origin}/studies/${run.studyId}/inputs/${run.input.id}`);
 process.exit(run.state.status === "ended" && run.state.outcome === "completed" ? 0 : 1);

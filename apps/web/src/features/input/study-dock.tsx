@@ -1,12 +1,12 @@
 /**
- * The scan review's Study panel: the study's scans, this one marked, each opening its latest run,
- * and a link to the study overview when there is more than one scan. The page polls the study
+ * The input review's Study panel: the study's inputs, this one marked, each opening its newest run,
+ * and a link to the study overview when there is more than one input. The page polls the study
  * (`study`) while any of its runs goes.
  */
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { Run } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { plural, runHref, StudyPanel } from "@voluma/run-view";
+import { inputHref, plural, StudyPanel } from "@voluma/run-view";
 import { Button, ErrorState, INPUT_WORD, LoadingState, ShellPanel } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
 import { ArrowUpRight, PanelLeft } from "lucide-react";
@@ -16,7 +16,7 @@ export function StudyDock({ run, study }: { run: Run; study: UseQueryResult<Stud
   const [params] = useSearchParams();
   return (
     <ShellPanel
-      id="scan-study"
+      id="input-study"
       side="left"
       group="study"
       label="Study"
@@ -33,7 +33,7 @@ export function StudyDock({ run, study }: { run: Run; study: UseQueryResult<Stud
               </Button>
             </p>
           )}
-          {study.data.scans.length > 1 && (
+          {study.data.inputs.length > 1 && (
             <div className="border-b border-border px-4 py-2">
               <Button asChild variant="link">
                 <Link to={`/studies/${study.data.study.id}`}>
@@ -44,17 +44,17 @@ export function StudyDock({ run, study }: { run: Run; study: UseQueryResult<Stud
           )}
           <StudyPanel
             detail={study.data}
-            about={`${plural(study.data.scans.length, INPUT_WORD.one, INPUT_WORD.many)}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
+            about={`${plural(study.data.inputs.length, INPUT_WORD.one, INPUT_WORD.many)}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
             current={run.input.id}
-            scanLink={({ runs: [latestRun] }) =>
-              latestRun
+            inputLink={({ member, runs }) =>
+              runs.length > 0
                 ? (props) => (
                     <Link
-                      // This scan keeps what it shows; another opens its latest run.
+                      // The open input keeps what it shows (its run and selection); another opens its newest run.
                       to={
-                        latestRun.id === run.id
+                        member.inputId === run.input.id
                           ? { search: params.toString() }
-                          : runHref({ runId: latestRun.id })
+                          : inputHref(run.studyId, member.inputId)
                       }
                       {...props}
                     />

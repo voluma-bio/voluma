@@ -3,7 +3,7 @@
  * the far left, and the main area. A screen lays out its own side panels (`SidePanel`): the shell
  * keeps each side's width and whether it is folded, so both carry across pages.
  *
- * The scan page still declares docked panels with `ShellPanel`, which put a labelled icon strip
+ * The input page still declares docked panels with `ShellPanel`, which put a labelled icon strip
  * at each edge with up to two panels per side; they go when it moves to `SidePanel`. Panels push the main area aside,
  * never float over it, so the 3D views are never covered.
  *
@@ -38,7 +38,7 @@ export type ShellPanelProps = {
   /** Unique across the app. */
   id: string;
   side: ShellSide;
-  /** Strip buttons are grouped (e.g. the study's sections, then the open scan's panels). */
+  /** Strip buttons are grouped (e.g. the study's sections, then the open input's panels). */
   group?: string;
   label: string;
   icon: ReactNode;

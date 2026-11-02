@@ -11,7 +11,7 @@
  * The copy must parse, its events must pass `runEventSchema` (as `import:run` demands), and
  * its file bytes must equal what was read. The delete runs in one transaction that rolls back
  * unless every deleted row equals the file's. Inputs are shared and stay. The run's study
- * is deleted with its scans when no other run is in it; import restores their original metadata.
+ * is deleted with its study inputs when no other run is in it; import restores their original metadata.
  */
 import { mkdir, open, readFile, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -26,7 +26,7 @@ import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
 import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
-import { events, piMessages, runs, studies, studyScans } from "../domains/run/schema";
+import { events, piMessages, runs, studies, studyInputs } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
 import { assertRestorable, countsOf, describeCounts, readDump } from "./run-dump";
 
@@ -56,13 +56,13 @@ if (
   !dump.study ||
   dump.input.labId !== dump.run.labId ||
   dump.study.labId !== dump.run.labId ||
-  dump.studyInputs.some((input) => input.labId !== dump.run.labId) ||
+  dump.inputs.some((input) => input.labId !== dump.run.labId) ||
   !workflowById(dump.study.workflowId) ||
-  !dump.studyScans.some((scan) => scan.inputId === dump.run.inputId) ||
-  dump.studyScans.some((scan) => !dump.studyInputs.some((input) => input.id === scan.inputId))
+  !dump.studyInputs.some((entry) => entry.inputId === dump.run.inputId) ||
+  dump.studyInputs.some((entry) => !dump.inputs.some((input) => input.id === entry.inputId))
 ) {
   throw new Error(
-    `run ${runId} has missing inputs, study scans or an unknown workflow; cannot restore`,
+    `run ${runId} has missing inputs, study inputs or an unknown workflow; cannot restore`,
   );
 }
 
@@ -138,9 +138,9 @@ const deleted = await db.transaction(async (tx) => {
     .limit(1);
   if (!sibling) {
     matches(
-      "study scans",
-      await tx.delete(studyScans).where(eq(studyScans.studyId, dump.run.studyId)).returning(),
-      copy.studyScans,
+      "study inputs",
+      await tx.delete(studyInputs).where(eq(studyInputs.studyId, dump.run.studyId)).returning(),
+      copy.studyInputs,
     );
     matches("study", await tx.delete(studies).where(eq(studies.id, dump.run.studyId)).returning(), [
       copy.study,
@@ -152,7 +152,7 @@ await client.end();
 console.log(
   `deleted run ${runId} and ${describeCounts(deleted.counts)}; ${
     deleted.studyDeleted
-      ? `study ${dump.run.studyId} and its scans (no other run in it)`
+      ? `study ${dump.run.studyId} and its inputs (no other run in it)`
       : "its study stays (other runs in it)"
   }; input ${dump.run.inputId} stays. R2 runs/${runId}/ untouched. Restore: import:run --from ${out}`,
 );

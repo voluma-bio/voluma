@@ -7,7 +7,7 @@ import { SegmentedControl } from "./segmented-control";
  * **What:** a few modes of one view; one is always on. Arrow keys move between them. A mode's
  * key, or why it can't be picked now, shows on hover.
  * **Why:** one look for mode switches that were drawn ad hoc. **Where:** the matrix's Status /
- * Values, a list's Comfortable / Compact, the Agents stream filter, the scan review's marking
+ * Values, a list's Comfortable / Compact, the Agents stream filter, the input review's marking
  * tools (each with its key; icons only on the outputs review's tool bar, named in the tooltip).
  */
 function Demo({

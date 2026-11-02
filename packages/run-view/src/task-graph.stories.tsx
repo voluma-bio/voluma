@@ -1,13 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { ResultRow, TaskState, Thread } from "./run-model";
-import { type ScanGraphTask, TaskGraph } from "./task-graph";
+import { type InputGraphTask, TaskGraph } from "./task-graph";
 
 /**
  * **What:** the workflow as a graph of real nodes, one box per task laid out by its
- * dependencies, in two sizes: `summary` (one scan's tasks, small, left to right) and `report` (one scan's tasks top down in
- * the scan review's Report panel; the selected, working or redone task lists its agents).
- * **Why:** one picture of what a scan went through and where it is stuck, and the way into a
- * task. **Where:** a scan row's quick summary (summary), the scan review's Report panel (report).
+ * dependencies, in two sizes: `summary` (one input's tasks, small, left to right) and `report` (one input's tasks top down in
+ * the input review's Report panel; the selected, working or redone task lists its agents).
+ * **Why:** one picture of what an input went through and where it is stuck, and the way into a
+ * task. **Where:** an input row's quick summary (summary), the input review's Report panel (report).
  *
  * Sample data (stories only): the mouse OA workflow's nine tasks, as `tasks.json` plans them.
  */
@@ -66,11 +66,11 @@ function thread(
   };
 }
 
-function scanTasks(
+function inputTasks(
   states: Record<string, TaskState>,
-  extra: Record<string, Partial<ScanGraphTask>> = {},
+  extra: Record<string, Partial<InputGraphTask>> = {},
 ) {
-  return PLAN.map(([id, title, dependsOn]): ScanGraphTask => {
+  return PLAN.map(([id, title, dependsOn]): InputGraphTask => {
     const state = states[id] ?? "waiting";
     const v = VALUES[id];
     const results: ResultRow[] =
@@ -81,7 +81,7 @@ function scanTasks(
   });
 }
 
-const finished = scanTasks(Object.fromEntries(PLAN.map(([id]) => [id, "done" as TaskState])), {
+const finished = inputTasks(Object.fromEntries(PLAN.map(([id]) => [id, "done" as TaskState])), {
   segmentation: {
     state: "to-check",
     open: 1,
@@ -112,7 +112,7 @@ const finished = scanTasks(Object.fromEntries(PLAN.map(([id]) => [id, "done" as 
   },
 });
 
-const running = scanTasks(
+const running = inputTasks(
   {
     intake: "done",
     orientation: "done",
@@ -131,7 +131,7 @@ const running = scanTasks(
   },
 );
 
-/** The scan review's Report panel, one task selected: it lists its agents. */
+/** The input review's Report panel, one task selected: it lists its agents. */
 export const Report: Story = {
   args: {
     size: "report",
@@ -153,7 +153,7 @@ export const ReportRunning: Story = {
 export const ReportFailed: Story = {
   args: {
     size: "report",
-    tasks: scanTasks({
+    tasks: inputTasks({
       intake: "done",
       orientation: "done",
       segmentation: "failed",
@@ -164,7 +164,7 @@ export const ReportFailed: Story = {
   decorators: [(Story) => <div className="w-[368px]">{Story()}</div>],
 };
 
-/** A scan row's quick summary: small, left to right; a box opens the scan review on that task. */
+/** An input row's quick summary: small, left to right; a box opens the input review on that task. */
 export const Summary: Story = {
   args: { size: "summary", tasks: finished, onSelect: () => {} },
   decorators: [(Story) => <div className="w-[760px]">{Story()}</div>],

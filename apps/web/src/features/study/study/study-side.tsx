@@ -3,7 +3,7 @@
  * across its groups, and its recent activity. The study page's right side shows them, and so does
  * the Studies page's details pane for the selected study. Each reads only the `StudyDetail`.
  */
-import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
+import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import { groupNames, groupOf, kneeOf, plural, useNow, whenText } from "@voluma/run-view";
 import { Button, cx, Facts, INPUT_WORD, type Status, StatusGlyph, StripPlot } from "@voluma/ui";
@@ -17,10 +17,10 @@ import {
   activityOf,
   digitsFor,
   farFromGroup,
+  inputValue,
   kneeWord,
+  openHref,
   rangeText,
-  scanHref,
-  scanValue,
   unitOf,
   valuesOf,
 } from "./study-model";
@@ -48,14 +48,14 @@ export function SideBlock({
 
 /** "OA, 5 · right knees": a group, its size and, when they share one, its samples' knee. */
 function groupLines(detail: StudyDetail): string[] {
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
+  const grouped = detail.inputs.some((s) => s.member.group !== null);
   return groupNames(detail).map((g) => {
-    const scans = detail.scans.filter((s) => groupOf(s, grouped) === g);
-    const knees = [...new Set(scans.map(kneeOf))];
+    const inputs = detail.inputs.filter((s) => groupOf(s, grouped) === g);
+    const knees = [...new Set(inputs.map(kneeOf))];
     const knee = knees.length === 1 && knees[0] ? ` · ${kneeWord(knees[0])} knees` : "";
     return grouped
-      ? `${g}, ${scans.length}${knee}`
-      : `${plural(scans.length, INPUT_WORD.one, INPUT_WORD.many)}${knee}`;
+      ? `${g}, ${inputs.length}${knee}`
+      : `${plural(inputs.length, INPUT_WORD.one, INPUT_WORD.many)}${knee}`;
   });
 }
 
@@ -66,7 +66,7 @@ export function StudyFacts({
   detail: StudyDetail;
   workflow: BundledWorkflow;
 }) {
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
+  const grouped = detail.inputs.some((s) => s.member.group !== null);
   return (
     <Facts
       items={[
@@ -104,18 +104,20 @@ export function StudyFacts({
 }
 
 /** Who a far sample is compared with: its group's other samples. */
-const others = (scan: StudyScanDetail) =>
-  scan.scan.group ? `other ${scan.scan.group} ${INPUT_WORD.many}` : `other ${INPUT_WORD.many}`;
+const others = (input: StudyInputDetail) =>
+  input.member.group
+    ? `other ${input.member.group} ${INPUT_WORD.many}`
+    : `other ${INPUT_WORD.many}`;
 
 /**
  * A sample has a dot when its value is in the declared unit, or counts as "to come" while its run
  * can still report one. A stopped run, an output its result skipped and a value in another unit
  * have none.
  */
-const onPlot = (scan: StudyScanDetail, output: OutputEntry) =>
-  scan.resultRunId !== null
-    ? scanValue(scan, output) !== null
-    : scan.runs[0] !== undefined && scan.runs[0].state.status !== "ended";
+const onPlot = (input: StudyInputDetail, output: OutputEntry) =>
+  input.resultRunId !== null
+    ? inputValue(input, output) !== null
+    : input.runs[0] !== undefined && input.runs[0].state.status !== "ended";
 
 /** One measurement across the study's groups: every sample a dot, a dot opens its sample. */
 export function MeasurePlot({
@@ -128,11 +130,11 @@ export function MeasurePlot({
   className?: string;
 }) {
   const navigate = useNavigate();
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
+  const grouped = detail.inputs.some((s) => s.member.group !== null);
   const unit = unitOf(output);
   const digits = digitsFor(valuesOf(detail, output));
   const far = farFromGroup(detail, output);
-  const byId = new Map(detail.scans.map((s) => [s.scan.inputId, s]));
+  const byId = new Map(detail.inputs.map((s) => [s.member.inputId, s]));
   return (
     <StripPlot
       className={className}
@@ -140,20 +142,20 @@ export function MeasurePlot({
       unit={unit}
       digits={digits}
       onSelect={(point) => {
-        const scan = byId.get(point.id);
-        const href = scan && scanHref(scan);
+        const input = byId.get(point.id);
+        const href = input && openHref(detail.study.id, input);
         if (href) navigate(href);
       }}
       groups={groupNames(detail).map((group) => ({
         name: group,
-        points: detail.scans
+        points: detail.inputs
           .filter((s) => groupOf(s, grouped) === group && onPlot(s, output))
           .map((s) => {
-            const f = far.get(s.scan.inputId);
+            const f = far.get(s.member.inputId);
             return {
-              id: s.scan.inputId,
-              label: s.scan.subject,
-              value: scanValue(s, output),
+              id: s.member.inputId,
+              label: s.member.subject,
+              value: inputValue(s, output),
               far: f !== undefined,
               farReason: f && `The ${others(s)} measure ${rangeText(f.others, digits)} ${unit}`,
             };
@@ -183,7 +185,7 @@ export function HeadlineBlock({
           No values yet. Each {INPUT_WORD.one}'s values appear when its run finishes.
         </p>
       )}
-      {detail.scans.length > 1 && (
+      {detail.inputs.length > 1 && (
         <Button asChild variant="link" className="justify-self-start">
           <Link to={`/studies/${detail.study.id}/compare`}>
             Compare results
@@ -207,7 +209,7 @@ const ACTIVITY_MARK: Record<Activity["kind"], Status> = {
 /** The study's latest run events, each opening its sample. */
 export function RecentActivity({ detail, limit = 6 }: { detail: StudyDetail; limit?: number }) {
   const lines = activityOf(detail).slice(0, limit);
-  const live = detail.scans.some((s) => s.runs[0] && s.runs[0].state.status !== "ended");
+  const live = detail.inputs.some((s) => s.runs[0] && s.runs[0].state.status !== "ended");
   // A minute is the finest step `whenText` shows.
   const now = useNow(live);
   return (
@@ -217,16 +219,16 @@ export function RecentActivity({ detail, limit = 6 }: { detail: StudyDetail; lim
       ) : (
         <ul className="m-0 grid list-none gap-2.5 p-0">
           {lines.map((line) => {
-            const href = scanHref(line.scan);
+            const href = openHref(detail.study.id, line.input);
             const text = (
               <>
-                <span className="font-mono text-xs font-medium">{line.scan.scan.subject}</span>{" "}
+                <span className="font-mono text-xs font-medium">{line.input.member.subject}</span>{" "}
                 {line.text}
               </>
             );
             return (
               <li
-                key={`${line.scan.scan.inputId}-${line.kind}-${line.at}`}
+                key={`${line.input.member.inputId}-${line.kind}-${line.at}`}
                 className="grid grid-cols-[14px_minmax(0,1fr)_auto] items-start gap-x-2 text-sm"
               >
                 <StatusGlyph status={ACTIVITY_MARK[line.kind]} className="mt-0.5" />

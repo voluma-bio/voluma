@@ -59,7 +59,7 @@ export const piMessages = pgTable(
 );
 
 /**
- * A scan a run reads (`inputSchema`). The reference scan has one row per organization.
+ * An input a run reads (`inputSchema`). The reference input has one row per organization.
  * An upload is `uploading` from create until complete finds every declared file
  * (`files`, `[{path, size}]`) stored; only a `ready` input is listed or started on.
  */
@@ -76,7 +76,7 @@ export const inputs = pgTable("inputs", {
   files: json(),
 });
 
-/** The scan every org may start from: one row per org, uploaded by the examples operator. */
+/** The input every org may start from: one row per org, uploaded by the examples operator. */
 export const EXAMPLES_OPERATOR = "voluma-examples";
 export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
   id: referenceInputId(labId),
@@ -87,7 +87,7 @@ export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
 });
 
 /**
- * A group of runs of one workflow, one per scan (`studySchema`, `@voluma/contracts/study`).
+ * A group of runs of one workflow, one per input (`studySchema`, `@voluma/contracts/study`).
  * `example` marks the seeded example's study. Like `runs`, no foreign keys: the rows are
  * checked where they are written (pg-queue.ts, and the operator scripts ops/import-run.ts and seed-example.ts).
  */
@@ -106,9 +106,9 @@ export const studies = pgTable(
   (t) => [index("studies_lab").on(t.labId, t.createdAt)],
 );
 
-/** A scan of a study: the confirmed intake row. `subject` is never empty (the input's name when none was given). */
-export const studyScans = pgTable(
-  "study_scans",
+/** An input of a study: the confirmed intake row. `subject` is never empty (the input's name when none was given). */
+export const studyInputs = pgTable(
+  "study_inputs",
   {
     studyId: text().notNull(),
     inputId: text().notNull(),

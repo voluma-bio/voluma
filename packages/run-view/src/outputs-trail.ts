@@ -1,7 +1,7 @@
 /**
  * How the AI got to an output, from the output fold: the trail behind one output (what its
  * latest version was made from, recursively), the whole run's made-from graph, a version's
- * report, and the run's agents (`agentLog`). Pure data; the scan review draws it (the trail panel,
+ * report, and the run's agents (`agentLog`). Pure data; the input review draws it (the trail panel,
  * the whole-run graph, Run details), so a new look changes only the drawing. Rules: the agent-model
  * design's `review.md` (Layout, Panels and views) and `outputs.md` (Stale).
  *

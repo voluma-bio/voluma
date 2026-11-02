@@ -4,7 +4,7 @@
  * the measurements the trouble sits and how far a running sample is; its accessible name (and
  * hover) counts each state. Reported is green at half strength so a finished study doesn't shout.
  */
-import type { StudyScanDetail } from "@voluma/contracts/study";
+import type { StudyInputDetail } from "@voluma/contracts/study";
 import { cx } from "@voluma/ui";
 import { SEGMENT_WORD, type Section, type Segment, segmentOf } from "./study-model";
 
@@ -20,8 +20,8 @@ export const SEGMENT_LOOK: Record<Segment, string> = {
 
 const ORDER: Segment[] = ["check", "stale", "making", "stopped", "missing", "reported", "waiting"];
 
-export function SampleBar({ scan, sections }: { scan: StudyScanDetail; sections: Section[] }) {
-  const states = sections.map((s) => s.outputs.map((o) => segmentOf(scan, o)));
+export function SampleBar({ input, sections }: { input: StudyInputDetail; sections: Section[] }) {
+  const states = sections.map((s) => s.outputs.map((o) => segmentOf(input, o)));
   const counts = new Map<Segment, number>();
   for (const s of states.flat()) counts.set(s, (counts.get(s) ?? 0) + 1);
   const name = ORDER.filter((s) => counts.has(s))
