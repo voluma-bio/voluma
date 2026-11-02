@@ -66,12 +66,19 @@ export function tasksWire(o: TasksWireOptions): Wire {
   return {
     sandboxOf: (threadId) => layout.forThread(recordOf(threadId)),
     nameOf: (threadId) => recordOf(threadId).name,
-    run: (shared) => runTasks(shared, o.plan, layout),
+    // A task thread releases its sandbox at each end.
+    keepsSandbox: () => false,
+    run: (shared) => runTasks(shared, definition, o.plan, layout),
   };
 }
 
-async function runTasks(o: Shared, plan: readonly PlanTask[], layout: RunLayout): Promise<void> {
-  const { runId, rootThreadId, recorder, definition, session, pool, bash, signal } = o;
+async function runTasks(
+  o: Shared,
+  definition: WorkflowDefinition,
+  plan: readonly PlanTask[],
+  layout: RunLayout,
+): Promise<void> {
+  const { runId, rootThreadId, recorder, session, pool, bash, signal } = o;
   const main = definition.agents.main;
   // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
   await keepOutputs({

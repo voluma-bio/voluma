@@ -20,8 +20,6 @@
  * threads are aborted and the root ends `failed`, because the loop must not carry on from a
  * record the store does not hold. A runtime abort writes no end, like a crash.
  */
-import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { By } from "@voluma/contracts/events";
 import {
   checkResult,
@@ -33,8 +31,10 @@ import {
 } from "@voluma/contracts/fold";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { UserSender } from "./adapters/pi/start-thread";
+import { failureKind, mainFailureAction, type ProviderError } from "./failure-policy";
 import type { RunLayout, ThreadLayout } from "./layout";
-import { loopShell, type Section, type Step } from "./loop-shell";
+import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "./loop-config";
+import { loopShell, RUNTIME, type Section, type Step } from "./loop-shell";
 import {
   agentsList,
   answerText,
@@ -87,31 +87,8 @@ import type { Tool } from "./tools/tool";
 /** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
 type Lineage = { name: string; role: string; parentThreadId: string; attemptId?: string };
 
-/** What the host decides about a thread's model; the loop adds the prompts, identity and tools. */
-export interface ModelSetup {
-  model: Model<Api>;
-  /** The Pi agent's thinking level, which Pi sends as `reasoning` and records on each reply. */
-  thinkingLevel: ThinkingLevel;
-  streamFn: StreamFn;
-}
-
-export interface LoopConfig {
-  /** `needs-review` rounds a task gets before it is left to-check. */
-  maxFixRounds: number;
-  /** Deliveries with no notice in a row before code ends the run. */
-  stuckLimit: number;
-}
-
 /** The role file the run's first thread runs on; the loader requires it. */
 const MAIN_ROLE = "main";
-
-export const LOOP_DEFAULTS: LoopConfig = {
-  maxFixRounds: 2,
-  stuckLimit: 2,
-};
-
-/** The host's reading of a provider error's text (`RunLoopOptions.providerError`). */
-export type ProviderError = "fatal" | "transient";
 
 export interface RunLoopOptions {
   runId: string;
@@ -150,7 +127,6 @@ export interface RunLoopOptions {
 const CHECK_REPLACEMENTS = 2;
 
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
-const RUNTIME: UserSender = { kind: "runtime" };
 
 export async function runLoop(o: RunLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
@@ -221,7 +197,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     // that message is still undelivered: it was never told the run had finished.
     const message = corrections(recorder.events()).open?.message;
     const inCorrection = d.undelivered.some((u) => u.kind === "person" && u.eventId === message);
-    const covers = { promptCovers: recorder.events().at(-1)?.id };
+    const covers = { promptCovers: d.lastEventId };
     const restart = mainRestartPrompt(
       view,
       stateBlock(d, view, stateOf),
@@ -584,11 +560,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
   }
 
   /** How a failed thread's error reads: the host's reading of its text, and `interrupted` from the thread's own end. */
-  function failureOf(r: ThreadRecord): ProviderError | "interrupted" | undefined {
-    if (r.end?.status !== "failed") return;
-    const kind = o.providerError?.(r.end.error ?? "");
-    return kind === "fatal" || !r.end.interrupted ? kind : "interrupted";
-  }
+  const failureOf = (r: ThreadRecord) => failureKind(r.end, o.providerError);
 
   /**
    * Fails the run for a fatal provider error on a thread this process ran: a failure an earlier
@@ -604,27 +576,21 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
   }
 
   /**
-   * A failed main agent, idle. The rules for the failure's kind:
-   * - a transient provider error (Pi's retries ran out before any reply) fails the run;
-   * - an interrupted reply resumes the same main, history as it was, unless its previous end was
-   *   an interrupted failure too and it has made no reply since its latest start: then the run fails;
-   * - anything else (a context overflow, a length stop, a refusal) keeps the history that failed,
-   *   so a fresh main takes over, once; if that one fails too, so does the run.
+   * A failed main agent, idle: `mainFailureAction` (`failure-policy.ts`) says whether the run
+   * fails, the same main resumes, or a new one takes over.
    */
   async function mainFailed(d: ThreadLog, m: ThreadRecord) {
-    const fail = () => {
-      throw new Error(fatalText(m, m.end?.error ?? "", taskName));
-    };
-    const kind = failureOf(m);
-    if (kind === "transient" && threads.started(m.id)) fail();
-    if (kind === "interrupted") {
-      if (!m.replied && m.endBefore?.status === "failed" && m.endBefore.interrupted) fail();
-      await resume(m, PROVIDER_FAILED_RESUME, RUNTIME);
-      return;
-    }
     const mains = [...d.threads.values()].filter((r) => r.place === "main");
-    if (mains.at(-2)?.end?.status === "failed") fail();
-    await startMain(d);
+    const action = mainFailureAction({
+      kind: failureOf(m),
+      startedHere: threads.started(m.id),
+      replied: m.replied,
+      endBefore: m.endBefore,
+      previousFailed: mains.at(-2)?.end?.status === "failed",
+    });
+    if (action === "fail") throw new Error(fatalText(m, m.end?.error ?? "", taskName));
+    if (action === "resume") await resume(m, PROVIDER_FAILED_RESUME, RUNTIME);
+    else await startMain(d);
   }
 
   /** The delivery message and the last event it covers. */
@@ -638,7 +604,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       : "";
     return {
       text: `${deliveryText(d, d.undelivered, agentsList(d, stateOf), changed)}${intro}`,
-      covers: events.at(-1)?.id,
+      covers: d.lastEventId,
     };
   }
 
@@ -685,10 +651,10 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       return true;
     }
     if (anyRunning(d)) return false;
-    const covers = recorder.events().at(-1)?.id;
+    const covers = d.lastEventId;
     if (d.emptyDeliveries < config.stuckLimit) {
       const asking = [...d.threads.values()].some((r) => openAsk(d, r));
-      await resume(m, livenessNudge(asking, stateBlock(d, view, stateOf)), {
+      await resume(m, livenessNudge(stateBlock(d, view, stateOf), asking), {
         kind: "runtime",
         ...(covers && { covers }),
       });

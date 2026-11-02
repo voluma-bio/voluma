@@ -67,6 +67,10 @@ import { useRunStream } from "./use-run-stream";
 import { ViewPanel } from "./view-panel";
 
 // three.js and the zarr reader load only once there is a task to show.
+// Lazy: it brings the workflow's output catalog, parsed on import, which a task run's page never needs.
+const OutputsReview = lazy(() =>
+  import("./outputs-review").then((m) => ({ default: m.OutputsReview })),
+);
 const TaskViewer = lazy(() => import("./viewer").then((m) => ({ default: m.TaskViewer })));
 
 /** Keyed on the run: nothing of one run's stream, selection or decisions carries over. */
@@ -119,7 +123,39 @@ function Scan({ runId }: { runId: string }) {
       </div>
     );
   }
-  return <ScanReview run={run.data} stale={run.isError} refetchRun={() => void run.refetch()} />;
+  return <ScanStream run={run.data} stale={run.isError} refetchRun={() => void run.refetch()} />;
+}
+
+type ReviewProps = {
+  run: RunRead;
+  /** The last poll failed: what is shown may be out of date. */
+  stale: boolean;
+  refetchRun: () => void;
+  /** Reconnects the run's stream, to catch what a write of yours added to the log. */
+  reopen: () => void;
+};
+
+/**
+ * The run's stream, and the review it opens in: a run of the agent loop (`run.harness`) on its
+ * outputs, any other in today's per-task review.
+ */
+function ScanStream({ run, stale, refetchRun }: Omit<ReviewProps, "reopen">) {
+  const [reopened, setReopened] = useState(0);
+  useRunStream(run.id, {
+    reopened,
+    revisionId: run.review?.revisionId,
+    going: run.state.status !== "ended",
+    onClosed: refetchRun,
+  });
+  const reopen = useCallback(() => setReopened((n) => n + 1), []);
+  const props = { run, stale, refetchRun, reopen };
+  return run.harness === "agents" ? (
+    <Suspense fallback={<LoadingState label="Loading the review" rows={4} />}>
+      <OutputsReview {...props} />
+    </Suspense>
+  ) : (
+    <ScanReview {...props} />
+  );
 }
 
 /**
@@ -206,16 +242,7 @@ function useAccepting(run: RunRead, revision: Revision | undefined) {
 }
 export type Accepting = ReturnType<typeof useAccepting>;
 
-function ScanReview({
-  run,
-  stale,
-  refetchRun,
-}: {
-  run: RunRead;
-  /** The last poll failed: what is shown may be out of date. */
-  stale: boolean;
-  refetchRun: () => void;
-}) {
+function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   const me = useOutletContext<Me>();
   const openPanel = useOpenPanel();
   // Under 1440 px, two panels leave the views too narrow: The AI waits for i or Something's wrong.
@@ -226,13 +253,6 @@ function ScanReview({
       isLive(run) || query.state.data?.scans.some((scan) => isLive(scan.runs[0])) ? 5000 : false,
   });
   const store = useRunStore();
-  const [reopened, setReopened] = useState(0);
-  useRunStream(run.id, {
-    reopened,
-    revisionId: run.review?.revisionId,
-    going: run.state.status !== "ended",
-    onClosed: refetchRun,
-  });
   const events = useEvents();
   const closed = useClosed();
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
@@ -373,7 +393,7 @@ function ScanReview({
     onSent: (sent) => {
       setAbout(undefined);
       marking.drop(sent);
-      setReopened((n) => n + 1);
+      reopen();
       refetchRun();
     },
   });

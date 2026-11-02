@@ -445,7 +445,7 @@ type Attempt = {
 
 /**
  * Every event type `fold` (and `reviewState`'s overlay of `check.accepted` and
- * `review.completed`) reads: a reader that loads only these gets the same result as one that
+ * `review.completed`, and its `outputsFold`) reads: a reader that loads only these gets the same result as one that
  * loads the whole log. Add a type here when `fold` or `corrections` starts to read it.
  */
 export const FOLD_EVENT_TYPES = [
@@ -468,6 +468,9 @@ export const FOLD_EVENT_TYPES = [
   "assets.failed",
   "check.accepted",
   "review.completed",
+  "outputs.changed",
+  "output.published",
+  "tocheck.resolved",
 ] as const satisfies readonly RunEvent["type"][];
 
 /** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */

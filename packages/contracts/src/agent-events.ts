@@ -97,7 +97,8 @@ export const outputPublishedSchema = z
 
 /**
  * A message between agents or to the researcher. `from` and `to` are `main`, a worker's name or
- * `researcher`. `show` points the researcher at an output, optionally in a view.
+ * `researcher`. `show` would point the researcher at an output, optionally in a view; no tool
+ * writes it and no screen reads it yet.
  */
 export const agentMessageSchema = z.object({
   from: nonEmpty,
@@ -121,6 +122,22 @@ export const tocheckResolvedSchema = z.object({
   by: userIdSchema,
   outcome: z.enum(["accepted", "corrected"]),
 });
+
+/**
+ * The researcher accepts one To check item of an output version: `POST
+ * /api/review/runs/:runId/tocheck/accept`, answered 200 `{}`. The API writes `tocheck.resolved
+ * {outcome: accepted}` with the caller as `by`; accepting an item already resolved writes
+ * nothing. 404: a run the caller can't read, or an output, version or item it does not have;
+ * 403: an example run. Allowed while the run goes: an item is a person's call on a version that
+ * never changes. A corrected item is the API's to write once corrections exist (phase 7).
+ */
+export const acceptToCheckRequestSchema = tocheckResolvedSchema.pick({
+  output: true,
+  version: true,
+  item: true,
+});
+export type AcceptToCheckRequest = z.infer<typeof acceptToCheckRequestSchema>;
+export const acceptToCheckResponseSchema = z.object({});
 
 /** An agent's wrap-up starts (`thread.ended` with status `closed` follows). `threadId` is the agent closing. */
 export const closeRequestedSchema = z.object({

@@ -61,6 +61,12 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   alone.
 - **Counting:** an ended run that takes no decisions (failed, cancelled, an example) shows its
   cards with one line saying why none can be accepted, and no "K to check" in the header or badge.
+- **A run of the agent loop is reviewed by its outputs** (`outputs-model.ts`): `outputsReview`
+  (sections, rows, To check items of an output and of what it was made from, the open count) and
+  `outputBlocks` (each output's latest version as a scene block, keyed by output id, on its base's
+  grid) from `outputsFold` and the bundled catalog. Grid shapes come from the converted levels;
+  spacing, crop offsets, surface axes and point/line ends come from the version's `detail` and are
+  absent until the writer fills them (`.context/TODO.md`). Units are UCUM, shown by `unitText`.
 - **Run-level data** is one `runView(events, state, providerCalls, halt)` (`run-model.ts`):
   threads, progress, and per plan task its state, threads, line, check, To check items, QC image,
   values and spend, memoized on the events. `withLiveCalls` overlays the tool calls being written

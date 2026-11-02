@@ -6,16 +6,21 @@
  * what it decides (`step`) and how it reads the log; it keeps no state the shell holds.
  */
 
-import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import type { UserSender } from "@voluma/contracts/thread-records";
 import type { BashRuntime } from "./bash-runtime";
+import type { ProviderError } from "./failure-policy";
 import type { ThreadLayout } from "./layout";
+import type { LoopConfig, ModelSetup } from "./loop-config";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { Outputs } from "./ports/outputs";
+import type { Publish } from "./ports/publish";
 import type { PayloadOf, Recorder } from "./recorder";
-import type { LoopConfig, ModelSetup, ProviderError } from "./run-loop";
 import type { SandboxSession } from "./sandbox-session";
 import type { ThreadSpec, Threads } from "./threads";
+
+/** The sender of every line the loop itself writes to a thread. */
+export const RUNTIME: UserSender = { kind: "runtime" };
 
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
 export type Step = "acted" | "idle" | "done";
@@ -37,7 +42,6 @@ export interface Shared {
   runId: string;
   rootThreadId: string;
   recorder: Recorder;
-  definition: WorkflowDefinition;
   /** The model, thinking level and call function of a thread of `role` (`recorded`: the model a resumed thread started on). */
   model(role: string, recorded: string | undefined): ModelSetup;
   selectedOutputs: readonly string[] | undefined;
@@ -47,10 +51,14 @@ export interface Shared {
   files: Files;
   evidence: Evidence;
   outputs: Outputs;
+  /** Moves a file an agent named into a published output version (the agent loop's). */
+  publish: Publish;
   session: SandboxSession;
   pool: Threads;
   /** The claim's background commands (`bash-runtime.ts`), built once for every loop. */
   bash: BashRuntime;
+  /** Stops a thread's background commands and releases its sandbox (a loop calls it for an agent that has really ended). */
+  release(threadId: string): Promise<void>;
   /** The run's one lock. */
   section: Section;
   signal: AbortSignal;
@@ -64,6 +72,8 @@ export interface Wire {
   /** A thread's sandbox; its `thread.started` is stored before its first sandbox call. */
   sandboxOf(threadId: string): ThreadLayout;
   nameOf(threadId: string): string;
+  /** The thread's sandbox outlives its thread's turn: the shell releases it when the loop says so, not at each end. */
+  keepsSandbox(threadId: string): boolean;
   run(shared: Shared): Promise<void>;
 }
 

@@ -2,7 +2,7 @@
  * The agent test loop's last step: start a run on the local API (`pnpm dev`), wait for it to
  * end, and print what it produced.
  *   pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>]
- *       [--outputs <id,id>] [--notes <text>]
+ *       [--outputs <id,id>] [--notes <text>] [--harness tasks|agents]
  * A runner must be running (`pnpm --filter @voluma/runner start`) to claim the run. It signs in
  * with the WORKOS_TEST_EMAIL and WORKOS_TEST_PASSWORD of the repo .env, as `upload:scan` does,
  * on the API and origin `.dev/env.json` names; the scan defaults to the lab's reference scan.
@@ -15,6 +15,7 @@ import { parseArgs } from "node:util";
 import { meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { fold } from "@voluma/contracts/fold";
+import { harnessSchema } from "@voluma/contracts/ids";
 import { listInputsResponseSchema, runSchema } from "@voluma/contracts/run";
 import { spend } from "@voluma/contracts/spend";
 import { END_EVENT } from "@voluma/contracts/stream";
@@ -43,6 +44,7 @@ const { values } = parseArgs({
     workflow: { type: "string", default: "mouse-oa" },
     outputs: { type: "string" },
     notes: { type: "string" },
+    harness: { type: "string" },
   },
 });
 const workflow = workflowById(values.workflow);
@@ -103,6 +105,7 @@ const study = studyDetailSchema.parse(
         start: [input.id],
         ...(outputs && { selectedOutputs: outputs }),
         ...(values.notes && { notes: values.notes }),
+        ...(values.harness && { harness: harnessSchema.parse(values.harness) }),
       },
     })
   ).json(),
@@ -123,8 +126,13 @@ const progress = (e: RunEvent) => {
   if (e.type === "task") say(`task ${e.payload.taskId}: ${e.payload.status} - ${e.payload.reason}`);
   else if (e.type === "tool.call") say(`  tool ${e.payload.name}`);
   else if (e.type === "thread.started")
-    say(`thread started: ${e.payload.kind} ${e.payload.task ?? ""}`);
-  else if (e.type === "thread.ended") say("thread ended");
+    say(`thread started: ${e.payload.kind} ${e.payload.task ?? e.payload.name}`);
+  else if (e.type === "thread.ended") say(`thread ended: ${e.payload.status}`);
+  else if (e.type === "agent.message")
+    say(`  ${e.payload.from} -> ${e.payload.to}: ${e.payload.text.slice(0, 100)}`);
+  else if (e.type === "output.published")
+    say(`  output ${e.payload.outputId} v${e.payload.version}`);
+  else if (e.type === "close.requested") say(`  close requested (${e.payload.by})`);
   else if (e.type === "claim.started") {
     clearTimeout(unclaimed);
     say("runner claimed the run");

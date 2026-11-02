@@ -18,25 +18,32 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { Harness } from "@voluma/contracts/ids";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
+import {
+  type AgentsDefinition,
+  OLDER_VERSION_MESSAGE,
+  type WorkflowDefinition,
+} from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
 import type { UserSender } from "./adapters/pi/start-thread";
+import { agentsWire } from "./agents/wire";
 import { BashRuntime } from "./bash-runtime";
 import { errorText } from "./error-text";
+import type { ProviderError } from "./failure-policy";
 import { convertLayout, type SandboxLayout } from "./layout";
-import { runLock } from "./loop-shell";
+import type { LoopConfig, ModelSetup } from "./loop-config";
+import { runLock, type Wire } from "./loop-shell";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
+import type { Publish } from "./ports/publish";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { failUnfinishedAssets, type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
-import type { LoopConfig, ModelSetup, ProviderError } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import type { PlanTask } from "./task-runtime";
-import { tasksWire } from "./tasks-wire";
+import { type TasksWireOptions, tasksWire } from "./tasks-wire";
 import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
 import { type Threads, threads } from "./threads";
@@ -50,12 +57,12 @@ export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
 const WIND_DOWN_MS = 5_000;
 
 /** The loops this build can run; a runner lists them on its claim, so it is handed no other run. */
-export const HARNESSES: readonly Harness[] = ["tasks"];
+export const HARNESSES: readonly Harness[] = ["tasks", "agents"];
 
 /** What `prepare` returns: the workflow and what depends on its roles. */
 export interface Prepared {
   /** The role files, skills and task files of the run's workflow snapshot. */
-  definition: WorkflowDefinition;
+  definition: WorkflowDefinition | AgentsDefinition;
   /** The plan computed from the user's selection; the run starts with it (the main agent may change it). */
   plan: readonly PlanTask[];
   /**
@@ -97,6 +104,8 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
+  /** How an agent's named file becomes a published output version (the agent loop's `report_output`). */
+  publish: Publish;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
   createSandbox: CreateSandbox;
   /** Size and lifetime of every sandbox. */
@@ -161,9 +170,22 @@ export function pinOf(runId: string, log: readonly RunEvent[]): Pin | undefined 
   return { image: first.payload.sandboxImage, harness: first.payload.harness ?? "tasks" };
 }
 
+/** The pinned loop's wire; the definition is that loop's own kind (the runner loaded it for the pin). */
+function wireOf(
+  harness: Harness,
+  o: Omit<TasksWireOptions, "definition"> & { definition: Prepared["definition"] },
+): Wire {
+  const { definition } = o;
+  if (harness === "agents") {
+    if (!("outputCatalog" in definition)) throw new Error("an agents run loaded a task workflow");
+    return agentsWire({ ...o, definition });
+  }
+  if (!("files" in definition)) throw new Error("a tasks run loaded an agents workflow");
+  return tasksWire({ ...o, definition });
+}
+
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, signal: cutOff } = options;
-  // The branch on the pin lands with the agent loop's wire; until then no other loop has one.
   if (!HARNESSES.includes(options.harness)) {
     throw new Error(`this build has no ${options.harness} loop`);
   }
@@ -180,7 +202,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   let worker: ReviewAssetsWorker | undefined; // set once `prepare` has resolved
   const world = options.prepare(loopSignal).then((prepared) => {
     const { definition } = prepared;
-    const wire = tasksWire({
+    const wire = wireOf(options.harness, {
       runId,
       inputId: options.inputId,
       inputPrefix: options.inputPrefix,
@@ -255,16 +277,22 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       cutOff,
       log: options.log,
     });
+    /** A thread whose sandbox the run is done with: its commands stop, then the sandbox goes. */
+    const release = (id: string) =>
+      bash
+        .release(id)
+        .then(() => session.release(id))
+        .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`));
     const running = threads(
       {
         recorder,
         history: withImageRefs(options.history, options.files, runId, wire.nameOf),
         sandbox: (id) => session.get(id),
-        release: (id) =>
-          bash
-            .release(id)
-            .then(() => session.release(id))
-            .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`)),
+        // Each end of a task thread releases its sandbox; an agent keeps its sandbox between
+        // turns (the idle timeout ends it) and is released when its loop says it really ended.
+        release: (id) => {
+          if (!wire.keepsSandbox(id)) void release(id);
+        },
       },
       loopSignal,
     );
@@ -285,7 +313,6 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       runId,
       rootThreadId,
       recorder,
-      definition,
       model: prepared.model,
       selectedOutputs: options.selectedOutputs,
       notes: options.notes,
@@ -294,9 +321,11 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       files: options.files,
       evidence: options.evidence,
       outputs: options.outputs,
+      publish: options.publish,
       session,
       pool,
       bash,
+      release,
       section: runLock(),
       signal: loopSignal,
     });

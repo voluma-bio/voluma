@@ -419,7 +419,7 @@ const unitText = (unit: string) =>
   unit === "1" ? "" : unit.replace(/\^-?\d/g, (p) => SUPERSCRIPT[p] ?? p);
 
 /** Up to three significant digits (whole numbers from 1,000). */
-const formatNumber = (value: number) =>
+export const formatNumber = (value: number) =>
   new Intl.NumberFormat("en-US", {
     ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
   }).format(value);

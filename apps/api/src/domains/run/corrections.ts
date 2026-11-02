@@ -119,6 +119,8 @@ export type MessageTarget = {
   example: boolean;
   credentials: "voluma" | "visitor";
   workflows: WorkflowPin[];
+  /** The loop that drives the run; null or absent: the task loop. */
+  harness?: "tasks" | "agents" | null;
   /** The queue state: `queued`, `running`, `awaiting-keys` or `ended`. */
   state: string;
   outcome: string | null;
@@ -147,6 +149,9 @@ export async function messageRefusal(
   run: MessageTarget,
 ): Promise<{ status: 403 | 409; message: string } | null> {
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
+  // A reopen enters the task loop's gate (`taskId`, go), which the agent loop does not have yet.
+  if (run.harness === "agents")
+    return { status: 409, message: "A run on the new agent model can't be reopened yet." };
   if (run.startedBy !== caller.userId)
     return { status: 403, message: "Only the person who started the run can write to it." };
   if (run.credentials === "visitor")

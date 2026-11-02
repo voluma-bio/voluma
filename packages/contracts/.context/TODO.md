@@ -30,19 +30,16 @@ conversion, parse every staging run and every `run.json`, then narrow.
 
 ## Final outputs file
 
-`/run/final-outputs.yaml` has no schema here yet; the phase that writes it brings one. Its sections
-hold delivered ids only, and its links are checked against the run's catalog (the entries in the
-first `outputs.changed`), never against the file itself: a value's basis is shown with it but is
-not final and never blocks `close`.
-
-## Display units
-
-Units are stored as UCUM. Review needs a display form (`[hnsf'U]` shows as HU, `mm3` as mm³).
+`final-outputs.ts` holds `finalOutputsSchema` (the rendered `/run/final-outputs.yaml`), the total
+`applyOutputsChange` the fold uses and `refuseOutputsChange`, the writer's check against the run's
+catalog; the runner's opening change and `change_outputs` call it and refuse there. The label
+overlays the fold resolves come from the `add` entries of the opening change, so it must add each
+label overlay a value or version links to.
 
 ## `output.published.detail`
 
-Loose until the review converter reads it from this event; then name its keys per catalog `shape`
-(`as`, `dtype`, `unit`, `gridId`, `axis`), narrowing in two steps if any writer already ran.
+Loose. The review converter (`review-assets.ts`) reads `as`, `axis`, `dtype` and `unit`: name its
+keys per catalog `shape`, narrowing in two steps if any writer already ran.
 
 ## Label overlays
 

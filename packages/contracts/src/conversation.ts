@@ -1,6 +1,7 @@
 /**
  * The chat between a researcher and a run's main agent (`messages.ts`), read from the run's events:
- * the person's messages, the agent's replies, and how each correction ended (`corrections`,
+ * the person's messages, the agent's replies (the task loop's `reply`, the agent loop's
+ * `agent.message` to the researcher), and how each correction ended (`corrections`,
  * fold.ts). A correction's end is the only sign in the chat that the AI stopped working: its last
  * reply is often "Redoing it now", and the outcome is in the root thread's closing summary.
  */
@@ -23,7 +24,7 @@ export type ConversationItem =
     }
   | {
       from: "agent";
-      /** The `reply` event id. */
+      /** The `reply` or `agent.message` event id. */
       id: string;
       seq: number;
       at: string;
@@ -68,6 +69,8 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         ...(taskId && { taskId }),
         go: go === true,
       });
+    } else if (e.type === "agent.message" && e.payload.to === "researcher") {
+      items.push({ from: "agent", id: e.id, seq: e.seq, at: e.createdAt, text: e.payload.text });
     } else if (e.type === "reply") {
       const { text, offer } = e.payload;
       items.push({

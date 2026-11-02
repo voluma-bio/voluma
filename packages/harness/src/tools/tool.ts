@@ -12,6 +12,8 @@ export interface ToolContext {
   /** The calling thread's kind and, for a worker or check thread, its task. */
   kind: "main" | Role;
   taskId?: string;
+  /** The agent model's thread: its name and role. Absent in the task loop. */
+  agent?: { name: string; role: "main" | "worker" };
   toolCallId: string;
   /** How many tool calls the reply that made this call holds, itself included. */
   batchSize: number;

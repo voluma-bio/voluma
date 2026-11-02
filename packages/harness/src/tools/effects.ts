@@ -5,8 +5,7 @@
  * is answered from the log by that id (`interruptedResult`).
  */
 
-/** The key of a tool call in `ThreadLog.calls`: ids may repeat across threads. */
-export const callKey = (threadId: string, toolCallId: string) => `${threadId}:${toolCallId}`;
+export { callKey } from "@voluma/contracts/thread-records";
 
 const SUFFIX = {
   checkpoint: "",

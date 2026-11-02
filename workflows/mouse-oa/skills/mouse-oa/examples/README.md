@@ -1,7 +1,7 @@
-# What correct looks like, per task
+# What correct looks like, per step
 
-For each placement a task makes: the criterion, and the lab's figure of it done right. A worker places against
-these; a checker writes down what it expects from them before it opens the worker's images. Every figure is a
+For each placement a step makes: the criterion, and the lab's figure of it done right. A worker places against
+these; whoever looks at the result writes down what it expects from them before opening the worker's images. Every figure is a
 crop from the lab's parameter deck unless its name says otherwise.
 
 ## intake
@@ -29,8 +29,8 @@ of the plateau. The heights (#7–9) run along the shaft axis from the growth pl
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
 middle of the medial and the lateral compartment of the plateau.
 
-`plate_faces.py` proposes both faces of the growth plate for the iioc task, where the search finds the plate (a part of the tibia: its V
-range and each section's U span are in `plate-faces.json`), and the metaphyseal task checks them again. The proposal is where the worker
+`plate_faces.py` proposes both faces of the growth plate for the iioc step, where the search finds the plate (a part of the tibia: its V
+range and each section's U span are in `plate-faces.json`), and the metaphyseal-roi step checks them again. The proposal is where the worker
 starts: the faces must follow the plate over the whole tibia at plate level, past each span end and on the sections with no span, out to the V
 ends. A worker checks its faces against these: each lies on the plate's two edges, a few voxels apart, on every section; every flagged
 stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has been looked at on a zoomed view and retraced where wrong, with points the worker read off the view
@@ -41,7 +41,7 @@ always visible: a proposal that rides a dark marrow space above it, or a sheet w
 same visible plate band end to end, including where it wraps down the condyles at the sides of the arch (OA6-2RK V=220 and 225); it is wrong
 where it switches onto the cortex or the marrow. Where a single-valued face cannot represent the anatomy (OA6-2RK V=185, the notch nearly in
 the section's plane) the worker has read the neighbouring sections and raised it in a To check item, not flattened it or called it eroded.
-The check opens every `qc-faces-<n>.jpg` of the task, sheet by sheet: `iioc.py` writes them, one panel per traced section, the proximal face as the
+The check opens every `qc-faces-<n>.jpg` of the step, sheet by sheet: `iioc.py` writes them, one panel per traced section, the proximal face as the
 worker delivered it (solid between traced points, dotted where held constant past them) over the tibia's outline, the crop reaching 0.8 mm beyond the faces' height range (a band farther from the faces than that is not in the
 sheet: look at the zoomed views for it). On each: the line lies on the plate band, including down a condylar wrap, stays on the bone from end to end, and does not
 leave the plate for cortex or marrow; a dotted stretch over the plate longer than `max_gap_um` is untraced plate, which is a failure; a sheet not opened is a check not done.
@@ -55,9 +55,8 @@ on OA6-1RK is not a thickness of the plate.
 
 ## subchondral-plate
 
-`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches (`plate_patch_width_um` wide), the plate in green and the slab below it in red. The plate patch is a column around the middle of each plateau compartment (medial, lateral), and the
-measured slab lies under the articular top surface, inside the plate, not down in the trabeculae: the figure shows
-where the column sits on the plateau.
+`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches (`plate_patch_width_um` wide). Green is the subchondral bone plate, what #11 and #12 measure; red is the trabecular bone under it, which this step does not measure. The plate patch is a column around the middle of each plateau compartment (medial, lateral), and the
+measured slab lies under the articular top surface, inside the plate (the green), not down in the trabeculae (the red).
 
 ## trabecular-roi
 
@@ -73,7 +72,7 @@ only, and never reaches the fibula.
 The distal face it starts from is the one `plate_faces.py` proposed, checked and retraced where flagged or wrong (see iioc,
 above); where the plate is eroded and the range marked so, the two faces meet, `metaphysis_roi.py` accepts that, ROI-3 starts below the
 remaining bone, and the result record lists the marked ranges and their share: report them with the To check item.
-The check opens every `qc-faces-<n>.jpg` of the task too: `metaphysis_roi.py` draws the distal face (magenta) and the proximal one (orange)
+The check opens every `qc-faces-<n>.jpg` of the step too: `metaphysis_roi.py` draws the distal face (magenta) and the proximal one (orange)
 as delivered on every traced section over the tibia's outline, and the distal line must lie on the plate's lower edge, on the bone, following the same band through any condylar wrap and not leaving it for cortex or marrow.
 
 ## cortical

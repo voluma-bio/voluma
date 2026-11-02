@@ -13,6 +13,14 @@
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
  * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
  *
+ * The agent model (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work`
+ * (so main's `plan.md` too), `/outputs` (the published versions), `/run` (the files rendered from the
+ * events), `/inputs` and `/workflow` read-only. Mounts must not overlap (a nested one is unreliable on
+ * Modal: the same spec once wrote and once failed read-only), so the sandbox mounts each peer folder that
+ * exists when it is created (`peers`); host-side tools (`read`, `view_image`) see all of `/work`, peers
+ * that started later included. The folder is the agent's name, except that every main thread (`main`,
+ * `main.2`) works in `main`; the sandbox keeps the thread's name.
+ *
  * `/inputs` is mounted read-only in every sandbox. Only a thread of a task whose `tasks.json`
  * entry sets `copyInputs` gets it copied to local disk (`stage`); the others read the mount.
  *
@@ -24,21 +32,25 @@ import {
   outputsPrefix,
   relativePathSchema,
   reviewAssetPrefix,
+  runFilesPrefix,
   scratchPrefix,
   toolOutputKey,
   workflowSnapshotPrefix,
+  workPrefix,
 } from "@voluma/contracts/r2";
 import type { AgentDefinition, Skill } from "@voluma/workflow/definition";
 import type { SandboxMount } from "./ports/sandbox";
 import type { ThreadIdentity } from "./thread-log";
 
 const INPUTS = "/inputs";
-const OUTPUTS = "/outputs";
+export const OUTPUTS = "/outputs";
 const SCRATCH = "/scratch";
 export const WORKFLOW = "/workflow";
 export const EVIDENCE = "/evidence";
 export const REVIEW = "/review";
 const INPUT_REVIEW = "/input-review";
+const RUN = "/run";
+const WORK = "/work";
 
 export interface ThreadLayout {
   /** What the thread is in the run (main, a task's worker, a task's check). */
@@ -99,6 +111,14 @@ export interface RunLayout {
    * run's scratch, and without it a check reads none.
    */
   forThread(thread: ThreadIdentity, cited?: (path: string) => boolean): ThreadLayout;
+  /** The layout of an agent-model thread: `tools` are the ones its role holds. */
+  forAgent(agent: {
+    name: string;
+    role: "main" | "worker";
+    tools: readonly string[];
+    /** The `/work` folders of the other agents that exist now: mounted read-only in the sandbox. */
+    peers: readonly string[];
+  }): ThreadLayout;
 }
 
 export interface RunLayoutOptions {
@@ -135,9 +155,34 @@ export interface RunLayoutOptions {
 }
 
 /**
+ * The mount of `table` that holds the absolute `path`, and the bucket key it names. A mount whose
+ * prefix has no trailing slash is a single file (`/work/main/plan.md`): its prefix is the whole key.
+ * Throws on a path outside what the thread can see (or write, when `access` is `write`) and on
+ * invalid segments.
+ */
+const holds = (m: SandboxMount, path: string) =>
+  path.startsWith(`${m.path}/`) || (!m.prefix.endsWith("/") && path === m.path);
+
+function lookup(table: readonly SandboxMount[], path: string, access: "read" | "write") {
+  const mount = table.find((m) => holds(m, path));
+  if (!mount || (access === "write" && mount.access !== "read-write")) {
+    const usable = table.filter((m) => access === "read" || m.access === "read-write");
+    throw new Error(
+      `${path} is not under ${usable.map((m) => m.path).join(", ")}, the paths this tool can ${access}`,
+    );
+  }
+  const relative = path.slice(mount.path.length + 1);
+  if (path === mount.path) return { mount, relative: "", key: mount.prefix };
+  if (!relativePathSchema.safeParse(relative).success)
+    throw new Error(`${path} is not a valid path`);
+  return { mount, relative, key: `${mount.prefix}${relative}` };
+}
+
+/**
  * The review-asset converter's sandbox, outside the threads and the same for every loop: reads
- * the evidence and the workflow, writes the run's review prefix and the input's conversion
- * cache, no network. The converter imports `sidecar` through the run's PYTHONPATH.
+ * the evidence, the published versions (`/outputs`, the agent loop's) and the workflow, writes the
+ * run's review prefix and the input's conversion cache, no network. The converter imports
+ * `sidecar` through the run's PYTHONPATH.
  */
 export function convertLayout(o: {
   runId: string;
@@ -148,6 +193,7 @@ export function convertLayout(o: {
     name: "convert",
     mounts: [
       { path: EVIDENCE, prefix: evidencePrefix(o.runId), access: "read-only" },
+      { path: OUTPUTS, prefix: outputsPrefix(o.runId), access: "read-only" },
       { path: WORKFLOW, prefix: workflowSnapshotPrefix(o.runId), access: "read-only" },
       { path: REVIEW, prefix: reviewAssetPrefix(o.runId), access: "read-write" },
       { path: INPUT_REVIEW, prefix: inputReviewPrefix(o.inputId), access: "read-write" },
@@ -238,6 +284,51 @@ export function runLayout({
   };
 
   return {
+    forAgent({ name, role, tools, peers }) {
+      const folder = role === "main" ? "main" : name;
+      const dir = `${WORK}/${folder}`;
+      const work = workPrefix(runId);
+      const own: SandboxMount = { path: dir, prefix: `${work}${folder}/`, access: "read-write" };
+      const peerMounts: SandboxMount[] = [...new Set(peers)]
+        .filter((p) => p !== folder)
+        .map((p) => ({ path: `${WORK}/${p}`, prefix: `${work}${p}/`, access: "read-only" }));
+      const hostWork: SandboxMount[] = [{ path: WORK, prefix: work, access: "read-only" }];
+      const mounts: SandboxMount[] = [
+        inputs(false),
+        workflow,
+        outputs("read-only"),
+        { path: RUN, prefix: runFilesPrefix(runId), access: "read-only" },
+        own,
+        ...peerMounts,
+      ];
+      // `own` before the whole of /work: the more specific folder matches first.
+      const table = [...mounts, ...hostWork];
+      const resolve = (path: string) =>
+        path.startsWith("/") ? path : `${dir}/${path.replace(/^(\.\/)+/, "")}`;
+      return {
+        place: role,
+        role,
+        reviewer: false,
+        name,
+        mounts,
+        scratch: own,
+        dir,
+        env: { PYTHONPATH: pythonPath, WORK: dir },
+        copiesInputs: false,
+        tools,
+        subagents: [],
+        gateway: tools.includes("segment_sam"),
+        description:
+          `${common(false)}- ${OUTPUTS} holds every published output version, one folder per version: read it, do not modify it. ${RUN}/outputs.yaml lists the versions and ${RUN}/final-outputs.yaml the outputs the researcher asked for; both are rewritten as the run goes.\n` +
+          `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, and the other agents' folders under ${WORK} are read-only to you; read their files, never change them. A folder of an agent that started after your sandbox did is visible to read at once, and to bash after the sandbox restarts. ` +
+          `Reporting an output moves the files you name out of your folder into ${OUTPUTS}, leaving a <file>.removed.txt that says where.`,
+        restartNote: `The sandbox was restarted. ${dir} was kept, and local files elsewhere (including /tmp) are gone.`,
+        toolOutputPath: (toolCallId) => `${dir}/.tool-output/${toolCallId}`,
+        resolve,
+        mounted: (path) => table.some((m) => holds(m, path)),
+        keyOf: (named, access) => lookup(table, resolve(named), access).key,
+      };
+    },
     forThread({ name, place, role, taskId }, cited = () => false) {
       const copy = taskId !== undefined && copiesInputs(taskId);
       const dir = `${SCRATCH}/${name}`;
@@ -269,23 +360,14 @@ export function runLayout({
         mounted: (path) => table.some((m) => path.startsWith(`${m.path}/`)),
         keyOf(named, access) {
           const path = resolve(named);
-          const mount = table.find((m) => path.startsWith(`${m.path}/`));
-          if (!mount || (access === "write" && mount.access !== "read-write")) {
-            const usable = table.filter((m) => access === "read" || m.access === "read-write");
-            throw new Error(
-              `${path} is not under ${usable.map((m) => m.path).join(", ")}, the paths this tool can ${access}`,
-            );
-          }
-          const relative = path.slice(mount.path.length + 1);
-          if (!relativePathSchema.safeParse(relative).success)
-            throw new Error(`${path} is not a valid path`);
+          const { mount, key, relative } = lookup(table, path, access);
           if (reviewer && hostOnly.includes(mount)) {
             if (!cited(relative))
               throw new Error(
                 `${path} is in the worker's folder and the worker did not cite it as evidence. A check can open the files the worker cited, and its own folder ${dir}.`,
               );
           }
-          return `${mount.prefix}${relative}`;
+          return key;
         },
       };
     },

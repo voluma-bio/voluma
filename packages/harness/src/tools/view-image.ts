@@ -16,12 +16,11 @@ import sharp from "sharp";
 import { z } from "zod";
 import type { ThreadLayout } from "../layout";
 import type { Files } from "../ports/files";
+import { downscale, MAX_BYTES, MAX_SIDE } from "./image-fit";
 import { readWhole } from "./read-whole";
 import type { Tool } from "./tool";
 
 const MAX_IMAGES = 4;
-const MAX_BYTES = 1024 * 1024;
-const MAX_SIDE = 2000;
 // What is read before downscaling; a bigger file is not an image anyone wants shown.
 const MAX_READ_BYTES = 64 * 1024 * 1024;
 
@@ -40,27 +39,6 @@ export interface ViewImageDeps {
   files: Files;
   /** Whether the thread has a sandbox of its own to read a /tmp file from (it holds `bash`). */
   hasSandbox: boolean;
-}
-
-/** Fits the image in MAX_SIDE and MAX_BYTES: shrinks it, then lowers the JPEG quality, until it does. */
-async function downscale(bytes: Buffer, width: number, height: number) {
-  let scale = Math.min(1, MAX_SIDE / Math.max(width, height));
-  for (;;) {
-    const size = {
-      width: Math.max(1, Math.round(width * scale)),
-      height: Math.max(1, Math.round(height * scale)),
-    };
-    for (const quality of [85, 70, 55]) {
-      const out = await sharp(bytes)
-        .autoOrient()
-        .flatten({ background: "#ffffff" })
-        .resize(size.width, size.height)
-        .jpeg({ quality })
-        .toBuffer();
-      if (out.length <= MAX_BYTES) return { bytes: out, ...size };
-    }
-    scale *= 0.75;
-  }
 }
 
 export function viewImageTool({

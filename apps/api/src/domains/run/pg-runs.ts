@@ -7,7 +7,7 @@
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
 import { openCorrectionRevision, progress, reviewState } from "@voluma/contracts/review-state";
-import { type Input, type Run, runSchema } from "@voluma/contracts/run";
+import { hasTaskReview, type Input, type Run, runSchema } from "@voluma/contracts/run";
 import { failedThreads, openThreads } from "@voluma/contracts/threads";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
@@ -123,6 +123,12 @@ export function openCorrectionOf(
   return open;
 }
 
+/** The columns `hasTaskReview` reads. */
+const reviewFacts = (run: Row["run"]) => ({
+  state: { status: run.state, outcome: run.outcome ?? undefined },
+  harness: run.harness ?? undefined,
+});
+
 function toRun({ run, input, position, calls }: Row, { summary, revisions }: Results): Run {
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
@@ -161,7 +167,7 @@ function toRun({ run, input, position, calls }: Row, { summary, revisions }: Res
     state,
     usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },
     providerCalls: calls,
-    review: run.state === "ended" && run.outcome === "completed" ? summary : null,
+    review: hasTaskReview(reviewFacts(run)) ? summary : null,
     tasks: run.state === "ended" ? null : progressOf(revisions.at(-1)),
   });
 }
@@ -307,7 +313,7 @@ export type RunResult = { run: Run; generation: string } & RunFold;
 interface LoadOptions {
   cache?: SummaryCache;
   /**
-   * The lists and the study reads: a completed run with no review summary (no revision,
+   * The lists and the study reads: a completed task-loop run with no review summary (no revision,
    * which `runSchema` forbids) is left out rather than failing every run listed with it.
    * Without it (one run's read, a cancel's reply) that run is a 409: its events can't be read.
    */
@@ -376,17 +382,14 @@ async function loadResults(
   }
   return rows
     .filter(
-      // A completed run with no revision has no review summary, so `runSchema` would throw:
-      // in a list it is left out.
+      // A completed task-loop run with no revision has no review summary, so `runSchema` would
+      // throw: in a list it is left out.
       ({ run }) =>
-        !skipSummaryless ||
-        run.state !== "ended" ||
-        run.outcome !== "completed" ||
-        foldOf.get(run.id)?.results.summary,
+        !skipSummaryless || !hasTaskReview(reviewFacts(run)) || foldOf.get(run.id)?.results.summary,
     )
     .map((row) => {
       const fold = foldOf.get(row.run.id) ?? NOTHING;
-      if (row.run.state === "ended" && row.run.outcome === "completed" && !fold.results.summary)
+      if (hasTaskReview(reviewFacts(row.run)) && !fold.results.summary)
         throw new HTTPException(409, {
           message: "This run's review can't be read: its events don't parse.",
         });

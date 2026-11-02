@@ -103,6 +103,8 @@ class Command {
 
 export class BashRuntime {
   readonly #deps: BashDeps;
+  /** Set by a loop that restarts idle threads: called when a notice waits for a thread that is not running. */
+  wake: (() => void) | undefined;
   readonly #commands = new Map<string, Command>();
   readonly #pending = new Map<string, string[]>();
 
@@ -339,6 +341,7 @@ export class BashRuntime {
   #queue(threadId: string, text: string): void {
     if (this.#deps.deliver(threadId, text)) return;
     this.#pending.set(threadId, [...(this.#pending.get(threadId) ?? []), text]);
+    this.wake?.();
   }
 
   /** This claim's commands, then those the log holds from earlier claims (all ended by now). */
