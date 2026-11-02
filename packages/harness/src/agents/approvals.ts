@@ -1,6 +1,7 @@
 /**
- * What a held call says it would do: the summary the researcher reads on an `approval.requested`,
- * written by code from the call and the log, never by main. The fold of requests and answers is
+ * What a held call would make out of date, for the `outOfDate` list of an `approval.requested`
+ * (written by code from the call and the log, never by main). The summary and the outputs a call
+ * names come from its tool (`Tool.changesResults`); the fold of requests and answers is
  * `approvalRecords` (`contracts/agents.ts`).
  */
 import type { RunEvent } from "@voluma/contracts/events";
@@ -23,34 +24,4 @@ export function madeStale(events: readonly RunEvent[], ids: readonly string[]): 
     }
   }
   return [...stale];
-}
-
-/** The outputs a gated call names: what it changes, for the summary and for leaving them to the researcher when declined. */
-export function outputsNamed(tool: string, args: unknown): string[] {
-  const a = (args ?? {}) as { ids?: string[]; outputs?: string[]; id?: string };
-  if (tool === "keep_output") return a.ids ?? [];
-  if (tool === "start_worker") return a.outputs ?? [];
-  if (tool === "report_output") return a.id ? [a.id] : [];
-  return [];
-}
-
-/**
- * What the call would do, in the researcher's words: outputs by their catalog name, no worker
- * names or ids. What it makes out of date is `outOfDate` on the request, which the card lists.
- */
-export function summaryOf(tool: string, args: unknown, titleOf: (id: string) => string): string {
-  const a = (args ?? {}) as { reason?: string };
-  const what = outputsNamed(tool, args).map(titleOf).join(", ");
-  switch (tool) {
-    case "start_worker":
-      return `Start an AI worker to redo ${what}.`;
-    case "report_output":
-      return `Publish a new version of ${what}.`;
-    case "keep_output":
-      return `Keep ${what} as ${outputsNamed(tool, args).length === 1 ? "it is" : "they are"}${a.reason ? `: ${a.reason}` : ""}.`;
-    case "change_outputs":
-      return `Change which outputs the run delivers${a.reason ? `: ${a.reason}` : ""}.`;
-    default:
-      return `Run ${tool}.`;
-  }
 }

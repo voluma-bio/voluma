@@ -7,7 +7,7 @@ import {
   type AgentLog,
   type AgentRecord,
   type AgentState,
-  approvalLeftId,
+  approvalLeftPrefix,
   type Notice,
 } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
@@ -48,7 +48,12 @@ export const STUCK_SUMMARY =
 export const WAITING_SUMMARY = "Waiting for the researcher.";
 export const STUCK_REASON = "the run stopped before this was made";
 
-export const noticeLine = (n: Notice, events: readonly RunEvent[]): string => {
+/** `screenshots`: where main reads each person notice's screenshot, by notice event id (`stageScreenshot`). */
+export const noticeLine = (
+  n: Notice,
+  events: readonly RunEvent[],
+  screenshots: ReadonlyMap<string, string>,
+): string => {
   switch (n.kind) {
     case "output": {
       const o = outputsFold(events).byId.get(n.outputId);
@@ -81,7 +86,7 @@ export const noticeLine = (n: Notice, events: readonly RunEvent[]): string => {
     case "silent":
       return `- ${n.agent} ended its turn without a report, a message to you or a close.${n.reply ? ` Its last words: ${n.reply}` : ""}`;
     case "person":
-      return personLines(n.message, events);
+      return personLines(n.message, events, screenshots.get(n.eventId));
     case "approval":
       return approvalLine(n, events);
   }
@@ -94,9 +99,7 @@ function approvalLine(
   n: Extract<Notice, { kind: "approval" }>,
   events: readonly RunEvent[],
 ): string {
-  const request = events.find(
-    (e) => e.type === "approval.requested" && e.payload.toolCallId === n.toolCallId,
-  );
+  const request = events.find((e) => e.type === "approval.requested" && e.id === n.requestId);
   const call =
     request?.type === "approval.requested"
       ? `${request.payload.tool} (${request.payload.summary})`
@@ -111,8 +114,7 @@ function approvalLine(
     case "declined": {
       const left = events
         .filter(
-          (e) =>
-            e.type === "output.published" && e.id.startsWith(approvalLeftId(request?.id ?? "", "")),
+          (e) => e.type === "output.published" && e.id.startsWith(approvalLeftPrefix(n.requestId)),
         )
         .map((e) => (e.type === "output.published" ? e.payload.outputId : ""));
       return [
@@ -138,7 +140,7 @@ const SHAPES: Record<string, string> = {
 };
 
 /** The message the researcher sent, with each mark they attached in the plain terms of the notice (`design-r3.md`). Positions are world mm, never voxels. */
-function personLines(m: PersonMessage, events: readonly RunEvent[]): string {
+function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?: string): string {
   const fold = outputsFold(events);
   const marks = (m.attached ?? []).map((a) => {
     const shape = SHAPES[Object.keys(a.mark.mark).find((k) => k in SHAPES) ?? ""] ?? "a mark";
@@ -180,9 +182,7 @@ function personLines(m: PersonMessage, events: readonly RunEvent[]): string {
           ...marks,
         ]
       : []),
-    ...(m.snapshotKey
-      ? [`Screenshot: ${m.snapshotKey.replace(/^runs\/[^/]+\/scratch\//, "/work/")}`]
-      : []),
+    ...(screenshot ? [`Screenshot: ${screenshot}`] : []),
   ].join("\n");
 }
 

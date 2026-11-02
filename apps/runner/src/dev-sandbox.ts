@@ -190,7 +190,7 @@ try {
     threadId: devThread.id,
     kind: "worker" as const,
     toolCallId: "dev",
-    batchSize: 1,
+    batch: [],
     signal: abort.signal,
     sandbox: async () => sandbox as Sandbox,
     output: (_stream: "stdout" | "stderr", text: string) => process.stderr.write(text),

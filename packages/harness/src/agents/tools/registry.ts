@@ -12,7 +12,7 @@ import { bashManageTool } from "../../tools/bash-manage";
 import { segmentSamTool } from "../../tools/segment-sam";
 import type { Tool } from "../../tools/tool";
 import { type AgentsApi, coordinationTools } from "./coordination";
-import { gate } from "./gate";
+import { gate, gatedNames } from "./gate";
 import { keepOutput } from "./keep-output";
 import type { OutputToolDeps } from "./output-shared";
 import { readTool } from "./read";
@@ -73,8 +73,10 @@ function toolNamed(
 
 /** The tools a thread holds; those that change results are gated (`gate.ts`). */
 export function buildAgentTools(names: readonly string[], deps: AgentToolDeps): Tool[] {
+  const tools = names.map((name) => toolNamed(name, names, deps));
+  const gated = gatedNames(tools);
   const gateDeps = { api: deps.api, hashIn: deps.outputs.hashIn };
-  return names.map((name) => gate(toolNamed(name, names, deps), gateDeps));
+  return tools.map((tool) => gate(tool, gated, gateDeps));
 }
 
 /** A tool as an approved call runs it: not gated, and `report_output` bound to the approved file hashes. */

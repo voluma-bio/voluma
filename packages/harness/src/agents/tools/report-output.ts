@@ -433,6 +433,9 @@ export function reportOutput(
           const path = deps.layoutOf(ctx.threadId).resolve(n);
           return { path, key: keyOf(ctx, path) };
         }),
+      outputs: (input) => [input.id],
+      summary: (input, titleOf) => `Publish a new version of ${titleOf(input.id)}.`,
+      makesStale: true,
     },
     execute: (input, ctx) =>
       result(async () => {

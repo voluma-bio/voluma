@@ -1,15 +1,17 @@
 /**
  * The review gate. While the run is reviewing (`AgentLog.reviewing`), main's call to a tool that
  * changes results (`Tool.changesResults`) is not run: code writes `approval.requested` and answers
- * the call "held", and the turn ends (`terminate`; the other calls of the batch follow it through
- * `endsBatch`). The held call lives in the log and needs no claim; the researcher's yes starts the
- * stored call as a job (`loop.ts`, `startApproved`). The gate is on the tool, not in a role file,
- * and only main is gated: a worker also has `report_output`, and its limit is `outputs`.
+ * the call "held", and the turn ends. Pi ends a turn only when every result of the batch
+ * terminates, so the gate wraps all of main's tools: a batch that holds a changes-results call
+ * ends the turn, the other calls running as usual and terminating beside it. A held call lives in
+ * the log and needs no claim; the researcher's yes starts the stored call as a job (`loop.ts`,
+ * `startApproved`). The gate is on the tool, not in a role file, and only main is gated: a worker
+ * also has `report_output`, and its limit is `outputs`.
  */
 
 import { approvalRequestId } from "@voluma/contracts/agents";
-import type { Tool } from "../../tools/tool";
-import { madeStale, outputsNamed, summaryOf } from "../approvals";
+import type { Tool, ToolContext } from "../../tools/tool";
+import { madeStale } from "../approvals";
 import type { AgentsApi } from "./coordination";
 import { Refusal } from "./refusal";
 
@@ -26,13 +28,32 @@ export interface GateDeps {
 export const gatedNames = (tools: readonly Tool[]) =>
   new Set(tools.filter((t) => t.changesResults).map((t) => t.name));
 
-export function gate(tool: Tool, { api, hashIn }: GateDeps): Tool {
+/** Wraps one of main's tools; `gated` is `gatedNames` of all of them. */
+export function gate(tool: Tool, gated: ReadonlySet<string>, deps: GateDeps): Tool {
+  const { api } = deps;
+  const holds = (ctx: ToolContext) => ctx.agent?.role === "main" && api.log().reviewing;
   const flag = tool.changesResults;
-  if (!flag) return tool;
+  if (!flag) {
+    return {
+      ...tool,
+      async execute(input, ctx) {
+        if (!holds(ctx) || !ctx.batch.some((n) => gated.has(n))) return tool.execute(input, ctx);
+        // `close` would end the run, and with it the review, before the held call is answered.
+        if (tool.name === "close")
+          return {
+            output: "Call close on its own: the researcher has to answer a call of yours first.",
+            isError: true,
+            truncated: false,
+          };
+        const result = await tool.execute(input, ctx);
+        return { ...result, terminate: true };
+      },
+    };
+  }
   return {
     ...tool,
     async execute(input, ctx) {
-      if (ctx.agent?.role !== "main" || !api.log().reviewing) return tool.execute(input, ctx);
+      if (!holds(ctx)) return tool.execute(input, ctx);
       const requestId = approvalRequestId(ctx.threadId, ctx.toolCallId);
       try {
         // A preflight takes the run's section itself when it reads the log to decide.
@@ -40,7 +61,8 @@ export function gate(tool: Tool, { api, hashIn }: GateDeps): Tool {
           await flag.preflight(input, ctx);
           const fileHashes: Record<string, string> = {};
           for (const f of flag.files?.(input, ctx) ?? [])
-            fileHashes[f.key] = await hashIn(ctx.threadId, f.path, ctx.signal);
+            fileHashes[f.key] = await deps.hashIn(ctx.threadId, f.path, ctx.signal);
+          const outputs = flag.outputs(input);
           await api.section(async () => {
             await api.recorder.append(
               ctx.threadId,
@@ -50,14 +72,12 @@ export function gate(tool: Tool, { api, hashIn }: GateDeps): Tool {
                 tool: tool.name,
                 args: input,
                 fileHashes,
-                summary: summaryOf(
-                  tool.name,
+                summary: flag.summary(
                   input,
                   (id) => api.catalog.find((e) => e.id === id)?.name ?? id,
                 ),
-                ...(tool.name !== "keep_output" && {
-                  outOfDate: madeStale(api.recorder.events(), outputsNamed(tool.name, input)),
-                }),
+                outputs,
+                ...(flag.makesStale && { outOfDate: madeStale(api.recorder.events(), outputs) }),
               },
               requestId,
             );

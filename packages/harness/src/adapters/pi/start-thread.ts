@@ -51,7 +51,7 @@ import {
   compactor,
   foldHistory,
 } from "./compaction";
-import { interruptedResult } from "./history-repair";
+import { type Interrupted, interruptedResult } from "./history-repair";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -73,13 +73,7 @@ export type StartThreadOptions = ThreadIdentity & {
    * Builds the result of a tool call that a crash cut off, from the log (the caller knows what
    * the call did). `undefined` keeps the cautious default text.
    */
-  interrupted?: (toolName: string, toolCallId: string) => string | undefined;
-  /**
-   * Whether a batch of calls (their tool names) ends the turn although some of its calls do not
-   * themselves: every call that is not `changesResults` terminates (the agent loop's review gate,
-   * `agents/tools/gate.ts`). Pi ends the turn only when every result of the batch terminates.
-   */
-  endsBatch?: (callNames: string[]) => boolean;
+  interrupted?: Interrupted;
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   prompt: string;
   /** The delivery cursor of a main agent's first message built from the log (`message.sender.covers`). */
@@ -565,7 +559,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { threadId, kind, taskId, agent, sandbox, recorder, endsBatch }: StartThreadOptions,
+  { threadId, kind, taskId, agent, sandbox, recorder }: StartThreadOptions,
   batchOf: (toolCallId: string) => string[],
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
@@ -578,7 +572,6 @@ function toAgentTool(
     ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
       let result: ToolResult;
-      const batch = batchOf(toolCallId);
       try {
         result = await tool.execute(tool.input.parse(params), {
           threadId,
@@ -586,7 +579,7 @@ function toAgentTool(
           ...(taskId && { taskId }),
           ...(agent && { agent }),
           toolCallId,
-          batchSize: Math.max(1, batch.length),
+          batch: batchOf(toolCallId),
           signal: signal ?? new AbortController().signal,
           sandbox: () => sandbox(threadId),
           output: (stream, text) =>
@@ -598,9 +591,6 @@ function toAgentTool(
         if (!(error instanceof SandboxUnavailableError)) throw error;
         result = { output: error.message, isError: true, infrastructure: true, truncated: false };
       }
-      // A call that changes results ends the turn only by holding (its own result says so); the others follow it.
-      const terminate =
-        result.terminate === true || (!tool.changesResults && endsBatch?.(batch) === true);
       return {
         content: [
           { type: "text" as const, text: result.output },
@@ -609,11 +599,11 @@ function toAgentTool(
         // `details` is stored with the message: a terminating batch is told from it on resume (`isFinished`).
         details: {
           truncated: result.truncated,
-          terminate,
+          terminate: result.terminate === true,
           ...(result.infrastructure && { infrastructure: true }),
         },
         isError: result.isError,
-        ...(terminate && { terminate: true }),
+        ...(result.terminate && { terminate: true }),
       };
     },
   };
@@ -698,7 +688,7 @@ function resumedTools(
  */
 function interruptedToolResults(
   messages: AgentMessage[],
-  interrupted: StartThreadOptions["interrupted"],
+  interrupted: Interrupted | undefined,
 ): ToolResultMessage[] {
   const kept = messages.filter(
     (m) => !(m.role === "assistant" && (m.stopReason === "error" || m.stopReason === "aborted")),

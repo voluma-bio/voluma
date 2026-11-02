@@ -147,6 +147,9 @@ export function keepOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
             if (why) throw new Refusal(why);
           }
         }),
+      outputs: (input) => input.ids,
+      summary: (input, titleOf) =>
+        `Keep ${input.ids.map(titleOf).join(", ")} as ${input.ids.length === 1 ? "it is" : "they are"}: ${input.reason}.`,
     },
     execute: ({ ids, reason, toCheck }, ctx) =>
       result(() =>

@@ -73,7 +73,7 @@ export interface AgentsApi {
   changed(): void;
 }
 
-const RESERVED = ["main", "researcher", "supervisor"];
+const RESERVED = ["main", "researcher", "supervisor", "person"];
 const NAME = /^[a-z][a-z0-9-]*$/;
 
 /** Types a tool's `execute` from its `input` schema, then erases the schema for the registry. */
@@ -183,7 +183,7 @@ const activityTool = (api: AgentsApi): Tool =>
 /** The run is closed only when nothing is open, undecided, unanswered or pending. */
 function mainCloseRefusal(api: AgentsApi, d: AgentLog): string | undefined {
   const events = api.recorder.events();
-  if (givenApprovals(events).length > 0)
+  if (givenApprovals(d.approvals).length > 0)
     return "A call the researcher approved is still running; close once it has finished.";
   const open = openWorkers(d, (id) => api.state(d.records.get(id) as AgentRecord) === "working");
   if (open.length > 0)
@@ -191,7 +191,7 @@ function mainCloseRefusal(api: AgentsApi, d: AgentLog): string | undefined {
   const stale = undecidedOutOfDate(events);
   if (stale.length > 0)
     return `These outputs are out of date and you have not decided them: ${stale.join(", ")}. Keep each with keep_output if it still holds, or have it redone.`;
-  if (d.hasUnansweredPerson)
+  if (d.unansweredPerson.length > 0)
     return "The researcher wrote and you have not answered them: message researcher first.";
   const pending = pendingFinal(events);
   if (pending.length > 0)
@@ -226,7 +226,7 @@ const closeTool = (api: AgentsApi): Tool =>
             const why = mainCloseRefusal(api, d);
             if (why) throw new Refusal(why);
             // The researcher's buttons for what was never answered go with the run.
-            for (const a of openApprovals(api.recorder.events()))
+            for (const a of openApprovals(d.approvals))
               await api.recorder.append(
                 a.threadId,
                 "approval.settled",
@@ -337,6 +337,10 @@ const startWorkerTool = (api: AgentsApi): Tool =>
           const { role, d } = caller(api, ctx);
           startRefusals(api, d, role, ctx.toolCallId, input);
         }),
+      outputs: (input) => input.outputs ?? [],
+      summary: (input, titleOf) =>
+        `Start an AI worker to redo ${(input.outputs ?? []).map(titleOf).join(", ")}.`,
+      makesStale: true,
     },
     execute: (input, ctx) =>
       run(async () => {
@@ -456,6 +460,8 @@ const changeOutputsTool = (api: AgentsApi): Tool => {
         api.section(async () => {
           changeOf(caller(api, ctx).role, input);
         }),
+      outputs: () => [],
+      summary: (input) => `Change which outputs the run delivers: ${input.reason}.`,
     },
     execute: (input, ctx) =>
       run(() =>

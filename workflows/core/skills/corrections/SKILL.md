@@ -18,8 +18,9 @@ A correction fixes what the researcher named, and nothing else.
    would make out of date. To get an independent look at a doubtful result, add `blind: <the first worker>`
    (you cannot use both `from` and `blind` naming related workers). Brief it with what is wrong and where, in
    mm and in the researcher's words, and the To check item it corrects.
-3. **A short fix you can do yourself** is a `report_output` of the corrected version. Keeping the outputs it
-   leaves current can go in the same turn: ask for both at once.
+3. **A short fix you can do yourself** is a `report_output` of the corrected version. It waits for the
+   researcher's yes, like a worker; what it makes out of date is decided after it has settled, not in the
+   same turn.
 4. **Decide each output the fix made out of date**, the researcher approving each in the conversation:
    keep it with a reason when it still holds (`keep_output`), have it redone through another approved
    `start_worker`, or leave it to them with `keep_output` and `toCheck` items saying what to judge. If they

@@ -9,6 +9,7 @@ import type { AgentsDefinition } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
 import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
+import { EvidenceNotFound } from "../ports/evidence";
 import type { Recorder } from "../recorder";
 import { keepNotes } from "./keep-notes";
 import { agentLoop, interruptedResult, openingOutputs } from "./loop";
@@ -16,7 +17,6 @@ import { type AgentStart, firstMessageOf, skillBlock, systemPromptOf } from "./p
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
 import type { AgentsApi } from "./tools/coordination";
-import { gatedNames } from "./tools/gate";
 import { leaveToResearcher } from "./tools/keep-output";
 import type { OutputToolDeps } from "./tools/output-shared";
 import { approvedTool, buildAgentTools } from "./tools/registry";
@@ -104,7 +104,8 @@ async function runAgents(
   const { recorder } = o;
   const catalog = definition.outputCatalog;
   const files = runFiles({ runId: o.runId, recorder, files: o.files, signal: o.signal });
-  const outputDeps = (api: AgentsApi): OutputToolDeps => ({
+  /** `sandboxThread`: the thread whose sandbox hashes a file (an approved call runs in the live main's, whoever made it). */
+  const outputDeps = (api: AgentsApi, sandboxThread?: string): OutputToolDeps => ({
     runId: o.runId,
     recorder,
     publish: o.publish,
@@ -115,7 +116,7 @@ async function runAgents(
       return forAgent(r.name, r.place, r.blind !== undefined, r.from);
     },
     hashIn: async (threadId, path, signal) =>
-      sandboxHash(await o.session.get(threadId, { note: false }), path, signal),
+      sandboxHash(await o.session.get(sandboxThread ?? threadId, { note: false }), path, signal),
     section: o.section,
     changed: api.changed,
     refreshRunFiles: files.refresh,
@@ -148,15 +149,29 @@ async function runAgents(
       const skill = definition.skills.find((s) => s.name === name);
       return skill && skillBlock(skill);
     },
+    stageScreenshot: async (snapshotKey) => {
+      const main = forAgent("main", "main", false);
+      const file = `person/${snapshotKey.split("/").pop()}`;
+      try {
+        await o.publish.copy(snapshotKey, `${main.scratch.prefix}${file}`, { signal: o.signal });
+      } catch (error) {
+        if (error instanceof EvidenceNotFound) return undefined;
+        throw error;
+      }
+      return `${main.dir}/${file}`;
+    },
     leave: (api, threadId, eventId, outputId) =>
       leaveToResearcher(outputDeps(api), threadId, eventId, outputId),
     async approved(call, api) {
       const record = api.log().records.get(call.threadId);
       if (!record) throw new Error(`${call.threadId} has no thread.started`);
       const layout = forAgent(record.name, record.place, record.blind !== undefined, record.from);
+      // Main's folder is the same whichever main made the call, and a replaced one's sandbox is gone:
+      // the job uses the live main's, so no sandbox is made for a thread that ended.
+      const sandboxThread = api.log().main?.id ?? call.threadId;
       const tool = approvedTool(
         call.tool,
-        { layout, files: o.files, api, bash: o.bash, outputs: outputDeps(api) },
+        { layout, files: o.files, api, bash: o.bash, outputs: outputDeps(api, sandboxThread) },
         call.fileHashes,
       );
       return tool.execute(tool.input.parse(call.args), {
@@ -164,9 +179,9 @@ async function runAgents(
         kind: "main",
         agent: { name: record.name, role: "main" },
         toolCallId: call.toolCallId,
-        batchSize: 1,
+        batch: [],
         signal: o.signal,
-        sandbox: () => o.session.get(call.threadId),
+        sandbox: () => o.session.get(sandboxThread),
         output: () => {},
       });
     },
@@ -200,7 +215,6 @@ async function runAgents(
         bash: o.bash,
         outputs: outputDeps(api),
       });
-      const gated = gatedNames(tools);
       return {
         ...setup,
         systemPrompt: systemPromptOf({ definition, layout }),
@@ -214,8 +228,6 @@ async function runAgents(
             : (api.log().records.get(sender.threadId)?.name ?? "an agent");
         },
         interrupted: (tool, toolCallId) => interruptedResult(api.log(), agent.id, tool, toolCallId),
-        endsBatch: (names) =>
-          agent.role === "main" && api.log().reviewing && names.some((n) => gated.has(n)),
       };
     },
   });
