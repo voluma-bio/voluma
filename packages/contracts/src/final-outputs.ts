@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type { outputsChangedSchema } from "./agent-events";
 import {
+  labelMapOf,
   type OutputCatalog,
   type OutputEntry,
   outputKindSchema,
@@ -159,7 +160,7 @@ export function labelOverlaysUnder(
     }),
   );
   return catalog.filter(
-    (e) => e.kind === "overlay" && e.label && links.has(e.id) && !have.has(e.id),
+    (e) => labelMapOf(catalog, e.id) !== e.id && links.has(e.id) && !have.has(e.id),
   );
 }
 

@@ -29,6 +29,7 @@
 
 import { madeFromSchema, toCheckItemSchema } from "@voluma/contracts/agent-events";
 import {
+  labelMapOf,
   type OutputEntry,
   type OutputKind,
   outputKindSchema,
@@ -269,9 +270,10 @@ function planOf(deps: OutputToolDeps, caller: Caller, input: ReportOutputInput):
   let plan: Plan;
   if (entry) {
     // Its voxels are its map's: the map's version covers it (`resolvedId`, `outputBlocks`).
-    if (entry.kind === "overlay" && entry.label)
+    const map = labelMapOf(deps.catalog, id);
+    if (map !== id && entry.kind === "overlay" && entry.label)
       throw new Refusal(
-        `${id} is label ${entry.label.value} of ${entry.label.of}: report ${entry.label.of}; its version covers ${id}.`,
+        `${id} is label ${entry.label.value} of ${map}: report ${map}; its version covers ${id}.`,
       );
     if (input.kind && input.kind !== entry.kind)
       throw new Refusal(`${id} is ${KEYS[entry.kind]} in this workflow, not ${KEYS[input.kind]}.`);
