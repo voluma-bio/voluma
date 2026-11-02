@@ -5,7 +5,9 @@
  * no-op, and the POST carries the run's lease token, `LEASE_TOKEN_HEADER` in
  * `runner.ts`, whose 409 means the runner stops); the server stamps `seq`,
  * unique and increasing per run, which is also the stream cursor the UI
- * resumes from.
+ * resumes from. The POST answers 200 `appendEventResponseSchema` with the event's stored
+ * `seq` (for an id already stored, the seq it has); a 204 with no body, from an API before
+ * that, is still accepted by the runner, which then fills no gap (`recorder.ts`).
  *
  * Reading back (the runner, to resume a run it claimed):
  *   GET /api/run/ingest/runs/:runId/events?after=<seq>  → 200 `runEventsResponseSchema`
@@ -685,6 +687,8 @@ export const runEventSchema = z.discriminatedUnion("type", [
 ]);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
+
+export const appendEventResponseSchema = z.object({ seq: z.number().int().positive() });
 
 /** A page of a run's stored events, oldest first. */
 export const runEventsResponseSchema = z.object({

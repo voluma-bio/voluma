@@ -2,8 +2,8 @@
  * The runner's routes, under /ingest/ and guarded for the runner (`service` principal);
  * the hand-off is `@voluma/contracts/runner`:
  *   POST /ingest/claim                                   take the oldest run the limits allow
- *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease; end or release the run (a report carries the last event seq the runner read)
- *   POST /ingest/runs/:runId/events                      append an event (EventInput)
+ *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease (answers the run's last event seq); end or release the run (an ended report carries the last event seq the runner read)
+ *   POST /ingest/runs/:runId/events                      append an event (EventInput); answers its stored seq
  *   POST /ingest/runs/:runId/live                        a batch of live frames, fanned out to the run's open streams, not stored
  *   GET  /ingest/runs/:runId/events?after=               stored events after a seq, one page of 1000 (RunEventsResponse)
  *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
@@ -13,7 +13,11 @@
  * write is keyed by the path's run (event ids and thread ids are unique within a run only), so
  * the lease scopes it. A claim returns a visitor run's keys once (pg-queue.ts).
  */
-import { eventInputSchema, type RunEventsResponse } from "@voluma/contracts/events";
+import {
+  type appendEventResponseSchema,
+  eventInputSchema,
+  type RunEventsResponse,
+} from "@voluma/contracts/events";
 import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
 import {
   type ClaimResponse,
@@ -106,8 +110,8 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
     if (event.runId !== c.req.param("runId")) {
       throw new HTTPException(400, { message: "event runId does not match the path" });
     }
-    await eventLog.append(event, c.var.leaseToken);
-    return c.body(null, 204);
+    const seq = await eventLog.append(event, c.var.leaseToken);
+    return c.json({ seq } satisfies z.infer<typeof appendEventResponseSchema>);
   });
 
   // Live frames are best effort: the lease is checked (a stale runner must not speak for the

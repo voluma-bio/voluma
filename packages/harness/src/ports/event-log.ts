@@ -4,7 +4,7 @@
  * the store assigns `seq`. Adapter: adapters/http (the client the runner uses). The API stores events
  * through its own lease-checked log (apps/api's run domain), not this port.
  */
-import type { EventInput } from "@voluma/contracts/events";
+import type { EventInput, RunEvent } from "@voluma/contracts/events";
 
 /**
  * The store could not be reached or answered 5xx, and the adapter's own retries ran out: the event
@@ -13,6 +13,11 @@ import type { EventInput } from "@voluma/contracts/events";
 export class EventLogUnavailable extends Error {}
 
 export interface EventLog {
-  /** Throws `LeaseLost`, `EventLogUnavailable`, or another error when the store refuses the event. */
-  append(event: EventInput): Promise<void>;
+  /**
+   * Returns the event's stored `seq` (for an id already stored, the seq it has), or nothing from
+   * an API that does not say. Throws `LeaseLost`, `EventLogUnavailable`, or another error when the store refuses the event.
+   */
+  append(event: EventInput): Promise<number | undefined>;
+  /** The stored events with `seq > after` (and `<= upTo`, if given), oldest first. */
+  eventsAfter(after: number, upTo?: number): Promise<RunEvent[]>;
 }

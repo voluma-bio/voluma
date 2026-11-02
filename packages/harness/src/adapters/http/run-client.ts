@@ -15,15 +15,21 @@
  * the run is already stopping (released, not failed) when the caller sees it. A failed event
  * append is the port's `EventLogUnavailable`; a lease loss or a 4xx passes through. History
  * writes are idempotent on the server (an idx repeated with the same content is a no-op), and a
- * 409 on one is the port's `HistoryConflict`. `storedEvents` is the resume read, paged
- * (`@voluma/contracts/events`).
+ * 409 on one is the port's `HistoryConflict`. `eventsAfter` is the read of the stored events (the
+ * resume read from 0, the recorder's gap fill and tail pull), paged (`@voluma/contracts/events`). An append
+ * answers with the stored seq; a 204 (an API from before that) answers none.
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt, cut at HEARTBEAT_ATTEMPT_MS: the caller keeps the usage and resends it if this throws.
  * `report` ends or releases the run, with the last event seq it read; a 409 means the server ended the run first or the lease
  * is no longer ours, so it returns false (the caller logs that nothing was stored). A network failure is retried for REPORT_BUDGET_MS; the
  * lease expires on its own after that.
  */
-import { type EventInput, type RunEvent, runEventsResponseSchema } from "@voluma/contracts/events";
+import {
+  appendEventResponseSchema,
+  type EventInput,
+  type RunEvent,
+  runEventsResponseSchema,
+} from "@voluma/contracts/events";
 import { type HistoryRow, historyResponseSchema } from "@voluma/contracts/history";
 import {
   type HeartbeatResponse,
@@ -45,7 +51,6 @@ const HEARTBEAT_ATTEMPT_MS = 5_000;
 const REPORT_BUDGET_MS = 60_000;
 
 export interface RunClient extends EventLog, History {
-  storedEvents(): Promise<RunEvent[]>;
   heartbeat(usage: Usage): Promise<HeartbeatResponse>;
   /** True when the server stored the report; false on a 409 (the run ended first, or the lease is gone). */
   report(report: ReportRequest["report"]): Promise<boolean>;
@@ -92,7 +97,9 @@ export function runClient(
   return {
     async append(event: EventInput) {
       try {
-        await post(`${runPath}/events`, event, writes);
+        const response = await post(`${runPath}/events`, event, writes);
+        if (response.status === 204) return undefined;
+        return appendEventResponseSchema.parse(await response.json()).seq;
       } catch (error) {
         const refused =
           error instanceof LeaseLost || (error instanceof HttpError && error.status < 500);
@@ -100,15 +107,15 @@ export function runClient(
         throw new EventLogUnavailable(errorText(error), { cause: error });
       }
     },
-    /** Every stored event of the run, oldest first: what a resumed run starts its recorder with. */
-    async storedEvents() {
+    async eventsAfter(after, upTo = Number.POSITIVE_INFINITY) {
       const events: RunEvent[] = [];
-      for (let more = true; more; ) {
-        const after = events.at(-1)?.seq ?? 0;
-        const response = await get(`${runPath}/events?after=${after}`);
+      // Each page starts after the last seq read, not after a count: a page can have holes.
+      for (let cursor = after, more = true; more && cursor < upTo; ) {
+        const response = await get(`${runPath}/events?after=${cursor}`);
         const page = runEventsResponseSchema.parse(await response.json());
-        events.push(...page.events);
-        more = page.more;
+        events.push(...page.events.filter((e) => e.seq <= upTo));
+        cursor = page.events.at(-1)?.seq ?? cursor;
+        more = page.more && page.events.length > 0;
       }
       return events;
     },

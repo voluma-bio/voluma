@@ -139,10 +139,10 @@ function cutOffReport(stopped: Stopped): ReportRequest["report"] | undefined {
     : { kind: "released", reason: stopped };
 }
 
-const endedReport = (error?: string): ReportRequest["report"] =>
+const endedReport = (readSeq: number | undefined, error?: string): ReportRequest["report"] =>
   error === undefined
-    ? { kind: "ended", outcome: "completed" }
-    : { kind: "ended", outcome: "failed", error };
+    ? { kind: "ended", outcome: "completed", readSeq }
+    : { kind: "ended", outcome: "failed", error, readSeq };
 
 /** Runs the claim inside its `RunScope`, so an uncaught error in its work fails this run alone. */
 export function runClaim(ctx: RunnerContext, claim: Claim, shutdown: AbortSignal): Promise<void> {
@@ -231,6 +231,9 @@ async function claimBody(
       meter,
       onStop: stop,
       onRoundTrip: heartbeatRoundTrip,
+      // Before the recorder exists there is no view to extend; the claim's own read covers it.
+      onLastSeq: (seq) =>
+        void events?.pull(seq).catch((e) => log(`pull failed, will retry: ${errorText(e)}`)),
       log,
     });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
@@ -255,7 +258,7 @@ async function claimBody(
     // A thread's name for a log line, from its `thread.started` (recorded before any other event of the thread).
     const names = new Map<string, string>();
     const nameOf = (id: string) => names.get(id) ?? id;
-    const stored = await client.storedEvents();
+    const stored = await client.eventsAfter(0);
     // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
     // run to different dependencies. A run made before this was recorded is refused here.
     const pin = pinOf(runId, stored);
@@ -268,9 +271,11 @@ async function claimBody(
     const recorded = recorder(
       {
         async append(event) {
-          await client.append(event);
+          const seq = await client.append(event);
           log(eventLine(event, redact, nameOf));
+          return seq;
         },
+        eventsAfter: (after, upTo) => client.eventsAfter(after, upTo),
       },
       runId,
       () => stop("lease-lost"),
@@ -491,12 +496,13 @@ async function claimBody(
   } finally {
     // The harness decided how the claim ended, drained included; a stop landing now changes nothing.
     // Without an outcome the claim failed before the supervisor ran (or was stopped then).
+    const readSeq = events?.events().at(-1)?.seq;
     const report =
       outcome?.kind === "ended"
-        ? endedReport(outcome.error === undefined ? undefined : redact(outcome.error))
+        ? endedReport(readSeq, outcome.error === undefined ? undefined : redact(outcome.error))
         : stopped
           ? cutOffReport(stopped)
-          : endedReport(uncaught ?? error);
+          : endedReport(readSeq, uncaught ?? error);
     if (report?.kind === "ended") await closeSandboxes(CLOSE_BUDGET_MS.ended);
     shutdown.removeEventListener("abort", onShutdown);
     lease?.halt();
