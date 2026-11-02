@@ -24,6 +24,7 @@ import type {
   Surface,
   Volume,
 } from "@voluma/contracts/review";
+import { trailOf } from "./outputs-trail";
 import { formatNumber } from "./run-model";
 
 /** One To check item, on the version it was raised on. */
@@ -102,35 +103,23 @@ export function unitText(ucum: string): string {
     .trim();
 }
 
-/** The latest versions an output's latest version was made from, transitively, itself first. */
-function trailOf(fold: OutputsFold, id: string): { output: string; v: OutputVersion }[] {
-  const seen = new Set<string>();
-  const out: { output: string; v: OutputVersion }[] = [];
-  const walk = (at: string) => {
-    if (seen.has(at)) return;
-    seen.add(at);
-    const latest = fold.byId.get(at)?.latest;
-    if (!latest) return;
-    out.push({ output: at, v: latest });
-    // A link to a label overlay (a bone) means its map's version.
-    for (const link of latest.madeFrom) walk(fold.labels.get(link.id) ?? link.id);
-  };
-  walk(fold.labels.get(id) ?? id);
-  return out;
+function itemsOf(fold: OutputsFold, id: string): OutputItem[] {
+  return trailOf(fold, id).flatMap(({ id: output, state }) =>
+    state?.latest ? itemsOfVersion(output, state.latest) : [],
+  );
 }
 
-function itemsOf(fold: OutputsFold, id: string): OutputItem[] {
-  return trailOf(fold, id).flatMap(({ output, v }) => {
-    return v.toCheck.map((t, item) => ({
-      key: `${output}/${v.version}/${item}`,
-      output,
-      version: v.version,
-      item,
-      title: t.title,
-      ...(t.focus && { focus: t.focus }),
-      resolved: t.resolved !== undefined,
-    }));
-  });
+/** The To check items version `v` of output `id` raised; `key` is the URL's `item`. */
+export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
+  return v.toCheck.map((t, item) => ({
+    key: `${id}/${v.version}/${item}`,
+    output: id,
+    version: v.version,
+    item,
+    title: t.title,
+    ...(t.focus && { focus: t.focus }),
+    resolved: t.resolved !== undefined,
+  }));
 }
 
 const strings = (x: unknown): string[] =>

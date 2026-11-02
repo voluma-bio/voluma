@@ -87,9 +87,9 @@
   /* Viewer colours as text in the chrome (mark tags, axis letters): the solids' hues, dark
      enough for 4.5:1 on every light surface. The solids stay for the images. */
   --mark-mine-text: oklch(0.5 0.2 338);
-  --axis-x-text: oklch(0.5 0.16 27);
-  --axis-y-text: oklch(0.47 0.12 150);
-  --axis-z-text: oklch(0.5 0.13 250);
+  --plane-coronal-text: oklch(0.5 0.16 27);
+  --plane-sagittal-text: oklch(0.47 0.12 150);
+  --plane-axial-text: oklch(0.5 0.13 250);
 
   --inverse: oklch(0.205 0.013 255); /* tooltips and toasts */
   --inverse-fg: oklch(0.985 0.003 255);
@@ -156,9 +156,9 @@
   --idle: oklch(0.56 0.012 255);
 
   --mark-mine-text: var(--mark-mine);
-  --axis-x-text: var(--axis-x);
-  --axis-y-text: var(--axis-y);
-  --axis-z-text: var(--axis-z);
+  --plane-coronal-text: var(--plane-coronal);
+  --plane-sagittal-text: var(--plane-sagittal);
+  --plane-axial-text: var(--plane-axial);
 
   --inverse: oklch(0.94 0.006 255);
   --inverse-fg: oklch(0.145 0.014 255);
@@ -187,10 +187,11 @@
   --viewer-chip-fg: oklch(0.94 0.006 255);
   --scale-bar: oklch(0.86 0.008 255);
 
-  /* Slice planes: frames, crosshairs, 3D planes. Text in the chrome uses `--axis-*-text`. */
-  --axis-x: #ef6a5e; /* coronal plane (constant x) */
-  --axis-y: #5ccf7a; /* sagittal plane (constant y) */
-  --axis-z: #5aa6f2; /* axial plane (constant z) */
+  /* Slice planes by anatomy: frames, chips, crosshairs. Which of a grid's planes is which comes
+     from its catalog entry (`planes`). Text in the chrome uses `--plane-*-text`. */
+  --plane-coronal: #ef6a5e;
+  --plane-sagittal: #5ccf7a;
+  --plane-axial: #5aa6f2;
 
   --bone: oklch(0.86 0.02 82);
   --bone-alt: oklch(0.82 0.02 82); /* neighbouring bones, so adjacent surfaces separate */

@@ -1,26 +1,33 @@
 /**
- * Outputs: a run of the agent loop's final outputs in their sections, each with its value and
- * status, then the outputs a worker reported that the workflow does not declare; under them, the
- * output in view: its status, value, what it is measured on, and the To check items on it and on
- * what it was made from, each accepted here (Looks right). Picking an output opens it in the
- * scene; Show moves the scene to an item's place.
+ * Final outputs, the scan page's right side: a run of the agent loop's final values in main's
+ * sections, then the outputs a worker reported that the workflow does not declare. The value
+ * picked opens in place under its row: what it is, who made it, its report, its To check items
+ * (with those of what it rests on), and "Rests on": the outputs its latest version was measured on,
+ * drawn beside, made from or drawn on, with "Further back" opening the rest of its history in the
+ * same list. A row there frames the panes on that output and opens its report under it. The
+ * whole run's graph (W) is the place for what rests on an output. Lists separate by spacing.
+ *
+ * Data: `outputsReview` and `trailOf` (`@voluma/run-view`); review.md "Panels and views".
  */
-import type { OutputStatus } from "@voluma/contracts/output-fold";
-import { ItemToCheck, type OutputItem, type OutputRow, type OutputsReview } from "@voluma/run-view";
+import type { RunEvent } from "@voluma/contracts/events";
+import type { LinkRole } from "@voluma/contracts/output-catalog";
+import type { OutputStatus, OutputsFold } from "@voluma/contracts/output-fold";
 import {
-  Button,
-  EmptyState,
-  List,
-  Readout,
-  Row,
-  type Status,
-  StatusGlyph,
-  StatusMark,
-} from "@voluma/ui";
-import { Crosshair } from "lucide-react";
+  itemsOfVersion,
+  type OutputItem,
+  type OutputRow,
+  type OutputsReview,
+  ROLE_WORD,
+  type TrailRow,
+  trailOf,
+} from "@voluma/run-view";
+import { cx, EmptyState, type Status, StatusGlyph } from "@voluma/ui";
+import { ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { type Accepting, clockOf, Items, Report, VersionLine } from "./version-report";
 
 /** Each output status on the shared status marks, in the design's words. */
-const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
+export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
   pending: { status: "waiting", word: "Pending" },
   reported: { status: "done", word: "Reported" },
   "to-check": { status: "check", word: "To check" },
@@ -28,36 +35,34 @@ const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
   "out-of-date": { status: "paused", word: "Out of date" },
 };
 
-export type Accepting = {
-  /** Looks right on an item; absent while no decision can be taken (`readOnly` says why). */
-  accept?: (item: OutputItem) => void;
-  readOnly?: string;
-  /** The item being saved. */
-  pending?: string;
-  error?: { key: string; text: string };
-};
+const needsYou = (r: OutputRow) => r.items.some((i) => !i.resolved);
 
-export function OutputsPanel({
-  review,
-  selected,
-  onSelect,
-  nameOf,
-  live,
-  item,
-  onItem,
-  accepting,
-}: {
+/** The final outputs with an open To check item, theirs or one they rest on. */
+export const needingYou = (review: OutputsReview) =>
+  new Set([...review.rows.values()].filter((r) => r.state.final && needsYou(r)).map((r) => r.id));
+
+export type FinalOutputsProps = {
   review: OutputsReview;
-  /** The output in view. */
+  /** The value open in place. */
   selected: OutputRow | undefined;
   onSelect: (id: string) => void;
-  nameOf: (id: string) => string;
+  /** The output of its history whose report is open and whose output the panes show. */
+  open: string | undefined;
+  onOpen: (id: string | null) => void;
+  /** Only the values that need you. */
+  onlyNeeds: boolean;
   live: boolean;
-  /** The item whose place the scene shows. */
+  runId: string;
+  events: readonly RunEvent[];
+  fold: OutputsFold;
+  nameOf: (id: string) => string;
   item: string | undefined;
   onItem: (item: OutputItem) => void;
   accepting: Accepting;
-}) {
+};
+
+export function FinalOutputs(props: FinalOutputsProps) {
+  const { review, selected, onlyNeeds, live } = props;
   const { sections, undeclared } = review;
   if (sections.length === 0 && undeclared.length === 0)
     return (
@@ -67,156 +72,353 @@ export function OutputsPanel({
         </EmptyState>
       </div>
     );
-  const list = (rows: OutputRow[], label: string) => (
-    <List label={label} columns="auto 16px" density="compact">
-      {rows.map((r) => (
-        <OutputListRow
-          key={r.id}
-          row={r}
-          selected={r.id === selected?.id}
-          onSelect={() => onSelect(r.id)}
-        />
-      ))}
-    </List>
-  );
+  const needing = needingYou(review);
+  const groups = [
+    ...sections,
+    ...(undeclared.length > 0 ? [{ title: "Not in the workflow", rows: undeclared }] : []),
+  ]
+    .map((s) => ({ ...s, rows: onlyNeeds ? s.rows.filter((r) => needing.has(r.id)) : s.rows }))
+    .filter((s) => s.rows.length > 0);
+  if (groups.length === 0)
+    return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing needs you.</p>;
   return (
-    // One track no wider than the panel, as the Report panel's.
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 p-4">
-      {sections.map((s) => (
-        <section key={s.title} aria-label={s.title} className="grid gap-1.5">
-          <h3 className="text-sm font-semibold">{s.title}</h3>
-          {list(s.rows, s.title)}
-        </section>
-      ))}
-      {undeclared.length > 0 && (
-        <section aria-label="Not in the workflow" className="grid gap-1.5">
-          <h3 className="text-sm font-semibold">Not in the workflow</h3>
-          {list(undeclared, "Not in the workflow")}
-        </section>
-      )}
-      {selected && (
-        <OutputDetail
-          row={selected}
-          nameOf={nameOf}
-          item={item}
-          onItem={onItem}
-          accepting={accepting}
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 py-1.5">
+      {groups.map((s) => (
+        <Section
+          key={s.title}
+          {...props}
+          title={s.title}
+          rows={s.rows}
+          needing={needing}
+          opens={onlyNeeds || s.rows.some((r) => r.id === selected?.id || needing.has(r.id))}
         />
-      )}
+      ))}
     </div>
   );
 }
 
-function OutputListRow({
-  row,
-  selected,
-  onSelect,
-}: {
-  row: OutputRow;
-  selected: boolean;
-  onSelect: () => void;
+function Section({
+  title,
+  rows,
+  needing,
+  opens,
+  ...props
+}: FinalOutputsProps & {
+  title: string;
+  rows: OutputRow[];
+  needing: Set<string>;
+  opens: boolean;
 }) {
-  const { status, word } = OUTPUT_STATUS[row.state.status];
+  // Opens by itself when it comes to hold the selection or an item; a click overrides until then.
+  const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
+  const open = toggled && toggled.when === opens ? toggled.open : opens;
+  const toCheck = rows.filter((r) => needing.has(r.id)).length;
+  const first = rows.find((r) => r.value);
   return (
-    <Row
-      title={row.name}
-      selected={selected}
-      onSelect={onSelect}
-      cells={[
-        <span key="value" className="font-mono text-xs tabular-nums whitespace-nowrap">
-          {row.value ? (
+    <section aria-label={title} className="grid">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setToggled({ when: opens, open: !open })}
+        className="flex h-8 cursor-pointer items-center gap-1.5 px-3 text-left text-sm hover:bg-accent"
+      >
+        <ChevronRight
+          aria-hidden
+          className={cx(
+            "size-3.5 shrink-0 text-fg-subtle transition-transform motion-reduce:transition-none",
+            open && "rotate-90",
+          )}
+        />
+        <span className="shrink-0 font-semibold">{title}</span>
+        {!open && first?.value && (
+          <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
+            {first.name} {first.value.text} {first.value.unit}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs">
+          {toCheck > 0 ? (
             <>
-              {row.value.text}
-              {row.value.unit && <span className="text-muted-foreground"> {row.value.unit}</span>}
+              <StatusGlyph status="check" />
+              <span className="text-check">{toCheck} to check</span>
             </>
           ) : (
-            <span className="text-muted-foreground">{word}</span>
+            <>
+              <StatusGlyph status="done" />
+              <span className="text-muted-foreground">{rows.length}</span>
+            </>
           )}
-        </span>,
-        <span key="status" title={word}>
-          <StatusGlyph status={status} />
-          <span className="sr-only">{word}</span>
-        </span>,
-      ]}
-    />
+        </span>
+      </button>
+      {open && (
+        <ul className="m-0 grid list-none p-0">
+          {rows.map((r) =>
+            r.id === props.selected?.id ? (
+              <Opened key={r.id} row={r} {...props} />
+            ) : (
+              <li key={r.id}>
+                <ValueRow row={r} onSelect={() => props.onSelect(r.id)} />
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+    </section>
   );
 }
 
-function OutputDetail({
+function ValueRow({
   row,
-  nameOf,
-  item,
-  onItem,
-  accepting,
+  selected = false,
+  bar = false,
+  onSelect,
 }: {
   row: OutputRow;
-  nameOf: (id: string) => string;
-  item: string | undefined;
-  onItem: (item: OutputItem) => void;
-  accepting: Accepting;
+  selected?: boolean;
+  /** The selection's blue bar: while nothing under it is open. */
+  bar?: boolean;
+  onSelect: () => void;
 }) {
-  const { state } = row;
-  const { status, word } = OUTPUT_STATUS[state.status];
-  const names = (ids: string[]) => ids.map(nameOf).join(", ");
-  const open = row.items.filter((i) => !i.resolved).length;
+  const { status, word } = OUTPUT_STATUS[row.state.status];
+  const ref = useScrolledTo(selected);
   return (
-    <article aria-label={row.name} className="grid gap-4 border-t border-border pt-4">
-      <header className="grid gap-1.5">
-        <h3 className="min-w-0 text-base font-semibold">{row.name}</h3>
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <StatusMark status={status} label={word} />
-          {!state.declared && <span>Not in the workflow</span>}
-          {row.provisional && <span>Provisional: no reference comparison yet</span>}
-        </p>
-        {state.missingReason && <p className="text-sm">{state.missingReason}</p>}
-        {state.outOfDate && (
-          <p className="text-sm">
-            Something it was made from has changed since. The AI keeps it or redoes it.
+    <button
+      ref={ref}
+      type="button"
+      aria-current={selected || undefined}
+      onClick={onSelect}
+      className={cx(
+        "relative flex h-[26px] w-full cursor-pointer items-center gap-2 pr-3 pl-5 text-left text-sm",
+        selected ? "bg-select-tint" : "hover:bg-accent",
+        bar && "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-select",
+      )}
+    >
+      <span title={word}>
+        <StatusGlyph status={status} />
+        <span className="sr-only">{word}</span>
+      </span>
+      <span className={cx("min-w-0 truncate", row.state.outOfDate && "line-through")}>
+        {row.name}
+      </span>
+      {row.provisional && (
+        <span className="shrink-0 rounded-sm px-1 font-mono text-[11px] text-muted-foreground inset-ring inset-ring-border">
+          provisional
+        </span>
+      )}
+      <span className="ml-auto shrink-0 font-mono text-sm tabular-nums whitespace-nowrap">
+        {row.value ? (
+          <>
+            {row.value.text}
+            {row.value.unit && (
+              <span className="text-muted-foreground text-xs"> {row.value.unit}</span>
+            )}
+          </>
+        ) : (
+          <span className="text-muted-foreground text-xs">{word}</span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+/** Brings the row into view when it becomes the selection, only if it is out of view. */
+function useScrolledTo(active: boolean) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+  return ref;
+}
+
+const ROLE_ORDER: LinkRole[] = ["on", "context", "input", "base"];
+
+/** The value open in place: what it is, its version, report and items, and what it rests on. */
+function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
+  const { fold, open, nameOf } = props;
+  const [report, setReport] = useState(false);
+  const trail = useMemo(() => trailOf(fold, row.id), [fold, row.id]);
+  const latest = row.state.latest;
+  const openItems = row.items.filter((i) => !i.resolved);
+  const shown = openItems.filter((i) => i.output !== open);
+  const below = openItems.length - shown.length;
+  const restsOn = trail
+    .filter((r) => r.depth === 1)
+    .sort((a, b) => ROLE_ORDER.indexOf(a.role ?? "base") - ROLE_ORDER.indexOf(b.role ?? "base"));
+  const further = trail.filter((r) => r.depth > 1);
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)] bg-select-tint pb-2.5">
+      <ValueRow row={row} selected bar={!open} onSelect={() => props.onOpen(null)} />
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-2 pr-3 pl-9">
+        {row.description && <p className="m-0 text-muted-foreground text-sm">{row.description}</p>}
+        {latest ? (
+          <VersionLine v={latest}>
+            {latest.kept && <span>kept: {latest.kept.reason}</span>}
+            <button
+              type="button"
+              aria-expanded={report}
+              onClick={() => setReport(!report)}
+              className="cursor-pointer text-primary-text hover:underline"
+            >
+              Report
+            </button>
+          </VersionLine>
+        ) : (
+          <p className="m-0 text-muted-foreground text-xs">
+            {row.state.missingReason ?? OUTPUT_STATUS[row.state.status].word}
           </p>
         )}
-        {row.description && <p className="text-sm leading-relaxed">{row.description}</p>}
-      </header>
-
-      {row.value && (
-        <Readout values={[{ label: row.name, value: row.value.text, unit: row.value.unit }]} />
-      )}
-      {(row.on.length > 0 || row.context.length > 0) && (
-        <p className="text-sm text-muted-foreground">
-          {row.on.length > 0 && `Measured on ${names(row.on)}.`}
-          {row.on.length > 0 && row.context.length > 0 && " "}
-          {row.context.length > 0 && `Shown with ${names(row.context)}.`}
-        </p>
-      )}
-
-      {row.items.length > 0 && (
-        <section aria-label="To check" className="grid gap-2">
-          <h4 className="text-xs text-muted-foreground">
-            {open > 0 ? `${open} to check` : "To check"}
-          </h4>
-          {row.items.map((i) => (
-            <ItemToCheck
-              key={i.key}
-              context={i.output === row.id ? row.name : nameOf(i.output)}
-              title={i.title}
-              text=""
-              state={i.resolved ? "accepted" : "open"}
-              onAccept={accepting.accept && (() => accepting.accept?.(i))}
-              accepting={accepting.pending === i.key}
-              readOnly={accepting.readOnly}
-              error={accepting.error?.key === i.key ? accepting.error.text : undefined}
-              className={i.key === item ? "inset-ring-select" : undefined}
-              actions={
-                i.focus && (
-                  <Button variant="ghost" size="sm" onClick={() => onItem(i)}>
-                    <Crosshair aria-hidden />
-                    Show
-                  </Button>
-                )
-              }
+        {row.provisional && (
+          <p className="m-0 text-muted-foreground text-xs">
+            Provisional: no reference comparison yet
+          </p>
+        )}
+        {report && latest && (
+          <div className="border-select border-l-2 pl-2.5">
+            <Report
+              runId={props.runId}
+              events={props.events}
+              v={latest}
+              outOfDate={row.state.outOfDate}
+              nameOf={nameOf}
+              madeFrom={false}
             />
-          ))}
-        </section>
+          </div>
+        )}
+        {/* Open items only; an open row below shows its own, so here they shrink to a line. */}
+        {shown.length > 0 && <Items {...props} items={shown} own={row.id} />}
+        {below > 0 && open && (
+          <p className="m-0 flex items-center gap-1.5 text-check text-xs">
+            <StatusGlyph status="check" />
+            {below} to check on {nameOf(open)}, open below
+          </p>
+        )}
+        {restsOn.length > 0 && (
+          <RestsOn {...props} rows={trail} restsOn={restsOn} further={further} />
+        )}
+      </div>
+    </li>
+  );
+}
+
+function RestsOn({
+  rows,
+  restsOn,
+  further,
+  ...props
+}: FinalOutputsProps & { rows: TrailRow[]; restsOn: TrailRow[]; further: TrailRow[] }) {
+  const { open, nameOf } = props;
+  // Further back opens by itself when the output open is one of its rows; a click overrides.
+  const holds = further.some((r) => r.id === open);
+  const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
+  const showFurther = toggled && toggled.when === holds ? toggled.open : holds;
+  // Which row a row further back feeds: the first, nearest the value, that links it.
+  const feeds = (r: TrailRow) => {
+    const at = rows.indexOf(r);
+    const parent = rows.find((p) => p.from.includes(at));
+    return parent ? nameOf(parent.id) : undefined;
+  };
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1 pt-1">
+      <h4 className="m-0 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+        Rests on
+      </h4>
+      <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] gap-0.5 rounded-md bg-card p-1 inset-ring inset-ring-border">
+        {restsOn.map((r) => (
+          <TrailItem key={r.id} row={r} {...props} />
+        ))}
+        {further.length > 0 && (
+          <li>
+            <button
+              type="button"
+              aria-expanded={showFurther}
+              onClick={() => setToggled({ when: holds, open: !showFurther })}
+              className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 text-left text-sm hover:bg-accent"
+            >
+              <ChevronRight
+                aria-hidden
+                className={cx(
+                  "size-3.5 shrink-0 text-fg-subtle transition-transform motion-reduce:transition-none",
+                  showFurther && "rotate-90",
+                )}
+              />
+              <span className="shrink-0">Further back · {further.length}</span>
+              {!showFurther && (
+                <span className="min-w-0 truncate text-muted-foreground text-xs">
+                  {further.map((r) => nameOf(r.id)).join(", ")}
+                </span>
+              )}
+            </button>
+          </li>
+        )}
+        {showFurther &&
+          further.map((r) => <TrailItem key={r.id} row={r} feeds={feeds(r)} {...props} />)}
+      </ul>
+    </div>
+  );
+}
+
+/** One output a value rests on: two lines, its report under it while open. */
+function TrailItem({
+  row,
+  feeds,
+  ...props
+}: FinalOutputsProps & { row: TrailRow; feeds?: string }) {
+  const { open, nameOf } = props;
+  const isOpen = row.id === open;
+  const latest = row.state?.latest;
+  const status = row.state ? OUTPUT_STATUS[row.state.status] : OUTPUT_STATUS.pending;
+  const ref = useScrolledTo(isOpen);
+  const items = latest ? itemsOfVersion(row.id, latest) : [];
+  return (
+    <li className={cx("grid grid-cols-[minmax(0,1fr)] rounded-sm", isOpen && "bg-select-tint")}>
+      <button
+        ref={ref}
+        type="button"
+        aria-expanded={isOpen}
+        onClick={() => props.onOpen(isOpen ? null : row.id)}
+        className={cx(
+          "relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 rounded-sm px-1.5 py-1 text-left text-sm",
+          isOpen
+            ? "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-select"
+            : "hover:bg-accent",
+        )}
+      >
+        <span title={status.word}>
+          <StatusGlyph status={status.status} />
+          <span className="sr-only">{status.word}</span>
+        </span>
+        <span className={cx("truncate", row.state?.outOfDate && "line-through")}>
+          {nameOf(row.id)}
+        </span>
+        <span className="text-muted-foreground text-xs">
+          {row.role && ROLE_WORD[row.role]}
+          {feeds && `, for ${feeds}`}
+        </span>
+        <span className="col-start-2 col-end-4 flex flex-wrap items-baseline gap-x-2 text-muted-foreground text-xs">
+          {row.used !== undefined && (
+            <span className="rounded-sm bg-muted px-1 font-mono">v{row.used}</span>
+          )}
+          {latest && <span className="font-mono">{latest.by}</span>}
+          {latest && <span>{clockOf(latest.at)}</span>}
+          {row.superseded && latest && <span>v{latest.version} is newest</span>}
+          {row.state?.outOfDate && <span>Out of date</span>}
+          {row.state && !row.state.declared && (
+            <span className="rounded-sm bg-muted px-1">not in the workflow</span>
+          )}
+          {!latest && <span>{status.word}</span>}
+        </span>
+      </button>
+      {isOpen && latest && (
+        <div className="mx-1.5 mb-2 grid grid-cols-[minmax(0,1fr)] gap-2 border-select border-l-2 pt-1 pl-2.5">
+          <Report
+            runId={props.runId}
+            events={props.events}
+            v={latest}
+            outOfDate={!!row.state?.outOfDate}
+            nameOf={nameOf}
+          />
+          {items.length > 0 && <Items {...props} items={items} own={row.id} />}
+        </div>
       )}
-    </article>
+    </li>
   );
 }

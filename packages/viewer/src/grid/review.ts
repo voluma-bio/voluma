@@ -296,6 +296,7 @@ export function reviewGrid({
       shapeZyx: image.shapeZyx,
       spacingZyx: spacingZyx(image),
       image: { base: assetBase(image.data.sha256), levels: imageAssets.levels },
+      imageUnit: image.unit,
       overlays,
       meshes,
       annotations,

@@ -4,6 +4,8 @@
  *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
  *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
+ *   GET /runs/:runId/outputs/*      a file under its outputs (`outputsPrefix`): an output
+ *                                   version's files and evidence, the agent loop's runs
  *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
  *                                   a presigned GET, the browser fetches the bytes from storage
  *   GET /runs/:runId/thumbnail      a small WebP of the run, rendered once and kept (`thumbnail.ts`);
@@ -11,11 +13,21 @@
  *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
  *   POST /runs/:runId/tocheck/accept  Looks right on a To check item of an output version
  *                                   (`acceptToCheckRequestSchema`, the agent loop's runs)
+ *   POST /runs/:runId/views         a view of an output the researcher saved
+ *                                   (`saveViewRequestSchema`, the agent loop's runs)
+ *   POST /runs/:runId/marks         a mark the researcher placed or changed (`placeMarkRequestSchema`)
+ *   DELETE /runs/:runId/marks/:markId  a mark the researcher took away
  *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
  *                                   the snapshot is checked and stored here, the Run domain judges
  *                                   and stores the message
  */
-import { acceptToCheckRequestSchema } from "@voluma/contracts/agent-events";
+import {
+  acceptToCheckRequestSchema,
+  MAX_MARK_BYTES,
+  MAX_VIEW_BYTES,
+  placeMarkRequestSchema,
+  saveViewRequestSchema,
+} from "@voluma/contracts/agent-events";
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
   type PersonMessage,
@@ -25,6 +37,7 @@ import {
 import {
   evidenceKey,
   messageSnapshotKey,
+  outputsPrefix,
   relativePathSchema,
   sha256Schema,
 } from "@voluma/contracts/r2";
@@ -49,6 +62,9 @@ function imageType(head: Uint8Array): string | null {
   if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return "image/jpeg";
   const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (png.every((byte, i) => head[i] === byte)) return "image/png";
+  const ascii = (from: number, to: number) => String.fromCharCode(...head.subarray(from, to));
+  if (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a") return "image/gif";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
   return null;
 }
 
@@ -148,6 +164,51 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     return c.json({});
   });
 
+  app.post("/runs/:runId/views", async (c) => {
+    const { output, view } = await parseJson(c, saveViewRequestSchema);
+    if (JSON.stringify(view).length > MAX_VIEW_BYTES)
+      return c.json({ error: "The view is too large." }, 413);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      if (record.run.example)
+        throw new HTTPException(403, { message: "Example runs can't be changed." });
+      if (!record.results.outputs.byId.has(output))
+        throw new HTTPException(404, { message: "Output not found." });
+      return { type: "view.saved", payload: { output, view } };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json({});
+  });
+
+  app.post("/runs/:runId/marks", async (c) => {
+    const body = await parseJson(c, placeMarkRequestSchema);
+    if (JSON.stringify(body).length > MAX_MARK_BYTES)
+      return c.json({ error: "The mark is too large." }, 413);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      if (record.run.example)
+        throw new HTTPException(403, { message: "Example runs can't be changed." });
+      if (!record.results.outputs.byId.has(body.output))
+        throw new HTTPException(404, { message: "Output not found." });
+      return { type: "mark.placed", payload: { ...body, by: c.var.user.userId } };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json({});
+  });
+
+  app.delete("/runs/:runId/marks/:markId", async (c) => {
+    const id = z.uuid().safeParse(c.req.param("markId"));
+    if (!id.success) return c.json({ error: "not found" }, 404);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      if (record.run.example)
+        throw new HTTPException(403, { message: "Example runs can't be changed." });
+      // Only the author's deletion counts, so any other would be a pointless stored event.
+      if (record.results.marks.get(id.data)?.by !== c.var.user.userId)
+        throw new HTTPException(404, { message: "Mark not found." });
+      return { type: "mark.deleted", payload: { id: id.data, by: c.var.user.userId } };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json({});
+  });
+
   app.post("/runs/:runId/messages", async (c) => {
     const { id, snapshot, ...rest } = await parseJson(c, sendRunMessageRequestSchema);
     const { runId } = c.req.param();
@@ -222,6 +283,24 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
       c,
       await openFile(store, evidenceKey(runId, sha256), c.req.raw.signal),
       "private, max-age=86400, immutable",
+    );
+  });
+
+  app.get("/runs/:runId/outputs/*", async (c) => {
+    if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });
+    const { runId } = c.req.param();
+    const marker = `/runs/${runId}/outputs/`;
+    const at = c.req.path.indexOf(marker);
+    const tail = at < 0 ? "" : decodeTail(c.req.path.slice(at + marker.length));
+    if (!relativePathSchema.safeParse(tail).success) return c.json({ error: "not found" }, 404);
+    if (!(await runs.readable(readerOf(c.var.user), runId)))
+      return c.json({ error: "not found" }, 404);
+    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
+    // The sandbox mounts the outputs read-write, so a published file's key can be rewritten.
+    return serveFile(
+      c,
+      await openFile(store, `${outputsPrefix(runId)}${tail}`, c.req.raw.signal),
+      "private, no-cache",
     );
   });
 

@@ -45,3 +45,29 @@ None of these stops a review; each makes it slower.
 - **A lost send response can drop an answer to the AI's offer.** If the stored answer reaches the
   stream before the send's `onSuccess`, the stale-answer check in `ai-panel.tsx` clears the answer
   mode and a retry sends a plain message (refused 409). Reasoned from the code, not reproduced.
+
+## Outputs review
+
+- Marks made on an agent-loop run's panes are drawn but never sent: the conversation is read-only
+  there until corrections (phase 7). Send them, with the panes' snapshot, with the message.
+- Rests on rows have no swatch or eye: the panes can't yet show or hide one overlay from the list
+  (mockup C's legend). The slices' Lat/Med letters are Andrew's call.
+- The task review still uses the shell's docked `ShellPanel`s; it goes with the task loop
+  (`packages/ui/.context/TODO.md`).
+- Presets per output ("XZ at V 125"), the value pinned on its overlay, and the pane's slice
+  counter in the grid's own letters (U, V, W) wait for the workflow to define views.
+- A collection output opens as a table: not built ("Lists open here as a table in a later version").
+
+## Outputs review, from the am-marks review (p1306, p1307)
+
+- Two people marking one run at once can both get P3: `nextTag` (`marks-panel.tsx`) counts the
+  marks this tab has seen. Cosmetic.
+- Probe and Point share the letter P in `QUAD_TOOLS`; tags stay unique (one counter), but a tag
+  can't tell the kind.
+- `useSavedViews` (`outputs-review.tsx`) never clears `pendingFor`: after one save, any later
+  `view.saved` for that output, another person's included, becomes the one shown.
+- `outputs-review.tsx` is about 900 lines: split `useSavedViews` with `savedViews`, and
+  `MainConversation`, into their own files before more lands.
+- Per-event costs: `savedViews(events)` runs twice per durable event, each zod-parsing every saved
+  view; `marksOf`, `waitingApprovals` and `conversation` each rescan the whole log. Compute
+  `savedViews` once and pass it down.

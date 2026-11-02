@@ -652,11 +652,40 @@ export function useFullView(): [boolean, (full: boolean) => void] {
   return [shell.folded.left && shell.folded.right, (full) => shell.fold("both", full)];
 }
 
-/** Whether one side is folded, and a way for the screen to fold or unfold it. */
-export function useSideFold(side: ShellSide): [boolean, (folded: boolean) => void] {
+/**
+ * Folds `side` while `active`, and puts it back when `active` ends or the screen unmounts, unless
+ * it was folded already. `onUnfolded`: the person unfolded it while active (the screen leaves
+ * what needed the room).
+ */
+export function useFoldWhile(side: ShellSide, active: boolean, onUnfolded?: () => void): void {
   const shell = useContext(ShellContext);
-  if (!shell) throw new Error("useSideFold must be used inside AppShell");
-  return [shell.folded[side], (folded) => shell.fold(side, folded)];
+  if (!shell) throw new Error("useFoldWhile must be used inside AppShell");
+  const { fold } = shell;
+  const folded = shell.folded[side];
+  // Whether this hook folded the side, so only it unfolds it; and the fold as last rendered.
+  const mine = useRef(false);
+  const was = useRef(folded);
+  const latest = useRef({ folded, onUnfolded });
+  latest.current = { folded, onUnfolded };
+  useEffect(() => {
+    if (!active) return;
+    if (!latest.current.folded) {
+      mine.current = true;
+      fold(side, true);
+    }
+    return () => {
+      if (mine.current) fold(side, false);
+      mine.current = false;
+    };
+  }, [active, side, fold]);
+  useEffect(() => {
+    const before = was.current;
+    was.current = folded;
+    if (mine.current && before && !folded) {
+      mine.current = false;
+      latest.current.onUnfolded?.();
+    }
+  }, [folded]);
 }
 
 /** Opens a panel of this screen by id, beside what is open on its side. */

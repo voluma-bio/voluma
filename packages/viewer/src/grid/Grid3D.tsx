@@ -42,7 +42,7 @@ import type { Contrast } from "./compose";
 import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
-import { readLevel } from "./planes";
+import { holdLevel } from "./planes";
 import {
   type AssetLevel,
   capturePane,
@@ -199,17 +199,12 @@ export function Grid3D({
     controls.update();
     three.current = { meshes, annotations, volumes, depth, render };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
+    const now = () => ({
+      camera: { position: xyz(camera.position), target: xyz(controls.target), up: xyz(camera.up) },
+    });
     handle.current = {
-      capture: () => ({
-        ...capturePane(renderer.domElement, draw),
-        view: {
-          camera: {
-            position: xyz(camera.position),
-            target: xyz(controls.target),
-            up: xyz(camera.up),
-          },
-        },
-      }),
+      capture: () => ({ ...capturePane(renderer.domElement, draw), view: now() }),
+      view: now,
       layers: () => layer.layers(renderer.domElement, draw),
       show(saved) {
         if (!("camera" in saved)) return;
@@ -532,9 +527,13 @@ export function Grid3D({
     const coarsest = all.length - 1;
     const target = volumeLevel(all);
     setVolumeLoad({ loading: true });
+    const held: { release(): void }[] = [];
     (async () => {
       for (const k of target === coarsest ? [coarsest] : [coarsest, target]) {
-        const { data } = await readLevel(base, all[k]!.path, abort.signal);
+        const level = holdLevel(base, all[k]!.path);
+        held.push(level);
+        const { data } = await level.read;
+        if (abort.signal.aborted) return;
         setLevels((had) => [...had.filter((l) => l.k !== k), { k, values: data }]);
       }
       setVolumeLoad({ loading: false });
@@ -545,7 +544,10 @@ export function Grid3D({
           error: `Couldn't load the volume: ${(cause as Error).message}`,
         });
     });
-    return () => abort.abort();
+    return () => {
+      abort.abort();
+      for (const level of held) level.release();
+    };
   }, [scene.image.base]);
   const shown = levels.reduce<(typeof levels)[number] | undefined>(
     (best, l) => (!best || l.k < best.k ? l : best),

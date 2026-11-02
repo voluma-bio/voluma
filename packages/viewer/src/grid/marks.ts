@@ -7,6 +7,7 @@
  * measures a mark carries (a line's mm, an outline's mm²).
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
+import type { Slab } from "./frame";
 import { sliceSegment } from "./geometry";
 import {
   type Axis,
@@ -21,8 +22,15 @@ import { tokenColor } from "./token-color";
 /** A source position to the pane's CSS pixels, or null where the pane can't show it. */
 type Project = (p: Zyx) => readonly [number, number] | null;
 
-/** How a pane shows marks now: its projection and what of a mark it shows. */
-export type MarkView = { project: Project; shapeOf: (mark: GridMark) => Shape | null };
+/**
+ * How a pane shows marks now: its projection, what of a mark it shows, and the handles that tilt
+ * the other planes (CSS px, each in its plane's colour).
+ */
+export type MarkView = {
+  project: Project;
+  shapeOf: (mark: GridMark) => Shape | null;
+  handles?: readonly { x: number; y: number; color: string }[];
+};
 
 /**
  * A pane's mark canvas and the marking gesture in progress. The pane draws the canvas with each
@@ -46,6 +54,8 @@ export type MarkLayer = {
    * click leaves the pointer to the orbit controls).
    */
   start(event: PointerEvent, capture?: boolean): void;
+  /** Lets the pointer go and keeps the draft: a mark made by clicks, between clicks. */
+  release(): void;
   /** Whether `event` is the gesture's pointer. */
   owns(event: PointerEvent): boolean;
   /** Ends the gesture: no draft, no ring, the pointer released, then the pane's own reset. */
@@ -116,6 +126,13 @@ export function useMarkLayer(
         if (capture) host.current?.setPointerCapture(event.pointerId);
       },
       owns: (event) => gesture?.pointerId === event.pointerId,
+      release() {
+        const ended = gesture;
+        gesture = null;
+        const element = host.current;
+        if (ended?.captured && element?.hasPointerCapture(ended.pointerId))
+          element.releasePointerCapture(ended.pointerId);
+      },
       cancel() {
         const ended = gesture;
         gesture = null;
@@ -139,7 +156,8 @@ export function useMarkLayer(
         cancelAnimationFrame(frame);
         frame = 0;
       },
-      active: () => gesture !== null,
+      // A mark made by clicks is in progress between clicks too.
+      active: () => gesture !== null || own.draft !== null,
     });
   });
   useEffect(() => {
@@ -192,7 +210,7 @@ export function useMarkLayer(
 
 /** What one mark draws, in source voxels: polylines, dots and a measure. */
 type Shape = {
-  lines: { points: Zyx[]; closed: boolean }[];
+  lines: { points: readonly Zyx[]; closed: boolean }[];
   dots: Zyx[];
   measure?: { at: Zyx; text: string };
 };
@@ -202,15 +220,32 @@ export function lengthMm(a: Zyx, b: Zyx, spacingZyx: Zyx): number {
   return Math.hypot(...a.map((v, k) => (b[k]! - v) * spacingZyx[k]!));
 }
 
-/** A closed outline's area in mm², its points all on one slice holding `axis`. */
-export function areaMm2(points: readonly Zyx[], axis: Axis, spacingZyx: Zyx): number {
-  const [ra, ca] = planeAxes(axis);
-  let twice = 0;
-  points.forEach((p, i) => {
-    const q = points[(i + 1) % points.length]!;
-    twice += p[ca] * q[ra] - q[ca] * p[ra];
+/** A closed outline's area in mm², its points all on one plane (Newell's method, in mm). */
+export function areaMm2(points: readonly Zyx[], spacingZyx: Zyx): number {
+  const mm = points.map((p) => p.map((v, k) => v * spacingZyx[k]!));
+  const sum = [0, 0, 0];
+  mm.forEach((p, i) => {
+    const q = mm[(i + 1) % mm.length]!;
+    sum[0]! += (p[1]! - q[1]!) * (p[2]! + q[2]!);
+    sum[1]! += (p[2]! - q[2]!) * (p[0]! + q[0]!);
+    sum[2]! += (p[0]! - q[0]!) * (p[1]! + q[1]!);
   });
-  return (Math.abs(twice) / 2) * spacingZyx[ra] * spacingZyx[ca];
+  return Math.hypot(...sum) / 2;
+}
+
+/** The angle at `vertex` between the rays to `a` and `b`, in degrees, on a grid with this spacing. */
+export function angleDegrees(a: Zyx, vertex: Zyx, b: Zyx, spacingZyx: Zyx): number {
+  const ray = (p: Zyx) => p.map((v, k) => (v - vertex[k]!) * spacingZyx[k]!);
+  const u = ray(a);
+  const w = ray(b);
+  const cos =
+    (u[0]! * w[0]! + u[1]! * w[1]! + u[2]! * w[2]!) / (Math.hypot(...u) * Math.hypot(...w));
+  return (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI;
+}
+
+/** The array axis every point shares a value on, if any: where a contract outline must lie. */
+export function outlineAxis(points: readonly Zyx[]): Axis | null {
+  return ([0, 1, 2] as const).find((a) => points.every((p) => p[a] === points[0]![a])) ?? null;
 }
 
 /** At most `max` of the points, evenly picked, first kept: the contract caps an outline at 500. */
@@ -222,15 +257,41 @@ export function thin<T>(points: readonly T[], max: number): T[] {
 /** Three significant figures: 0.112, 1.39, 12.3. */
 const measure = (n: number) => String(Number(n.toPrecision(3)));
 
+/** What a point says beside it: its note, cut short, or the value a probe read. */
+function pointText(mark: Extract<GridMark, { point: Zyx }>): string | undefined {
+  if (mark.note) return mark.note.length > 28 ? `${mark.note.slice(0, 27)}…` : mark.note;
+  if (mark.probe) return probeText(mark.probe);
+}
+
+/** "≈ −172 HU": a probe's value, three significant figures. */
+export function probeText(p: NonNullable<Extract<GridMark, { point: Zyx }>["probe"]>): string {
+  const v = Math.abs(p.value) >= 100 ? String(Math.round(p.value)) : measure(p.value);
+  return `${p.approx ? "≈ " : ""}${v.replace("-", "−")}${p.unit ? ` ${p.unit}` : ""}`;
+}
+
 const mid = (points: readonly Zyx[]): Zyx =>
   [0, 1, 2].map((k) => points.reduce((s, p) => s + p[k]!, 0) / points.length) as unknown as Zyx;
 
-/** The part of a mark on the slice holding `axis` at `at` (a source voxel), or null. */
-export function sliceShape(mark: GridMark, axis: Axis, at: number): Shape | null {
-  const [ra, ca] = planeAxes(axis);
-  const onSlice = (p: Zyx) => Math.abs(p[axis] - at) <= 0.5;
-  if ("point" in mark) return onSlice(mark.point) ? { lines: [], dots: [mark.point] } : null;
+/**
+ * The part of a mark on a slice pane's slice (`slab`; `whole` when the pane is untilted: the
+ * axis it holds at a source voxel), or null. A box shows only on untilted panes: the task
+ * review's, which never tilt.
+ */
+export function sliceShape(
+  mark: GridMark,
+  slab: Slab,
+  whole: { axis: Axis; at: number } | null,
+): Shape | null {
+  const onSlice = (p: Zyx) => Math.abs(slab(p)) <= 0.5;
+  if ("point" in mark) {
+    if (!onSlice(mark.point)) return null;
+    const text = pointText(mark);
+    return { lines: [], dots: [mark.point], ...(text && { measure: { at: mark.point, text } }) };
+  }
   if ("box" in mark) {
+    if (!whole) return null;
+    const { axis, at } = whole;
+    const [ra, ca] = planeAxes(axis);
     const { min, max } = mark.box;
     if (at < min[axis] - 0.5 || at > max[axis] + 0.5) return null;
     // Voxel i spans i ± ½: the outline goes round the boxed voxels.
@@ -251,7 +312,7 @@ export function sliceShape(mark: GridMark, axis: Axis, at: number): Shape | null
   }
   if ("line" in mark) {
     const { aZyx, bZyx, lengthMm } = mark.line;
-    const segment = sliceSegment(aZyx, bZyx, axis, at);
+    const segment = sliceSegment(aZyx, bZyx, slab);
     if (!segment) return null;
     // A line crossing the slice shows a dot where it crosses; its length shows where it lies.
     const ends = [aZyx, bZyx].filter(onSlice);
@@ -262,8 +323,21 @@ export function sliceShape(mark: GridMark, axis: Axis, at: number): Shape | null
       ...(whole && { measure: { at: mid(segment), text: `${measure(lengthMm)} mm` } }),
     };
   }
+  if ("angle" in mark) {
+    const { aZyx, vertexZyx, bZyx, degrees } = mark.angle;
+    const arms = [sliceSegment(aZyx, vertexZyx, slab), sliceSegment(vertexZyx, bZyx, slab)].filter(
+      (s): s is [Zyx, Zyx] => !!s,
+    );
+    if (!arms.length) return null;
+    const ends = [aZyx, vertexZyx, bZyx].filter(onSlice);
+    return {
+      lines: arms.map((points) => ({ points, closed: false })),
+      dots: ends.length ? ends : arms.map(mid),
+      ...(ends.length === 3 && { measure: { at: vertexZyx, text: `${measure(degrees)}°` } }),
+    };
+  }
   const { outline } = mark;
-  if (outline.axis !== axis || !onSlice(outline.zyx[0]!)) return null;
+  if (!outline.zyx.every(onSlice)) return null;
   return {
     lines: [{ points: outline.zyx, closed: true }],
     dots: [],
@@ -273,7 +347,18 @@ export function sliceShape(mark: GridMark, axis: Axis, at: number): Shape | null
 
 /** The whole mark, for 3D. */
 export function wholeShape(mark: GridMark): Shape {
-  if ("point" in mark) return { lines: [], dots: [mark.point] };
+  if ("point" in mark) {
+    const text = pointText(mark);
+    return { lines: [], dots: [mark.point], ...(text && { measure: { at: mark.point, text } }) };
+  }
+  if ("angle" in mark) {
+    const { aZyx, vertexZyx, bZyx, degrees } = mark.angle;
+    return {
+      lines: [{ points: [aZyx, vertexZyx, bZyx], closed: false }],
+      dots: [aZyx, vertexZyx, bZyx],
+      measure: { at: vertexZyx, text: `${measure(degrees)}°` },
+    };
+  }
   if ("box" in mark) {
     const { min, max } = mark.box;
     const lo = min.map((v) => v - 0.5);
@@ -310,7 +395,7 @@ export function wholeShape(mark: GridMark): Shape {
 function drawMarks(
   canvas: HTMLCanvasElement,
   ink: Ink,
-  { project, shapeOf }: MarkView,
+  { project, shapeOf, handles = [] }: MarkView,
   marks: readonly ShownMark[],
   draft: GridMark | null,
   hover: Zyx | null,
@@ -318,7 +403,7 @@ function drawMarks(
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!marks.length && !draft && !hover) return;
+  if (!marks.length && !draft && !hover && !handles.length) return;
   // The scale the canvas was sized with, so a pixel-ratio change before the next resize can't skew it.
   const scale = canvas.width / (canvas.clientWidth || 1);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -393,6 +478,16 @@ function drawMarks(
       ctx.fillText(shape.measure.text, x + 4, y);
     }
   }
+  // Tilt handles: a ring in the plane's colour on a dark edge.
+  for (const h of handles) {
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, 5, 0, 2 * Math.PI);
+    ctx.fillStyle = h.color;
+    ctx.fill();
+    ctx.strokeStyle = ink.well;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
   const ring = hover && project(hover);
   if (ring) {
     ctx.beginPath();
@@ -404,4 +499,24 @@ function drawMarks(
     ctx.lineWidth = 1.5;
     ctx.stroke();
   }
+}
+
+/**
+ * A mark's vertices in a fixed order: a point's one; a box's min, max; a line's a, b; an angle's
+ * a, vertex, b; an outline's own.
+ */
+export function markPoints(mark: GridMark): readonly Zyx[] {
+  if ("point" in mark) return [mark.point];
+  if ("box" in mark) return [mark.box.min, mark.box.max];
+  if ("line" in mark) return [mark.line.aZyx, mark.line.bZyx];
+  if ("angle" in mark) return [mark.angle.aZyx, mark.angle.vertexZyx, mark.angle.bZyx];
+  return mark.outline.zyx;
+}
+
+/** A voxel (z, y, x) in world mm (x, y, z) through a volume's 4x4 row-major affine. */
+export function worldOf(p: Zyx, affine: readonly (readonly number[])[]): [number, number, number] {
+  const [x, y, z] = [p[2], p[1], p[0]];
+  const row = (r: number) =>
+    affine[r]![0]! * x + affine[r]![1]! * y + affine[r]![2]! * z + affine[r]![3]!;
+  return [row(0), row(1), row(2)];
 }

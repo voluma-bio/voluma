@@ -27,14 +27,16 @@ import {
   useEvents,
   useRunStore,
 } from "@voluma/run-view";
-import { Button, EmptyState, ErrorState, LoadingState, ShellPanel, useOpenPanel } from "@voluma/ui";
-import type {
-  GridMark,
-  GridViewerHandle,
-  MarkTool,
-  StructureDisplay,
-  Zyx,
-} from "@voluma/viewer/grid";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  INPUT_WORD,
+  LoadingState,
+  ShellPanel,
+  useOpenPanel,
+} from "@voluma/ui";
+import type { GridViewerHandle, StructureDisplay } from "@voluma/viewer/grid";
 import { CircleAlert, Layers, ListChecks, MessagesSquare, Network, Users } from "lucide-react";
 import {
   lazy,
@@ -51,12 +53,10 @@ import { AgentsPanel } from "./agents-panel";
 import { AiPanel, useMessage } from "./ai-panel";
 import {
   gridKeyOf,
-  gridMark,
   MarksPanel,
-  middleOf,
-  nextTag,
-  type ShownGrid,
   TOOLS,
+  useLocalMarks,
+  useMarking,
   type YourMark,
 } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
@@ -102,7 +102,7 @@ function Scan({ runId }: { runId: string }) {
   if (run.isPending)
     return (
       <div className={page}>
-        <LoadingState label="Loading the scan" rows={4} />
+        <LoadingState label={`Loading the ${INPUT_WORD.one}`} rows={4} />
       </div>
     );
   if (!run.data) {
@@ -110,7 +110,9 @@ function Scan({ runId }: { runId: string }) {
     return (
       <div className={page}>
         <ErrorState
-          title={missing ? "This scan isn't here" : "Couldn't load the scan"}
+          title={
+            missing ? `This ${INPUT_WORD.one} isn't here` : `Couldn't load the ${INPUT_WORD.one}`
+          }
           onRetry={missing ? undefined : () => void run.refetch()}
         >
           {missing
@@ -338,14 +340,21 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   const focusKey = check?.focus && JSON.stringify(check.focus);
   const focus = useMemo(() => check?.focus && { ...check.focus }, [focusKey, picked]);
   const [display, setDisplay] = useState<StructureDisplay>({});
-  const marking = useMarking();
+  const local = useLocalMarks(MAX_MARKS);
+  const marking = useMarking(TOOLS, local);
+  const viewer = useRef<GridViewerHandle>(null);
+  // Undefined until the lazy viewer mounts: nothing to picture yet.
+  const takeSnapshot = useCallback(
+    (maxBytes: number) => viewer.current?.snapshot(maxBytes) ?? Promise.resolve(undefined),
+    [],
+  );
   // A redo that replaces an image leaves no marks on the old one: their voxels mean nothing now.
   const grids = useMemo(
     () =>
       latest && new Set(latest.volumes.flatMap((v) => (v.kind === "image" && gridKeyOf(v)) || [])),
     [latest],
   );
-  const { keep } = marking;
+  const { keep } = local;
   useEffect(() => {
     if (grids) keep(grids);
   }, [grids, keep]);
@@ -378,7 +387,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
     () => (subjectShown ? marking.marks.filter((m) => m.gridKey === subjectShown.key) : []),
     [marking.marks, subjectShown],
   );
-  const snapshot = subjectShown?.ready ? marking.snapshot : undefined;
+  const snapshot = subjectShown?.ready ? takeSnapshot : undefined;
   const message = useMessage({
     run,
     tasks,
@@ -392,7 +401,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
     itemId: named?.acceptable ? named.id : undefined,
     onSent: (sent) => {
       setAbout(undefined);
-      marking.drop(sent);
+      local.drop(sent);
       reopen();
       refetchRun();
     },
@@ -453,8 +462,9 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
           jump={marking.jump}
           onJumped={marking.jumped}
           onMark={(mark, volumeId, gridKey) => marking.add(mark, volumeId, gridKey, reviewTask.id)}
+          full={marking.full}
           onShown={marking.setShown}
-          viewer={marking.viewer}
+          viewer={viewer}
         />
       </Suspense>
     );
@@ -580,106 +590,6 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
       </ThreadNavigationProvider>
     </DisclosureProvider>
   );
-}
-
-/**
- * Your marks and the tool that makes them. A tool's key (`TOOLS`) picks it and Esc puts it away,
- * as the shell's panel keys do: never while typing, never with a modifier. Listening on the
- * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
- * (leaving Full view), so one Esc does one thing.
- */
-function useMarking() {
-  const [tool, setTool] = useState<MarkTool | null>(null);
-  const [marks, setMarks] = useState<YourMark[]>([]);
-  const [selected, setSelected] = useState<string>();
-  const [jump, setJump] = useState<{ at: Zyx; gridKey: string; taskId: string }>();
-  const [shown, setShown] = useState<ShownGrid>();
-  const viewer = useRef<GridViewerHandle>(null);
-  const full = marks.length >= MAX_MARKS;
-  const latest = useRef({ tool, full });
-  latest.current = { tool, full };
-  // At the cap the tools are held off (`viewer.tsx` says why).
-  useEffect(() => {
-    if (full) setTool(null);
-  }, [full]);
-  useEffect(() => {
-    const keys = new Map(
-      TOOLS.map((t) => [t.shortcut.toLowerCase(), t.value === "navigate" ? null : t.value]),
-    );
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || event.isComposing) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement;
-      if (
-        target.isContentEditable ||
-        target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
-      )
-        return;
-      const next = keys.get(event.key.toLowerCase());
-      if (next === undefined) return;
-      // Esc with no tool out is the shell's; a tool's key at the cap does nothing.
-      if (next === null ? !latest.current.tool : latest.current.full) return;
-      event.preventDefault();
-      setTool(next);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
-  return {
-    tool,
-    setTool,
-    marks,
-    selected,
-    jump,
-    shown,
-    setShown,
-    viewer,
-    jumped: useCallback(() => setJump(undefined), []),
-    add: useCallback((mark: GridMark, volumeId: string, gridKey: string, taskId: string) => {
-      setMarks((had) =>
-        had.length >= MAX_MARKS
-          ? had
-          : [
-              ...had,
-              {
-                id: crypto.randomUUID(),
-                tag: nextTag(had, mark),
-                taskId,
-                gridKey,
-                mark: { volumeId, ...mark },
-              },
-            ],
-      );
-    }, []),
-    /** Selects a mark and aims the views at it; returns it. */
-    select: useCallback(
-      (id: string) => {
-        setSelected(id);
-        const mark = marks.find((m) => m.id === id);
-        const shape = mark && gridMark(mark.mark);
-        if (mark && shape)
-          setJump({ at: middleOf(shape), gridKey: mark.gridKey, taskId: mark.taskId });
-        return mark;
-      },
-      [marks],
-    ),
-    remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
-    /** Keeps only the marks on these grids. */
-    keep: useCallback((grids: ReadonlySet<string>) => {
-      setMarks((had) =>
-        had.every((m) => grids.has(m.gridKey)) ? had : had.filter((m) => grids.has(m.gridKey)),
-      );
-    }, []),
-    /** Drops the marks a message carried. */
-    drop: useCallback((ids: string[]) => {
-      if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));
-    }, []),
-    snapshot: useCallback(
-      // Undefined until the lazy viewer mounts: nothing to picture yet.
-      (maxBytes: number) => viewer.current?.snapshot(maxBytes) ?? Promise.resolve(undefined),
-      [],
-    ),
-  };
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

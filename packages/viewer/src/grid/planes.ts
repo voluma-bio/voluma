@@ -72,3 +72,46 @@ export const readPlane = (
 /** A whole level; meant for the coarsest, which is one or a few chunks. */
 export const readLevel = (base: string, path: string, signal: AbortSignal) =>
   request({ base, path, whole: true }, signal);
+
+/**
+ * A whole level, shared while held: the 3D pane, the contrast and tilted slices read one copy.
+ * Each mounted user holds it and releases it on unmount; the last release drops the level (and
+ * cancels its read if still waiting). The drop waits a microtask, so an effect that re-runs
+ * (release, then hold again) keeps the level instead of reading it again.
+ */
+export function holdLevel(base: string, path: string): { read: Promise<Plane>; release(): void } {
+  const key = `${base}${path}`;
+  let held = levels.get(key);
+  if (!held) {
+    const abort = new AbortController();
+    const entry: Held = {
+      read: request({ base, path, whole: true }, abort.signal),
+      users: 0,
+      abort,
+    };
+    // A failed read isn't kept, so the next user tries again.
+    entry.read.catch(() => {
+      if (levels.get(key) === entry) levels.delete(key);
+    });
+    levels.set(key, entry);
+    held = entry;
+  }
+  const entry = held;
+  entry.users++;
+  let released = false;
+  return {
+    read: entry.read,
+    release() {
+      if (released) return;
+      released = true;
+      entry.users--;
+      queueMicrotask(() => {
+        if (entry.users > 0 || levels.get(key) !== entry) return;
+        levels.delete(key);
+        entry.abort.abort();
+      });
+    },
+  };
+}
+type Held = { read: Promise<Plane>; users: number; abort: AbortController };
+const levels = new Map<string, Held>();

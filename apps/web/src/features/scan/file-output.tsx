@@ -1,0 +1,122 @@
+/**
+ * A file output in the panes' place: its own file as it reads (JSON laid out, Markdown rendered,
+ * an image shown, other text as is), beside the evidence it was checked on. The file comes from
+ * the run's outputs (`outputFileUrl`); of a large one only the first 200 KB is read and shown.
+ */
+import { useQuery } from "@tanstack/react-query";
+import { outputFileUrl } from "@voluma/api-client";
+import type { OutputVersion } from "@voluma/contracts/output-fold";
+import { Markdown } from "@voluma/run-view";
+import { ErrorState, LoadingState } from "@voluma/ui";
+
+/** The most of a file read and shown, in bytes. */
+const MAX_BYTES = 200_000;
+const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
+
+export function FileOutput({ runId, version }: { runId: string; version: OutputVersion }) {
+  const file = version.files[0];
+  const images = version.evidence.filter((e) => IMAGE.test(e.name));
+  const text = (
+    <div className="min-h-0 overflow-auto p-4">
+      {file ? (
+        <FileText runId={runId} path={`${version.path}/${file.name}`} name={file.name} />
+      ) : (
+        <p className="text-sm text-muted-foreground">This version has no file.</p>
+      )}
+    </div>
+  );
+  // With no images, the file takes the whole centre.
+  if (images.length === 0) return <div className="grid h-full min-h-0 bg-card">{text}</div>;
+  return (
+    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] bg-card">
+      {text}
+      <div className="grid min-h-0 content-start gap-3 overflow-auto bg-viewer-well p-3">
+        {images.map((e) => (
+          <figure key={e.name} className="grid gap-1">
+            <img
+              src={outputFileUrl(runId, `${version.path}/${e.name}`)}
+              alt={e.name}
+              loading="lazy"
+              className="w-full object-contain"
+            />
+            <figcaption className="font-mono text-xs text-viewer-chip-fg">
+              {e.name.replace(/^evidence\//, "")}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FileText({ runId, path, name }: { runId: string; path: string; name: string }) {
+  const url = outputFileUrl(runId, path);
+  const text = useQuery({
+    queryKey: ["output-file", runId, path],
+    enabled: !IMAGE.test(name),
+    staleTime: Number.POSITIVE_INFINITY,
+    queryFn: async ({ signal }) => {
+      const res = await fetch(url, { signal });
+      if (!res.ok)
+        throw new Error(res.status === 404 ? "The file isn't there." : `HTTP ${res.status}`);
+      return start(res);
+    },
+  });
+  if (IMAGE.test(name)) return <img src={url} alt={name} className="max-w-full" />;
+  if (text.isPending) return <LoadingState label={`Loading ${name}`} rows={6} />;
+  if (text.isError)
+    return <ErrorState title={`Couldn't load ${name}`}>{text.error.message}</ErrorState>;
+  const { text: shown, cut } = text.data;
+  let body = (
+    <pre className="font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">{shown}</pre>
+  );
+  if (/\.json$/i.test(name) && !cut)
+    try {
+      body = (
+        <pre className="font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {JSON.stringify(JSON.parse(shown), null, 2)}
+        </pre>
+      );
+    } catch {
+      // Not valid JSON: shown as written.
+    }
+  if (/\.md$/i.test(name)) body = <Markdown text={shown} className="text-sm" />;
+  return (
+    <div className="grid gap-2">
+      <h3 className="font-mono text-sm">{name}</h3>
+      {body}
+      {cut && (
+        <p className="text-xs text-muted-foreground">
+          The first {(MAX_BYTES / 1000).toLocaleString()} KB.{" "}
+          <a href={url} download className="underline">
+            Download the whole file
+          </a>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The file's text up to `MAX_BYTES`, read from the stream and no further. */
+async function start(res: Response): Promise<{ text: string; cut: boolean }> {
+  const reader = res.body!.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size <= MAX_BYTES) {
+    const next = await reader.read();
+    if (next.done) break;
+    chunks.push(next.value);
+    size += next.value.length;
+  }
+  const cut = size > MAX_BYTES;
+  if (cut) await reader.cancel();
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  // A cut can split a character, which decodes as U+FFFD at the end: dropped.
+  const text = new TextDecoder().decode(cut ? bytes.subarray(0, MAX_BYTES) : bytes);
+  return { text: cut ? text.replace(/\uFFFD$/, "") : text, cut };
+}

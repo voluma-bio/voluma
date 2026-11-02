@@ -1,6 +1,6 @@
 /**
  * A study (`/studies/:id/*`): loads it once for its two pages (the scans, and Compare), puts
- * "Studies › <study> (› Compare)" and "Next scan that needs you" in the header line, and the
+ * "Studies › <study> (› Compare)" and "Next sample that needs you" in the header line, and the
  * scan tree on the left side (this study open, the lab's other studies below). Pages read the
  * study through `useStudy` and render the centre, and a right side if they have one, beside the
  * tree. A study of one has no study page: it opens its scan. While a scan is still running the

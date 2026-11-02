@@ -81,7 +81,7 @@ export const Empty: Story = {
     tools: undefined,
     foot: undefined,
     children: (
-      <EmptyState title="Nothing needs you">Items appear as each scan's run finishes.</EmptyState>
+      <EmptyState title="Nothing needs you">Items appear as each sample's run finishes.</EmptyState>
     ),
   },
 };

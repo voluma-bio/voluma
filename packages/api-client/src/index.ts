@@ -9,6 +9,13 @@ import {
   type AcceptToCheckRequest,
   acceptToCheckRequestSchema,
   acceptToCheckResponseSchema,
+  deleteMarkResponseSchema,
+  type PlaceMarkRequest,
+  placeMarkRequestSchema,
+  placeMarkResponseSchema,
+  type SaveViewRequest,
+  saveViewRequestSchema,
+  saveViewResponseSchema,
 } from "@voluma/contracts/agent-events";
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
@@ -96,7 +103,7 @@ async function request(
     method = "GET",
     body,
     signal,
-  }: { method?: "GET" | "POST"; body?: unknown; signal?: AbortSignal } = {},
+  }: { method?: "GET" | "POST" | "DELETE"; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const post = method !== "GET";
   const res = await fetch(`/api${path}`, {
@@ -314,6 +321,44 @@ export async function acceptToCheck(runId: string, body: AcceptToCheckRequest): 
   );
 }
 
+/**
+ * Saves a view of an output (a run of the agent loop). It comes back on the run's event stream
+ * as `view.saved`: reconnect it to see it.
+ */
+export async function saveView(runId: string, body: SaveViewRequest): Promise<void> {
+  await read(
+    saveViewResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/views`, {
+      method: "POST",
+      body: saveViewRequestSchema.parse(body),
+    }),
+  );
+}
+
+/**
+ * Places or changes a mark of yours (a run of the agent loop); it comes back on the run's event
+ * stream as `mark.placed`.
+ */
+export async function placeMark(runId: string, body: PlaceMarkRequest): Promise<void> {
+  await read(
+    placeMarkResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/marks`, {
+      method: "POST",
+      body: placeMarkRequestSchema.parse(body),
+    }),
+  );
+}
+
+/** Takes a mark of yours away; it comes back on the stream as `mark.deleted`. */
+export async function deleteMark(runId: string, markId: string): Promise<void> {
+  await read(
+    deleteMarkResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/marks/${encodeURIComponent(markId)}`, {
+      method: "DELETE",
+    }),
+  );
+}
+
 /** Explicitly completes review of a revision with no open checks. */
 export async function markReviewed(
   runId: string,
@@ -355,12 +400,23 @@ export const runMessageSnapshotUrl = (runId: string, messageId: string) =>
 
 /**
  * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,
- * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG and PNG come back as
+ * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG, PNG, GIF and WebP come back as
  * images; anything else is an attachment. 404: unreadable run or no such file; 503: no file
  * storage configured. Only files under the run's own prefix, not the reference run's keys.
  */
 export const reviewFileUrl = (runId: string, sha256: string) =>
   `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
+
+/**
+ * Where the browser reads a file under a run's outputs (the agent loop): `path` is relative to
+ * `/outputs/`, an output version's `path` and a file name. Images come back as images, anything
+ * else as an attachment. 404: unreadable run or no such file.
+ */
+export const outputFileUrl = (runId: string, path: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/outputs/${path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
 
 /**
  * Where the browser reads a converted asset (zarr level or mesh file) of a run: `path` is

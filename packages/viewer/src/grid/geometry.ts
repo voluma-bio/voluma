@@ -1,7 +1,8 @@
-/** Published mesh geometry and its intersection with a source-voxel slice plane. */
+/** Published mesh geometry and its intersection with a slice pane's plane. */
 import { BufferAttribute, BufferGeometry, type Mesh } from "three";
 import { acceleratedRaycast, MeshBVH } from "three-mesh-bvh";
-import type { Axis, GridMesh, Zyx } from "./scene";
+import type { Slab } from "./frame";
+import type { GridMesh, Zyx } from "./scene";
 
 export async function loadMesh(m: GridMesh, signal: AbortSignal) {
   const response = await fetch(m.url, { signal });
@@ -29,8 +30,12 @@ export function makePickable(mesh: Mesh) {
   mesh.raycast = acceleratedRaycast;
 }
 
-/** Segments in source voxels, including boundary edges of coplanar surface patches. */
-export function surfaceTrace(geometry: BufferGeometry, axis: Axis, at: number, offset: Zyx): Zyx[] {
+/**
+ * Segments in source voxels where the mesh crosses the plane `slab` measures from (its zero),
+ * including boundary edges of coplanar surface patches (which only an untilted plane, exact on
+ * whole voxels, has).
+ */
+export function surfaceTrace(geometry: BufferGeometry, slab: Slab, offset: Zyx): Zyx[] {
   const positions = geometry.getAttribute("position");
   const indices = geometry.getIndex()!;
   const segments: Zyx[] = [];
@@ -45,28 +50,30 @@ export function surfaceTrace(geometry: BufferGeometry, axis: Axis, at: number, o
   };
   for (let i = 0; i < indices.count; i += 3) {
     const triangle = [vertex(i), vertex(i + 1), vertex(i + 2)];
-    const coplanar = triangle.every((p) => p[axis] === at);
+    const d = triangle.map(slab);
+    const coplanar = d.every((v) => v === 0);
     let hasEdge = false;
     for (let e = 0; e < 3; e++) {
       const next = (e + 1) % 3;
-      const a = triangle[e]!;
-      const b = triangle[next]!;
-      if (a[axis] !== at || b[axis] !== at) continue;
+      if (d[e] !== 0 || d[next] !== 0) continue;
       hasEdge = true;
       const j = indices.getX(i + e);
       const k = indices.getX(i + next);
       const key = `${Math.min(j, k)}/${Math.max(j, k)}`;
-      const edge = onPlane.get(key) ?? { a, b, coplanarFaces: 0 };
+      const edge = onPlane.get(key) ?? { a: triangle[e]!, b: triangle[next]!, coplanarFaces: 0 };
       if (coplanar) edge.coplanarFaces++;
       onPlane.set(key, edge);
     }
     if (hasEdge) continue;
     const hits: Zyx[] = [];
     for (let e = 0; e < 3; e++) {
-      const a = triangle[e]!;
-      const b = triangle[(e + 1) % 3]!;
-      if ((a[axis] <= at && b[axis] > at) || (b[axis] <= at && a[axis] > at)) {
-        const t = (at - a[axis]) / (b[axis] - a[axis]);
+      const next = (e + 1) % 3;
+      const da = d[e]!;
+      const db = d[next]!;
+      if ((da <= 0 && db > 0) || (db <= 0 && da > 0)) {
+        const a = triangle[e]!;
+        const b = triangle[next]!;
+        const t = da / (da - db);
         hits.push(a.map((v, k) => v + t * (b[k]! - v)) as unknown as Zyx);
       }
     }
@@ -77,12 +84,13 @@ export function surfaceTrace(geometry: BufferGeometry, axis: Axis, at: number, o
   return segments;
 }
 
-/** A ruler's part inside a one-source-voxel slice slab, never a projection from another slice. */
-export function sliceSegment(a: Zyx, b: Zyx, axis: Axis, at: number): [Zyx, Zyx] | null {
-  const delta = b[axis] - a[axis];
-  if (!delta) return Math.abs(a[axis] - at) <= 0.5 ? [a, b] : null;
-  const t0 = (at - 0.5 - a[axis]) / delta;
-  const t1 = (at + 0.5 - a[axis]) / delta;
+/** A segment's part inside the slice `slab` measures (within ½ of its plane), never a projection from another slice. */
+export function sliceSegment(a: Zyx, b: Zyx, slab: Slab): [Zyx, Zyx] | null {
+  const da = slab(a);
+  const delta = slab(b) - da;
+  if (!delta) return Math.abs(da) <= 0.5 ? [a, b] : null;
+  const t0 = (-0.5 - da) / delta;
+  const t1 = (0.5 - da) / delta;
   const lo = Math.max(0, Math.min(t0, t1));
   const hi = Math.min(1, Math.max(t0, t1));
   if (lo > hi) return null;

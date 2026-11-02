@@ -28,7 +28,7 @@ const scans: Scan[] = [
 const columns: TableColumn<Scan>[] = [
   {
     key: "scan",
-    header: "Scan",
+    header: "Sample",
     cell: (s) => <span className="font-mono whitespace-nowrap">{s.id}</span>,
   },
   { key: "knee", header: "Knee", cell: (s) => `${s.group}, ${s.knee} knee` },
@@ -55,7 +55,7 @@ const columns: TableColumn<Scan>[] = [
 const meta = {
   title: "Parts/Table",
   component: Table<Scan>,
-  args: { label: "Scans", columns, rows: scans, rowKey: (s: Scan) => s.id },
+  args: { label: "Samples", columns, rows: scans, rowKey: (s: Scan) => s.id },
 } satisfies Meta<typeof Table<Scan>>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -82,13 +82,13 @@ export const Grouped: Story = {
   args: {
     groupOf: (s) => s.group,
     selectedKey: "OA7-11",
-    rowDetail: () => <p className="m-0 text-sm text-fg-subtle">The scan's tasks open here.</p>,
+    rowDetail: () => <p className="m-0 text-sm text-fg-subtle">The sample's tasks open here.</p>,
   },
 };
 
 /** No rows: the table says what will fill it. */
 export const Empty: Story = {
-  args: { rows: [], empty: "Scans appear here once you add them to the study." },
+  args: { rows: [], empty: "Samples appear here once you add them to the study." },
 };
 
 /** Static rows: no link, no detail, no hover. */
@@ -102,7 +102,7 @@ export const Scrolls: Story = {
   args: {
     groupOf: (s) => s.group,
     rowLink: (s) => `#${s.id}`,
-    rowDetail: () => <p className="m-0 text-sm text-fg-subtle">The scan's tasks open here.</p>,
+    rowDetail: () => <p className="m-0 text-sm text-fg-subtle">The sample's tasks open here.</p>,
     columns: [
       ...columns,
       ...["Patella volume", "Medial osteophyte volume", "Tibial cortical thickness"].map(

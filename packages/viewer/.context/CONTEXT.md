@@ -55,7 +55,12 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
     └─► Grid3D ── readLevel (whole level) ──► volume rendering; meshes fetched once each
 ```
 
-- **Panes.** Axial holds array axis 0, coronal axis 2, sagittal axis 1 (DESIGN.md's axis colours).
+- **Panes.** Axial holds array axis 0, coronal axis 2, sagittal axis 1 (DESIGN.md's axis colours) in
+  `GridViewer`, the task review's. `QuadViewer`, the outputs review's, names planes by the grid's
+  axes (XY holds z, XZ y, YZ x) and colours them by the anatomy the caller gives per grid
+  (`planes`, from the base's catalog entry); without it they are uncoloured. Its views stay
+  mounted and move between CSS grid cells, so a chip swap, a layout change or full screen never
+  remounts a pane; the layout is the caller's, the seams the viewer's.
   Rows run down, so z runs down in every slice pane and in 3D (`camera.up` = −z).
 - **Levels.** A pane opens on the coarsest level and loads the level whose voxel still covers at
   least one device pixel at its zoom; the coarse picture shows meanwhile unless the finer one lands
@@ -70,8 +75,9 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   camera; a new `focus` voxel (a check's) moves the crosshair. A pane with no size (hidden) draws
   nothing; showing it resizes it, which draws, so a caller may keep a viewer mounted and hidden.
 - **Marks.** With `tool` set, left clicks and drags mark instead of moving the crosshair, and
-  `onMark` gets a `GridMark`: the contract's `Mark` (`messages.ts`) without `volumeId`, which the
-  caller adds from `ReviewGrid.imageId`. The caller holds the marks and passes them back as
+  `onMark` gets a `GridMark`: the contract's `MarkShape` (`agent-events.ts`, read-only), which a
+  task review's message turns into a `Mark` (`messages.ts`) with the `volumeId` the caller adds
+  from `ReviewGrid.imageId`. The caller holds the marks and passes them back as
   `ShownMark`s. Point: a click; on a slice the voxel under the pointer, in 3D the nearer of the
   first shown mesh (a see-through shell included) and the volume where it turns half opaque by
   `volume.ts`'s opacity (a CPU march of the shown byte texture, with the shader's trilinear
@@ -96,6 +102,41 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   finest level of at most 16 M voxels (`volume.ts`), as an 8-bit 3D texture between the window
   limits, ray-marched with gradient lighting in `--bone`. The meshes render first into a target
   with depth and each ray stops at it, so a structure inside the bone shows where it is.
+
+## Tilted planes, tools and saved views (`QuadViewer` only)
+
+The task review's panes never tilt; everything here is the outputs review's.
+
+- **Where a pane lies.** Each slice pane has a basis in the grid's mm, (z, y, x): `right`, `down`,
+  `normal` (`frame.ts`). On the grid's axes a pane reads whole slices from zarr as above. Tilted,
+  it is resliced on the CPU (`reslice.ts`) from one whole level shared with the 3D pane
+  (`holdLevel`, at most 16 M voxels): the image trilinear, overlays nearest. A whole level is
+  read once while anyone holds it and dropped when the last pane holding it unmounts or untilts;
+  nothing outlives the viewer. So a tilted pane is
+  softer than an untilted one at high zoom. Its counter is primed (′) on the nearest axis and steps
+  the grid's finest spacing along its normal; marks within half a step of the plane count as on it.
+- **Tilting by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
+  other two planes' lines; dragging one turns those two planes about this pane's normal (this pane
+  stays still).
+- **Align.** Targets come from the caller (`planeTargets`, `targets.ts`): a plane fitted (least
+  squares, `fitNormal`) through the vertices of every published surface whose catalog entry has
+  `fitsPlane` (mouse-oa: both growth-plate faces, so "GP"), and every other image grid's axes.
+  Aligning to a plane turns the pane nearest it onto it, the others following by Gram–Schmidt;
+  aligning to a grid takes its axes, flipped so no pane shows mirrored. The fitted plane also gives
+  the GP view, a fifth pane coloured as the nearest anatomy. GP is data, not a side effect of
+  picking it: whenever the layout shows GP (picked, carried from another grid, or a reopened saved
+  view) the plane is fitted; a grid with nothing to fit shows the view GP replaced in that slot. A target with no published surface is
+  listed as "Not traced yet". The fit uses each face's whole height field, rim included, so it can
+  differ by a few degrees from a fit inside the bone only (ce5a0f21: 9.97° against the mockup's 12.16°).
+- **Tools.** Beyond the task review's: a point may carry a note (typed in place) or a probe value
+  (the image under the cursor, from the pane's loaded level, `≈` when coarser than full
+  resolution); a line is two clicks or a drag; an angle is three clicks; an outline has no held
+  axis (its area by Newell's method, so it works on a tilted plane). All show in every pane and
+  in 3D. Only points, lines, boxes and outlines on the grid's axes become a contract `Mark`.
+- **Saved views.** `saved-view.ts` stores a view in `quad_view.py`'s `.view.json` keys where they
+  mean the same (`version` 2, `center_zyx`, `panes` with `normal`, `up`, `right` and `axis`,
+  `window`), plus `shown` and a `review` block (grid, aligned target, layout, each pane's zoom and
+  centre or 3D camera). `readView` refuses a view of another grid or one an agent drew.
 
 Correctness evidence: `compose.test.ts` pins where a cropped, downsampled overlay lands; worker
 planes matched `labels.npy` of OA6-1RK exactly on all three axes ([#188](https://github.com/voluma-bio/voluma/pull/188)).

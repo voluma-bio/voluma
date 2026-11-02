@@ -25,7 +25,7 @@ import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
 import { ArrowRight, RotateCcw, Send, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { describe, type YourMark } from "./marks-panel";
+import { describe, gridMark, messageMark, type YourMark } from "./marks-panel";
 
 /**
  * The box's text, kept in this tab's sessionStorage so a reload (by hand, or onto a new deploy)
@@ -166,7 +166,8 @@ export function useMessage({
     if (closed !== undefined || inFlight.current || (!answer && !text.trim())) return;
     inFlight.current = true;
     const note = text.trim();
-    const carried = !answer && subject ? marks : [];
+    // A mark a message can't carry (an angle) stays on the page.
+    const carried = !answer && subject ? marks.filter((m) => messageMark(m)) : [];
     const fields = answer
       ? go
         ? { taskId: answer.taskId, go: true as const, ...(note && { text: note }) }
@@ -175,7 +176,7 @@ export function useMessage({
           text: note,
           ...(subject && { taskId: subject.id }),
           ...(subject && itemId && { itemId }),
-          ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
+          ...(carried.length > 0 && { marks: carried.map((m) => messageMark(m)!) }),
         };
     // An answer is told apart by the offer it answers: a later offer for the same task is a new message.
     const fingerprint = JSON.stringify({
@@ -315,7 +316,8 @@ export function AiPanel({
                   {m.marks.length > 0 && (
                     <span className="flex flex-wrap gap-1">
                       {m.marks.map((mark, i) => {
-                        const { title, measure } = describe(mark);
+                        const shape = gridMark(mark);
+                        const { title, measure } = shape ? describe(shape) : { title: "Mark" };
                         return (
                           // biome-ignore lint/suspicious/noArrayIndexKey: a sent message's marks never change.
                           <Chip key={i}>

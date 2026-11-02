@@ -14,6 +14,7 @@ export { TaskInfo } from "./info";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
 export {
+  itemsOfVersion,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
@@ -24,6 +25,18 @@ export {
   shownOf,
   undrawn,
 } from "./outputs-model";
+export {
+  type GraphNode,
+  madeFromIt,
+  ROLE_WORD,
+  type RunGraph,
+  runGraph,
+  type TrailRow,
+  trailOf,
+  versionWords,
+  type Worker,
+  workersOf,
+} from "./outputs-trail";
 export { plainError, stoppedText } from "./run-error";
 export {
   type AgentNode,

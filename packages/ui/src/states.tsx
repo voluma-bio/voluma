@@ -12,7 +12,7 @@ import { StatusGlyph } from "./status-mark";
 export type EmptyStateProps = {
   /** What isn't here, e.g. "Nothing to check yet". */
   title: string;
-  /** What will fill it, e.g. "Items appear as each scan's run finishes." */
+  /** What will fill it, e.g. "Items appear as each sample's run finishes." */
   children?: ReactNode;
   className?: string;
 };
@@ -30,7 +30,7 @@ export type LoadingStateProps = {
   /** How many rows to hold; match what usually arrives. */
   rows?: number;
   density?: Density;
-  /** Spoken while loading, e.g. "Loading scans". */
+  /** Spoken while loading, e.g. "Loading samples". */
   label?: string;
   className?: string;
 };

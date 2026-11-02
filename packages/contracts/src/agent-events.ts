@@ -65,7 +65,7 @@ export const outputPublishedSchema = z
   .object({
     outputId: outputRefSchema,
     version: versionSchema,
-    /** The version's folder, relative to the run's prefix. */
+    /** The version's folder, relative to the run's `outputs/` (`versionPath`, r2.ts). */
     path: relativePathSchema,
     /** The first is the output's own file, the one out of date is judged by; the rest travel with it. A value has none. */
     files: z.array(versionFileSchema).min(1).optional(),
@@ -195,6 +195,17 @@ export const skillLoadedSchema = z.object({ name: nonEmpty, cause: nonEmpty });
 /** The researcher saved a view of an output; `view` is the `.view.json` format. Written by the API. */
 export const viewSavedSchema = z.object({ output: outputRefSchema, view: viewSchema });
 
+/**
+ * The researcher saves a view of an output: `POST /api/review/runs/:runId/views`, answered 200
+ * `{}`. The API writes `view.saved` as sent, by the caller. 404: a run the caller can't read, or an
+ * output it doesn't have; 403: an example run. Allowed while the run goes. At most
+ * `MAX_VIEW_BYTES` of JSON.
+ */
+export const saveViewRequestSchema = viewSavedSchema;
+export type SaveViewRequest = z.infer<typeof saveViewRequestSchema>;
+export const saveViewResponseSchema = z.object({});
+export const MAX_VIEW_BYTES = 64 * 1024;
+
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
 
 /**
@@ -222,6 +233,16 @@ const markShapeSchema = z.union([
   z.looseObject({ outline: z.object({ zyx: z.array(vec3), areaMm2: z.number() }) }),
 ]);
 
+/** A mark's shape as code holds it (the viewer's `GridMark`): read-only, the known keys only. */
+export type MarkShape = Known<z.infer<typeof markShapeSchema>>;
+
+/** `T` read-only throughout, without the index signature a loose object adds. */
+type Known<T> = T extends readonly unknown[]
+  ? { readonly [K in keyof T]: Known<T[K]> }
+  : T extends object
+    ? { readonly [K in keyof T as string extends K ? never : K]: Known<T[K]> }
+    : T;
+
 /**
  * A mark the researcher placed or changed, written by the API (`by` is the caller). The mark is
  * the researcher's, not an output. `id` is the client's: a later `mark.placed` with the same id
@@ -248,3 +269,19 @@ export const markPlacedSchema = z.looseObject({
   by: userIdSchema,
 });
 export const markDeletedSchema = z.object({ id: z.uuid(), by: userIdSchema });
+
+/**
+ * The researcher places a mark: `POST /api/review/runs/:runId/marks`, answered 200 `{}`. The API
+ * writes `mark.placed` with `by` the caller. 404: a run the caller can't read or an output it
+ * doesn't have; 403: an example run; 413: over `MAX_MARK_BYTES` of JSON. Allowed while the run goes.
+ */
+export const placeMarkRequestSchema = markPlacedSchema.omit({ by: true });
+export type PlaceMarkRequest = Known<z.infer<typeof placeMarkRequestSchema>>;
+export const placeMarkResponseSchema = z.object({});
+export const MAX_MARK_BYTES = 64 * 1024;
+
+/**
+ * Deletes a mark: `DELETE /api/review/runs/:runId/marks/:markId`, answered 200 `{}`. 404: a run
+ * the caller can't read, or a mark the log doesn't hold as the caller's; 403: an example run.
+ */
+export const deleteMarkResponseSchema = z.object({});

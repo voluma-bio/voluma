@@ -88,9 +88,9 @@ export {
   ShellPanel,
   type ShellPanelProps,
   type ShellSide,
+  useFoldWhile,
   useFullView,
   useOpenPanel,
-  useSideFold,
 } from "./shell/shell";
 export { SidePanel, type SidePanelProps, type SidePanelTab } from "./shell/side-panel";
 export {

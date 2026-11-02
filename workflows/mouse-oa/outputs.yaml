@@ -34,6 +34,7 @@
   kind: base
   name: Scan
   description: hu.npy from scan-intake, in HU, with the affine from hu.json
+  planes: { XY: axial, XZ: sagittal, YZ: coronal }
   expect:
     - Holder, padding and debris are set to air under a removal mask on the scan grid, and the scan
       is unchanged outside it; a piece that may be anatomy stays, with a To check item. Both are
@@ -44,6 +45,7 @@
   name: Aligned tibia grid
   description: the tibia resampled onto the oriented grid; the regions and surfaces below sit on it
   from: scan
+  planes: { XY: axial, XZ: coronal, YZ: sagittal }
   expect:
     - +U is medial on this knee, confirmed on the frame's QC montage against the fibula (lateral); a
       left knee flips the sign rule.
@@ -234,6 +236,7 @@
   description: traced once; the later tasks read it
   base: tibia-grid
   shape: surface
+  fitsPlane: { code: GP, name: the growth plate }
 
 - id: growth-plate-distal-face
   kind: overlay
@@ -241,6 +244,7 @@
   description: traced once; the later tasks read it
   base: tibia-grid
   shape: surface
+  fitsPlane: { code: GP, name: the growth plate }
 
 - id: under-plate-boundary
   kind: overlay

@@ -117,8 +117,8 @@ export function StudiesPage() {
   } else if (list.length === 0) {
     body = (
       <EmptyState title="No studies yet">
-        A study runs the workflow on your scans: one scan, or a whole study's with your sample
-        sheet. <Link to="/new">Start one</Link>.
+        A study runs the workflow on your {INPUT_WORD.many}: one {INPUT_WORD.one}, or a whole
+        study's with your sample sheet. <Link to="/new">Start one</Link>.
       </EmptyState>
     );
   } else {
