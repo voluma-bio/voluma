@@ -5,15 +5,17 @@ A file carries the `grid_id` of the grid it was traced on (indices mean nothing 
 curves use the schema of `region_from_curves.py` (core `regions-and-landmarks/SKILL.md`).
 """
 
+import itertools
 import json
 from pathlib import Path
 
+import numpy as np
 import sidecar
 from region_from_curves import surface_from_curves
 
 KEYS = (
     'grid_id', 'growth_plate_curves', 'growth_plate_distal_curves', 'under_plate_curves', 'articular_corrections',
-    'width_points_uvw', 'compartment_midpoint_u', 'growth_plate_mid_u', 'height_section_v', 'v_limits', 'plate_patches',
+    'width_points_uvw', 'compartment_midpoint_u', 'growth_plate_mid_u', 'height_section_v', 'v_limits', 'plate_patches', 'plate_stretches',
 )  # every key check_bounds covers: a script reads no other, so a misspelt optional key cannot silently fall back to its default
 
 
@@ -118,6 +120,23 @@ def check_bounds(ann, shape):
     if 'v_limits' in ann:
         for x in listof('v_limits', ann['v_limits'], 2, '[first V, last V] with two numbers'):
             scalar('v_limits', x, V, 'V', 'limit')
+    stretches = mapping('plate_stretches', ann.get('plate_stretches', {}), '{"<V>": [{"u": [first, last], "eroded": "<why>"}]}')
+    for k, runs in stretches.items():
+        try:
+            section = int(k)
+        except ValueError:
+            malformed('plate_stretches', f'integer section keys, got "{k}"')
+        inside('plate_stretches', 'V section', section, V, 'V')
+        for run in listof('plate_stretches', runs, None, f'a list of {{"u": [first, last]}} stretches on section {k}'):
+            mapping('plate_stretches', run, f'stretches as {{"u": [first, last], "eroded": "<why>"}} on section {k}')
+            if 'u' not in run:
+                malformed('plate_stretches', f'every stretch on section {k} to have "u": [first, last]')
+            listof('plate_stretches', run['u'], 2, '"u": [first, last] with two numbers')
+            for x in run['u']:
+                number('plate_stretches', x, '"u": [first, last] with two numbers')
+                inside('plate_stretches', f'section {k}: a U', x, U, 'U')
+            if 'eroded' in run and not (isinstance(run['eroded'], str) and run['eroded'].strip()):
+                malformed('plate_stretches', f'"eroded" on section {k} to say why the plate is gone, as a sentence')
     patches = mapping('plate_patches', ann.get('plate_patches', {}), '{"medial": {"u": [lo, hi], "v": [lo, hi]}, "lateral": {...}}')
     for side, patch in patches.items():
         mapping(f'plate_patches.{side}', patch, '{"u": [lo, hi], "v": [lo, hi]}')
@@ -142,3 +161,49 @@ def traced_surface(spec, key, shape):
         sidecar.fail(f'"{key}" needs curves on at least two coronal sections (V indices): trace more sections')
     H, *_, valid = surface_from_curves(spec, shape)
     return H, valid
+
+
+def cleared_stretches(ann, key, spec_path, shape, vox, on_bone):
+    """Refuse a flagged stretch (`plate_stretches`, from plate_faces.py) that the curves `key` leave unrepresented, and report the eroded ones.
+
+    A stretch is cleared when its section has a curve whose points inside the stretch are at most `max_gap_um` apart (counting the
+    points either side of it), or when the worker marked it "eroded". A section with a stretch must have a curve at all, which an
+    eroded one still needs on the remaining bone. Returns (eroded, record): `eroded`, bool (V, U): where the plate is marked
+    eroded on the sections either side along V (a face is linear in V between traced sections), and `record`, the dict the
+    script reports: the eroded stretches with the share of the tibia's width on their section, and the eroded share of the
+    footprint `on_bone` over the traced V range.
+    """
+    gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
+    slices = ann[key]['slices']
+    refused, eroded_runs = [], []
+    marked = {}  # V -> bool U array of the eroded stretches on that traced section
+    for k, runs in ann.get('plate_stretches', {}).items():
+        v = int(k)
+        pts = sorted(p[1] for p in slices.get(k, []))
+        for run in runs:
+            a, b = run['u']
+            if 'eroded' in run:
+                marked.setdefault(v, np.zeros(shape[2], bool))[a : b + 1] = True
+                eroded_runs.append({'v': v, 'u': [a, b], 'reason': run['eroded'], 'width_fraction': (b - a + 1) / max(on_bone[v].sum(), 1)})
+            if k not in slices:
+                refused.append(f'V={v}, U={a}..{b}: the section has no curve')
+            elif 'eroded' not in run:
+                edges = ([a] if not pts or pts[0] > a else []) + pts + ([b] if not pts or pts[-1] < b else [])
+                widest = max((q - p for p, q in itertools.pairwise(edges) if q > a and p < b), default=0)
+                if widest > gap:
+                    refused.append(f'V={v}, U={a}..{b}: points up to {widest * vox * 1000:.0f} um apart')
+    if refused:
+        shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more' if len(refused) > 6 else '')
+        sidecar.fail(f'"{key}" leaves {len(refused)} flagged stretch(es) of plate_stretches uncleared: {shown}. A flagged stretch is the plate '
+                     'the search could not follow: trace it densely (points at most the spec\'s max_gap_um apart; a straight line between '
+                     'two far points is an invented face), or add "eroded": "<why>" to the stretch where the plate is gone')
+    sections = sorted(int(k) for k in slices)
+    eroded = np.zeros(shape[1:], bool)
+    for v in range(sections[0], sections[-1] + 1):
+        lo = max(s for s in sections if s <= v)
+        hi = min(s for s in sections if s >= v)
+        eroded[v] = marked.get(lo, False) & marked.get(hi, False) if lo != hi else marked.get(lo, False)
+    eroded &= on_bone
+    rows = on_bone[sections[0] : sections[-1] + 1]
+    record = {'eroded_stretches': eroded_runs, 'eroded_fraction': float(eroded[sections[0] : sections[-1] + 1].sum() / max(rows.sum(), 1))}
+    return eroded, record

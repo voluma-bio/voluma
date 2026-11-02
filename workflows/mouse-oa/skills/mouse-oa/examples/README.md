@@ -31,14 +31,15 @@ middle of the medial and the lateral compartment of the plateau.
 
 `plate_faces.py` proposes both faces of the growth plate for the iioc task, and the metaphyseal task checks them again. A worker
 checks the proposal against these: each proposed face lies on the plate's two edges, a few voxels apart, on every section; every
-flagged stretch (red ticks in `qc-plate-<n>.jpg`) has your own dense points, traced on a zoomed view, or a To check item; no
-straight line crosses a flagged stretch. The plate is a thin sheet of lower density between denser bone, and it is not
+flagged stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate_stretches`) has your own dense points, traced on a zoomed view,
+or is marked eroded where the plate is gone; no straight line crosses a flagged stretch. `iioc.py` stops on a stretch left
+sparse; a To check item never replaces the retrace. The plate is a thin sheet of lower density between denser bone, and it is not
 always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong.
 
 **Eroded plate.** `iioc/eroded-plate-oa6-1rk-v231.jpg`: OA6-1RK, coronal section V=231, the lab's reading of the plate, traced by Jimmy.
 Left of U~296 two thin lines run along the plate, some 20 to 90 µm apart; to the right the plate has been destroyed, the two lines meet
-and the face follows the remaining bone. Trace what remains, say so, and raise a To check item naming the stretch ("V=231, U 296 to
-338: plate eroded, faces traced on the remaining bone"); a search for a plate there finds another structure. OA6-1RK is eroded
+and the face follows the remaining bone. Trace what remains with both faces, mark the stretch eroded in `plate_stretches` with a reason, and
+raise a To check item naming it ("V=231, U 296 to 338: plate eroded, faces traced on the remaining bone"); a search for a plate there finds another structure. OA6-1RK is eroded
 (bone destruction, possibly age-related) and is not representative: OA6-2RK's plate is the typical one, and a thickness measured
 on OA6-1RK is not a thickness of the plate.
 
@@ -60,7 +61,8 @@ cortex all round: on a coronal section it is a band in the marrow under the plat
 wall; on an axial slice it is the marrow space with a clear margin to the cortex. The cortex mask is the wall
 only, and never reaches the fibula.
 The distal face it starts from is the one `plate_faces.py` proposed, checked and retraced where flagged or wrong (see iioc,
-above); where the plate is eroded the two faces meet and ROI-3 is measured from the remaining bone, with a To check item.
+above); where the plate is eroded and the stretch marked so, the two faces meet, `metaphysis_roi.py` accepts that, ROI-3 starts below the
+remaining bone, and the result record lists the eroded stretches and their share: report them with the To check item.
 
 ## cortical
 
