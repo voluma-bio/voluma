@@ -138,7 +138,13 @@ interface AgentLoopOptions {
   /** Runs an approved call's tool, not gated, as main's thread (`tools/registry.ts` `approvedTool`). */
   approved(call: ApprovedCall, api: AgentsApi): Promise<ToolResult>;
   /** Leaves `outputId` to the researcher after a declined keep or redo; false when there is nothing to leave (`tools/keep-output.ts`). */
-  leave(api: AgentsApi, threadId: string, eventId: string, outputId: string): Promise<boolean>;
+  leave(
+    api: AgentsApi,
+    threadId: string,
+    eventId: string,
+    outputId: string,
+    ended: { by: "declined" | "withdrawn"; labels: readonly string[] },
+  ): Promise<boolean>;
   /** Copies a researcher's screenshot (its stored key) into main's `/work` folder, and returns the path main reads; undefined when the file is gone. */
   stageScreenshot(snapshotKey: string): Promise<string | undefined>;
   /** The skill block (`prompts.ts` `skillBlock`) for a skill of the run's snapshot, if it has one. */
@@ -251,7 +257,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const jobs = approvalJobs({
     recorder,
     approved: (call) => o.approved(call, api),
-    leaveOutput: (threadId, eventId, outputId) => o.leave(api, threadId, eventId, outputId),
+    leaveOutput: (threadId, eventId, outputId, ended) =>
+      o.leave(api, threadId, eventId, outputId, ended),
     signal: o.signal,
     nudge: shell.nudge,
   });
@@ -799,6 +806,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     await recorder.flush(); // a thread's end is stored before it is read
     const d = derive();
     if (d.rootEnded) {
+      // A close withdraws the open requests in the step that ends the run: their outputs are left now.
+      if (await jobs.leave(d)) return "acted";
       // The run is over: main's plan, and the notes of workers it ended without their own close.
       for (const r of d.records.values()) await o.keepNotes({ name: r.name, role: r.place });
       return "done";

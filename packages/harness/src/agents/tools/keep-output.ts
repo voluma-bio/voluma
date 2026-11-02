@@ -48,6 +48,9 @@ const inputSchema = z.object({
     ),
 });
 
+/** Characters of main's reason shown in the researcher's summary of a keep. */
+const REASON_CHARS = 120;
+
 /** The refusal for an id that cannot be kept, or undefined. */
 function keepRefusal(deps: OutputToolDeps, id: string): string | undefined {
   const o = foldOf(deps).byId.get(id);
@@ -102,15 +105,19 @@ async function keep(
 }
 
 /**
- * The researcher declined a keep or redo of `id`: it is kept as it is and left to them, with one
- * To check item saying what changed beneath it and that nobody has re-checked it. Called by the
- * loop inside its step, with the thread that made the call; a repeat finds the event by `eventId`.
+ * A keep or redo of `id` (an output, never a label: the caller resolves a label to its map) ended
+ * without running: the researcher declined it, or the run closed with it withdrawn. The output is
+ * kept as it is and left to them, with one To check item saying what changed beneath it and that
+ * nobody has re-checked it; `labels` are the names of the label overlays the call named, which
+ * the item lists. Called by the loop inside its step, with the thread that made the call; a
+ * repeat finds the event by `eventId`.
  */
 export async function leaveToResearcher(
   deps: OutputToolDeps,
   threadId: string,
   eventId: string,
   id: string,
+  ended: { by: "declined" | "withdrawn"; labels: readonly string[] },
 ): Promise<boolean> {
   if (eventById(deps, eventId)) return false;
   const fold = foldOf(deps);
@@ -124,8 +131,13 @@ export async function leaveToResearcher(
   const why = stale
     ? `Made from ${stale.id} v${stale.version}, since replaced by v${fold.byId.get(fold.labels.get(stale.id) ?? stale.id)?.latest?.version}; `
     : "Something it was made from changed; ";
+  const what =
+    ended.by === "declined"
+      ? "the AI's keep or redo was declined"
+      : "the AI's keep or redo was withdrawn when the run closed";
+  const names = ended.labels.length > 0 ? `${ended.labels.join(", ")}: ` : "";
   await keep(deps, threadId, eventId, id, { reason: "left to the researcher" }, [
-    { title: `${why}the AI's keep or redo was declined, so this has not been re-checked.` },
+    { title: `${names}${why}${what}, so this has not been re-checked.` },
   ]);
   return true;
 }
@@ -148,8 +160,12 @@ export function keepOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           }
         }),
       outputs: (input) => input.ids,
-      summary: (input, titleOf) =>
-        `Keep ${input.ids.map(titleOf).join(", ")} as ${input.ids.length === 1 ? "it is" : "they are"}: ${input.reason}.`,
+      // Short: the researcher reads it on a card; main's full reason stays in the stored call.
+      summary: (input, titleOf) => {
+        const reason = input.reason.replace(/\s+/g, " ").trim();
+        const line = reason.length > REASON_CHARS ? `${reason.slice(0, REASON_CHARS)}…` : reason;
+        return `Keep ${input.ids.map(titleOf).join(", ")} as ${input.ids.length === 1 ? "it is" : "they are"}: ${line}`;
+      },
     },
     execute: ({ ids, reason, toCheck }, ctx) =>
       result(() =>

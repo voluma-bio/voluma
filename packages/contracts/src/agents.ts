@@ -468,14 +468,14 @@ export type ApprovalRecord = Payload<"approval.requested"> & {
   threadId: string;
   /** The researcher's answer (`<request id>:answer`), if given; `at` is its position in the log. */
   answer?: { kind: "given" | "declined"; text: string; at: number };
-  /** `<request id>:settled` is stored. */
-  settled: boolean;
+  /** `<request id>:settled`, if stored: how the call ended, and where in the log. */
+  settled?: { outcome: "done" | "refused" | "withdrawn"; at: number };
 };
 
 /** Every `approval.requested`, in log order, with its answer and whether it is settled. `agentLog` holds it as `approvals`. */
 export function approvalRecords(events: readonly RunEvent[]): ApprovalRecord[] {
   const answers = new Map<string, NonNullable<ApprovalRecord["answer"]>>();
-  const settled = new Set<string>();
+  const settled = new Map<string, NonNullable<ApprovalRecord["settled"]>>();
   for (const [at, e] of events.entries()) {
     if (e.type === "approval.given" || e.type === "approval.declined")
       answers.set(e.id, {
@@ -483,18 +483,19 @@ export function approvalRecords(events: readonly RunEvent[]): ApprovalRecord[] {
         text: e.payload.text ?? "",
         at,
       });
-    else if (e.type === "approval.settled") settled.add(e.id);
+    else if (e.type === "approval.settled") settled.set(e.id, { outcome: e.payload.outcome, at });
   }
   return events.flatMap((e) => {
     if (e.type !== "approval.requested") return [];
     const answer = answers.get(approvalAnswerId(e.id));
+    const done = settled.get(approvalSettledId(e.id));
     return [
       {
         requestId: e.id,
         threadId: e.threadId,
         ...e.payload,
         ...(answer && { answer }),
-        settled: settled.has(approvalSettledId(e.id)),
+        ...(done && { settled: done }),
       },
     ];
   });

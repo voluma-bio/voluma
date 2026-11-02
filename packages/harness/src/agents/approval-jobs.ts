@@ -32,7 +32,11 @@ const ATTEMPTS = 3;
 export interface ApprovalJobs {
   /** Starts the next approved call that has no job running; true when one started. */
   start(d: AgentLog): boolean;
-  /** Leaves the outputs a declined call named, and that were undecided when it was declined, to the researcher; true when one was left. */
+  /**
+   * A call that ended without running (declined, or withdrawn when the run closed) leaves the
+   * outputs it named that were undecided at that point in the log to the researcher, a label
+   * overlay as its map, once. True when one was left.
+   */
   leave(d: AgentLog): Promise<boolean>;
   /** The failure of storing an outcome, for the step to throw. */
   failure(): unknown;
@@ -42,14 +46,22 @@ export function approvalJobs(o: {
   recorder: Recorder;
   approved(call: ApprovedCall): Promise<ToolResult>;
   /** Leaves `outputId` to the researcher (`tools/keep-output.ts`); false when there is nothing to leave. */
-  leaveOutput(threadId: string, eventId: string, outputId: string): Promise<boolean>;
+  leaveOutput(
+    threadId: string,
+    eventId: string,
+    outputId: string,
+    ended: { by: "declined" | "withdrawn"; labels: readonly string[] },
+  ): Promise<boolean>;
   signal?: AbortSignal;
   nudge(): void;
 }): ApprovalJobs {
   const running = new Set<string>();
   const attempts = new Map<string, number>();
-  /** The outputs undecided when each declined request was answered: fixed by the log, so found once. */
-  const undecidedThen = new Map<string, Set<string>>();
+  /** The outputs undecided where each request ended, by the map each label names: fixed by the log, so found once. */
+  const endState = new Map<
+    string,
+    { labels: ReadonlyMap<string, string>; undecided: Set<string> }
+  >();
   let failure: unknown;
 
   const settle = (a: ApprovalRecord, outcome: "done" | "refused", text: string) =>
@@ -81,6 +93,14 @@ export function approvalJobs(o: {
     }
   }
 
+  /** Where the request ended without running, as a log position, and how. */
+  const endedAt = (a: ApprovalRecord) =>
+    a.answer?.kind === "declined"
+      ? { by: "declined" as const, at: a.answer.at }
+      : a.settled?.outcome === "withdrawn"
+        ? { by: "withdrawn" as const, at: a.settled.at }
+        : undefined;
+
   return {
     start(d) {
       const next = running.size === 0 ? givenApprovals(d.approvals)[0] : undefined;
@@ -91,24 +111,27 @@ export function approvalJobs(o: {
     },
     async leave(d) {
       for (const a of d.approvals) {
-        if (a.answer?.kind !== "declined") continue;
-        let then = undecidedThen.get(a.requestId);
-        if (!then) {
-          then = new Set(
-            outputsFold(o.recorder.events().slice(0, a.answer.at + 1))
-              .outputs.filter((x) => x.undecided)
-              .map((x) => x.id),
-          );
-          undecidedThen.set(a.requestId, then);
+        const end = endedAt(a);
+        if (!end) continue;
+        let state = endState.get(a.requestId);
+        if (!state) {
+          const fold = outputsFold(o.recorder.events().slice(0, end.at + 1));
+          state = {
+            labels: fold.labels,
+            undecided: new Set(fold.outputs.filter((x) => x.undecided).map((x) => x.id)),
+          };
+          endState.set(a.requestId, state);
         }
+        // The labels named, by the map each is part of.
+        const byMap = new Map<string, string[]>();
         for (const id of a.outputs ?? []) {
-          const eventId = approvalLeftId(a.requestId, id);
-          if (
-            then.has(id) &&
-            !d.written.has(eventId) &&
-            (await o.leaveOutput(a.threadId, eventId, id))
-          )
-            return true;
+          const map = state.labels.get(id) ?? id;
+          byMap.set(map, [...(byMap.get(map) ?? []), ...(map === id ? [] : [id])]);
+        }
+        for (const [map, labels] of byMap) {
+          const eventId = approvalLeftId(a.requestId, map);
+          if (!state.undecided.has(map) || d.written.has(eventId)) continue;
+          if (await o.leaveOutput(a.threadId, eventId, map, { by: end.by, labels })) return true;
         }
       }
       return false;
