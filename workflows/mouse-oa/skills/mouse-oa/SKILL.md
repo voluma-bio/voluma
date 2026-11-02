@@ -3,6 +3,7 @@ name: mouse-oa
 description: >
   The mouse knee osteoarthritis workflow: the lab's 28 standard µCT parameters (patella, joint mineralization,
   tibial IIOC and trabecular regions, cortical thickness, distal femur). Read first in every mouse-oa run.
+companions: [microct-core]
 ---
 
 # Mouse OA workflow
