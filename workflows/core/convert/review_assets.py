@@ -245,7 +245,7 @@ def main():
             generation = cached / uuid.UUID((cached / 'ready').read_text().strip()).hex
             text = (generation / 'manifest.json').read_text()
             ready = json.loads(text)
-        except (FileNotFoundError, ValueError):
+        except (OSError, ValueError):  # a cache problem must not fail the run
             ready = {}
         if (ready.get('sourceSha256') == digest and ready.get('converterVersion') == VERSION
                 and ready.get('mode') == mode):

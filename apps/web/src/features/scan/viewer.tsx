@@ -43,7 +43,6 @@ export function TaskViewer({
   onMark,
   onShown,
   viewer,
-  onRetry,
 }: {
   runId: string;
   revision: Revision;
@@ -64,8 +63,6 @@ export function TaskViewer({
   /** The mounted task and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
   viewer: Ref<GridViewerHandle>;
-  /** Refetch the review when converting the scan failed. */
-  onRetry?: () => void;
 }) {
   const [labels, setLabels] = useState(false);
   const grid = useMemo(
@@ -178,7 +175,7 @@ export function TaskViewer({
       {grid.state !== "ready" && (
         <div className="grid h-full place-content-center p-6">
           {grid.state === "failed" ? (
-            <ErrorState title={grid.message} onRetry={onRetry} />
+            <ErrorState title={grid.message} />
           ) : (
             <div role="status">
               <EmptyState title={grid.state === "preparing" ? "Preparing the views" : "No views"}>
