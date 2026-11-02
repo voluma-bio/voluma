@@ -18,9 +18,15 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { Harness } from "@voluma/contracts/ids";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
+import {
+  type AgentsDefinition,
+  OLDER_VERSION_MESSAGE,
+  type WorkflowDefinition,
+} from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
-import { agentsWire } from "./agents/wire";
+import type { UserSender } from "./adapters/pi/start-thread";
+import { type AgentsWireOptions, agentsWire } from "./agents/wire";
+import { BashRuntime } from "./bash-runtime";
 import { errorText } from "./error-text";
 import type { SandboxLayout } from "./layout";
 import { runLock } from "./loop-shell";
@@ -39,7 +45,10 @@ import type { PlanTask } from "./task-runtime";
 import { tasksWire } from "./tasks-wire";
 import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
-import { threads } from "./threads";
+import { type Threads, threads } from "./threads";
+
+/** The sender of a background command's notices. */
+const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
 export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
 
@@ -49,7 +58,7 @@ const WIND_DOWN_MS = 5_000;
 /** What `prepare` returns: the workflow and what depends on its roles. */
 export interface Prepared {
   /** The role files, skills and task files of the run's workflow snapshot. */
-  definition: WorkflowDefinition;
+  definition: WorkflowDefinition | AgentsDefinition;
   /** The task loop's plan computed from the user's selection (the main agent may change it); empty for the agent loop. */
   plan: readonly PlanTask[];
   /**
@@ -156,6 +165,20 @@ export function pinOf(runId: string, log: readonly RunEvent[]): Pin | undefined 
   return { image: first.payload.sandboxImage, harness: first.payload.harness ?? "tasks" };
 }
 
+/** The loop the run is pinned to, with its half of the wiring; the definition is the loop's own kind. */
+function wireOf(
+  harness: Harness,
+  o: Omit<AgentsWireOptions, "definition"> & { definition: Prepared["definition"] },
+) {
+  const { definition } = o;
+  if (harness === "agents") {
+    if (!("outputCatalog" in definition)) throw new Error("an agents run loaded a task workflow");
+    return { harness: "agents", ...agentsWire({ ...o, definition }) } as const;
+  }
+  if (!("files" in definition)) throw new Error("a tasks run loaded an agents workflow");
+  return { harness: "tasks", ...tasksWire({ ...o, definition }) } as const;
+}
+
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, signal: cutOff } = options;
   const rootThreadId = threadIdOf(runId, ROOT_NAME);
@@ -179,10 +202,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       definition,
       gateway: options.gateway !== undefined,
     };
-    const wire =
-      options.harness === "agents"
-        ? ({ harness: "agents", ...agentsWire(wireOptions) } as const)
-        : ({ harness: "tasks", ...tasksWire(wireOptions) } as const);
+    const wire = wireOf(options.harness, wireOptions);
     // The sandboxes of the run: one per thread, and the review-asset converter's.
     const sandboxLayout = (id: string): SandboxLayout =>
       id === CONVERT ? wire.convert : wire.sandboxOf(id);
@@ -242,24 +262,50 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       ...(options.previousClaim && { after: options.previousClaim }),
       ...(reopened && { reopened }),
     });
-    const pool = threads(
+    const bash = new BashRuntime({
+      recorder,
+      deliver: (id, text) => running.send(id, text, BASH_NOTICE),
+      cutOff,
+      log: options.log,
+    });
+    /** A thread whose sandbox the run is done with: its commands stop, then the sandbox goes. */
+    const release = (id: string) =>
+      bash
+        .release(id)
+        .then(() => session.release(id))
+        .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`));
+    const running = threads(
       {
         recorder,
         history: withImageRefs(options.history, options.files, runId, wire.nameOf),
         sandbox: (id) => session.get(id),
-        release: (id) =>
-          session
-            .release(id)
-            .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`)),
+        // Each end of a task thread releases its sandbox; an agent keeps its sandbox between
+        // turns (the idle timeout ends it) and is released when it really ends.
+        release: (id) => (wire.keepsSandbox(id) ? Promise.resolve() : release(id)),
       },
       loopSignal,
     );
+    // An input to a thread that was not running carries the notices it missed.
+    const pool: Threads = {
+      ...running,
+      start(spec) {
+        const handle = running.start(spec);
+        if (spec.input) {
+          for (const text of bash.takeNotices(spec.threadId)) handle.send(text, BASH_NOTICE);
+        }
+        return handle;
+      },
+    };
+    // Before any thread resumes: the commands the last claim left running are over.
+    await bash.endCutOff();
     const shared = {
       ...options,
       rootThreadId,
       definition,
       model: prepared.model,
       session,
+      bash,
+      release,
       pool,
       section: runLock(),
       signal: loopSignal,

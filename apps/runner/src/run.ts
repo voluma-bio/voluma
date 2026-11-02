@@ -429,7 +429,7 @@ async function claimBody(
       };
       return {
         definition,
-        plan: harness === "agents" ? [] : computePlan(definition.files, run.selectedOutputs).tasks,
+        plan: "files" in definition ? computePlan(definition.files, run.selectedOutputs).tasks : [],
         model: (role, recorded) => ({
           model: threadModel(setupOf(role).model, recorded),
           thinkingLevel: setupOf(role).thinkingLevel,

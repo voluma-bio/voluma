@@ -3,9 +3,12 @@
  * its run is pinned to; the task loop's list is `tools/registry.ts`, and `report_output` means
  * something else there. `buildAgentTools` builds exactly the tools a role names for one thread.
  */
+
+import type { BashRuntime } from "../../bash-runtime";
 import type { ThreadLayout } from "../../layout";
 import type { Files } from "../../ports/files";
 import { bashTool } from "../../tools/bash";
+import { bashManageTool } from "../../tools/bash-manage";
 import { segmentSamTool } from "../../tools/segment-sam";
 import type { Tool } from "../../tools/tool";
 import { type AgentsApi, coordinationTools } from "./coordination";
@@ -16,6 +19,7 @@ import { reportOutput } from "./report-output";
 
 export const AGENT_TOOL_NAMES = [
   "bash",
+  "bash_manage",
   "read",
   "segment_sam",
   "message",
@@ -28,7 +32,8 @@ export const AGENT_TOOL_NAMES = [
 ] as const;
 
 const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) => Tool> = {
-  bash: ({ layout }) => bashTool(layout, true),
+  bash: ({ layout, bash }) => bashTool(layout, true, bash),
+  bash_manage: ({ bash }) => bashManageTool(bash),
   segment_sam: ({ layout }) => segmentSamTool(layout),
   read: ({ layout, files }, names) =>
     readTool({ layout, files, hasSandbox: names.includes("bash") }),
@@ -37,6 +42,7 @@ const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) 
 export interface AgentToolDeps {
   layout: ThreadLayout;
   files: Files;
+  bash: BashRuntime;
   api: AgentsApi;
   outputs: OutputToolDeps;
 }

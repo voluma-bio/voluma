@@ -4,10 +4,12 @@
  * a name it does not know. Which tools a role holds is its file's `tools` (`workflows/core/agents/`);
  * the task runtime and the main tools refuse a call by a thread of the wrong kind.
  */
+import type { BashRuntime } from "../bash-runtime";
 import type { ThreadLayout } from "../layout";
 import type { Files } from "../ports/files";
 import type { TaskRuntime } from "../task-runtime";
 import { bashTool } from "./bash";
+import { bashManageTool } from "./bash-manage";
 import { type MainDeps, mainTools } from "./main-tools";
 import { readTool } from "./read";
 import { segmentSamTool } from "./segment-sam";
@@ -18,6 +20,8 @@ import { viewImageTool } from "./view-image";
 /** What a tool factory may use; a tool that needs more adds its field here. */
 export interface ToolDeps {
   layout: ThreadLayout;
+  /** The claim's background commands. */
+  bash: BashRuntime;
   /** The run's bucket, read and written host-side. */
   files: Files;
   runtime: TaskRuntime;
@@ -28,6 +32,7 @@ export interface ToolDeps {
 /** Every tool name a role file may list. */
 export const TOOL_NAMES = [
   "bash",
+  "bash_manage",
   "checkpoint",
   "report_output",
   "submit_task",
@@ -51,12 +56,10 @@ export const TOOL_NAMES = [
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 
-/** The tools that need only the thread's own layout and the run's files; both loops hold them. */
-export const sharedFactories: Record<
-  string,
-  (deps: Pick<ToolDeps, "layout" | "files">, names: readonly string[]) => Tool
-> = {
-  bash: ({ layout }, names) => bashTool(layout, names.includes("read")),
+/** The tools that need only the thread's own layout and the run's files. */
+const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => Tool> = {
+  bash: ({ layout, bash }, names) => bashTool(layout, names.includes("read"), bash),
+  bash_manage: ({ bash }) => bashManageTool(bash),
   view_image: ({ layout, files }, names) =>
     viewImageTool({ layout, files, hasSandbox: names.includes("bash") }),
   segment_sam: ({ layout }) => segmentSamTool(layout),
@@ -66,7 +69,14 @@ export const sharedFactories: Record<
     readTool({ layout, files, name: "read_file", hasSandbox: names.includes("bash") }),
 };
 
-export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
+export function buildTools(roleNames: readonly string[], deps: ToolDeps): Tool[] {
+  // A role that holds `bash` holds `bash_manage`: `bash` backgrounds a command, and the agent must be
+  // able to wait for it. A run's role files are its snapshot, so one from before `bash_manage`
+  // lacks the name; a resumed thread is told of the added tool. DELETE once no run's snapshot lacks it.
+  const names =
+    roleNames.includes("bash") && !roleNames.includes("bash_manage")
+      ? [...roleNames, "bash_manage"]
+      : roleNames;
   // The task and main tools are built once for the thread, not once per name.
   const coordination: Record<string, Tool> = {
     ...taskTools(deps.runtime, deps.main.agents.changed),
@@ -75,8 +85,8 @@ export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
   return names.map((name) => {
     const tool = Object.hasOwn(coordination, name)
       ? coordination[name]
-      : Object.hasOwn(sharedFactories, name)
-        ? sharedFactories[name]?.(deps, names)
+      : Object.hasOwn(factories, name)
+        ? factories[name]?.(deps, names)
         : undefined;
     if (!tool) throw new Error(`tool "${name}" is not registered`);
     return tool;

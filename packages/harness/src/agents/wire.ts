@@ -4,7 +4,9 @@
  * loop on the shared shell's pool and lock. Task-loop wiring is `tasks-wire.ts`.
  */
 import { agentLog } from "@voluma/contracts/agents";
-import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import { renderFinalOutputs } from "@voluma/contracts/output-files";
+import type { AgentsDefinition } from "@voluma/workflow/definition";
+import type { BashRuntime } from "../bash-runtime";
 import type { ThreadLayout } from "../layout";
 import { runLayout } from "../layout";
 import type { Section } from "../loop-shell";
@@ -15,7 +17,7 @@ import type { ModelSetup, ProviderError } from "../run-loop";
 import type { SandboxSession } from "../sandbox-session";
 import type { Threads } from "../threads";
 import { type AgentLoopConfig, agentLoop, interruptedResult } from "./loop";
-import { firstMessageOf, systemPromptOf } from "./prompts";
+import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
 import { buildAgentTools } from "./tools/registry";
@@ -25,7 +27,7 @@ export interface AgentsWireOptions {
   inputId: string;
   inputPrefix: string;
   recorder: Recorder;
-  definition: WorkflowDefinition;
+  definition: AgentsDefinition;
   /** Whether a gateway is configured (`segment_sam` is held only where it can be used). */
   gateway: boolean;
 }
@@ -67,7 +69,12 @@ export function agentsWire(o: AgentsWireOptions) {
       return forAgent(r.name, r.place);
     },
     nameOf: (threadId: string) => recordOf(threadId).name,
-    run: (r: AgentsRun) => runAgents(r, forAgent),
+    /** An agent keeps its sandbox between turns; only one that has ended gives it up. */
+    keepsSandbox: (threadId: string) => {
+      const end = agentLog(recorder.events()).records.get(threadId)?.end?.status;
+      return end !== "closed" && end !== "cancelled";
+    },
+    run: (r: AgentsRun) => runAgents({ ...r, definition }, forAgent),
   };
 }
 
@@ -78,7 +85,6 @@ export interface AgentsRun {
   runId: string;
   rootThreadId: string;
   recorder: Recorder;
-  definition: WorkflowDefinition;
   selectedOutputs: readonly string[] | undefined;
   notes: string | undefined;
   model(role: string, recorded: string | undefined): ModelSetup;
@@ -87,19 +93,20 @@ export interface AgentsRun {
   files: Files;
   publish: Publish;
   session: SandboxSession;
+  bash: BashRuntime;
+  /** Releases a thread's commands and sandbox. */
+  release(threadId: string): Promise<void>;
   pool: Threads;
   section: Section;
   signal: AbortSignal;
 }
 
 async function runAgents(
-  o: AgentsRun,
+  o: AgentsRun & { definition: AgentsDefinition },
   forAgent: (name: string, role: "main" | "worker") => ThreadLayout,
 ): Promise<void> {
   const { definition, recorder } = o;
   const catalog = definition.outputCatalog;
-  if (!catalog)
-    throw new Error("this workflow has no outputs.yaml, so the agent loop cannot run it");
   const files = runFiles({ runId: o.runId, recorder, files: o.files, signal: o.signal });
   await agentLoop({
     runId: o.runId,
@@ -111,6 +118,8 @@ async function runAgents(
     selectedOutputs: o.selectedOutputs,
     skills: definition.skills.map((s) => s.name),
     runFiles: files,
+    bash: o.bash,
+    release: o.release,
     providerError: o.providerError,
     config: o.config,
     signal: o.signal,
@@ -118,15 +127,30 @@ async function runAgents(
       const layout = forAgent(agent.name, agent.role);
       const recorded = api.log().records.get(agent.id)?.model;
       const setup = o.model(agent.role, recorded);
-      const prompt = { ...agent, layout };
+      const start: AgentStart =
+        agent.role === "main"
+          ? {
+              role: "main",
+              finalOutputs: renderFinalOutputs(recorder.events()),
+              selected: o.selectedOutputs?.length ?? catalog.length,
+              limit: api.limit,
+              ...(o.notes && { notes: o.notes }),
+            }
+          : {
+              role: "worker",
+              name: agent.name,
+              brief: agent.brief ?? "",
+              ...(agent.skills && { skills: agent.skills }),
+            };
       return {
         ...setup,
-        systemPrompt: systemPromptOf(definition, prompt),
-        prompt: firstMessageOf(definition, prompt, recorder.events(), o.notes),
+        systemPrompt: systemPromptOf({ definition, layout }),
+        prompt: firstMessageOf({ definition, start }),
         tools: buildAgentTools(layout.tools, {
           layout,
           files: o.files,
           api,
+          bash: o.bash,
           outputs: {
             runId: o.runId,
             recorder,

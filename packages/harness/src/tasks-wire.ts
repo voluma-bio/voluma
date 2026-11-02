@@ -5,6 +5,7 @@
  * by every loop (`supervise-run.ts`).
  */
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import type { BashRuntime } from "./bash-runtime";
 import { type RunLayout, type RunLayoutOptions, runLayout, type ThreadLayout } from "./layout";
 import type { Section } from "./loop-shell";
 import { keepOutputs } from "./outputs-backup";
@@ -72,7 +73,9 @@ export function tasksWire(o: TasksWireOptions) {
     /** A thread's sandbox; its `thread.started` is stored before its first sandbox call. */
     sandboxOf: (threadId: string): ThreadLayout => layout.forThread(recordOf(threadId)),
     nameOf: (threadId: string) => recordOf(threadId).name,
-    run: (r: TasksRun) => runTasks(r, layout),
+    /** A task thread releases its sandbox at each end. */
+    keepsSandbox: () => false,
+    run: (r: TasksRun) => runTasks({ ...r, definition }, layout),
   };
 }
 
@@ -83,7 +86,6 @@ export interface TasksRun {
   runId: string;
   rootThreadId: string;
   recorder: Recorder;
-  definition: WorkflowDefinition;
   plan: readonly PlanTask[];
   selectedOutputs: readonly string[] | undefined;
   notes: string | undefined;
@@ -94,12 +96,16 @@ export interface TasksRun {
   evidence: Evidence;
   outputs: Outputs;
   session: SandboxSession;
+  bash: BashRuntime;
   pool: Threads;
   section: Section;
   signal: AbortSignal;
 }
 
-async function runTasks(o: TasksRun, layout: RunLayout): Promise<void> {
+async function runTasks(
+  o: TasksRun & { definition: WorkflowDefinition },
+  layout: RunLayout,
+): Promise<void> {
   const { runId, rootThreadId, recorder, definition, session, pool, signal } = o;
   const main = definition.agents.main;
   // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
@@ -140,6 +146,7 @@ async function runTasks(o: TasksRun, layout: RunLayout): Promise<void> {
     tools: (thread, agents) =>
       buildTools(thread.tools, {
         layout: thread,
+        bash: o.bash,
         files: o.files,
         runtime,
         main: {

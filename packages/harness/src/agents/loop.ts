@@ -26,6 +26,7 @@ import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import { callKey, type UserSender } from "@voluma/contracts/thread-records";
+import type { BashRuntime } from "../bash-runtime";
 import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
 import { loopShell, type Section, type Step } from "../loop-shell";
 import { cutOffText } from "../messages";
@@ -103,6 +104,10 @@ export interface AgentLoopOptions {
   /** The skills a brief may name. */
   skills: readonly string[];
   runFiles: RunFiles;
+  /** The claim's background commands: a thread running one is not idle, and a notice for a thread that is not running restarts it. */
+  bash: BashRuntime;
+  /** Releases an agent's commands and sandbox once it has really ended. */
+  release(threadId: string): Promise<void>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
   config?: Partial<AgentLoopConfig>;
@@ -112,13 +117,15 @@ export interface AgentLoopOptions {
 }
 
 const RUNTIME: UserSender = { kind: "runtime" };
+const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, threads } = o;
   const config = { ...AGENT_LOOP_DEFAULTS, ...o.config };
   const now = o.now ?? Date.now;
   const derive = () => agentLog(recorder.events());
-  const stateOf = (r: AgentRecord): AgentState => agentState(r, threads.running(r.id));
+  const stateOf = (r: AgentRecord): AgentState =>
+    agentState(r, threads.running(r.id) || o.bash.busy(r.id));
   /** Inbox items given to a running thread whose user message is not stored yet, by thread. */
   const handed = new Map<string, Set<string>>();
   const dealtWith = new Set<string>();
@@ -349,6 +356,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         { status: "closed", ...(r.reply && { note: r.reply }) },
         closedEndId(r.id),
       );
+      await o.release(r.id);
       return true;
     }
     return false;
@@ -373,6 +381,19 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
           },
           id,
         );
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** An agent that is not running has background-command notices waiting: it starts a turn with them. */
+  async function deliverBashNotices(d: AgentLog): Promise<boolean> {
+    for (const r of d.records.values()) {
+      if (threads.running(r.id) || !["idle", "closing"].includes(stateOf(r))) continue;
+      const notices = o.bash.takeNotices(r.id);
+      if (notices.length > 0) {
+        await resume(r, notices.join("\n\n"), BASH_NOTICE);
         return true;
       }
     }
@@ -530,12 +551,14 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     }
     if (await finishClosings(d)) return "acted";
     if (await returnUnread(d)) return "acted";
+    if (await deliverBashNotices(d)) return "acted";
     if (await deliverInboxes(d)) return "acted";
     if (await deliverToMain(d)) return "acted";
     if (await stuck(d)) return "acted";
     return "idle";
   }
 
+  o.bash.wake = shell.nudge;
   await shell.run(step);
 }
 

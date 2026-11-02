@@ -233,6 +233,10 @@ export function loadWorkflow(
   dir: string,
   options: LoadOptions & { harness?: "tasks" },
 ): Promise<WorkflowDefinition>;
+export function loadWorkflow(
+  dir: string,
+  options: LoadOptions,
+): Promise<WorkflowDefinition | AgentsDefinition>;
 export async function loadWorkflow(
   dir: string,
   options: LoadOptions,
