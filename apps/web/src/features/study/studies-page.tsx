@@ -10,6 +10,7 @@
  * study's `getStudy` for the side.
  */
 import { useQuery } from "@tanstack/react-query";
+import { runThumbnailUrl } from "@voluma/api-client";
 import { studiesQuery, studyQuery } from "@voluma/api-client/query";
 import type { StudyDetail, StudyRunSummary, StudySummary } from "@voluma/contracts/study";
 import {
@@ -35,6 +36,7 @@ import {
   SidePanel,
   type Status,
   StatusGlyph,
+  Thumbnail,
 } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
 import { ChevronRight, Info, Plus } from "lucide-react";
@@ -359,7 +361,11 @@ function SamplesBlock({ study, detail }: { study: StudySummary; detail: StudyDet
                   const run = s.runs[0];
                   const name = (
                     <>
-                      <StatusGlyph status={scanStatus(s).status} className="size-3" />
+                      <Thumbnail
+                        size={36}
+                        src={run && runThumbnailUrl(run.id)}
+                        mark={<StatusGlyph status={scanStatus(s).status} className="size-3" />}
+                      />
                       <span className="font-mono text-xs">{s.scan.subject}</span>
                     </>
                   );
@@ -367,12 +373,12 @@ function SamplesBlock({ study, detail }: { study: StudySummary; detail: StudyDet
                     <Link
                       key={s.scan.inputId}
                       to={runHref({ runId: run.id })}
-                      className="inline-flex items-center gap-1 rounded-sm hover:underline"
+                      className="inline-flex items-center gap-2 rounded-sm hover:underline"
                     >
                       {name}
                     </Link>
                   ) : (
-                    <span key={s.scan.inputId} className="inline-flex items-center gap-1">
+                    <span key={s.scan.inputId} className="inline-flex items-center gap-2">
                       {name}
                     </span>
                   );

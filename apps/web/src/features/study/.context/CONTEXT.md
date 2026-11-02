@@ -16,8 +16,11 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `q24/c-quad-graph/study.html`) is a list with a details pane, like a file browser: a click
   selects a study and the right side describes it; the chevron, a double-click, Enter or "Open
   study" opens it. The list reads `listStudies` alone (each scan's newest run in brief), refetched
-  every 5 s while a run is live; the pane reads the selected study's `getStudy`. There are no
-  thumbnails: no run makes one yet (the mockup's were made up).
+  every 5 s while a run is live; the pane reads the selected study's `getStudy`. A scan's
+  picture is `Thumbnail` on its newest run's `runThumbnailUrl`, in the study's rows and the
+  pane's Scans block (not in the Studies list rows). The API renders it once per run generation
+  (`apps/api/src/domains/review/thumbnail.ts`), so a row costs one cached image request, never a
+  3D view; a run with nothing converted yet gets 204 and the plain tile.
 - **A scan's place** (`placeOf`): Needs you (To check, paused for keys, failed or stopped),
   Running (live or queued), Done, then Not started (no run). The group comes from one function,
   `placeOfStatus(status, example)` in run-view, which the tree, the Studies counts, the study
