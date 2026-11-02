@@ -19,6 +19,7 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
+import { BashRuntime } from "./bash-runtime";
 import { errorText } from "./error-text";
 import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
 import { keepOutputs } from "./outputs-backup";
@@ -35,7 +36,7 @@ import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
-import { threads } from "./threads";
+import { type Threads, threads } from "./threads";
 import { buildTools } from "./tools/registry";
 
 export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
@@ -253,18 +254,37 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       mainWorks: main.tools.includes("bash") && main.outputs === "write",
       signal: loopSignal,
     });
-    const pool = threads(
+    // Ends what the last claim left running before any thread resumes and is told.
+    const bash = new BashRuntime({
+      recorder,
+      deliver: (id, text) => running.send(id, text, { kind: "runtime", notice: true }),
+      cutOff,
+      log: options.log,
+    });
+    await bash.endCutOff();
+    const running = threads(
       {
         recorder,
         history: withImageRefs(options.history, options.files, runId, (id) => recordOf(id).name),
         sandbox: (id) => session.get(id),
         release: (id) =>
-          session
+          bash
             .release(id)
+            .then(() => session.release(id))
             .catch((e) => options.log(`releasing ${recordOf(id).name} failed: ${e}`)),
       },
       loopSignal,
     );
+    // An input to a thread that was not running carries the notices it missed.
+    const pool: Threads = {
+      ...running,
+      start(spec) {
+        const { input } = spec;
+        if (!input) return running.start(spec);
+        const text = [input.text, ...bash.takeNotices(spec.threadId)].filter(Boolean).join("\n\n");
+        return running.start({ ...spec, input: { ...input, text } });
+      },
+    };
     const runtime = taskRuntime({
       recorder,
       evidence: options.evidence,
@@ -292,6 +312,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       tools: (thread, agents) =>
         buildTools(thread.tools, {
           layout: thread,
+          bash,
           files: options.files,
           runtime,
           main: {

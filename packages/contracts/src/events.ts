@@ -359,6 +359,31 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
+   * A `bash` command moved to the background (it outlived `timeout_min`, or the call asked for
+   * it), written before the agent is told. The runner keeps one exec stream open for it until
+   * it ends (`bash-runtime.ts`).
+   */
+  const bashBackgrounded = event(
+    "bash.backgrounded",
+    z.object({ bashId: nonEmpty, command: z.string() }),
+  );
+
+  /**
+   * A background command ended: `output` is what the agent saw (head and tail when long).
+   * `cutOff`: written by the next claim for a `bash.backgrounded` with no end, because the
+   * process died with the old claim's sandbox; `exit` is then 137 and `output` empty.
+   */
+  const bashEnded = event(
+    "bash.ended",
+    z.object({
+      bashId: nonEmpty,
+      exit: z.number().int(),
+      output: z.string(),
+      cutOff: z.literal(true).optional(),
+    }),
+  );
+
+  /**
    * A revision starts: the first at the run's start, then one per correction
    * (`taskId` is the corrected task). Written by the runtime before the writes it covers.
    */
@@ -546,6 +571,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     toolCall,
     toolResult,
     sandbox,
+    bashBackgrounded,
+    bashEnded,
     revisionStarted,
     attemptOpened,
     task,
