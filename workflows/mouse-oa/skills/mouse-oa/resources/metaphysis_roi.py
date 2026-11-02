@@ -7,11 +7,13 @@ naming the section, and so is a face that leaves bone at plate level untraced (o
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
 ROI-3 is the slab between `start_um` and `start_um + length_um` below that face (measured along W), inside the filled tibial
 cross-section, at least `cortex + cortex_clearance_um` from its outer edge. Those, and `cortex_search_factor`, come from the spec
-(--spec, protocol.json, the entry `roi-metaphyseal`). The cortex thickness used for that edge is the
-depth at which the bone fraction of the outer layers first drops below one half (estimated in the ROI-3 slices,
-reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `cortex_search_factor` times
-that depth of the outer edge, below the local distal face and down to 1.3 mm past its deepest point along W
-(rounded up to an inclusive slice, clipped to the stack): it can include trabeculae that join the cortex.
+(--spec, protocol.json, the entry `roi-metaphyseal`). The cortex thickness used for that edge is --cortex-mm, else the
+depth at which the bone fraction of the outer layers first drops below one half (reported as cortex_estimate_mm), estimated on
+the axial slices `start_um` to `start_um + length_um` below the face's deepest point: ROI-3's own depths, on slices wholly below
+the plate, where the outer layers are the wall alone. On the slices ROI-3 spans, a domed plate slopes down the wall and the dense
+bone under its face would count as wall (OA6-2RK: 0.357 mm there, 0.147 mm below the plate). The cortex mask for Ct.Th is the
+bone within `cortex_search_factor` times that depth of the outer edge, below the local distal face and down to 1.3 mm past its
+deepest point along W (rounded up to an inclusive slice, clipped to the stack): it can include trabeculae that join the cortex.
 It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, nodes/ends (deck #19-23) are
 `morphometry.py trabecular --output roi-metaphyseal` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on cortex.npy with the distal face as --surface.
 
@@ -33,7 +35,8 @@ The script stops when the distal trace does not cover the V range of the proxima
 marks where its proximal face was traced), or when the distal face lies at or above the proximal face (`--proximal-face`)
 inside the tibia: the band between them cannot be thinner than nothing. Where both faces are traced that means a point is
 wrong; where either is held constant past its curves' ends it means the curves must reach further, and the message says
-which face and sections. It also stops on an empty ROI-3.
+which face and sections. It also stops on an empty ROI-3, and when the stack holds no tibia `start_um` to
+`start_um + length_um` below the distal face's deepest point, the slices the cortex is estimated on.
 
 Eroded ranges. Inside a range marked eroded (on both sections either side of a row along V) the faces may meet or cross: the
 check above does not apply, because the plate there is gone and both curves follow the remaining bone. ROI-3 is cut as everywhere
@@ -124,12 +127,11 @@ def edge_distance(filled, w0, w1):
     return d
 
 
-def cortex_depth(bone, dist, roi_slices, max_layers=40):
-    """Depth in voxels where the bone fraction of the outer layers first falls below one half."""
-    sel = np.zeros(bone.shape, bool)
-    sel[roi_slices] = True
+def cortex_depth(bone, dist, max_layers=40):
+    """Depth in voxels where the bone fraction of the outer layers first falls below one half, over the slices given: `dist` is the
+    in-plane distance to the outer edge, 0 outside the filled cross-section."""
     for k in range(max_layers):
-        layer = sel & (dist > k) & (dist <= k + 1)
+        layer = (dist > k) & (dist <= k + 1)
         if layer.any() and bone[layer].mean() < 0.5:
             return float(k)
     return float(max_layers)
@@ -182,7 +184,13 @@ def main():
     dist = edge_distance(filled, w0, w1)
     bone_all = np.asarray(h) > a.threshold  # HU alone; `filled` (from the tibia label) only limits where it is looked at
     slab = (rel >= p['start_um']) & (rel < p['start_um'] + p['length_um'])
-    est = cortex_depth(bone_all, dist, slab & filled) * vox
+    # the cortex is estimated at the slab's depths below the face's deepest point, on slices that hold no plate
+    c0, c1 = (int(np.ceil(gd.max() + d / 1000 / vox)) for d in (p['start_um'], p['start_um'] + p['length_um']))
+    if not filled[c0:c1].any():
+        v, u = np.unravel_index(np.argmax(gd), gd.shape)
+        sidecar.fail(f'the distal face reaches W={gd.max():.0f} at V={v}, U={u}, and the stack ({h.shape[0]} slices) holds no tibia '
+                     f'{p["start_um"]:g} to {p["start_um"] + p["length_um"]:g} um below that to estimate the cortex on: check the distal curves there')
+    est = cortex_depth(bone_all[c0:c1], dist[c0:c1]) * vox
     cortex_mm = a.cortex_mm if a.cortex_mm is not None else est
     edge = (cortex_mm + p['cortex_clearance_um'] / 1000) / vox
     roi = slab & filled & (dist > edge)

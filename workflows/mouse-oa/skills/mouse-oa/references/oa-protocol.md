@@ -211,7 +211,8 @@ the measurements they check.
 - Every tibial region (#4–25) follows traces made on one scan; the old run labelled its values provisional and so
   do we. They are counted on the aligned grid, a linear resampling of HU (grid rule above).
 - ROI-3 (#16–23) depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported
-  as `cortex_estimate_mm`): a wrong depth moves ROI-3.
+  as `cortex_estimate_mm`, the wall's thickness just below the plate): a wrong depth moves ROI-3. The edge is that
+  one depth all round, so where the wall is locally thicker ROI-3 reaches into it (OA6-2RK: the tibial tuberosity).
 - A medial or lateral value (#8, #9, #11, #12) follows the aligned frame's +U medial, confirmed on the render.
 - Tb.Nd and Tb.Tm (#22, #23) are exploratory; Tb.Th, Tb.Sp, Tb.N and Ct.Th (#19–21, #24, #25) carry the
   sphere-method bias with the voxel size.
