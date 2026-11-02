@@ -41,8 +41,8 @@ workflow's anatomy reference, for how that applies to its structures.
   up whatever sits at the same spot. Trimming cuts track ends, so a trimmed volume runs under the true one; say so
   when you report it.
 - **Map back and merge** (`to_scan.py`, `merge_labels.py`): a voxel both requests claim goes to the nearer
-  voxel only one of them claims, and the merge reports each piece's contested voxels by big label and where they went; a
-  piece with a large contested count, or a big label that lost much, is a To check item. Clip once more: that is `labels.npy`.
+  side's own voxels, and the merge reports each piece's contested voxels by big label and where they went, and what each big
+  label lost (`big_lost`); a piece with a large contested count, or a big label that lost much, is a To check item. Clip once more: that is `labels.npy`.
 
 Do not claim a voxel-exact number from one call: keep the call's counts, prompts and labels as evidence, and when a
 measurement must be stable, call twice and report the spread. A third rerun on one problem is a To check item.
