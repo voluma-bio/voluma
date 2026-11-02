@@ -130,6 +130,8 @@ export type MessageTarget = {
   example: boolean;
   credentials: "voluma" | "visitor";
   workflows: WorkflowPin[];
+  /** The study's workflow when the caller already holds it, which spares the lookup. */
+  studyWorkflowId?: string;
   /** The loop that drives the run; null or absent: the task loop. */
   harness?: "tasks" | "agents" | null;
   /** The queue state: `queued`, `running`, `awaiting-keys` or `ended`. */
@@ -182,11 +184,12 @@ export async function messageRefusal(
   }
   if (run.state !== "ended" || run.outcome !== "completed")
     return { status: 409, message: "Only a run that completed can be reopened; rerun this one." };
-  const [study] = await tx
-    .select({ workflowId: studies.workflowId })
-    .from(studies)
-    .where(eq(studies.id, run.studyId));
-  const current = study && pinsOf(study.workflowId);
+  const workflowId =
+    run.studyWorkflowId ??
+    (
+      await tx.select({ id: studies.workflowId }).from(studies).where(eq(studies.id, run.studyId))
+    )[0]?.id;
+  const current = workflowId && pinsOf(workflowId);
   const pathsOf = (pins: readonly WorkflowPin[]) => pins.map((p) => p.path ?? "").sort();
   if (!current || pathsOf(current).join() !== pathsOf(run.workflows).join())
     return { status: 409, message: "This run used an older version of its workflow, so rerun it." };

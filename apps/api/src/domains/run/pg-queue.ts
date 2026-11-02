@@ -52,6 +52,7 @@ import { cancelOpenThreads, cancelReviewWorkers, lockRun } from "./pg-event-log"
 import {
   loadRun,
   loadRuns,
+  type Queryable,
   readableInputs,
   readableRuns,
   readableStudies,
@@ -536,13 +537,14 @@ export function pgRunQueue(
       reader: Reader,
       caller: { userId: string; guest: boolean },
       run: Run,
+      /** Where to read: a caller inside a read transaction passes it, so the check shares its snapshot and connection. */
+      tx: Queryable = db,
+      studyWorkflowId?: string,
     ): Promise<string | null> {
-      const refusal = await messageRefusal(
-        db,
-        messageContext(reader).pinsOf,
-        caller,
-        messageTargetOf(run),
-      );
+      const refusal = await messageRefusal(tx, messageContext(reader).pinsOf, caller, {
+        ...messageTargetOf(run),
+        studyWorkflowId,
+      });
       return refusal?.message ?? null;
     },
 

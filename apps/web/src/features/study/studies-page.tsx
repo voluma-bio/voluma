@@ -42,7 +42,7 @@ import { workflowById } from "@voluma/workflow/bundled";
 import { ChevronRight, Info, Plus } from "lucide-react";
 import { type KeyboardEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { PLACES, type Place, placeOf } from "./study/study-model";
+import { ACT_ON, PLACES, type Place, placeOf } from "./study/study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study/study-side";
 
 /** Where a study opens: its page, or a study of one's input once it has a run. */
@@ -75,9 +75,6 @@ const COUNT_WORD: Record<Place, string> = {
   done: "done",
   "not-started": "not started",
 };
-
-/** The places the researcher has to act on: counted in bold, without a mark. */
-const ACT_ON = new Set<Place>(["waiting-on-you", "needs-you"]);
 
 const COUNT_MARK: Record<Place, Status> = {
   "waiting-on-you": "check",

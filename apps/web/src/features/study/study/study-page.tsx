@@ -34,6 +34,7 @@ import { Link, useSearchParams } from "react-router";
 import { SampleBar } from "./sample-bar";
 import { useStudy } from "./study-layout";
 import {
+  actHref,
   changedAt,
   hasBar,
   kneeWord,
@@ -146,7 +147,7 @@ function SampleRow({
   knees: boolean;
   now: number;
 }) {
-  const href = place === "needs-you" ? reviewHref(studyId, input) : openHref(studyId, input);
+  const href = actHref(studyId, input, place);
   const knee = kneeOf(input);
   const changed = changedAt(input);
   const about = [input.member.group, knees && knee ? `${kneeWord(knee)} knee` : null]
@@ -209,7 +210,7 @@ function StatusLine({
     mark = <StatusMark status="check" label={needsYouText(needsYouOf(input), run.harness)} />;
     more = waitsOn(input, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
-    mark = <StatusMark {...liveStatus({ ...run, waiting: input.waiting })} />;
+    mark = <StatusMark {...liveStatus(run)} />;
   } else if (status.status === "stopped") {
     more = stoppedLine(input, workflow);
   } else if (status.status === "done" && hasBar(input)) {

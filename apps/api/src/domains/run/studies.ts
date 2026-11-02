@@ -24,9 +24,10 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
   /** Whether `principal` can answer a run's held calls: the run read's `cannotMessage` is null. The debug token only reads. */
   const canAnswerAs =
     (principal: Principal): CanAnswer =>
-    async (run) =>
+    async (tx, run, workflowId) =>
       principal.kind === "user" &&
-      (await queue.cannotMessage(readerOf(principal), callerOf(principal), run)) === null;
+      (await queue.cannotMessage(readerOf(principal), callerOf(principal), run, tx, workflowId)) ===
+        null;
 
   app.post("/studies", requireUser, async (c) => {
     const body = await parseJson(c, createStudyRequestSchema);

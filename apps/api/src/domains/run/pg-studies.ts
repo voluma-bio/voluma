@@ -24,6 +24,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
 import {
+  type Queryable,
   type ResultsLoader,
   type RunResult,
   readableRuns,
@@ -42,11 +43,16 @@ const toStudy = (row: typeof studies.$inferSelect): Study => ({
 });
 
 /** Whether the caller may answer this run's held calls: the run read's `cannotMessage` is null. */
-export type CanAnswer = (run: Run) => Promise<boolean>;
+export type CanAnswer = (tx: Queryable, run: Run, workflowId: string) => Promise<boolean>;
 
 /** A run's open calls the caller can answer; the check runs only for a run that holds any. */
-async function waitingOf({ run, waiting }: RunResult, canAnswer: CanAnswer) {
-  return waiting > 0 && (await canAnswer(run)) ? waiting : 0;
+async function waitingOf(
+  tx: Queryable,
+  workflowId: string,
+  { run, waiting }: RunResult,
+  canAnswer: CanAnswer,
+) {
+  return waiting > 0 && (await canAnswer(tx, run, workflowId)) ? waiting : 0;
 }
 
 const completed = ({ state }: Run) => state.status === "ended" && state.outcome === "completed";
@@ -117,6 +123,7 @@ const tasksOf = (newest: RunResult | undefined) =>
   shownTasks(newest && { ...newest, state: newest.run.state, revision: latestRevision(newest) });
 
 async function summarize(
+  tx: Queryable,
   study: Study,
   inputCount: number,
   results: RunResult[],
@@ -149,7 +156,7 @@ async function summarize(
           ...(result.run.outputs && { outputs: result.run.outputs }),
           ...(result.run.harness && { harness: result.run.harness }),
           review: reviewOf(result),
-          waiting: await waitingOf(result, canAnswer),
+          waiting: await waitingOf(tx, study.workflowId, result, canAnswer),
           example: result.run.example,
         }),
       ),
@@ -185,6 +192,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           const summaries = await Promise.all(
             rows.map((row) =>
               summarize(
+                tx,
                 toStudy(row),
                 inputCount.get(row.id) ?? 0,
                 byStudy.get(row.id) ?? [],
@@ -224,7 +232,8 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           const waiting = new Map(
             await Promise.all(
               [...newest].map(
-                async ([inputId, r]) => [inputId, await waitingOf(r, canAnswer)] as const,
+                async ([inputId, r]) =>
+                  [inputId, await waitingOf(tx, row.workflowId, r, canAnswer)] as const,
               ),
             ),
           );

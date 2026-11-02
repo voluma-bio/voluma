@@ -230,6 +230,9 @@ export function segmentOf(input: StudyInputDetail, output: OutputEntry): Segment
 /** Where a sample sits on the study page and in its `?status=` filter. */
 export type Place = SampleGroup | "not-started";
 
+/** The places the researcher has to act on: counted in bold, without a mark. */
+export const ACT_ON = new Set<Place>(["waiting-on-you", "needs-you"]);
+
 export const PLACES: { place: Place; title: string }[] = [
   { place: "waiting-on-you", title: "Waiting on you" },
   { place: "needs-you", title: "Needs you" },
@@ -282,6 +285,16 @@ export const waitsOn = (input: StudyInputDetail, workflow: BundledWorkflow) =>
 /** The samples with items that need a person (`needsYouOf`), most first. */
 export const byMostToCheck = (inputs: readonly StudyInputDetail[]) =>
   inputs.filter((s) => needsYouOf(s) > 0).sort((a, b) => needsYouOf(b) - needsYouOf(a));
+
+/** Where a sample you act on opens: a waiting one at its request (the sample page), a needs-you one at its first item. */
+export const actHref = (studyId: string, input: StudyInputDetail, place: Place) =>
+  place === "needs-you" ? reviewHref(studyId, input) : openHref(studyId, input);
+
+/** The sample to act on next: one waiting on you first, else the one with most to check. */
+export function nextToAct(inputs: readonly StudyInputDetail[], example: boolean) {
+  const act = inputs.filter((s) => ACT_ON.has(placeOf(s, example)));
+  return act.find((s) => placeOf(s, example) === "waiting-on-you") ?? byMostToCheck(act)[0];
+}
 
 /** Where a sample opens: its first acceptable item, else its first card, else the input. */
 export const reviewHref = (studyId: string, input: StudyInputDetail) => {
