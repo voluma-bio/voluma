@@ -36,6 +36,8 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 
 ## Lengths still in voxels (left by the skills cleanup)
 - Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `snap_boxes.py` `min_px=50`.
+- **Review-asset publish lock** (`convert/review_assets.py` `publish()`): every file takes the global mkdir lock before its copy. Try the copy first, and only on FileNotFoundError take the lock, mkdir and retry. A directory that holds a file persists on the R2 mount, so the common case never waits. Unmeasured on a large scan's level 0 (#436 review).
+- **A real "convert again"** for a review asset that failed (`assets.failed` is permanent today, so the viewer offers no retry).
 
 ## Which way up a render shows
 - `quad_view.py` fixes its 3D camera's view-up to scan +z (`'view_up': [0.0, 0.0, 1.0]`); `--rotate` changes azimuth and

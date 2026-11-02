@@ -93,7 +93,7 @@ export function taskGrid({
   if (imageAssets.state === "failed")
     return {
       state: "failed",
-      message: `Couldn't prepare ${image.name} for viewing: ${imageAssets.error}`,
+      message: `Couldn't prepare ${image.name} for viewing.`,
     };
 
   const notes = { preparing: [] as string[], failed: [] as string[], elsewhere: [] as string[] };
