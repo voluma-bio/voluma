@@ -2,7 +2,7 @@
 import type { RunEvent } from "./events";
 import { corrections, type FoldedTask, fold } from "./fold";
 import type { TaskState, TaskStatus } from "./ids";
-import { type OutputsFold, outputsFold } from "./output-fold";
+import { outputsFold } from "./output-fold";
 import type { ReviewSummary, Unacceptable } from "./review";
 import type { RunState } from "./run";
 
@@ -50,13 +50,8 @@ export function reviewState(events: readonly RunEvent[], { live = false } = {}) 
         reviewedAt: completed?.createdAt ?? null,
       }
     : null;
-  const outputs = outputsFold(events);
-  return {
-    revisions,
-    summary: summary ?? outputsSummary(events, outputs),
-    assets: folded.assets,
-    outputs,
-  };
+  // The agent loop's outputs; empty for a run of the task loop, which publishes no versions.
+  return { revisions, summary, assets: folded.assets, outputs: outputsFold(events) };
 }
 
 /**
@@ -251,18 +246,4 @@ function stateOf(
   if (status === "under-review" && check && running.has(check)) return "checking";
   if (started) return "held";
   return blocked ? "waiting" : "ready";
-}
-
-/**
- * The summary of a run of the agent loop, which has no revisions: its To check items on the
- * final outputs' latest versions that nobody has resolved. Each one is acceptable ("Looks
- * right"), and none is a card without a check. Null for a run that never listed final outputs.
- */
-function outputsSummary(events: readonly RunEvent[], outputs: OutputsFold): ReviewSummary | null {
-  const listed = events.filter((e) => e.type === "outputs.changed").at(-1);
-  if (!listed) return null;
-  const open = outputs.outputs
-    .filter((o) => o.final)
-    .reduce((n, o) => n + (o.latest?.toCheck.filter((t) => !t.resolved).length ?? 0), 0);
-  return { revisionId: listed.id, acceptable: open, needsYou: open, reviewedAt: null };
 }
