@@ -107,8 +107,8 @@ export const studies = pgTable(
 );
 
 /** An input of a study: the confirmed intake row. `subject` is never empty (the input's name when none was given). */
-export const studyInputs = pgTable(
-  "study_inputs",
+export const studyMembers = pgTable(
+  "study_members",
   {
     studyId: text().notNull(),
     inputId: text().notNull(),

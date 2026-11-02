@@ -573,8 +573,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.study_inputs": {
-      "name": "study_inputs",
+    "public.study_members": {
+      "name": "study_members",
       "schema": "",
       "columns": {
         "study_id": {
@@ -617,8 +617,8 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "study_inputs_study_id_input_id_pk": {
-          "name": "study_inputs_study_id_input_id_pk",
+        "study_members_study_id_input_id_pk": {
+          "name": "study_members_study_id_input_id_pk",
           "columns": ["study_id", "input_id"]
         }
       },

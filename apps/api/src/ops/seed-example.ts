@@ -34,7 +34,7 @@ import {
   referenceInput,
   runs,
   studies,
-  studyInputs,
+  studyMembers,
 } from "../domains/run/schema";
 import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
 import { databaseUrl } from "./operator";
@@ -145,7 +145,7 @@ await db.transaction(async (tx) => {
   await tx.delete(piMessages).where(eq(piMessages.runId, exampleId));
   await tx.delete(events).where(eq(events.runId, exampleId));
   await tx.delete(runs).where(eq(runs.id, exampleId));
-  await tx.delete(studyInputs).where(eq(studyInputs.studyId, studyId));
+  await tx.delete(studyMembers).where(eq(studyMembers.studyId, studyId));
   await tx.delete(studies).where(eq(studies.id, studyId));
 
   const reference = referenceInput(demoLabId);
@@ -158,7 +158,7 @@ await db.transaction(async (tx) => {
     createdBy: EXAMPLES_OPERATOR,
     example: true,
   });
-  await tx.insert(studyInputs).values({
+  await tx.insert(studyMembers).values({
     studyId,
     inputId: reference.id as string,
     subject: reference.name,

@@ -11,7 +11,7 @@ import { catalog, workflowById } from "@voluma/workflow/bundled";
 import { asc, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { reviewSnapshots } from "../domains/review/schema";
-import { events, inputs, piMessages, runs, studies, studyInputs } from "../domains/run/schema";
+import { events, inputs, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
 
 export async function readDump(db: PostgresJsDatabase, runId: string) {
   return db.transaction((tx) => readRows(tx, runId), { isolationLevel: "repeatable read" });
@@ -22,7 +22,7 @@ async function readRows(db: PostgresJsDatabase, runId: string) {
   if (!run) throw new Error(`run ${runId} not found`);
   const [input] = await db.select().from(inputs).where(eq(inputs.id, run.inputId));
   const [study] = await db.select().from(studies).where(eq(studies.id, run.studyId));
-  const members = await db.select().from(studyInputs).where(eq(studyInputs.studyId, run.studyId));
+  const members = await db.select().from(studyMembers).where(eq(studyMembers.studyId, run.studyId));
   return {
     run,
     input,

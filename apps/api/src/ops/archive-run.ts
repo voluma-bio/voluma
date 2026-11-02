@@ -26,7 +26,7 @@ import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
 import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
-import { events, piMessages, runs, studies, studyInputs } from "../domains/run/schema";
+import { events, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
 import { assertRestorable, countsOf, describeCounts, readDump } from "./run-dump";
 
@@ -139,7 +139,7 @@ const deleted = await db.transaction(async (tx) => {
   if (!sibling) {
     matches(
       "study members",
-      await tx.delete(studyInputs).where(eq(studyInputs.studyId, dump.run.studyId)).returning(),
+      await tx.delete(studyMembers).where(eq(studyMembers.studyId, dump.run.studyId)).returning(),
       copy.studyMembers,
     );
     matches("study", await tx.delete(studies).where(eq(studies.id, dump.run.studyId)).returning(), [

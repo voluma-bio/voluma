@@ -55,7 +55,7 @@ import {
   type Tx,
 } from "./pg-runs";
 import { modelChoices, pickModel } from "./run-models";
-import { events, inputs, runs, studies, studyInputs } from "./schema";
+import { events, inputs, runs, studies, studyMembers } from "./schema";
 
 /**
  * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
@@ -403,10 +403,13 @@ export function pgRunQueue(
         if (!study) throw new HTTPException(404, { message: "unknown study" });
         if (study.example) throw new HTTPException(403, { message: "Examples are read-only." });
         const [input] = await tx
-          .select({ inputId: studyInputs.inputId })
-          .from(studyInputs)
+          .select({ inputId: studyMembers.inputId })
+          .from(studyMembers)
           .where(
-            and(eq(studyInputs.studyId, request.studyId), eq(studyInputs.inputId, request.inputId)),
+            and(
+              eq(studyMembers.studyId, request.studyId),
+              eq(studyMembers.inputId, request.inputId),
+            ),
           );
         if (!input) throw new HTTPException(404, { message: "unknown input" });
         await checkInputs(tx, reader, caller, [request.inputId]);
@@ -428,7 +431,7 @@ export function pgRunQueue(
       request: {
         study: Omit<typeof studies.$inferInsert, "labId" | "createdBy" | "example" | "createdAt">;
         /** `subject` absent: the input's name. */
-        inputs: (Omit<typeof studyInputs.$inferInsert, "studyId" | "position" | "subject"> & {
+        inputs: (Omit<typeof studyMembers.$inferInsert, "studyId" | "position" | "subject"> & {
           subject?: string;
         })[];
         /** The runs to start now, one per input to start. */
@@ -448,7 +451,7 @@ export function pgRunQueue(
           labId: reader.labId,
           createdBy: caller.userId,
         });
-        await tx.insert(studyInputs).values(
+        await tx.insert(studyMembers).values(
           request.inputs.map((input, position) => ({
             ...input,
             subject: input.subject ?? found.get(input.inputId)!.name,

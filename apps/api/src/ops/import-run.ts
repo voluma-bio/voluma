@@ -24,7 +24,7 @@ import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
 import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
-import { events, inputs, piMessages, runs, studies, studyInputs } from "../domains/run/schema";
+import { events, inputs, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
 import { withLocalDir } from "./r2-dir";
 import { assertRestorable, countsOf, describeCounts } from "./run-dump";
@@ -63,7 +63,7 @@ const dump = await withLocalDir(
       run: typeof runs.$inferSelect & { workflowId?: string; workflows: { path: string }[] };
       input: typeof inputs.$inferSelect | null;
       study?: typeof studies.$inferSelect;
-      studyMembers?: (typeof studyInputs.$inferSelect)[];
+      studyMembers?: (typeof studyMembers.$inferSelect)[];
       inputs?: (typeof inputs.$inferSelect)[];
       events: { id: string; seq: number; runId: string }[];
       // Dumps made before run-keyed rows also hold `threads` (ignored) and `pi_messages` without `runId`.
@@ -159,12 +159,12 @@ await db.transaction(async (tx) => {
       const [input] = await tx.select().from(inputs).where(eq(inputs.id, member.inputId));
       if (!input || input.labId !== run.labId)
         throw new Error(`missing study member ${member.inputId}`);
-      await tx.insert(studyInputs).values(member).onConflictDoNothing();
+      await tx.insert(studyMembers).values(member).onConflictDoNothing();
       const [storedMember] = await tx
         .select()
-        .from(studyInputs)
+        .from(studyMembers)
         .where(
-          and(eq(studyInputs.studyId, member.studyId), eq(studyInputs.inputId, member.inputId)),
+          and(eq(studyMembers.studyId, member.studyId), eq(studyMembers.inputId, member.inputId)),
         );
       sameSharedRow(`study member ${member.inputId}`, storedMember, member);
     }
@@ -180,7 +180,7 @@ await db.transaction(async (tx) => {
       example: run.example ?? false,
       createdAt: run.createdAt,
     });
-    await tx.insert(studyInputs).values({
+    await tx.insert(studyMembers).values({
       studyId,
       inputId: run.inputId,
       subject: dump.input?.name ?? runId,
@@ -197,8 +197,8 @@ await db.transaction(async (tx) => {
     });
     const [member] = await tx
       .select()
-      .from(studyInputs)
-      .where(and(eq(studyInputs.studyId, keep), eq(studyInputs.inputId, run.inputId)));
+      .from(studyMembers)
+      .where(and(eq(studyMembers.studyId, keep), eq(studyMembers.inputId, run.inputId)));
     if (!member) throw new Error(`study ${keep} has no study member for input ${run.inputId}`);
     run.studyId = keep;
   }

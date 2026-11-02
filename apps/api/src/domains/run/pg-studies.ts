@@ -27,7 +27,7 @@ import {
   readableStudies,
   toInput,
 } from "./pg-runs";
-import { inputs, runs, studies, studyInputs } from "./schema";
+import { inputs, runs, studies, studyMembers } from "./schema";
 
 const toStudy = (row: typeof studies.$inferSelect): Study => ({
   id: row.id,
@@ -155,10 +155,10 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           if (rows.length === 0) return [];
           const ids = rows.map((row) => row.id);
           const counts = await tx
-            .select({ studyId: studyInputs.studyId, n: sql<number>`count(*)::int` })
-            .from(studyInputs)
-            .where(inArray(studyInputs.studyId, ids))
-            .groupBy(studyInputs.studyId);
+            .select({ studyId: studyMembers.studyId, n: sql<number>`count(*)::int` })
+            .from(studyMembers)
+            .where(inArray(studyMembers.studyId, ids))
+            .groupBy(studyMembers.studyId);
           const inputCount = new Map(counts.map(({ studyId, n }) => [studyId, n]));
           const byStudy = new Map<string, RunResult[]>();
           for (const result of await results(
@@ -189,11 +189,11 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             .where(and(readableStudies(reader), eq(studies.id, studyId)));
           if (!row) return null;
           const members = await tx
-            .select({ member: studyInputs, input: inputs })
-            .from(studyInputs)
-            .innerJoin(inputs, eq(studyInputs.inputId, inputs.id))
-            .where(eq(studyInputs.studyId, studyId))
-            .orderBy(asc(studyInputs.position));
+            .select({ member: studyMembers, input: inputs })
+            .from(studyMembers)
+            .innerJoin(inputs, eq(studyMembers.inputId, inputs.id))
+            .where(eq(studyMembers.studyId, studyId))
+            .orderBy(asc(studyMembers.position));
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
             skipSummaryless: true,
             stopped: "newest",

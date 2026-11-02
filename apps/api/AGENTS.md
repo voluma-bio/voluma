@@ -63,7 +63,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   recovery) and the key vault, `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per limit.
-- **Every run belongs to a study** (`studies`, `study_inputs`; `runs.study_id` is not null), and
+- **Every run belongs to a study** (`studies`, `study_members`; `runs.study_id` is not null), and
   the study owns the workflow. `readableStudies` (`pg-runs.ts`) is `readableRuns` on the study
   (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
   it. `queue.createStudy` inserts the study, its inputs and the runs to start in one
