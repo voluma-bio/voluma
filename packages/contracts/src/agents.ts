@@ -447,8 +447,21 @@ export type ApprovalRecord = Payload<"approval.requested"> & {
   settled: boolean;
 };
 
+const approvalMemo = new WeakMap<
+  readonly RunEvent[],
+  { length: number; value: ApprovalRecord[] }
+>();
+
 /** Every `approval.requested`, in log order, with its answer and whether it is settled. */
 export function approvalRecords(events: readonly RunEvent[]): ApprovalRecord[] {
+  const cached = approvalMemo.get(events);
+  if (cached?.length === events.length) return cached.value;
+  const value = foldApprovals(events);
+  approvalMemo.set(events, { length: events.length, value });
+  return value;
+}
+
+function foldApprovals(events: readonly RunEvent[]): ApprovalRecord[] {
   const answers = new Map<string, ApprovalRecord["answer"]>();
   const settled = new Set<string>();
   for (const e of events) {

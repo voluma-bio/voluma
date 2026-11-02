@@ -531,10 +531,10 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     return acted;
   }
 
-  /** The researcher's words and answers come before the workers' news. */
-  const researcherFirst = (notices: readonly Notice[]) => [
-    ...notices.filter((n) => n.agent === "researcher"),
-    ...notices.filter((n) => n.agent !== "researcher"),
+  /** What the researcher wrote comes before everything else main is told. */
+  const personFirst = (notices: readonly Notice[]) => [
+    ...notices.filter((n) => n.kind === "person"),
+    ...notices.filter((n) => n.kind !== "person"),
   ];
 
   /**
@@ -571,7 +571,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const events = recorder.events();
     const cut = d.cursor ? (d.written.get(d.cursor) ?? -1) : -1;
     const text = deliveryText({
-      notices: researcherFirst(d.undelivered).map((n) => noticeLine(n, events)),
+      notices: personFirst(d.undelivered).map((n) => noticeLine(n, events)),
       receipts: receipts(d, cut),
       agents: agentList(d, stateOf, now()),
       outOfDate: outOfDateIds(),
