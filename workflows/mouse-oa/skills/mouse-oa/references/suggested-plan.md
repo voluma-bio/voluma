@@ -14,9 +14,11 @@ the method.
 - **Makes:** the outputs it reports, with the protocol steps (`oa-protocol.md`, "Steps, in order") that make them.
 - **Leaves:** what later steps read from it, and what a new version of an input would put out of date.
 
-When a check-first fails, the input is either good enough elsewhere and not here (the worker fixes it for its own
-region and reports that fix as part of its basis) or wrong for every step that reads it (the worker tells main what
-it saw and where; main decides whether the input gets a new version).
+When a check-first fails, ask whether the fault could make any other output wrong. If it could, the worker tells
+main what it saw and where, and main decides whether the input gets a new version: patella voxels in the tibia label
+also make the patella volume wrong, even though the femur is fine. If the input is right and this step needs it finer
+(the growth plate traced more closely than segmentation drew it), the worker refines it for its own region and
+reports that as part of its basis.
 
 ## Before you plan
 
@@ -57,18 +59,23 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 - **Needs:** `scan`, the tibia in `bone-labels`.
 - **Check first:** from the articular surface to about 1 mm below the growth plate, the tibia label holds no femur,
   patella, meniscus or fibula voxels, and its top runs through the joint space, not through femur. Which side is
-  medial: the fibula is lateral. Confirm the aligned frame's +U medial on its QC montage against the fibula before
-  you name a compartment (a left knee flips the sign rule).
+  medial: the fibula is lateral. On a view of the aligned grid that shows the fibula beside the tibia (an axial
+  slice just below the plateau), find which way along U is medial on this knee, and record it before you name a
+  compartment. `tibia_frame.py`'s sign rule assumes one knee and one scan orientation and has no flip, so where +U
+  is lateral, keep the frame and name the medial and lateral fields of the annotations from what you saw.
 - **Makes:** `tibia-grid` (the aligned frame; protocol step 1), `growth-plate-proximal-face` (step 2),
   `articular-surface`, `roi-iioc`, the four rulers and #4–10 (steps 3 and 7). Report both height definitions with
-  the plane residual (protocol, "What the deck says").
+  the plane residual (protocol, "What the deck says"). Report the files later steps run their scripts on with the
+  output they belong to, since no other worker can open your folder: `tibia-hu.npy`, `tibia-mask.npy` and
+  `tibia-frame.json` with `tibia-grid`, `growth-plate-proximal-valid.npy` with `growth-plate-proximal-face`, and
+  the two `*-plate-run.npy` with `roi-iioc`.
 - **Leaves:** steps 4 to 7 work on `tibia-grid` and read `roi-iioc` and the faces. A new `tibia-grid` or proximal
   face puts steps 4 to 7 out of date.
 
 ## 4. Subchondral bone plate (`subchondral-plate`)
 
-- **Needs:** `tibia-grid`, `roi-iioc`, `articular-surface`, and the medial and lateral plate runs step 3 wrote.
-- **Check first:** each compartment's patch sits on the side step 3 confirmed as medial or lateral, under the
+- **Needs:** `tibia-grid`, `roi-iioc` (with the medial and lateral plate runs), `articular-surface`.
+- **Check first:** each compartment's patch sits on the side step 3 recorded as medial or lateral, under the
   articular top surface.
 - **Makes:** `roi-subchondral-plate-medial` and `-lateral`, #11–12 (protocol step 8).
 - **Leaves:** step 5 removes the plate from ROI-1.
@@ -83,7 +90,8 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 
 ## 6. Proximal tibial metaphysis, ROI-3 (`metaphyseal-roi`)
 
-- **Needs:** `tibia-grid`, `growth-plate-proximal-face`, the tibia below the growth plate.
+- **Needs:** `tibia-grid`, `growth-plate-proximal-face` (with where it was traced, `growth-plate-proximal-valid.npy`),
+  the tibia below the growth plate.
 - **Check first:** below the growth plate, where ROI-3 and the cortex go, the tibia label holds no fibula voxels:
   the fibula joins the tibia toward the shaft, and a cortex mask that reaches it is wrong.
 - **Makes:** `growth-plate-distal-face` (annotation C, over at least the proximal face's range), `cortex`,

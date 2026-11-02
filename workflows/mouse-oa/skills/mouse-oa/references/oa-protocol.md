@@ -55,8 +55,9 @@ boundary matters: a sensitivity check, not an error bar.
 
 `tibia_frame.py` writes `tibia-hu.npy`, `tibia-mask.npy` and `tibia-frame.json` on an **aligned grid**: array
 axes (W, V, U), the scan's voxel size, W from the joint toward the shaft. +U medial and +V anterior come from a sign
-rule on scan y and the joint end that assumes one knee and one scan orientation: **confirm it on the QC montage**
-before you name a side (a left knee flips it). Every annotation is an index on that grid and carries its `grid_id`;
+rule on scan y and the joint end that assumes one knee and one scan orientation, and the frame has no flip:
+**find which way along U is medial** on a view that shows the fibula (it is lateral) before you name a side, and where
++U is lateral, name the medial and lateral annotation fields from what you saw. Every annotation is an index on that grid and carries its `grid_id`;
 the scripts refuse a file without one or from another grid, because indices mean nothing on another frame. They
 also refuse, before writing anything, a key they don't know, a value of the wrong form, and an index outside the grid. The
 femoral landmarks are the exception: `[z, y, x]` on the scan grid.
@@ -182,6 +183,6 @@ the measurements they check.
   do we. They are counted on the aligned grid, a linear resampling of HU (grid rule above).
 - ROI-3 (#16–23) depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported
   as `cortex_estimate_mm`): a wrong depth moves ROI-3.
-- A medial or lateral value (#8, #9, #11, #12) follows the aligned frame's +U medial, confirmed on the render.
+- A medial or lateral value (#8, #9, #11, #12) follows the side found from the fibula, on the view you cite.
 - Tb.Nd and Tb.Tm (#22, #23) are exploratory; Tb.Th, Tb.Sp, Tb.N and Ct.Th (#19–21, #24, #25) carry the
   sphere-method bias with the voxel size.
