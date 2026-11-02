@@ -6,7 +6,6 @@
 import { agentLog } from "@voluma/contracts/agents";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
 import type { AgentsDefinition } from "@voluma/workflow/definition";
-import type { BashRuntime } from "../bash-runtime";
 import type { ThreadLayout } from "../layout";
 import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
