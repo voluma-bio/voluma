@@ -1,9 +1,11 @@
 /**
  * Study feature: Studies (`/`), Run on new scans (`/new`), Workflows (`/workflows`) and a study's
  * pages (`/studies/:id`: its samples, and `/compare`). Owns its routes; the shell mounts them and
- * applies the user's theme.
+ * applies the user's theme. The study's old pages (To check, Scans, Results, Details, Workflow)
+ * redirect to where their content now lives; they sit under the layout, so a study of one still
+ * opens its scan first.
  */
-import type { RouteObject } from "react-router";
+import { Navigate, type RouteObject } from "react-router";
 import { NewPage } from "./new-page";
 import { StudiesPage } from "./studies-page";
 import { ComparePage } from "./study/compare-page";
@@ -20,6 +22,12 @@ export const studyRoutes: RouteObject[] = [
     children: [
       { index: true, element: <StudyPage /> },
       { path: "compare", element: <ComparePage /> },
+      { path: "check", element: <Navigate replace to="..?status=needs-you" /> },
+      { path: "results", element: <Navigate replace to="../compare" /> },
+      ...["scans", "details", "workflow"].map((path) => ({
+        path,
+        element: <Navigate replace to=".." />,
+      })),
     ],
   },
   { path: "/workflows", element: <WorkflowsPage /> },

@@ -27,7 +27,7 @@ function NotFound() {
     <div className="grid flex-1 place-content-center gap-2 text-center">
       <h1 className="text-2xl font-semibold">Page not found</h1>
       <Button asChild variant="link" className="justify-self-center">
-        <Link to="/">Go to Home</Link>
+        <Link to="/">Go to Studies</Link>
       </Button>
     </div>
   );

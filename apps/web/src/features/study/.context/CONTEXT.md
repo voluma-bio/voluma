@@ -6,6 +6,9 @@ Studies (`/`, `studies-page.tsx`), Run on new scans (`/new`, `new-page.tsx`), Wo
 the scan review and uploads. Every run
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
 shown as its scan and linked straight to its scan review (`/scans/:runId`, `runHref`).
+The deleted study pages' paths redirect (`index.tsx`): `check` to `?status=needs-you`, `results` to
+Compare, `scans`, `details` and `workflow` to the study. Links to them are out in the world (the
+hackathon judges' notes link the example's study), so keep these until there is a reason not to.
 
 - **Studies** (design: the agent-model `review.md`, "The shell and the study pages"; mockup
   `q24/c-quad-graph/study.html`) is a list with a details pane, like a file browser: a click
@@ -16,7 +19,8 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
 - **A sample's place** (`placeOf`): Needs you (To check, paused for keys, failed or stopped),
   Running (live or queued), Done, then Not started (no run). It is the Samples tree's grouping
   (`sampleTree` in run-view), so a sample sits in the same group in the tree and on the page;
-  `?status=<place>` shows one group, on the study page and on Compare.
+  `?status=<place>` shows one group, on the study page and on Compare. An example's samples are
+  always Done: nobody can change an example, so it never needs you.
 - **A sample's bar** (`SampleBar`, rule in `study-model.ts`'s header and `segmentOf`): one segment
   per measurement of the workflow (29 for mouse OA today, the mockup's "28" plus bone threshold),
   in task order, each from the study read's own fields: its task's state in the newest run

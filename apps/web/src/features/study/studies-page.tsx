@@ -59,7 +59,9 @@ function marksOf(study: StudySummary): Status[] {
 function placeCounts(study: StudySummary): Map<Place, number> {
   const counts = new Map<Place, number>();
   const add = (p: Place, n = 1) => counts.set(p, (counts.get(p) ?? 0) + n);
-  for (const run of study.newestRuns) add(placeOfStatus(runStatus(run).status));
+  // Nobody can change an example, so it never needs you (as in the Samples tree).
+  for (const run of study.newestRuns)
+    add(study.example ? "done" : placeOfStatus(runStatus(run).status));
   if (study.scanCount > study.newestRuns.length)
     add("not-started", study.scanCount - study.newestRuns.length);
   return counts;

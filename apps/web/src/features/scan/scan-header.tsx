@@ -102,7 +102,7 @@ export function ScanHeading({
               to={study ? `/studies/${study.study.id}` : "/"}
               className="truncate text-muted-foreground hover:text-foreground"
             >
-              {study ? study.study.name : "Home"}
+              {study ? study.study.name : "Studies"}
             </Link>
             <span aria-hidden className="text-fg-subtle">
               /

@@ -1,6 +1,6 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
- * Home, the study page and the scan review so they read the same: Running, N to check, Checked,
+ * Studies, the study page and the scan review so they read the same: Running, N to check, Checked,
  * Failed, Stopped, Waiting (queued),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
