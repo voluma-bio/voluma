@@ -7,7 +7,7 @@
  */
 export { AgentThread } from "./agent-thread";
 export { THREAD_STATUS } from "./agents";
-export { ApprovalCard, type ApprovalCardProps } from "./approval-card";
+export { ApprovalCard, type ApprovalCardProps, approvalWords } from "./approval-card";
 export { DisclosureProvider } from "./chat/disclosure-store";
 export { Markdown } from "./chat/markdown";
 export { ThreadNavigationProvider } from "./chat/thread-navigation";

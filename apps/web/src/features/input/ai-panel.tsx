@@ -12,54 +12,27 @@
  * Who may write, and when, is the API's rule (`messages.ts`); the run read carries it as
  * `cannotMessage` and the box shows it as its reason for being off.
  */
-import { useMutation } from "@tanstack/react-query";
-import { ApiError, sendRunMessage } from "@voluma/api-client";
+import { ApiError } from "@voluma/api-client";
 import { type ConversationItem, conversation, openOffer } from "@voluma/contracts/conversation";
-import {
-  MAX_MESSAGE_SNAPSHOT_BYTES,
-  MESSAGE_BODY_BYTES,
-  type SendRunMessageRequest,
-} from "@voluma/contracts/messages";
 import type { RunRead } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
 import { ArrowRight, RotateCcw, Send, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { describe, gridMark, messageMark, type YourMark } from "./marks-panel";
-
-/**
- * The box's text, kept in this tab's sessionStorage so a reload (by hand, or onto a new deploy)
- * keeps it. A send clears the box and with it the draft.
- */
-export function useDraft(key: string) {
-  const [text, setText] = useState(() => {
-    try {
-      return sessionStorage.getItem(key) ?? "";
-    } catch {
-      return "";
-    }
-  });
-  useEffect(() => {
-    try {
-      if (text) sessionStorage.setItem(key, text);
-      else sessionStorage.removeItem(key);
-    } catch {
-      // Without storage the draft lives only as long as the page.
-    }
-  }, [key, text]);
-  return [text, setText] as const;
-}
+import { refusalOf, useDraft, useIdempotentSend } from "./message-send";
 
 /** The API's refusal in its own words when it gave some; the text stays in the box. */
-function refusal(error: Error): string {
-  if (!(error instanceof ApiError)) return "Couldn't send. Check your connection and try again.";
-  if (error.serverMessage) return error.serverMessage;
-  if (error.status === 409)
-    return "The AI is still answering, or the run can't be reopened. Try again once it finishes.";
-  if (error.status === 403) return "You can't write to this run's AI.";
-  if (error.status === 429) return "Too many runs are going right now. Try again shortly.";
-  return "Couldn't send. Try again.";
-}
+const refusal = (error: Error) =>
+  refusalOf(error, (status) =>
+    status === 409
+      ? "The AI is still answering, or the run can't be reopened. Try again once it finishes."
+      : status === 403
+        ? "You can't write to this run's AI."
+        : status === 429
+          ? "Too many runs are going right now. Try again shortly."
+          : undefined,
+  );
 
 /**
  * A go the server turned down (409: the plan no longer lets that task be redone), in the task's own
@@ -73,15 +46,6 @@ function redoRefused(
   if (redo === undefined || !(error instanceof ApiError) || error.status !== 409) return undefined;
   const title = tasks.find((t) => t.id === redo)?.title ?? "That task";
   return `${title} can't be redone now. Ask the AI what changed.`;
-}
-
-/** PNG bytes as plain base64, as the message takes them. */
-async function base64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let text = "";
-  for (let i = 0; i < bytes.length; i += 0x8000)
-    text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(text);
 }
 
 /**
@@ -123,37 +87,24 @@ export function useMessage({
   /** The AI's offer you are answering: `go` redoes its task, else you keep the task as it is. */
   const [answer, setAnswer] = useState<{ replyId: string; taskId: string; go: boolean }>();
   const subject = tasks.find((t) => t.id === (answer?.taskId ?? about?.taskId ?? task?.id));
-  // The API deduplicates by id alone. A retry must keep the entire request, including its PNG.
-  const tried = useRef<{
-    fingerprint: string;
+  // The offer accepted: its button stays gone while the reopened run catches up.
+  const [accepted, setAccepted] = useState<string>();
+  // A message without the picture it meant to carry says so once sent.
+  const [unseen, setUnseen] = useState(false);
+  const { send, submit: post } = useIdempotentSend<{
     marks: string[];
     /** The reply whose offer this accepts. */
     offer?: string;
     /** The task a go asks to redo. */
     redo?: string;
-    prepared: Promise<{ body: SendRunMessageRequest; unseen: boolean }>;
-  }>(undefined);
-  // The offer accepted: its button stays gone while the reopened run catches up.
-  const [accepted, setAccepted] = useState<string>();
-  const inFlight = useRef(false);
-  // A message without the picture it meant to carry says so once sent.
-  const [unseen, setUnseen] = useState(false);
-  const send = useMutation({
-    mutationFn: async (attempt: NonNullable<typeof tried.current>) => {
-      const { body, unseen } = await attempt.prepared;
-      await sendRunMessage(run.id, body);
-      return { marks: attempt.marks, offer: attempt.offer, unseen };
-    },
-    onSuccess: (sent) => {
+  }>({
+    runId: run.id,
+    onSuccess: ({ unseen, meta }) => {
       setText("");
       setAnswer(undefined);
-      setUnseen(sent.unseen);
-      if (sent.offer) setAccepted(sent.offer);
-      tried.current = undefined;
-      onSent(sent.marks);
-    },
-    onSettled: () => {
-      inFlight.current = false;
+      setUnseen(unseen);
+      if (meta.offer) setAccepted(meta.offer);
+      onSent(meta.marks);
     },
   });
   const closed = run.cannotMessage ?? undefined;
@@ -163,11 +114,11 @@ export function useMessage({
    */
   const submit = () => {
     const go = answer?.go === true;
-    if (closed !== undefined || inFlight.current || (!answer && !text.trim())) return;
-    inFlight.current = true;
+    if (closed !== undefined || (!answer && !text.trim())) return;
     const note = text.trim();
     // A mark a message can't carry (an angle) stays on the page.
     const carried = !answer && subject ? marks.filter((m) => messageMark(m)) : [];
+    // Marks name a block of the task's results, so they go only with a task; an answer takes none.
     const fields = answer
       ? go
         ? { taskId: answer.taskId, go: true as const, ...(note && { text: note }) }
@@ -185,36 +136,16 @@ export function useMessage({
       marks: carried,
       viewKey: !answer && snapshot ? viewKey : undefined,
     });
-    if (tried.current?.fingerprint !== fingerprint) {
-      // Marks name a block of the task's results, so they go only with a task; an answer takes none.
-      const body: SendRunMessageRequest = { id: crypto.randomUUID(), ...fields };
-      // An answer has nothing to show the AI; a message carries the views as they are, in the room
-      // the rest of the body leaves (base64 is 4 bytes per 3, plus the field's own JSON).
-      const room = Math.floor(
-        ((MESSAGE_BODY_BYTES - new Blob([JSON.stringify(body)]).size - 64) * 3) / 4,
-      );
-      // Invoke capture before mutate: a mutation can pause offline while the user changes tasks.
-      // A capture that fails sends the message without its picture, and says so.
-      const picture: Promise<string | null | undefined> =
-        answer || !snapshot
-          ? Promise.resolve(undefined)
-          : room > 0
-            ? snapshot(Math.min(MAX_MESSAGE_SNAPSHOT_BYTES, room))
-                .then((png) => png && base64(png))
-                .catch(() => null)
-            : Promise.resolve(null);
-      tried.current = {
-        fingerprint,
+    // An answer has nothing to show the AI; a message carries the views as they are.
+    post(fingerprint, () => ({
+      fields,
+      ...(!answer && snapshot && { picture: snapshot }),
+      meta: {
         marks: carried.map((m) => m.id),
         offer: answer?.replyId,
         redo: go ? answer?.taskId : undefined,
-        prepared: picture.then((data) => ({
-          body: { ...body, ...(data && { snapshot: { mimeType: "image/png" as const, data } }) },
-          unseen: data === null,
-        })),
-      };
-    }
-    send.mutate(tried.current);
+      },
+    }));
   };
   return {
     subject,
@@ -471,7 +402,7 @@ export function AiPanel({
         )}
         {send.isError && (
           <p role="alert" className="text-sm text-destructive">
-            {redoRefused(send.error, tasks, send.variables?.redo) ?? refusal(send.error)}
+            {redoRefused(send.error, tasks, send.variables?.meta.redo) ?? refusal(send.error)}
           </p>
         )}
       </form>

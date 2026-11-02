@@ -178,7 +178,8 @@ The conversation is the only place anything on the run changes (design review.md
 "Approvals"). It shows main's messages to the researcher, yours with the marks they carried, the
 views you saved and the calls main holds for your yes (`ApprovalCard`, `@voluma/run-view`: what the
 call does in code's words, with what it makes out of date; Yes and No with optional words through
-`answerApproval`; then the answer, and done, refused or withdrawn). `conversation()` (contracts)
+`answerApproval`; then the answer, and only the outcome's word: `approval.settled`'s text is
+written for main). `conversation()` (contracts)
 gives the items. While the run is live and the last word was yours, "main is on it".
 
 **Editing a mark is a correction, and nothing reaches main until Send.** A new mark, a moved one
@@ -189,18 +190,20 @@ beside the box. Which marks wait is derived, never kept: `useRunMarks`'s `change
 your marks with what the last `person.message` froze of it (`attached`, by mark id); a mark no
 message carried, one whose ends or note changed since, and one main was told of that you deleted.
 x on a chip undoes the change (a new mark goes; a moved or deleted one goes back to what main saw).
-An edit writes a line ("I moved P1.") into the box only while the box is empty or holds just the
-page's lines, and takes it out again when undone. Tags are never reused in a run (`MarkStore.tags`):
-a message may name a deleted one.
+Nothing is written into the box: main gets each attached mark with its change and positions, and
+the empty box shows what the marks say. Tags are never reused in a run (`MarkStore.tags`): a message
+may name a deleted one. A send waits for the writes of the marks it names (`settled`), since the API
+freezes them from the log; if one failed, nothing is sent.
 
 A message carries the words, the waiting marks by id (`markIds`; the API freezes them), the output
 in view (`output`), the panes' view as Save view keeps it (`view`, dropped over `MAX_VIEW_BYTES`), a
 PNG of the panes when "With <output>, as you see it" is on (`QuadViewerHandle.snapshot` through
 `SceneHandle`), and the To check item it answers (`toCheck`, set by "Tell main what's wrong" on an
-item). Retries keep the id and the exact request; refusals show the API's words. A message or an
+item). Both composers send through `message-send.ts` (`useIdempotentSend`): a retry keeps the id
+and the exact request; refusals show the API's words. A message or an
 answer to an ended run reopens it: the page reconnects the stream and reads the run again.
 
-A run whose root ended "Waiting for the researcher." with a call open reads "Waiting on you" in
-the heading (from the log, not the row). The Samples tree and the study rows can't say so yet: the
+A run with a call open that you can answer reads "Waiting on you" in the heading (from the log,
+not the row). The Samples tree and the study rows can't say so yet: the
 study summaries carry no open-call count (`TODO.md`).
 

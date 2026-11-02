@@ -1,9 +1,9 @@
 /**
  * A call the run's main AI holds for the researcher's yes, inside the conversation (review.md,
- * "Approvals"): what it would do in code's words (which outputs it makes out of date included),
- * Yes and No with the researcher's own words, then the answer and how the call ended. The answer
- * is the API's to record; this only shows it. Data comes in as props; the outputs review's
- * conversation shows it.
+ * "Approvals"): what it would do in code's words and the outputs it makes out of date, Yes and No
+ * with the researcher's own words, then the answer and how the call ended. The answer is the
+ * API's to record; this only shows it. Data comes in as props (`approvalWords` names the call);
+ * the outputs review's conversation shows it.
  */
 import { Button, StatusMark, TextField } from "@voluma/ui";
 import { useState } from "react";
@@ -12,8 +12,10 @@ import { Markdown } from "./chat/markdown";
 export type ApprovalCardProps = {
   /** What the call is, in words: "Start a worker". */
   title: string;
-  /** What it would do, with what it makes out of date, as code wrote it. */
+  /** What it would do, as code wrote it. */
   summary: string;
+  /** The outputs it makes out of date if it runs, by name; absent when the request names none. */
+  outOfDate?: readonly string[];
   /** The yes button's words: "Yes, start fix-labels". */
   yes?: string;
   /** The researcher's answer, once given; `time` as the chat shows times. */
@@ -22,7 +24,7 @@ export type ApprovalCardProps = {
    * How the call closed: it ran (`done`), was refused when it ran (`refused`), or was withdrawn
    * (main closed the run, or it was cancelled) with or without an answer.
    */
-  settled?: { outcome: "done" | "refused" | "withdrawn"; text: string };
+  settled?: "done" | "refused" | "withdrawn";
   /** Yes or No with the words typed; absent, no answer can be given here (`readOnly` says why). */
   onAnswer?: (answer: "yes" | "no", text: string) => void;
   /** The answer being saved. */
@@ -40,6 +42,7 @@ const SETTLED = {
 export function ApprovalCard({
   title,
   summary,
+  outOfDate,
   yes = "Yes",
   answer,
   settled,
@@ -59,20 +62,22 @@ export function ApprovalCard({
         <h3 className="font-semibold">{title}</h3>
         {open ? (
           <span className="text-xs text-muted-foreground">waits for your answer</span>
-        ) : settled?.outcome === "withdrawn" ? (
+        ) : settled === "withdrawn" ? (
           // Not a failure: main moved on without it.
           <span className="text-xs text-muted-foreground">withdrawn</span>
         ) : settled ? (
-          <StatusMark
-            status={SETTLED[settled.outcome].status}
-            label={SETTLED[settled.outcome].label}
-          />
+          <StatusMark status={SETTLED[settled].status} label={SETTLED[settled].label} />
         ) : (
           <span className="text-xs text-muted-foreground">answered</span>
         )}
       </header>
-      <div className="px-3 py-2">
+      <div className="grid gap-1.5 px-3 py-2">
         <Markdown text={summary} className="text-sm" />
+        {outOfDate && outOfDate.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Out of date if it runs: <span className="text-foreground">{outOfDate.join(", ")}</span>
+          </p>
+        )}
       </div>
       {open ? (
         <div className="grid gap-2 border-t border-border px-3 py-2">
@@ -110,17 +115,34 @@ export function ApprovalCard({
           )}
         </div>
       ) : (
-        <div className="grid gap-1 border-t border-border px-3 py-2 text-muted-foreground">
-          {answer && (
-            <p>
-              You said <span className="font-semibold text-foreground">{answer.answer}</span> at{" "}
-              {answer.time}
-              {answer.text ? `: ${answer.text}` : "."}
-            </p>
-          )}
-          {settled && settled.text && <p className="text-xs break-words">{settled.text}</p>}
-        </div>
+        answer && (
+          <p className="border-t border-border px-3 py-2 text-muted-foreground">
+            You said <span className="font-semibold text-foreground">{answer.answer}</span> at{" "}
+            {answer.time}
+            {answer.text ? `: ${answer.text}` : "."}
+          </p>
+        )
       )}
     </article>
   );
+}
+
+/** A held call in words, by the tool main called: what it is, and what Yes says. */
+export function approvalWords(tool: string, args: unknown): { title: string; yes: string } {
+  const name = (args as { name?: unknown } | null)?.name;
+  switch (tool) {
+    case "start_worker":
+      return {
+        title: "Start a worker",
+        yes: typeof name === "string" ? `Yes, start ${name}` : "Yes, start it",
+      };
+    case "report_output":
+      return { title: "Publish a new version", yes: "Yes, publish it" };
+    case "change_outputs":
+      return { title: "Change the final outputs", yes: "Yes, change them" };
+    case "keep_output":
+      return { title: "Keep as they are", yes: "Yes, keep them" };
+    default:
+      return { title: tool, yes: "Yes" };
+  }
 }

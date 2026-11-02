@@ -3,50 +3,65 @@
  * (review.md, "The conversation"): main's messages, yours with the marks they carried, the calls
  * main holds for your yes (`ApprovalCard`), and the views you saved, in log order. Under it the
  * box: your words, the mark changes waiting for them (each chip goes to its mark; x undoes the
- * change), and whether a picture of the panes goes too. The message itself is `useMainMessage`.
+ * change), and whether a picture of the panes goes too. Main gets each mark with its change and
+ * positions, so the box needs no words about them: while it is empty it shows what the marks say.
+ * The message itself is `useMainMessage`.
  */
-import { type ConversationItem, conversation } from "@voluma/contracts/conversation";
-import type { RunEvent } from "@voluma/contracts/events";
-import { ApprovalCard, Markdown } from "@voluma/run-view";
+import type { ConversationItem } from "@voluma/contracts/conversation";
+import { ApprovalCard, approvalWords, Markdown } from "@voluma/run-view";
 import { Button, Chip, cx, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
 import { Bookmark, Send, X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
-import type { MarkChange } from "./run-marks";
+import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
+import type { MarkChange } from "./marks-panel";
 import type { SavedView } from "./saved-views";
 import type { useAnswers, useMainMessage } from "./use-main-message";
 import { clockOf } from "./version-report";
 
-type Approval = Extract<ConversationItem, { from: "approval" }>;
-
-/** A held call in words: what it is, and what Yes says. */
-function callWords({ tool, args }: Approval): { title: string; yes: string } {
-  const name = (args as { name?: unknown } | null)?.name;
-  switch (tool) {
-    case "start_worker":
-      return {
-        title: "Start a worker",
-        yes: typeof name === "string" ? `Yes, start ${name}` : "Yes, start it",
-      };
-    case "report_output":
-      return { title: "Publish a new version", yes: "Yes, publish it" };
-    case "change_outputs":
-      return { title: "Change the final outputs", yes: "Yes, change them" };
-    case "keep_output":
-      return { title: "Keep as they are", yes: "Yes, keep them" };
-    default:
-      return { title: tool, yes: "Yes" };
-  }
-}
-
 const CHANGE_WORD: Record<MarkChange["change"], string | undefined> = {
   place: undefined,
   move: "moved",
-  edit: "edited",
   delete: "deleted",
 };
 
+/** What a waiting change says to main, in the researcher's voice. */
+function lineOf(c: MarkChange, nameOf: (id: string) => string): string {
+  if (c.change === "place") return `I placed ${c.tag} on ${nameOf(c.output)}.`;
+  return `I ${CHANGE_WORD[c.change]} ${c.tag}.`;
+}
+
+/** A mark and what changed of it; its tag shows the mark, unless it is gone (`onShow` absent). */
+function MarkChangeChip({
+  tag,
+  change,
+  onShow,
+  children,
+}: {
+  tag: string;
+  change: MarkChange["change"];
+  onShow: (() => void) | undefined;
+  /** Beside the tag: the chip's own action. */
+  children?: ReactNode;
+}) {
+  const word = CHANGE_WORD[change];
+  return (
+    <Chip className={cx("text-mark-mine-text", !!children && "gap-0.5 pr-0.5")}>
+      <button
+        type="button"
+        className="cursor-pointer font-mono disabled:cursor-default"
+        disabled={!onShow}
+        title={onShow && `Show ${tag}`}
+        onClick={onShow}
+      >
+        <span className={cx(change === "delete" && "line-through")}>{tag}</span>
+        {word && <span className="font-sans"> {word}</span>}
+      </button>
+      {children}
+    </Chip>
+  );
+}
+
 export function MainConversation({
-  events,
+  conversation,
   views,
   live,
   nameOf,
@@ -57,7 +72,8 @@ export function MainConversation({
   onMark,
   onDiscard,
 }: {
-  events: readonly RunEvent[];
+  /** The run's `conversation()`. */
+  conversation: readonly ConversationItem[];
   views: readonly SavedView[];
   /** The run is queued or running: main is at work on what it was sent. */
   live: boolean;
@@ -73,13 +89,13 @@ export function MainConversation({
   onDiscard: (id: string) => void;
 }) {
   const items = useMemo(() => {
-    const said = conversation(events)
+    const said = conversation
       .filter((m): m is Exclude<ConversationItem, { from: "outcome" }> => m.from !== "outcome")
       .map((m) => ({ ...m, kind: "said" as const }));
     return [...said, ...views.map((v) => ({ ...v, kind: "view" as const }))].sort(
       (a, b) => a.seq - b.seq,
     );
-  }, [events, views]);
+  }, [conversation, views]);
   // Main is at work while the run goes and the last word was yours: a message, or a yes or no.
   const last = [...items].reverse().find((m) => m.kind === "said");
   const working =
@@ -148,25 +164,13 @@ export function MainConversation({
                         {m.output && <span>looking at {nameOf(m.output)}</span>}
                         {m.attached.map((a) => {
                           const id = typeof a.mark.id === "string" ? a.mark.id : undefined;
-                          const word = CHANGE_WORD[a.change];
                           return (
-                            <Chip
+                            <MarkChangeChip
                               key={`${id ?? a.mark.tag}-${a.change}`}
-                              className="text-mark-mine-text"
-                            >
-                              <button
-                                type="button"
-                                className="cursor-pointer font-mono disabled:cursor-default"
-                                disabled={!id || a.change === "delete"}
-                                title={`Show ${a.mark.tag}`}
-                                onClick={() => id && onMark(id)}
-                              >
-                                <span className={cx(a.change === "delete" && "line-through")}>
-                                  {a.mark.tag}
-                                </span>
-                                {word && <span className="font-sans"> {word}</span>}
-                              </button>
-                            </Chip>
+                              tag={a.mark.tag}
+                              change={a.change}
+                              onShow={id && a.change !== "delete" ? () => onMark(id) : undefined}
+                            />
                           );
                         })}
                       </p>
@@ -181,10 +185,11 @@ export function MainConversation({
               ) : (
                 <li key={m.id}>
                   <ApprovalCard
-                    {...callWords(m)}
+                    {...approvalWords(m.tool, m.args)}
                     summary={m.summary}
+                    outOfDate={m.outOfDate?.map(nameOf)}
                     answer={m.answer && { ...m.answer, time: clockOf(m.answer.at) }}
-                    settled={m.settled}
+                    settled={m.settled?.outcome}
                     onAnswer={
                       answers.answer && ((yes, words) => answers.answer?.(m.id, yes, words))
                     }
@@ -238,9 +243,11 @@ export function MainConversation({
           label="Message to main"
           hideLabel
           placeholder={
-            about
-              ? "What's wrong with it, and what should change?"
-              : "Ask about what you're looking at, or say what should change"
+            attached.length > 0
+              ? attached.map((c) => lineOf(c, nameOf)).join("\n")
+              : about
+                ? "What's wrong with it, and what should change?"
+                : "Ask about what you're looking at, or say what should change"
           }
           rows={3}
           maxLength={10_000}
@@ -274,37 +281,29 @@ export function MainConversation({
               </label>
             )}
             {attached.length > 0 && <span>{message.picture ? "and" : "With"} your marks:</span>}
-            {attached.map((c) => {
-              const word = CHANGE_WORD[c.change];
-              return (
-                <Chip key={c.id} className="gap-0.5 pr-0.5 text-mark-mine-text">
-                  <button
-                    type="button"
-                    className="cursor-pointer font-mono disabled:cursor-default"
-                    disabled={c.change === "delete"}
-                    title={`Show ${c.tag}`}
-                    onClick={() => onMark(c.id)}
-                  >
-                    <span className={cx(c.change === "delete" && "line-through")}>{c.tag}</span>
-                    {word && <span className="font-sans"> {word}</span>}
-                  </button>
-                  <IconButton
-                    size="sm"
-                    label={
-                      c.change === "place"
-                        ? `Remove ${c.tag}`
-                        : c.change === "delete"
-                          ? `Keep ${c.tag}`
-                          : `Undo the change to ${c.tag}`
-                    }
-                    disabled={send.isPending}
-                    onClick={() => onDiscard(c.id)}
-                  >
-                    <X />
-                  </IconButton>
-                </Chip>
-              );
-            })}
+            {attached.map((c) => (
+              <MarkChangeChip
+                key={c.id}
+                tag={c.tag}
+                change={c.change}
+                onShow={c.change === "delete" ? undefined : () => onMark(c.id)}
+              >
+                <IconButton
+                  size="sm"
+                  label={
+                    c.change === "place"
+                      ? `Remove ${c.tag}`
+                      : c.change === "delete"
+                        ? `Keep ${c.tag}`
+                        : `Undo the change to ${c.tag}`
+                  }
+                  disabled={send.isPending}
+                  onClick={() => onDiscard(c.id)}
+                >
+                  <X />
+                </IconButton>
+              </MarkChangeChip>
+            ))}
           </div>
           <Button
             type="submit"

@@ -67,13 +67,18 @@ export type ConversationItem =
       at: string;
       tool: string;
       args: unknown;
-      /** What the call would do, in words, with what it makes out of date; written by code. */
+      /** What the call would do, in words; written by code. */
       summary: string;
+      /** The outputs it makes out of date if it runs, when the request names them. */
+      outOfDate?: string[];
       /** The researcher's answer, once given. */
       answer?: { answer: "yes" | "no"; text?: string; at: string };
       /** How it closed: the held call ran, was refused when it ran, or was withdrawn. */
-      settled?: { outcome: "done" | "refused" | "withdrawn"; text: string; at: string };
+      settled?: { outcome: "done" | "refused" | "withdrawn"; at: string };
     };
+
+/** The id of a held call's answer (`approval.given`, `approval.declined`) or its outcome (`approval.settled`). */
+export const approvalIdOf = (requestId: string, of: "answer" | "settled") => `${requestId}:${of}`;
 
 /**
  * The person's messages, the agent's replies, the corrections' ends and the held calls, in log
@@ -82,10 +87,8 @@ export type ConversationItem =
  */
 export function conversation(events: readonly RunEvent[]): ConversationItem[] {
   const items: ConversationItem[] = [];
-  // Answers and outcomes carry the request's id with a suffix (`<request id>:answer`, `:settled`).
+  // A held call by the ids of its answer and its outcome.
   const approvals = new Map<string, Extract<ConversationItem, { from: "approval" }>>();
-  const requestOf = (id: string, suffix: string) =>
-    id.endsWith(suffix) ? approvals.get(id.slice(0, -suffix.length)) : undefined;
   for (const e of events) {
     if (e.type === "person.message") {
       const { text, marks, taskId, go, attached, output, toCheck } = e.payload;
@@ -103,7 +106,7 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         ...(toCheck && { toCheck }),
       });
     } else if (e.type === "approval.requested") {
-      const { tool, args, summary } = e.payload;
+      const { tool, args, summary, outOfDate } = e.payload;
       const item = {
         from: "approval" as const,
         id: e.id,
@@ -112,11 +115,13 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         tool,
         args,
         summary,
+        ...(outOfDate && { outOfDate }),
       };
-      approvals.set(e.id, item);
+      approvals.set(approvalIdOf(e.id, "answer"), item);
+      approvals.set(approvalIdOf(e.id, "settled"), item);
       items.push(item);
     } else if (e.type === "approval.given" || e.type === "approval.declined") {
-      const request = requestOf(e.id, ":answer");
+      const request = approvals.get(e.id);
       if (request)
         request.answer = {
           answer: e.type === "approval.given" ? "yes" : "no",
@@ -124,9 +129,9 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
           at: e.createdAt,
         };
     } else if (e.type === "approval.settled") {
-      const request = requestOf(e.id, ":settled");
-      if (request)
-        request.settled = { outcome: e.payload.outcome, text: e.payload.text, at: e.createdAt };
+      const request = approvals.get(e.id);
+      // Its text is written for main, not the researcher.
+      if (request) request.settled = { outcome: e.payload.outcome, at: e.createdAt };
     } else if (e.type === "agent.message" && e.payload.to === "researcher") {
       items.push({ from: "agent", id: e.id, seq: e.seq, at: e.createdAt, text: e.payload.text });
     } else if (e.type === "reply") {

@@ -10,7 +10,15 @@
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { angleAbout, type Basis, type Slab, unit, type Vec3 } from "./frame";
-import { angleDegrees, areaMm2, lengthMm, type MarkLayer, probeText, thin } from "./marks";
+import {
+  angleDegrees,
+  areaMm2,
+  lengthMm,
+  type MarkLayer,
+  markPoints,
+  probeText,
+  thin,
+} from "./marks";
 import {
   type Axis,
   type GridAnnotation,
@@ -86,10 +94,8 @@ function withEnd(mark: GridMark, index: number, p: Zyx, spacingZyx: Zyx): GridMa
 
 /** The ends a press can take: a point's voxel (not a probe's), a line's two, an angle's three. */
 function endsOf(mark: GridMark): readonly Zyx[] {
-  if ("point" in mark) return mark.probe ? [] : [mark.point];
-  if ("line" in mark) return [mark.line.aZyx, mark.line.bZyx];
-  if ("angle" in mark) return [mark.angle.aZyx, mark.angle.vertexZyx, mark.angle.bZyx];
-  return [];
+  const probe = "point" in mark && mark.probe;
+  return probe || "box" in mark || "outline" in mark ? [] : markPoints(mark);
 }
 
 /**

@@ -166,6 +166,8 @@ export const approvalRequestedSchema = z.object({
   args: z.unknown(),
   fileHashes: z.record(relativePathSchema, sha256Schema),
   summary: nonEmpty,
+  /** The outputs the call makes out of date if it runs (the transitive dependents of what it changes), for the researcher's card. */
+  outOfDate: z.array(outputRefSchema).optional(),
 });
 
 /** The researcher's answer to an `approval.requested`; written by the API. */

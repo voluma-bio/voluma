@@ -6,8 +6,10 @@
  * frame, for sending it to main as a correction.
  *
  * Every change of yours waits for your next message to main (`changes`): a mark no message has
- * carried, one moved or edited since main was told of it (the last `person.message` that froze
- * it), and one main was told of that you deleted. A change undone (`discard`) is no change.
+ * carried (or re-placed after main was told it was deleted), one moved or with a new note since
+ * main was told of it (the last `person.message` that froze it), and one main was told of that you
+ * deleted. A change undone (`discard`) is no change. A message waits for the writes of the marks it
+ * names (`settled`): the API freezes them from the log.
  */
 import { deleteMark, placeMark } from "@voluma/api-client";
 import type { PlaceMarkRequest } from "@voluma/contracts/agent-events";
@@ -16,7 +18,8 @@ import type { Volume } from "@voluma/contracts/review";
 import { marksOf } from "@voluma/contracts/review-state";
 import { type GridMark, type MarkPlane, markPoints, worldOf } from "@voluma/viewer/grid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { gridKeyOf, type MarkStore, type YourMark } from "./marks-panel";
+import { gridKeyOf, type MarkChange, type MarkStore, type YourMark } from "./marks-panel";
+import { NotSent } from "./message-send";
 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
 
@@ -31,16 +34,10 @@ const yours = (p: Placed, me: string): YourMark => ({
   theirs: p.by !== me,
 });
 
-/** A change of yours to a mark that your next message carries: its id is the `markIds` entry. */
-export type MarkChange = {
-  id: string;
-  tag: string;
-  /** `move`: its ends moved; `edit`: something else (a note); `delete`: deleted since main saw it. */
-  change: "place" | "move" | "edit" | "delete";
-};
-
 type Told = { change: string; mark: YourMark };
 
+// TODO: use toldMarks and changeOf from @voluma/contracts/review-state once #480 lands; this rule
+// is theirs (the API freezes by it), copied here until then.
 /** What the last message to carry each mark told main of it, by mark id. */
 function toldOf(events: readonly RunEvent[]): Map<string, Told> {
   const told = new Map<string, Told>();
@@ -65,10 +62,12 @@ function toldOf(events: readonly RunEvent[]): Map<string, Told> {
   return told;
 }
 
-const sameEnds = (a: GridMark, b: GridMark) =>
-  JSON.stringify(markPoints(a)) === JSON.stringify(markPoints(b));
 const sameMark = (a: GridMark, b: GridMark) =>
-  sameEnds(a, b) && ("point" in a ? a.note : undefined) === ("point" in b ? b.note : undefined);
+  JSON.stringify(markPoints(a)) === JSON.stringify(markPoints(b)) &&
+  ("point" in a ? a.note : undefined) === ("point" in b ? b.note : undefined);
+
+/** A mark write that failed: the message naming the mark waits. */
+const UNSAVED = "A mark of yours wasn't saved, so the message wasn't sent. Try again.";
 
 /**
  * The marks of a run whose log is `events`, for the outputs review (`useMarking`'s store). A mark
@@ -89,8 +88,8 @@ export function useRunMarks({
   reopen: () => void;
 }): MarkStore & {
   error: string | undefined;
-  changes: MarkChange[];
-  discard: (id: string) => void;
+  /** Resolves once the writes of these marks are in the log; rejects when one failed. */
+  settled: (ids: readonly string[]) => Promise<void>;
 } {
   const logged = useMemo(() => marksOf(events), [events]);
   // id → the mark as written and not yet seen in the log; null for a deletion.
@@ -134,35 +133,35 @@ export function useRunMarks({
     ],
     [events, pending],
   );
+  // A mark on an image the run has since replaced is gone from the panes, and from the next message.
   const changes = useMemo(() => {
     const out: MarkChange[] = [];
     for (const m of all.values()) {
-      if (m.theirs) continue;
+      if (m.theirs || !gridKeys.has(m.gridKey)) continue;
       const t = told.get(m.id);
-      if (!t || t.change === "delete") out.push({ id: m.id, tag: m.tag, change: "place" });
-      else if (!sameMark(t.mark.mark, m.mark))
-        out.push({
-          id: m.id,
-          tag: m.tag,
-          change: sameEnds(t.mark.mark, m.mark) ? "edit" : "move",
-        });
+      const change =
+        !t || t.change === "delete" ? "place" : sameMark(t.mark.mark, m.mark) ? null : "move";
+      if (change) out.push({ id: m.id, tag: m.tag, output: m.taskId, change });
     }
     for (const [id, t] of told)
-      if (t.change !== "delete" && !all.has(id))
-        out.push({ id, tag: t.mark.tag, change: "delete" });
+      if (t.change !== "delete" && !all.has(id) && gridKeys.has(t.mark.gridKey))
+        out.push({ id, tag: t.mark.tag, output: t.mark.taskId, change: "delete" });
     return out;
-  }, [all, told]);
+  }, [all, told, gridKeys]);
 
   const latest = useRef({ volumes, run, reopen });
   latest.current = { volumes, run, reopen };
   // Each mark's writes go one after another, so the log ends with the last (a point, then its
-  // note); a run lock can hold one while the next would overtake it.
-  const queues = useRef(new Map<string, Promise<void>>());
+  // note); a run lock can hold one while the next would overtake it. Each settles true when saved.
+  const queues = useRef(new Map<string, Promise<boolean>>());
   const write = useCallback((id: string, next: YourMark | null, send: () => Promise<void>) => {
     setError(undefined);
     setPending((had) => new Map(had).set(id, next));
-    const sent = (queues.current.get(id) ?? Promise.resolve()).then(send).then(
-      () => latest.current.reopen(),
+    const sent = (queues.current.get(id) ?? Promise.resolve(true)).then(send).then(
+      () => {
+        latest.current.reopen();
+        return true;
+      },
       (e: unknown) => {
         // Only this write's own pending entry goes; a later write's stays.
         setPending((had) => {
@@ -172,12 +171,17 @@ export function useRunMarks({
           return rest;
         });
         setError(e instanceof Error && e.message ? e.message : "Couldn't save the mark.");
+        return false;
       },
     );
     queues.current.set(id, sent);
     void sent.then(() => {
       if (queues.current.get(id) === sent) queues.current.delete(id);
     });
+  }, []);
+  const settled = useCallback(async (ids: readonly string[]) => {
+    const saved = await Promise.all(ids.map((id) => queues.current.get(id) ?? true));
+    if (!saved.every(Boolean)) throw new NotSent(UNSAVED);
   }, []);
   const place = useCallback(
     (m: YourMark) => {
@@ -218,5 +222,5 @@ export function useRunMarks({
     },
     [place, erase],
   );
-  return { marks, tags, full: false, place, erase, error, changes, discard };
+  return { marks, tags, full: false, place, erase, error, changes, discard, settled };
 }

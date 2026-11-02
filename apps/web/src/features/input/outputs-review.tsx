@@ -17,8 +17,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, acceptToCheck } from "@voluma/api-client";
 import { studyQuery } from "@voluma/api-client/query";
-import { openApprovals } from "@voluma/contracts/agents";
 import type { Me } from "@voluma/contracts/auth";
+import { conversation } from "@voluma/contracts/conversation";
 import { outputsFold } from "@voluma/contracts/output-fold";
 import type { RunRead } from "@voluma/contracts/run";
 import {
@@ -203,8 +203,7 @@ export function OutputsReview({
   const [onlyNeeds, setOnlyNeeds] = useState(false);
   const needing = review.needing.size;
   const [leftTab, setLeftTab] = useState("conversation");
-  // Calls main holds for your yes: while one is open the run waits on you, whatever its row says.
-  const waiting = useMemo(() => openApprovals(events).length, [events]);
+  const said = useMemo(() => conversation(events), [events]);
   const runMarks = useRunMarks({
     run,
     me: me.userId,
@@ -215,6 +214,7 @@ export function OutputsReview({
   // An example run keeps no marks (its writes are refused): they are the page's, uncapped.
   const exampleMarks = useLocalMarks();
   const store = run.example ? exampleMarks : runMarks;
+  const settled = runMarks.settled;
   const marking = useMarking(QUAD_TOOLS, store);
   const allViews = useMemo(() => savedViews(events), [events]);
   const views = useSavedViews(run, allViews, reopen);
@@ -231,13 +231,19 @@ export function OutputsReview({
   const message = useMainMessage({
     run,
     events,
-    changes: run.example ? [] : runMarks.changes,
+    changes: store.changes,
     inView,
     picture: pictured,
     scene,
+    settled,
     onSent: sent,
   });
   const answers = useAnswers(run, sent);
+  // Calls main holds for your yes: while one is open and you can answer, the run waits on you,
+  // whatever its row says.
+  const waiting = answers.answer
+    ? said.filter((m) => m.from === "approval" && !m.answer && !m.settled).length
+    : 0;
   const accepting: Accepting = {
     ...useAcceptToCheck(run, reopen),
     ...(!run.example && {
@@ -247,40 +253,25 @@ export function OutputsReview({
       },
     }),
   };
-  // An edit is a correction: the mark is written now, and waits for your next message with a line
-  // about it in the box.
-  const latestEdit = useRef({ marks: marking.marks, store, add: marking.add, say: message.say });
-  latestEdit.current = { marks: marking.marks, store, add: marking.add, say: message.say };
+  // An edit is a correction: the mark is written now, and waits for your next message.
+  const latestEdit = useRef({ marks: marking.marks, store, add: marking.add });
+  latestEdit.current = { marks: marking.marks, store, add: marking.add };
   const onEdit = useCallback(
     (edit: MarkEdit, volumeId: string, gridKey: string, plane: MarkPlane) => {
-      const { marks, store: kept, add, say } = latestEdit.current;
+      const { marks, store: kept, add } = latestEdit.current;
       if (edit.from === "mark") {
         const m = marks.find((x) => x.id === edit.id);
-        if (!m || m.theirs) return;
-        kept.place({ ...m, mark: edit.mark, plane });
-        say(m.id, `I moved ${m.tag}.`);
-      } else {
-        const id = add(edit.mark, volumeId, gridKey, edit.id, plane);
-        const name = nameOf(edit.id);
-        if (id) say(id, `I moved an end of ${/ruler/i.test(name) ? "the " : ""}${name}.`);
-      }
+        if (m && !m.theirs) kept.place({ ...m, mark: edit.mark, plane });
+      } else add(edit.mark, volumeId, gridKey, edit.id, plane);
     },
-    [nameOf],
+    [],
   );
   // Delete takes away the mark you picked; one main was told of waits as a deletion.
-  const deleteMark = useCallback(
-    (id: string) => {
-      const { marks, store: kept, say } = latestEdit.current;
-      const m = marks.find((x) => x.id === id);
-      if (!m || m.theirs) return;
-      kept.erase(id);
-      if (run.example) return;
-      // A mark main never saw just goes, with any line about it.
-      const unseen = runMarks.changes.some((c) => c.id === id && c.change === "place");
-      say(id, unseen ? null : `I deleted ${m.tag}.`);
-    },
-    [run.example, runMarks.changes],
-  );
+  const deleteMark = useCallback((id: string) => {
+    const { marks, store: kept } = latestEdit.current;
+    const m = marks.find((x) => x.id === id);
+    if (m && !m.theirs) kept.erase(id);
+  }, []);
 
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
   // leaving Full view (Esc, F, opening a panel) puts the panes back. The page keeps only which
@@ -433,7 +424,7 @@ export function OutputsReview({
               badgeLabel: "main is waiting on you",
               content: (
                 <MainConversation
-                  events={events}
+                  conversation={said}
                   views={allViews}
                   live={live}
                   nameOf={nameOf}
@@ -446,13 +437,7 @@ export function OutputsReview({
                   answers={answers}
                   markError={runMarks.error}
                   onMark={marking.select}
-                  onDiscard={(id) => {
-                    if (run.example) exampleMarks.erase(id);
-                    else {
-                      runMarks.discard(id);
-                      message.say(id, null);
-                    }
-                  }}
+                  onDiscard={store.discard}
                 />
               ),
             },
