@@ -219,9 +219,10 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
   app.get("/runs/:runId/thumbnail", async (c) => {
     const { runId } = c.req.param();
     const reader = readerOf(c.var.user);
-    if (!(await runs.readable(reader, runId))) return c.json({ error: "not found" }, 404);
+    const readable = await runs.readable(reader, runId);
+    if (!readable) return c.json({ error: "not found" }, 404);
     if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
-    const webp = await runThumbnail(store, runId, async () => {
+    const webp = await runThumbnail(store, runId, readable.generation, async () => {
       const record = await runs.load(reader, runId);
       return record?.results.assets ?? null;
     });

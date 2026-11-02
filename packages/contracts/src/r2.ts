@@ -93,9 +93,11 @@ export const reviewAssetKey = (runId: string, sha256: string, path: string) =>
 
 /**
  * The run's picture for lists: one small WebP the review domain renders once from the run's
- * first converted image volume (`GET /api/review/runs/:runId/thumbnail`).
+ * converted scan (`GET /api/review/runs/:runId/thumbnail`). Keyed by the run's `generation`, so a
+ * re-seeded example or a run imported into a worktree (same id, new generation) renders its own.
  */
-export const runThumbnailKey = (runId: string) => `${runPrefix(runId)}thumbnail.webp`;
+export const runThumbnailKey = (runId: string, generation: string) =>
+  `${runPrefix(runId)}thumbnail-${seg(generation)}.webp`;
 
 /**
  * Completed conversions reused by runs of one input. Outside `inputPrefix`: raw inputs

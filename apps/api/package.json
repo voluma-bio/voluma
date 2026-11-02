@@ -30,7 +30,7 @@
     "postgres": "catalog:",
     "sharp": "0.34.5",
     "tsx": "^4.23.15",
-    "zarrita": "0.7.5",
+    "zarrita": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

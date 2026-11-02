@@ -199,11 +199,14 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   no event log (a viewer sends one request per chunk). The tail goes through `relativePathSchema`;
   the route does not check the object exists, so a missing chunk is R2's 404 on the redirect.
 - `runs.ts` also serves `GET /runs/:runId/thumbnail` (`thumbnail.ts`): a ≤192 px WebP of the run
-  for lists, kept at `runThumbnailKey`. The first request renders it from the coarse OME-Zarr
-  levels of the latest revision's first converted `image` volume (the review converter's own
-  output, read with zarrita through the store; the plane through the middle of the shortest axis,
-  windowed to the 1st to 99.5th percentile) and stores it; later requests read the store and no
-  event log. Concurrent first requests share one render. 204 (`no-store`) while the run has no
-  converted image volume; a failed render is a 500 and not stored.
+  for lists, kept at `runThumbnailKey(runId, generation)`, so a re-seeded example or a run imported
+  into a worktree never reads or writes another generation's picture. The first request renders it
+  from the coarse OME-Zarr levels of the run's scan: of all its converted assets the converter
+  marked `image` (`multiscales[0].name` in `image.zarr/.zattrs`), the one with the most voxels,
+  ties to log order; any dtype. It reads with zarrita through the store, takes the plane through
+  the middle of the shortest axis, windows it to the 1st to 99.5th percentile of the finite values,
+  and stores it; later requests read the store and no event log. Concurrent first requests share
+  one render. 204 (`no-store`) while the run has no converted image volume; a failed render is a
+  500 and not stored.
 - Deferred work:
   [.context/TODO.md](src/domains/review/.context/TODO.md).
