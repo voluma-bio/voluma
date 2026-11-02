@@ -31,7 +31,7 @@ The researcher reviews your outputs in 3D, and main judges them from your views 
 - every number with the file and command it came from.
 
 Look at each view before you rely on it. Report with `report_output`, once per output, naming what it was
-made from. An output you could not make is reported missing with the reason. A choice the data cannot
+made from. If you could not make an output, tell main what and why; only main marks an output missing. A choice the data cannot
 settle, that changes a number, is a To check item on the output with the choice you made meanwhile.
 
 ## Working with others

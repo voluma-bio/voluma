@@ -328,7 +328,7 @@ export function runLayout({
         gateway: tools.includes("segment_sam"),
         description:
           `${common(false)}- ${OUTPUTS} holds every published output version, one folder per version: read it, do not modify it. ${RUN}/outputs.yaml lists the versions and ${RUN}/final-outputs.yaml the outputs the researcher asked for; both are rewritten as the run goes.\n` +
-          `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, and the other agents' folders under ${WORK} are read-only to you; read their files, never change them. A folder of an agent that started after your sandbox did is visible to read and view_image at once, and to bash after the sandbox restarts. ` +
+          `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, and the other agents' folders under ${WORK} are read-only to you; read their files, never change them. A folder of an agent that started after your sandbox did is visible to read at once, and to bash after the sandbox restarts. ` +
           `Reporting an output moves the files you name out of your folder into ${OUTPUTS}, leaving a <file>.removed.txt that says where.`,
         restartNote: `The sandbox was restarted. ${dir} was kept, and local files elsewhere (including /tmp) are gone.`,
         toolOutputPath: (toolCallId) => `${dir}/.tool-output/${toolCallId}`,

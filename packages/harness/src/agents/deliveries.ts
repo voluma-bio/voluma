@@ -6,10 +6,11 @@
 import type { AgentLog, AgentRecord, AgentState, Notice } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
 import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
+import { callKey } from "@voluma/contracts/thread-records";
 
 /** Characters of a worker-to-worker message shown to main as a receipt. */
 const RECEIPT_CHARS = 300;
-/** Characters of main's last message to an agent, shown as what it is on. */
+/** Characters of main's last message to an agent (or its brief), shown as what it is on. */
 const ON_CHARS = 80;
 
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)}…` : text);
@@ -67,6 +68,19 @@ export const noticeLine = (n: Notice, events: readonly RunEvent[]): string => {
   }
 };
 
+/** The brief and skills of a worker, read back from the `start_worker` call that started it. */
+export function briefOf(d: AgentLog, r: AgentRecord): { brief: string; skills: string[] } {
+  const call =
+    r.parentThreadId && r.spawnedBy
+      ? d.calls.get(callKey(r.parentThreadId, r.spawnedBy))
+      : undefined;
+  const input = call?.name === "start_worker" ? (call.input as Record<string, unknown>) : {};
+  return {
+    brief: typeof input.brief === "string" ? input.brief : "",
+    skills: Array.isArray(input.skills) ? (input.skills as string[]) : [],
+  };
+}
+
 /** Agents as main reads them: name, state, what it is on, idle time, last report. */
 export function agentList(
   d: AgentLog,
@@ -78,7 +92,7 @@ export function agentList(
     .map((r) => {
       const state = stateOf(r);
       const brief = [...d.messages.values()].filter((m) => m.from === "main" && m.to === r.name);
-      const on = brief.at(-1)?.text;
+      const on = brief.at(-1)?.text ?? briefOf(d, r).brief;
       const idle =
         state === "idle" && r.end
           ? `, idle ${Math.max(0, Math.round((now - Date.parse(r.endedTime)) / 60_000))} min`

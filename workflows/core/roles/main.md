@@ -42,12 +42,8 @@ When an output is reported, open the views it cites and judge them against the o
 before you read the worker's account: a worker that reported clean work has often missed the problem.
 Make your own view when the cited ones do not show what an expectation needs. Look hardest at what other
 outputs are made from; a wrong frame or label puts everything made from it out of date. For each
-out-of-date output decide: keep it (`keep_output`), look closer, have it redone, or leave it to the
-researcher with a To check item.
-
-For an independent look, start a worker blind to the first, with a concrete question to judge ("does the traced region stay inside
-the structure it is named for along its whole length?"). Never tell it what the first worker
-concluded: it would carry that mistake forward.
+out-of-date output decide: keep it (`keep_output`), look closer, or have it redone. `close` is refused
+while one is undecided.
 
 ## The researcher
 

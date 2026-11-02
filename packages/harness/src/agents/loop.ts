@@ -25,7 +25,7 @@ import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
 import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
-import { callKey, type UserSender } from "@voluma/contracts/thread-records";
+import type { UserSender } from "@voluma/contracts/thread-records";
 import type { BashRuntime } from "../bash-runtime";
 import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
 import { loopShell, type Section, type Step } from "../loop-shell";
@@ -37,6 +37,7 @@ import type { ThreadSpec, Threads } from "../threads";
 import type { Tool } from "../tools/tool";
 import {
   agentList,
+  briefOf,
   deliveryText,
   livenessNudge,
   noticeLine,
@@ -188,19 +189,6 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     refreshRunFiles: o.runFiles.refresh,
     changed: shell.nudge,
   };
-
-  /** The brief and skills of a worker, read back from the `start_worker` call that started it. */
-  function briefOf(d: AgentLog, r: AgentRecord): { brief: string; skills: string[] } {
-    const call =
-      r.parentThreadId && r.spawnedBy
-        ? d.calls.get(callKey(r.parentThreadId, r.spawnedBy))
-        : undefined;
-    const input = call?.name === "start_worker" ? (call.input as Record<string, unknown>) : {};
-    return {
-      brief: typeof input.brief === "string" ? input.brief : "",
-      skills: Array.isArray(input.skills) ? (input.skills as string[]) : [],
-    };
-  }
 
   const identityOf = (d: AgentLog, r: AgentRecord): AgentIdentity => ({
     id: r.id,
