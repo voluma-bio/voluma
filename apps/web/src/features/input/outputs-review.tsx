@@ -117,7 +117,7 @@ export function OutputsReview({
   });
   const events = useEvents();
   const catalog = useMemo(() => outputCatalogOf(run.workflows[0]?.path), [run.workflows]);
-  const fold = useMemo(() => outputsFold(events, catalog), [events, catalog]);
+  const fold = outputsFold(events);
   const review = useMemo(() => outputsReview(fold, catalog), [fold, catalog]);
   const assets = useMemo(() => reviewAssetsOf(events), [events]);
   const blocks = useMemo(

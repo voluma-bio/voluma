@@ -18,8 +18,7 @@
  *   name (a value: its number and unit), so a redo that produces the same files changes nothing,
  *   a kept version (same files) clears everything below it, and a change to a support file counts.
  *   A link to the output's own earlier version is ignored. A link to a label overlay (an entry
- *   of an `outputs.changed` with `label: {of}`, else the catalog's, when the fold is given it) is a
- *   link to its map. The fold resolves each overlay once: an overlay's `status`, `outOfDate` and
+ *   of an `outputs.changed` with `label: {of}`, or the change's `labels` map) is a link to its map. The fold resolves each overlay once: an overlay's `status`, `outOfDate` and
  *   `needsYou` are its map's, and readers take `labels` instead of re-resolving.
  * - **Undecided**: out of date and in the trail of a final output (the output itself, or
  *   something its latest version was made from, through latest versions). Main's `close` is
@@ -35,7 +34,7 @@ import {
   type FinalOutputs,
   sectionsOf,
 } from "./final-outputs";
-import type { LinkRole, OutputCatalog, OutputKind } from "./output-catalog";
+import type { LinkRole, OutputKind } from "./output-catalog";
 
 type Ev<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>;
 
@@ -107,7 +106,7 @@ export interface OutputsFold {
   /** Final outputs in section order, then the other published ones in order of first version. */
   outputs: OutputState[];
   byId: Map<string, OutputState>;
-  /** Each label overlay the log or the given catalog names, to the map whose version a link to it means. */
+  /** Each label overlay the log names (`outputs.changed`'s `labels`, a list entry's `label`), to the map whose version a link to it means. */
   labels: Map<string, string>;
 }
 
@@ -144,14 +143,13 @@ function versionOf(e: Ev<"output.published">, names: Map<string, string>): Outpu
   return { ...v, hash: hashOf(v) };
 }
 
-function compute(events: readonly RunEvent[], catalog: OutputCatalog | undefined): OutputsFold {
+function compute(events: readonly RunEvent[]): OutputsFold {
   const names = new Map<string, string>();
   const versions = new Map<string, OutputVersion[]>();
   const kinds = new Map<string, { kind?: OutputKind; base?: string }>();
   const resolved = new Map<string, NonNullable<ToCheckState["resolved"]>>();
   /** A label overlay to the map that holds its voxels. */
   const labels = new Map<string, string>();
-  for (const e of catalog ?? []) if (e.kind === "overlay" && e.label) labels.set(e.id, e.label.of);
   let list: FinalOutputs | undefined;
 
   for (const e of events) {
@@ -161,6 +159,8 @@ function compute(events: readonly RunEvent[], catalog: OutputCatalog | undefined
         break;
       case "outputs.changed": {
         list = applyOutputsChange(list, e.payload, e.createdAt);
+        for (const [overlay, map] of Object.entries(e.payload.labels ?? {}))
+          labels.set(overlay, map);
         for (const entry of e.payload.add ?? [])
           if (isLabel(entry)) labels.set(entry.id, entry.label.of);
         break;
@@ -198,7 +198,8 @@ function compute(events: readonly RunEvent[], catalog: OutputCatalog | undefined
   const latestOf = (id: string) => versions.get(mapOf(id))?.at(-1);
   const memo = new Map<string, boolean>();
   const visiting = new Set<string>();
-  const outOfDate = (id: string): boolean => {
+  const outOfDate = (of: string): boolean => {
+    const id = mapOf(of);
     const cached = memo.get(id);
     if (cached !== undefined) return cached;
     const latest = latestOf(id);
@@ -291,21 +292,14 @@ function compute(events: readonly RunEvent[], catalog: OutputCatalog | undefined
   return { ...(list && { list }), outputs, byId: new Map(outputs.map((o) => [o.id, o])), labels };
 }
 
-const memo = new WeakMap<
-  object,
-  { length: number; catalog: OutputCatalog | undefined; fold: OutputsFold }
->();
+const memo = new WeakMap<object, { length: number; fold: OutputsFold }>();
 
-/**
- * The fold of `events`, recomputed only when the log has grown (the log array may be appended to
- * in place) or the catalog is another one. `catalog` names the label overlays a run's list may
- * not: pass it wherever the run's catalog is at hand.
- */
-export function outputsFold(events: readonly RunEvent[], catalog?: OutputCatalog): OutputsFold {
+/** The fold of `events`, recomputed only when the log has grown (the log array may be appended to in place). */
+export function outputsFold(events: readonly RunEvent[]): OutputsFold {
   const held = memo.get(events);
-  if (held && held.length === events.length && held.catalog === catalog) return held.fold;
-  const fold = compute(events, catalog);
-  memo.set(events, { length: events.length, catalog, fold });
+  if (held && held.length === events.length) return held.fold;
+  const fold = compute(events);
+  memo.set(events, { length: events.length, fold });
   return fold;
 }
 
@@ -313,14 +307,18 @@ export function outputsFold(events: readonly RunEvent[], catalog?: OutputCatalog
 // What the run loop needs (design-c1.md, section 2)
 
 /** The run's final outputs with their status, in section order. */
-export const finalOutputs = (events: readonly RunEvent[], catalog?: OutputCatalog): OutputState[] =>
-  outputsFold(events, catalog).outputs.filter((o) => o.final);
+export const finalOutputs = (events: readonly RunEvent[]): OutputState[] =>
+  outputsFold(events).outputs.filter((o) => o.final);
 
-/** Final outputs with a version, of all final outputs: what "1 of 2 in" counts. */
+/** Final outputs with a version (a label overlay has its map's), of all final outputs: what "1 of 2 in" counts. */
 export function outputsIn(fold: OutputsFold): { done: number; total: number } {
   const final = fold.outputs.filter((o) => o.final);
-  return { done: final.filter((o) => o.latest).length, total: final.length };
+  return { done: final.filter(hasVersion).length, total: final.length };
 }
+
+/** A version covers it: its own, or its map's for a label overlay. */
+export const hasVersion = (o: OutputState): boolean =>
+  o.status !== "pending" && o.status !== "missing";
 
 /** Each final value's latest number and UCUM unit, by output id: what the run reported. */
 export function finalValues(fold: OutputsFold): Map<string, { number: number; unit: string }> {
@@ -339,16 +337,13 @@ export const needingYou = (fold: OutputsFold): Set<string> =>
   new Set(fold.outputs.filter((o) => o.needsYou).map((o) => o.id));
 
 /** Final outputs with no version that are not marked missing. */
-export const pendingFinal = (events: readonly RunEvent[], catalog?: OutputCatalog): string[] =>
-  finalOutputs(events, catalog)
+export const pendingFinal = (events: readonly RunEvent[]): string[] =>
+  finalOutputs(events)
     .filter((o) => o.status === "pending")
     .map((o) => o.id);
 
 /** Out-of-date outputs in a final output's trail: main must keep or redo them before it closes. */
-export const undecidedOutOfDate = (
-  events: readonly RunEvent[],
-  catalog?: OutputCatalog,
-): string[] =>
-  outputsFold(events, catalog)
+export const undecidedOutOfDate = (events: readonly RunEvent[]): string[] =>
+  outputsFold(events)
     .outputs.filter((o) => o.undecided)
     .map((o) => o.id);

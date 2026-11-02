@@ -54,7 +54,7 @@ export function callerOf(deps: OutputToolDeps, threadId: string): Caller {
 export const eventById = (deps: OutputToolDeps, id: string) =>
   deps.recorder.events().find((e) => e.id === id);
 
-export const foldOf = (deps: OutputToolDeps) => outputsFold(deps.recorder.events(), deps.catalog);
+export const foldOf = (deps: OutputToolDeps) => outputsFold(deps.recorder.events());
 
 /** The next version number of `id`. Read inside the section. */
 export const nextVersion = (deps: OutputToolDeps, id: string) =>

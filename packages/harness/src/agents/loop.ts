@@ -508,7 +508,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       receipts: receipts(d, cut),
       agents: agentList(d, stateOf, now()),
       outOfDate: outOfDateIds(),
-      pending: pendingFinal(events, o.catalog),
+      pending: pendingFinal(events),
     });
     const sender: UserSender = { kind: "runtime", covers };
     if (!running) {
@@ -521,7 +521,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   }
 
   const outOfDateIds = () =>
-    outputsFold(recorder.events(), o.catalog)
+    outputsFold(recorder.events())
       .outputs.filter((x) => x.undecided)
       .map((x) => x.id);
 
@@ -607,7 +607,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       await resume(m, agentLivenessNudge(state), { kind: "runtime", covers: d.lastEventId });
       return true;
     }
-    const pending = pendingFinal(events, o.catalog);
+    const pending = pendingFinal(events);
     if (pending.length > 0) {
       await recorder.append(
         root,

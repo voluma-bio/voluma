@@ -36,7 +36,10 @@ export const toCheckItemSchema = z.object({ title: nonEmpty, focus: focusSchema.
  * `change_outputs`, and the stuck-run rule writes `missing`. `add` carries whole catalog entries
  * so the fold needs no workflow files; they are stored loose (`id`, `kind`, the rest passes
  * through) and checked against the catalog by the writer. `sections` replaces the grouping;
- * `expect` appends lines to an output's own.
+ * `expect` appends lines to an output's own. `labels` maps each label overlay to the map whose
+ * voxels it holds (`{overlayId: mapId}`); the runner records the catalog's whole map once, at the
+ * start, so the fold resolves a link to an overlay that no list entry carries. It sits on the
+ * change, not on `add` entries, because it is the catalog's, not part of the list.
  */
 export const outputsChangedSchema = z
   .object({
@@ -49,6 +52,7 @@ export const outputsChangedSchema = z
       .array(z.object({ title: nonEmpty, outputs: z.array(outputRefSchema).min(1) }))
       .optional(),
     expect: z.array(z.object({ id: outputRefSchema, lines: z.array(nonEmpty).min(1) })).optional(),
+    labels: z.record(outputRefSchema, outputRefSchema).optional(),
   })
   .refine((p) => Object.keys(p).some((k) => k !== "by" && k !== "reason"), {
     message: "a change changes something",

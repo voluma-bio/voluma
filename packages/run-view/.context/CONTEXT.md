@@ -72,8 +72,7 @@ screens are the scan review (`apps/web/src/features/input`) and the study pages
   `runGraph` (the whole run by column), `versionWords` (a worker's message after its version) and
   `workersOf` (the agents from `agentLog`, with what each reported). No drawing lives there.
   One link rule (`resolveLink`): a link to a label overlay is a link to its map, as the fold
-  resolved it (`fold.labels`, from the run's list and the catalog the review passes to
-  `outputsFold`); run-view resolves nothing itself. The chain (`chainOf`) is the same breadth-first walk as `trailOf` along the
+  resolved it (`fold.labels`, from the run's `outputs.changed` events: `labels` and list entries' `label`); run-view resolves nothing itself. The chain (`chainOf`) is the same breadth-first walk as `trailOf` along the
   spine a final value is computed on, nearest first (value `on` overlay, label to its map, overlay
   to its base, base to its `from`): each step follows the published version's `on`/`base` links
   where it names some, else the catalog's, so it exists before anything is published, and each
