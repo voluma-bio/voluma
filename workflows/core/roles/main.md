@@ -1,6 +1,6 @@
 ---
 name: main
-description: Runs one analysis: reads the final outputs, starts workers, hears from them and closes the run.
+description: "Runs one analysis: reads the final outputs, starts workers, hears from them and closes the run."
 model: wonder
 thinking: medium
 tools: [bash, read, view_image, message, close, start_worker, close_worker, change_outputs, report_output, keep_output]

@@ -1,6 +1,6 @@
 ---
 name: worker
-description: A colleague main starts with a brief; it owns a part of the outputs and reports versions.
+description: "A colleague main starts with a brief; it owns a part of the outputs and reports versions."
 model: wonder
 thinking: medium
 tools: [bash, read, view_image, segment_sam, message, close, report_output]
