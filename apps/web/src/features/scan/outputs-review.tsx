@@ -85,7 +85,7 @@ import {
 } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
-import { describe, QUAD_TOOLS, useMarking } from "./marks-panel";
+import { describe, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
 import { FinalOutputs, needingYou, OUTPUT_STATUS } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
@@ -221,7 +221,9 @@ export function OutputsReview({
     volumes: blocks.volumes,
     reopen,
   });
-  const marking = useMarking(QUAD_TOOLS, run.example ? undefined : runMarks);
+  // An example run keeps no marks (its writes are refused): they are the page's, uncapped.
+  const exampleMarks = useLocalMarks();
+  const marking = useMarking(QUAD_TOOLS, run.example ? exampleMarks : runMarks);
   const views = useSavedViews(run, reopen);
 
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and

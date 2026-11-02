@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
+import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { ReviewRun, Revision } from "@voluma/contracts/review";
 import type { RunRead } from "@voluma/contracts/run";
 import {
@@ -27,7 +28,7 @@ import {
   useRunStore,
 } from "@voluma/run-view";
 import { Button, EmptyState, ErrorState, LoadingState, ShellPanel, useOpenPanel } from "@voluma/ui";
-import type { StructureDisplay } from "@voluma/viewer/grid";
+import type { GridViewerHandle, StructureDisplay } from "@voluma/viewer/grid";
 import { CircleAlert, Layers, ListChecks, MessagesSquare, Network, Users } from "lucide-react";
 import {
   lazy,
@@ -42,7 +43,14 @@ import {
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel, useMessage } from "./ai-panel";
-import { gridKeyOf, MarksPanel, useMarking, type YourMark } from "./marks-panel";
+import {
+  gridKeyOf,
+  MarksPanel,
+  TOOLS,
+  useLocalMarks,
+  useMarking,
+  type YourMark,
+} from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { StudyDock } from "./study-dock";
@@ -322,14 +330,21 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
   const focusKey = check?.focus && JSON.stringify(check.focus);
   const focus = useMemo(() => check?.focus && { ...check.focus }, [focusKey, picked]);
   const [display, setDisplay] = useState<StructureDisplay>({});
-  const marking = useMarking();
+  const local = useLocalMarks(MAX_MARKS);
+  const marking = useMarking(TOOLS, local);
+  const viewer = useRef<GridViewerHandle>(null);
+  // Undefined until the lazy viewer mounts: nothing to picture yet.
+  const takeSnapshot = useCallback(
+    (maxBytes: number) => viewer.current?.snapshot(maxBytes) ?? Promise.resolve(undefined),
+    [],
+  );
   // A redo that replaces an image leaves no marks on the old one: their voxels mean nothing now.
   const grids = useMemo(
     () =>
       latest && new Set(latest.volumes.flatMap((v) => (v.kind === "image" && gridKeyOf(v)) || [])),
     [latest],
   );
-  const { keep } = marking;
+  const { keep } = local;
   useEffect(() => {
     if (grids) keep(grids);
   }, [grids, keep]);
@@ -362,7 +377,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
     () => (subjectShown ? marking.marks.filter((m) => m.gridKey === subjectShown.key) : []),
     [marking.marks, subjectShown],
   );
-  const snapshot = subjectShown?.ready ? marking.snapshot : undefined;
+  const snapshot = subjectShown?.ready ? takeSnapshot : undefined;
   const message = useMessage({
     run,
     tasks,
@@ -376,7 +391,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
     itemId: named?.acceptable ? named.id : undefined,
     onSent: (sent) => {
       setAbout(undefined);
-      marking.drop(sent);
+      local.drop(sent);
       reopen();
       refetchRun();
     },
@@ -439,7 +454,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
           onMark={(mark, volumeId, gridKey) => marking.add(mark, volumeId, gridKey, reviewTask.id)}
           full={marking.full}
           onShown={marking.setShown}
-          viewer={marking.viewer}
+          viewer={viewer}
         />
       </Suspense>
     );

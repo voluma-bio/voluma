@@ -34,9 +34,8 @@ const yours = (p: Placed, me: string): YourMark => ({
   taskId: p.output,
   gridKey: p.gridKey,
   volumeId: p.volume,
-  // Validated by the schema; the viewer's `GridMark` is the same shape.
-  mark: p.mark as YourMark["mark"],
-  plane: p.plane as YourMark["plane"],
+  mark: p.mark,
+  plane: p.plane,
   theirs: p.by !== me,
 });
 
@@ -87,16 +86,28 @@ export function useRunMarks({
 
   const latest = useRef({ volumes, run, reopen });
   latest.current = { volumes, run, reopen };
-  const write = useCallback((id: string, next: YourMark | null, send: Promise<void>) => {
+  // Each mark's writes go one after another, so the log ends with the last (a point, then its
+  // note); a run lock can hold one while the next would overtake it.
+  const queues = useRef(new Map<string, Promise<void>>());
+  const write = useCallback((id: string, next: YourMark | null, send: () => Promise<void>) => {
     setError(undefined);
     setPending((had) => new Map(had).set(id, next));
-    send.then(latest.current.reopen, (e: unknown) => {
-      setPending((had) => {
-        const rest = new Map(had);
-        rest.delete(id);
-        return rest;
-      });
-      setError(e instanceof Error && e.message ? e.message : "Couldn't save the mark.");
+    const sent = (queues.current.get(id) ?? Promise.resolve()).then(send).then(
+      () => latest.current.reopen(),
+      (e: unknown) => {
+        // Only this write's own pending entry goes; a later write's stays.
+        setPending((had) => {
+          if (had.get(id) !== next) return had;
+          const rest = new Map(had);
+          rest.delete(id);
+          return rest;
+        });
+        setError(e instanceof Error && e.message ? e.message : "Couldn't save the mark.");
+      },
+    );
+    queues.current.set(id, sent);
+    void sent.then(() => {
+      if (queues.current.get(id) === sent) queues.current.delete(id);
     });
   }, []);
   const place = useCallback(
@@ -110,23 +121,22 @@ export function useRunMarks({
         tag: m.tag,
         volume: m.volumeId,
         gridKey: m.gridKey,
-        // Zyx is readonly in the viewer; the schema checks the shape the server receives.
-        mark: m.mark as PlaceMarkRequest["mark"],
+        mark: m.mark,
         world: markPoints(m.mark).map((p) => worldOf(p, volume.affine)),
         plane: m.plane && {
           view: m.plane.view,
-          normal: [...m.plane.normal],
-          right: [...m.plane.right],
-          down: [...m.plane.down],
+          normal: m.plane.normal,
+          right: m.plane.right,
+          down: m.plane.down,
         },
       };
-      write(m.id, m, placeMark(r.id, body));
+      write(m.id, m, () => placeMark(r.id, body));
     },
     [write],
   );
   const erase = useCallback(
-    (id: string) => write(id, null, deleteMark(latest.current.run.id, id)),
+    (id: string) => write(id, null, () => deleteMark(latest.current.run.id, id)),
     [write],
   );
-  return { marks, place, erase, error };
+  return { marks, full: false, place, erase, error };
 }

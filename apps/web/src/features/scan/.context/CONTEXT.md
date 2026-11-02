@@ -109,7 +109,9 @@ stopped.
   the failure or stop and its reason, with the note that the task's earlier results stand. The
   running mark ("The AI is answering", "Redoing <task>") shows only while the run has not ended
   and the latest message has no outcome after it.
-- **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
+- **Your marks** go through one store-backed path (`useMarking` over a `MarkStore`): the task
+  review's are page state (`useLocalMarks(MAX_MARKS)`, `scan-page.tsx`), lost on reload; the
+  outputs review's are the run's log (`useRunMarks`), an example run's page state, uncapped. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark
   being drawn, then puts the tool away, then (the shell's) leaves Full view: one thing per press.

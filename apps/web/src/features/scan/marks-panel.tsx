@@ -12,7 +12,6 @@ import type { Volume } from "@voluma/contracts/review";
 import { IconButton, List, Row } from "@voluma/ui";
 import {
   type GridMark,
-  type GridViewerHandle,
   type MarkPlane,
   type MarkTool,
   markPoints,
@@ -41,14 +40,50 @@ export type YourMark = {
 };
 
 /**
- * Where marks are kept when the run keeps them (the outputs review): the page's marks, and the two
- * writes. `place` is a new mark or a changed one under the same id.
+ * Where marks are kept: the run's log (`useRunMarks`, the outputs review) or the page
+ * (`useLocalMarks`). `place` is a new mark or a changed one under the same id; at `full` it takes
+ * no new one.
  */
 export type MarkStore = {
   marks: readonly YourMark[];
+  full: boolean;
   place(mark: YourMark): void;
   erase(id: string): void;
 };
+
+/**
+ * Marks the page holds until a message carries them, lost on reload: the task review's, capped
+ * at what a message carries (`cap`), and an example run's outputs review, which keeps none.
+ */
+export function useLocalMarks(cap?: number) {
+  const [marks, setMarks] = useState<YourMark[]>([]);
+  return {
+    marks,
+    full: cap !== undefined && marks.length >= cap,
+    place: useCallback(
+      (mark: YourMark) =>
+        setMarks((had) =>
+          had.some((m) => m.id === mark.id)
+            ? had.map((m) => (m.id === mark.id ? mark : m))
+            : cap !== undefined && had.length >= cap
+              ? had
+              : [...had, mark],
+        ),
+      [cap],
+    ),
+    erase: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
+    /** Keeps only the marks on these grids. */
+    keep: useCallback((grids: ReadonlySet<string>) => {
+      setMarks((had) =>
+        had.every((m) => grids.has(m.gridKey)) ? had : had.filter((m) => grids.has(m.gridKey)),
+      );
+    }, []),
+    /** Drops the marks a message carried. */
+    drop: useCallback((ids: string[]) => {
+      if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));
+    }, []),
+  };
+}
 
 /**
  * The task and immutable image/grid identity actually mounted in the viewer, and whether a
@@ -253,18 +288,14 @@ export function MarksPanel({
  * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
  * (leaving Full view), so one Esc does one thing.
  */
-export function useMarking(tools: readonly Tool[] = TOOLS, store?: MarkStore) {
+export function useMarking(tools: readonly Tool[], store: MarkStore) {
   const [tool, setTool] = useState<MarkTool | null>(null);
-  const [held, setMarks] = useState<YourMark[]>([]);
-  const marks = store ? store.marks : held;
+  const { marks, full } = store;
   const [selected, setSelected] = useState<string>();
   const [jump, setJump] = useState<{ at: Zyx; gridKey: string; taskId: string }>();
   const [shown, setShown] = useState<ShownGrid>();
-  const viewer = useRef<GridViewerHandle>(null);
-  // A message carries up to MAX_MARKS; marks the run keeps have no cap.
-  const full = !store && marks.length >= MAX_MARKS;
-  const latest = useRef({ tool, full, tools, store, marks });
-  latest.current = { tool, full, tools, store, marks };
+  const latest = useRef({ tool, full, tools, store });
+  latest.current = { tool, full, tools, store };
   // At the cap the tools are held off (`viewer.tsx` says why).
   useEffect(() => {
     if (full) setTool(null);
@@ -301,7 +332,6 @@ export function useMarking(tools: readonly Tool[] = TOOLS, store?: MarkStore) {
     jump,
     shown,
     setShown,
-    viewer,
     jumped: useCallback(() => setJump(undefined), []),
     /** Adds a mark at the cap's mercy; returns its id, or undefined when full. */
     add: useCallback(
@@ -312,50 +342,27 @@ export function useMarking(tools: readonly Tool[] = TOOLS, store?: MarkStore) {
         taskId: string,
         plane: MarkPlane | null = null,
       ): string | undefined => {
-        const { full: capped, store: kept, marks: had, tools: made } = latest.current;
+        const { full: capped, store: kept, tools: made } = latest.current;
         if (capped) return undefined;
         const id = crypto.randomUUID();
-        if (kept) {
-          kept.place({
-            id,
-            tag: nextTag(had, mark, made),
-            taskId,
-            gridKey,
-            volumeId,
-            mark,
-            plane,
-          });
-          return id;
-        }
-        setMarks((had) =>
-          had.length >= MAX_MARKS
-            ? had
-            : [
-                ...had,
-                {
-                  id,
-                  tag: nextTag(had, mark, latest.current.tools),
-                  taskId,
-                  gridKey,
-                  volumeId,
-                  mark,
-                  plane,
-                },
-              ],
-        );
+        kept.place({
+          id,
+          tag: nextTag(kept.marks, mark, made),
+          taskId,
+          gridKey,
+          volumeId,
+          mark,
+          plane,
+        });
         return id;
       },
       [],
     ),
     /** Gives a point its note. */
     note: useCallback((id: string, note: string) => {
-      const { store: kept, marks: had } = latest.current;
-      const noted = (m: YourMark): YourMark =>
-        m.id === id && "point" in m.mark ? { ...m, mark: { ...m.mark, note } } : m;
-      if (kept) {
-        const m = had.find((x) => x.id === id);
-        if (m) kept.place(noted(m));
-      } else setMarks((had) => had.map(noted));
+      const { store: kept } = latest.current;
+      const m = kept.marks.find((x) => x.id === id);
+      if (m && "point" in m.mark) kept.place({ ...m, mark: { ...m.mark, note } });
     }, []),
     /** Selects a mark and aims the views at it; returns it. */
     select: useCallback(
@@ -367,25 +374,6 @@ export function useMarking(tools: readonly Tool[] = TOOLS, store?: MarkStore) {
       },
       [marks],
     ),
-    remove: useCallback((id: string) => {
-      const { store: kept } = latest.current;
-      if (kept) kept.erase(id);
-      else setMarks((had) => had.filter((m) => m.id !== id));
-    }, []),
-    /** Keeps only the marks on these grids. */
-    keep: useCallback((grids: ReadonlySet<string>) => {
-      setMarks((had) =>
-        had.every((m) => grids.has(m.gridKey)) ? had : had.filter((m) => grids.has(m.gridKey)),
-      );
-    }, []),
-    /** Drops the marks a message carried. */
-    drop: useCallback((ids: string[]) => {
-      if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));
-    }, []),
-    snapshot: useCallback(
-      // Undefined until the lazy viewer mounts: nothing to picture yet.
-      (maxBytes: number) => viewer.current?.snapshot(maxBytes) ?? Promise.resolve(undefined),
-      [],
-    ),
+    remove: useCallback((id: string) => latest.current.store.erase(id), []),
   };
 }
