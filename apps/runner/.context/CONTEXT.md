@@ -452,7 +452,9 @@ Anthropic error sent mid-stream with no status, its documented `error.type` (`ov
 claim (see `apps/api/.context/deploy.md`).
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
-task before it is left to check). The harness defaults the rest (`LoopConfig`). No limit is
+task before it is left to check) and `RUNNER_ACTIVITY_MINUTES` (default 10; agent loop: minutes an
+agent may work without an `activity` line before it is reminded, and twice that before it stops
+holding the run open). The harness defaults the rest (`LoopConfig`). No other limit is
 on time: a checker ends with its verdict or when it is stopped (a stale mark, feedback, the run's
 end).
 

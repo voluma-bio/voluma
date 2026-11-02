@@ -36,6 +36,13 @@ export interface AgentRecord extends ThreadBase {
   /** The turn's input came from main (the brief, or a message from main) and it said nothing since: `silent` if the turn ends so. */
   fromMain: boolean;
   spoke: boolean;
+  /** When it last said what it is doing (`activity`), or else when it last started. */
+  activityAt: number;
+  /** The later of `activityAt` and its latest tool result: when it last showed progress. */
+  progressAt: number;
+  /** Time in turn outside tool calls before `markAt`, since `activityAt`; `markAt` is 0 inside a tool call. */
+  outsideMs: number;
+  markAt: number;
   /** Its latest report: output id, version and the log position. */
   lastReport: { outputId: string; version: number; at: number } | undefined;
 }
@@ -88,6 +95,17 @@ export interface AgentLog {
   hasUnansweredPerson: boolean;
 }
 
+/** Minutes since the agent last showed progress (an activity line or a tool result); 0 while it is inside a tool call or not in a turn. */
+export function stalledMinutes(r: AgentRecord, inTurn: boolean, now: number): number {
+  return inTurn && r.openCalls.size === 0 ? Math.max(0, (now - r.progressAt) / 60_000) : 0;
+}
+
+/** Minutes of its turn outside tool calls since its last activity line: what the reminder counts. */
+export function silentMinutes(r: AgentRecord, inTurn: boolean, now: number): number {
+  const open = inTurn && r.openCalls.size === 0 ? Math.max(0, now - r.markAt) : 0;
+  return (r.outsideMs + open) / 60_000;
+}
+
 const memo = new WeakMap<readonly RunEvent[], { length: number; value: AgentLog }>();
 
 export function agentLog(events: readonly RunEvent[]): AgentLog {
@@ -111,6 +129,10 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       endedTime: prev?.endedTime ?? "",
       fromMain: prev === undefined || (continues && prev.fromMain),
       spoke: continues ? prev.spoke : false,
+      activityAt: 0,
+      progressAt: 0,
+      outsideMs: 0,
+      markAt: 0,
       lastReport: prev?.lastReport,
     };
   });
@@ -149,6 +171,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       case "thread.started": {
         if (!record) break;
         record.startedAt = at;
+        record.activityAt = record.progressAt = record.markAt = Date.parse(e.createdAt);
+        record.outsideMs = 0;
         idByName.set(record.name, record.id);
         if (record.place === "main") {
           main = record;
@@ -222,6 +246,21 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         }
         break;
       }
+      case "activity":
+        if (record) {
+          record.activityAt = record.progressAt = Date.parse(e.createdAt);
+          record.outsideMs = 0;
+        }
+        break;
+      case "tool.call":
+        if (record) {
+          if (record.markAt > 0) record.outsideMs += Date.parse(e.createdAt) - record.markAt;
+          record.markAt = 0;
+        }
+        break;
+      case "tool.result":
+        if (record) record.progressAt = record.markAt = Date.parse(e.createdAt);
+        break;
       case "person.message":
         personAt = at;
         break;

@@ -26,6 +26,7 @@ import { threadIdOf } from "../../thread-id";
 import type { Tool, ToolContext, ToolResult } from "../../tools/tool";
 import { wrapUpText } from "../deliveries";
 import {
+  activityId,
   changeOutputsId,
   closeEventId,
   closeWorkerEndId,
@@ -154,6 +155,27 @@ const messageTool = (api: AgentsApi): Tool =>
       ),
   });
 
+const activityTool = (api: AgentsApi): Tool =>
+  define({
+    name: "activity",
+    description:
+      "Say in one plain sentence what you are doing now, for the researcher watching the run. It replaces your last line. Send one when your work changes and at least every few minutes while you work; no ids, file paths, counts or step numbers.",
+    input: z.object({ text: z.string().min(1).max(300) }),
+    execute: ({ text: line }, ctx) =>
+      run(() =>
+        api.section(async () => {
+          caller(api, ctx);
+          await api.recorder.append(
+            ctx.threadId,
+            "activity",
+            { text: line },
+            activityId(ctx.threadId, ctx.toolCallId),
+          );
+          return text("Noted.");
+        }),
+      ),
+  });
+
 /** The run is closed only when nothing is open, undecided, unanswered or pending. */
 function mainCloseRefusal(api: AgentsApi, d: AgentLog): string | undefined {
   const events = api.recorder.events();
@@ -236,6 +258,10 @@ const startWorkerTool = (api: AgentsApi): Tool =>
         return api.section(async () => {
           const { role, d } = caller(api, ctx);
           if (role !== "main") throw new Refusal("Only main starts workers: message main.");
+          if (![...d.messages.values()].some((m) => m.from === "main" && m.to === "researcher"))
+            throw new Refusal(
+              "Send your plan note to the researcher first: message `researcher` with the text of /work/main/plan.md, then start workers.",
+            );
           const workerId = threadIdOf(api.runId, name);
           const started = d.records.get(workerId);
           if (started?.spawnedBy === ctx.toolCallId) return text(`Started ${name}.`);
@@ -391,6 +417,7 @@ const changeOutputsTool = (api: AgentsApi): Tool =>
 
 export const coordinationTools = (api: AgentsApi): Record<string, Tool> => ({
   message: messageTool(api),
+  activity: activityTool(api),
   close: closeTool(api),
   start_worker: startWorkerTool(api),
   close_worker: closeWorkerTool(api),
