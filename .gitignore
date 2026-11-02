@@ -55,3 +55,4 @@ meridian.local.toml
 .clipboard
 *.code-workspace
 .dev/
+.vitest/

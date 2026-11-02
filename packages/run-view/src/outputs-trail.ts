@@ -149,7 +149,8 @@ export function chainOf(
   for (const r of rows.slice(1)) {
     const step = steps[r.depth - 1] ?? [];
     steps[r.depth - 1] = step;
-    const status = r.state?.status;
+    // A label overlay has no versions of its own: its status is its map's.
+    const status = fold.byId.get(resolveLink(fold, r.id))?.status;
     step.push({
       id: r.id,
       ...(status && status !== "pending" && status !== "missing" && { status }),
