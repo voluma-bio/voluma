@@ -17,4 +17,5 @@
   same scan position. That set the margin at 400 µm, so mid-plateau a point up to 400 µm off the face passes too. The distance from
   the point to the face curve within its section separates the known cases at 200 µm (991c50b3: 141 and 52 µm; f45f630f's points,
   at the top of the epiphysis: 575 and 669 µm). Switch to it if a run shows a wrong point inside 400 µm along W, or a right one
-  refused beside a steep face.
+  refused beside a steep face. The check does not judge where along the face the ends are: two points anywhere on the face on one
+  section pass, so whether they are the fibula–tibia junction and the prominent point opposite is still judged by eye.
