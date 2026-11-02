@@ -60,8 +60,8 @@ None of these stops a review; each makes it slower.
 
 ## Outputs review, from the am-marks review (p1306, p1307)
 
-- Two marks can get the same tag: `nextTag` (`marks-panel.tsx`) counts the marks already rendered,
-  so two quick adds, or two people marking at once, both get P3. Cosmetic.
+- Two people marking one run at once can both get P3: `nextTag` (`marks-panel.tsx`) counts the
+  marks this tab has seen. Cosmetic.
 - Probe and Point share the letter P in `QUAD_TOOLS`; tags stay unique (one counter), but a tag
   can't tell the kind.
 - `useSavedViews` (`outputs-review.tsx`) never clears `pendingFor`: after one save, any later

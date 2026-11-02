@@ -202,15 +202,11 @@ export function describe(
 }
 
 /** A new mark's tag: its tool's letter and the next number for that letter. */
-export function nextTag(
-  marks: readonly YourMark[],
-  mark: GridMark,
-  tools: readonly Tool[],
-): string {
+function nextTag(tags: readonly string[], mark: GridMark, tools: readonly Tool[]): string {
   const letter = tools.find((t) => t.value === kindOf(mark))?.letter ?? "M";
-  const used = marks
-    .filter((m) => m.tag.startsWith(letter))
-    .map((m) => Number(m.tag.slice(letter.length)));
+  const used = tags
+    .filter((tag) => tag.startsWith(letter))
+    .map((tag) => Number(tag.slice(letter.length)));
   return `${letter}${Math.max(0, ...used) + 1}`;
 }
 
@@ -296,6 +292,8 @@ export function useMarking(tools: readonly Tool[], store: MarkStore) {
   const [shown, setShown] = useState<ShownGrid>();
   const latest = useRef({ tool, full, tools, store });
   latest.current = { tool, full, tools, store };
+  // Tags given out since the store's marks last changed: two adds before a render get two tags.
+  const issued = useRef({ of: marks, tags: [] as string[] });
   // At the cap the tools are held off (`viewer.tsx` says why).
   useEffect(() => {
     if (full) setTool(null);
@@ -345,9 +343,12 @@ export function useMarking(tools: readonly Tool[], store: MarkStore) {
         const { full: capped, store: kept, tools: made } = latest.current;
         if (capped) return undefined;
         const id = crypto.randomUUID();
+        if (issued.current.of !== kept.marks) issued.current = { of: kept.marks, tags: [] };
+        const tag = nextTag([...kept.marks.map((m) => m.tag), ...issued.current.tags], mark, made);
+        issued.current.tags.push(tag);
         kept.place({
           id,
-          tag: nextTag(kept.marks, mark, made),
+          tag,
           taskId,
           gridKey,
           volumeId,
