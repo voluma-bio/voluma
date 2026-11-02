@@ -66,9 +66,10 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 - **Makes:** `tibia-grid` (the aligned frame; protocol step 1), `growth-plate-proximal-face` (step 2),
   `articular-surface`, `roi-iioc`, the four rulers and #4–10 (steps 3 and 7). Report both height definitions with
   the plane residual (protocol, "What the deck says"). Report the files later steps run their scripts on with the
-  output they belong to, since no other worker can open your folder: `tibia-hu.npy`, `tibia-mask.npy` and
-  `tibia-frame.json` with `tibia-grid`, `growth-plate-proximal-valid.npy` with `growth-plate-proximal-face`, and
-  the two `*-plate-run.npy` with `roi-iioc`.
+  output they belong to, since no other worker can open your folder, each after the output's own file (the first
+  file is the one compared when deciding what is out of date): `tibia-hu.npy`, then `tibia-mask.npy` and
+  `tibia-frame.json`, for `tibia-grid`; `growth-plate-proximal-face.npy`, then `growth-plate-proximal-valid.npy`;
+  `roi-iioc.npy`, then the two `*-plate-run.npy`.
 - **Leaves:** steps 4 to 7 work on `tibia-grid` and read `roi-iioc` and the faces. A new `tibia-grid` or proximal
   face puts steps 4 to 7 out of date.
 
