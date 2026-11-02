@@ -7,7 +7,7 @@
 import { Button } from "@voluma/ui";
 import { createBrowserRouter, Link, Navigate } from "react-router";
 import { RouterProvider } from "react-router/dom";
-import { scanRoutes } from "../features/scan";
+import { inputRoutes } from "../features/input";
 import { studyRoutes } from "../features/study";
 import { SignedIn } from "./signed-in";
 
@@ -16,7 +16,7 @@ const router = createBrowserRouter([
     element: <SignedIn />,
     children: [
       ...studyRoutes,
-      ...scanRoutes,
+      ...inputRoutes,
       // The old Settings page: the theme and account now live in the rail's Settings.
       { path: "settings", element: <Navigate to="/" replace state={{ openSettings: true }} /> },
       { path: "*", element: <NotFound /> },

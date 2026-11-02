@@ -1,5 +1,5 @@
 /**
- * Status mark: one glyph and one word per state, for a task, scan, item, run or agent, wherever it
+ * Status mark: one glyph and one word per state, for a task, input, item, run or agent, wherever it
  * appears. This is the one list of states and their words; features map their own statuses (task,
  * run, agent thread) onto it. The glyph's shape carries the state without colour: a diamond to
  * check, a tick done, a turning arc running, a turning arc round a tick checking (a second AI

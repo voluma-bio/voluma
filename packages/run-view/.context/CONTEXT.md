@@ -5,7 +5,7 @@ importing each other: the run model (`run-model.ts`: `runView`, `agentTree`, `ha
 transcript fold (`transcript.ts`), the run store (`run-store.tsx`), `AgentThread`, the task graph
 (`task-graph.tsx`: `TaskGraph` at study, summary and report size), `ItemToCheck`, `chat/`, the
 clock (`use-now.ts`), and the status, formatting and visitor-key helpers. It has no router. Its
-screens are the scan review (`apps/web/src/features/scan`) and the study pages
+screens are the scan review (`apps/web/src/features/input`) and the study pages
 (`apps/web/src/features/study`).
 
 - **Parts take data and callbacks; screens own the calls.** `ItemToCheck` makes no request: each
@@ -128,7 +128,7 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   in this browser is sent with every start, and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
   `voluma.visitor-keys.<userId>`. A run in `awaiting-keys` is handled on its page
-  (`features/scan/scan-header.tsx`) for the user who started it only: with a key stored, the page
+  (`features/input/input-header.tsx`) for the user who started it only: with a key stored, the page
   sends it (`resendKeys`) by itself, and again after a refusal that clears: a 429 every minute with no
   cap (a slot frees only when another run ends), a 5xx or network failure with a capped backoff. So
   the run page polls in a background tab too. A 409 means another tab already sent it. The form

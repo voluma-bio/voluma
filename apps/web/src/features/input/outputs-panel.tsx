@@ -1,5 +1,5 @@
 /**
- * Final outputs, the scan page's right side: a run of the agent loop's final values in main's
+ * Final outputs, the input page's right side: a run of the agent loop's final values in main's
  * sections, then the outputs a worker reported that the workflow does not declare. The value
  * picked opens in place under its row: what it is, who made it, its report, its To check items
  * (with those of what it rests on), and "Rests on": the outputs its latest version was measured on,

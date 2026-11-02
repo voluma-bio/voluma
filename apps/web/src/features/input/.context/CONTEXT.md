@@ -1,17 +1,17 @@
-# Scan review
+# Input review
 
-One screen, `/scans/:runId` (the user's theme, dark image wells): one scan's run, live while it goes and for review once
-it ends. A run of the agent loop gets the outputs review (last section). A task-loop run keeps the
+One screen, `/studies/:studyId/inputs/:inputId` (the user's theme, dark image wells): one input's run, live while it goes and for review once
+it ends. The page shows the input's newest run in that study (from the study read, `studyQuery`); `?run=<runId>` opens an earlier run of it. The study is in the URL because one input can be in several studies, so the input alone can't pick the run. A run of the agent loop gets the outputs review (last section). A task-loop run keeps the
 review below, inside the shell's rail. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
 Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i (c on agent-loop runs); Marks only while you have a mark). Study replaces the left panel
 without navigating; To check keeps its URL selection and panel scroll position when reopened.
-Each visit to a scan opens To check and The AI, including after Home or a reload. Panel choices
+Each visit to an input opens To check and The AI, including after Home or a reload. Panel choices
 last only for that visit; the shell saves widths and stacked splits, not open panels.
-Study highlights the current scan and links to the study overview only when it has multiple scans:
-a study of one redirects to its scan, so neither this panel nor the breadcrumb links there.
-`/runs/:id/live` and
-`/runs/:runId` redirect here with their search kept. Links to a run use `runHref`
-(`@voluma/run-view`).
+Study highlights the current input and links to the study overview only when it has multiple inputs:
+a study of one redirects to its input, so neither this panel nor the breadcrumb links there.
+`/scans/:runId`, `/runs/:id/live` and
+`/runs/:runId` redirect here (`index.tsx` reads the run for its study and input, and adds `?run=` only when the run isn't the input's newest), keeping their search. Links use `inputHref` and `itemHref`
+(`@voluma/run-view`); they never carry `?run=` unless they mean an earlier run.
 
 ## One selection, in the URL
 
@@ -110,7 +110,7 @@ stopped.
   running mark ("The AI is answering", "Redoing <task>") shows only while the run has not ended
   and the latest message has no outcome after it.
 - **Your marks** go through one store-backed path (`useMarking` over a `MarkStore`): the task
-  review's are page state (`useLocalMarks(MAX_MARKS)`, `scan-page.tsx`), lost on reload; the
+  review's are page state (`useLocalMarks(MAX_MARKS)`, `input-page.tsx`), lost on reload; the
   outputs review's are the run's log (`useRunMarks`), an example run's page state, uncapped. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark

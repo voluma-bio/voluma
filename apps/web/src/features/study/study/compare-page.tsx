@@ -3,12 +3,12 @@
  * as strip plots by group, then every sample × every measurement, measurements under the task that
  * reports them (a task folds to its headline measurement), samples grouped as on the study page.
  * A cell shows its value and its state (`segmentOf`); a value far from its group is amber. A cell
- * opens the sample's scan review at its task, a dot its scan. `?status=<place>` shows one group.
+ * opens the sample's input review at its task, a dot its input. `?status=<place>` shows one group.
  * "Export values" downloads the values as CSV, one row per sample.
  */
-import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
+import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import { kneeOf, runHref, scanStatus } from "@voluma/run-view";
+import { inputHref, inputStatus, kneeOf } from "@voluma/run-view";
 import { Button, Count, cx, INPUT_WORD, StatusGlyph, StatusMark } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
@@ -21,15 +21,16 @@ import {
   digitsFor,
   farFromGroup,
   hasBar,
+  inputValue,
   keyOutput,
   kneeWord,
   otherUnit,
   PLACES,
   placeOf,
   placeParam,
+  resultRunQuery,
   SEGMENT_WORD,
   type Segment,
-  scanValue,
   sectionsOf,
   segmentOf,
   unitOf,
@@ -43,7 +44,7 @@ export function ComparePage() {
   const only = placeParam(search.get("status"));
   const outputs = measurementsOf(workflow);
   const plotted = workflow.headline.filter((o) => valuesOf(detail, o).length > 0);
-  const finished = detail.scans.filter((s) => s.resultRunId !== null).length;
+  const finished = detail.inputs.filter((s) => s.resultRunId !== null).length;
   return (
     <div className="min-w-0 flex-1 overflow-y-auto">
       {plotted.length > 0 ? (
@@ -108,8 +109,8 @@ function ValuesTable({
   const digits = new Map(columns.map((o) => [o.id, digitsFor(valuesOf(detail, o))]));
   const groups = PLACES.map((p) => ({
     ...p,
-    scans: detail.scans.filter((s) => placeOf(s, detail.study.example) === p.place),
-  })).filter((g) => g.scans.length > 0 && (!only || g.place === only));
+    inputs: detail.inputs.filter((s) => placeOf(s, detail.study.example) === p.place),
+  })).filter((g) => g.inputs.length > 0 && (!only || g.place === only));
   const toggle = (taskId: string) =>
     setFolded((now) => {
       const next = new Set(now);
@@ -213,15 +214,15 @@ function ValuesTable({
                 >
                   <span className="sticky left-4 inline-flex items-center gap-2">
                     {g.title}
-                    <Count>{g.scans.length}</Count>
+                    <Count>{g.inputs.length}</Count>
                   </span>
                 </th>
               </tr>
-              {g.scans.map((scan) => {
-                const run = scan.runs[0];
-                const knee = kneeOf(scan);
+              {g.inputs.map((input) => {
+                const run = input.runs[0];
+                const knee = kneeOf(input);
                 return (
-                  <tr key={scan.scan.inputId} className="group/row">
+                  <tr key={input.member.inputId} className="group/row">
                     <th
                       scope="row"
                       className="sticky left-0 z-[1] border-r border-b border-border bg-card px-4 py-1.5 text-left font-normal group-hover/row:bg-accent"
@@ -229,18 +230,18 @@ function ValuesTable({
                       <span className="flex items-center gap-3">
                         {run ? (
                           <Link
-                            to={runHref({ runId: run.id })}
+                            to={inputHref(detail.study.id, input.member.inputId)}
                             className="font-mono font-semibold hover:underline"
                           >
-                            {scan.scan.subject}
+                            {input.member.subject}
                           </Link>
                         ) : (
-                          <span className="font-mono font-semibold">{scan.scan.subject}</span>
+                          <span className="font-mono font-semibold">{input.member.subject}</span>
                         )}
                         <span className="text-xs text-muted-foreground">
-                          {[scan.scan.group, knee && kneeWord(knee)].filter(Boolean).join(" · ")}
+                          {[input.member.group, knee && kneeWord(knee)].filter(Boolean).join(" · ")}
                         </span>
-                        <StatusMark {...scanStatus(scan)} className="ml-auto text-xs" />
+                        <StatusMark {...inputStatus(input)} className="ml-auto text-xs" />
                       </span>
                     </th>
                     {shown.flatMap((s) =>
@@ -255,15 +256,18 @@ function ValuesTable({
                           {/* The row's sample link is the keyboard way in; a cell is a mouse shortcut to its task, or the agent loop's value. */}
                           {run ? (
                             <Link
-                              to={`${runHref({ runId: run.id })}?${run.harness === "agents" ? `output=${o.id}` : `task=${o.task}`}`}
+                              to={inputHref(detail.study.id, input.member.inputId, {
+                                ...(run.harness === "agents" ? { output: o.id } : { task: o.task }),
+                                ...resultRunQuery(input),
+                              })}
                               tabIndex={-1}
                               className="block px-2 py-1.5"
                             >
                               <Cell
-                                scan={scan}
+                                input={input}
                                 output={o}
                                 digits={digits.get(o.id) ?? 2}
-                                far={far.get(o.id)?.has(scan.scan.inputId) ?? false}
+                                far={far.get(o.id)?.has(input.member.inputId) ?? false}
                               />
                             </Link>
                           ) : (
@@ -285,20 +289,20 @@ function ValuesTable({
 
 /** One value with its state: the number where there is one, else a bar of the state's colour. */
 function Cell({
-  scan,
+  input,
   output,
   digits,
   far,
 }: {
-  scan: StudyScanDetail;
+  input: StudyInputDetail;
   output: OutputEntry;
   digits: number;
   far: boolean;
 }) {
-  if (!scan.runs[0] || !hasBar(scan)) return null;
-  const state = segmentOf(scan, output);
-  const value = scanValue(scan, output);
-  const unit = otherUnit(scan, output);
+  if (!input.runs[0] || !hasBar(input)) return null;
+  const state = segmentOf(input, output);
+  const value = inputValue(input, output);
+  const unit = otherUnit(input, output);
   const word = SEGMENT_WORD[state];
   if (state === "missing")
     return <span className="text-xs text-fg-subtle">{SEGMENT_WORD.missing}</span>;
@@ -341,13 +345,13 @@ function exportCsv(detail: StudyDetail, outputs: OutputEntry[]) {
     "Knee",
     ...outputs.map((o) => text(`${o.name} (${unitOf(o) || "-"})`)),
   ];
-  const row = (s: StudyScanDetail) => [
-    text(s.scan.subject),
-    text(s.scan.group ?? ""),
+  const row = (s: StudyInputDetail) => [
+    text(s.member.subject),
+    text(s.member.group ?? ""),
     text(kneeOf(s) ?? ""),
-    ...outputs.map((o) => String(scanValue(s, o) ?? "")),
+    ...outputs.map((o) => String(inputValue(s, o) ?? "")),
   ];
-  const csv = [head, ...detail.scans.filter((s) => s.resultRunId !== null).map(row)]
+  const csv = [head, ...detail.inputs.filter((s) => s.resultRunId !== null).map(row)]
     .map((r) => r.map(cell).join(","))
     .join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));

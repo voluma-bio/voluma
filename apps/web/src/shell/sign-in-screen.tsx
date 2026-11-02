@@ -38,7 +38,7 @@ export function SignInScreen() {
       </GateScreen>
     );
   return (
-    <GateScreen detail="Turn a micro-CT scan into validated measurements, each traced to its evidence.">
+    <GateScreen detail="Turn a micro-CT input into validated measurements, each traced to its evidence.">
       <Button variant="primary" onClick={startSignIn}>
         Sign in
       </Button>

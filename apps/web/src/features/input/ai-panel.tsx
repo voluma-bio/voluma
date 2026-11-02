@@ -2,7 +2,7 @@
  * The AI: the conversation with this run's lead AI, read from the run's events
  * (`conversation`), and a box to write to it (`sendRunMessage`). A message is about the task in
  * view, or the item's task after Something's wrong; "The AI sees" names what goes with it: the
- * scan, the task, a picture of the views as they show (`snapshot`) and your marks. A
+ * input, the task, a picture of the views as they show (`snapshot`) and your marks. A
  * message reopens a finished run for one answer: the AI talks it through and, when a redo would
  * help, offers one (`reply.offer`). Under its latest offer, "Yes, redo <task>" and "No, keep it"
  * start your answer in the box, where you can add detail; Send sends it (a `go` on the task, or a
@@ -235,7 +235,7 @@ const KEEP_IT = "No, keep it.";
 
 export function AiPanel({
   run,
-  scan,
+  input,
   tasks,
   inView,
   onTask,
@@ -245,7 +245,7 @@ export function AiPanel({
   message: { subject, text, setText, send, unseen, submit, closed, accepted, answer, setAnswer },
 }: {
   run: RunRead;
-  scan: string;
+  input: string;
   tasks: TaskView[];
   /** The task in view: a redo of it needs no link to it. */
   inView: string | undefined;
@@ -286,7 +286,7 @@ export function AiPanel({
     <div className="flex h-full flex-col">
       <p className="flex flex-wrap items-center gap-1 border-b border-border px-3 py-2 text-xs text-muted-foreground">
         <span className="mr-0.5">The AI sees</span>
-        <Chip>{scan}</Chip>
+        <Chip>{input}</Chip>
         {subject && <Chip>{subject.title}</Chip>}
         {!answer && views && <Chip>the views</Chip>}
         {answer ? null : marks.length === 0 ? (

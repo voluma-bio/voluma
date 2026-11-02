@@ -6,10 +6,10 @@ import { Table, type TableColumn } from "./table";
  * **What:** a list with a head: the Row look on a real table, so columns size to their content.
  * Comfortable rows are 40 px, compact 30 px. Rows can go somewhere (`rowLink`, arrow on hover),
  * open in place (`rowDetail`) or both, and sit under group heads (`groupOf`). **Why:** one table
- * for values and scan lists, in place of six table-like grids. **Where:** Scans, Results, a
+ * for values and input lists, in place of six table-like grids. **Where:** Scans, Results, a
  * task's values, the runs list.
  */
-type Scan = {
+type Input = {
   id: string;
   group: string;
   knee: string;
@@ -18,16 +18,16 @@ type Scan = {
   bvtv?: number;
 };
 
-const scans: Scan[] = [
+const inputs: Input[] = [
   { id: "OA7-4", group: "DMM", knee: "left", state: "check", checks: 2, bvtv: 55.1 },
   { id: "OA7-6", group: "DMM", knee: "left", state: "running" },
   { id: "OA7-11", group: "Sham", knee: "right", state: "done", bvtv: 61.4 },
   { id: "OA7-15", group: "Sham", knee: "right", state: "stopped" },
 ];
 
-const columns: TableColumn<Scan>[] = [
+const columns: TableColumn<Input>[] = [
   {
-    key: "scan",
+    key: "input",
     header: "Sample",
     cell: (s) => <span className="font-mono whitespace-nowrap">{s.id}</span>,
   },
@@ -54,9 +54,9 @@ const columns: TableColumn<Scan>[] = [
 
 const meta = {
   title: "Parts/Table",
-  component: Table<Scan>,
-  args: { label: "Samples", columns, rows: scans, rowKey: (s: Scan) => s.id },
-} satisfies Meta<typeof Table<Scan>>;
+  component: Table<Input>,
+  args: { label: "Samples", columns, rows: inputs, rowKey: (s: Input) => s.id },
+} satisfies Meta<typeof Table<Input>>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
@@ -106,7 +106,7 @@ export const Scrolls: Story = {
     columns: [
       ...columns,
       ...["Patella volume", "Medial osteophyte volume", "Tibial cortical thickness"].map(
-        (name): TableColumn<Scan> => ({
+        (name): TableColumn<Input> => ({
           key: name,
           header: <span className="inline-block w-28 whitespace-normal">{name}</span>,
           align: "end",

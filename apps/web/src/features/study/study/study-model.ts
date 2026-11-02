@@ -21,18 +21,18 @@
  * with neither (before its plan or its list) has no bar rather than a made-up one.
  */
 import type { OutputStatus } from "@voluma/contracts/output-fold";
-import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
+import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
   CARD_TITLE,
   cardId,
   groupNames,
   groupOf,
+  inputHref,
+  inputStatus,
   itemHref,
   needsYouOf,
   placeOfStatus,
-  runHref,
-  scanStatus,
   shownStatus,
   type TaskState,
 } from "@voluma/run-view";
@@ -60,14 +60,14 @@ export const sectionsOf = (workflow: BundledWorkflow): Section[] =>
  * A sample's value for an output in its declared unit; null when it has none (not reported, no
  * number, or reported in another unit: `otherUnit`).
  */
-export function scanValue(scan: StudyScanDetail, output: OutputEntry): number | null {
-  const reported = scan.values[output.id];
+export function inputValue(input: StudyInputDetail, output: OutputEntry): number | null {
+  const reported = input.values[output.id];
   return reported && reported.unit === unitOf(output) ? reported.value : null;
 }
 
 /** The unit a sample reported an output's number in when it isn't the declared one, else null. */
-export function otherUnit(scan: StudyScanDetail, output: OutputEntry): string | null {
-  const reported = scan.values[output.id];
+export function otherUnit(input: StudyInputDetail, output: OutputEntry): string | null {
+  const reported = input.values[output.id];
   return reported && reported.value !== null && reported.unit !== unitOf(output)
     ? reported.unit
     : null;
@@ -75,7 +75,7 @@ export function otherUnit(scan: StudyScanDetail, output: OutputEntry): string | 
 
 /** Every sample's value for an output, in its declared unit. */
 export const valuesOf = (detail: StudyDetail, output: OutputEntry) =>
-  detail.scans.flatMap((s) => scanValue(s, output) ?? []);
+  detail.inputs.flatMap((s) => inputValue(s, output) ?? []);
 
 export type Far = {
   /** The other values of the group, low and high. */
@@ -88,12 +88,12 @@ export type Far = {
  * widen each other's range and neither flags.
  */
 export function farFromGroup(detail: StudyDetail, output: OutputEntry): Map<string, Far> {
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
+  const grouped = detail.inputs.some((s) => s.member.group !== null);
   const far = new Map<string, Far>();
   for (const group of groupNames(detail)) {
-    const valued = detail.scans.flatMap((s) => {
-      const v = scanValue(s, output);
-      return groupOf(s, grouped) === group && v !== null ? [{ id: s.scan.inputId, v }] : [];
+    const valued = detail.inputs.flatMap((s) => {
+      const v = inputValue(s, output);
+      return groupOf(s, grouped) === group && v !== null ? [{ id: s.member.inputId, v }] : [];
     });
     for (const { id, v } of valued) {
       const others = valued.filter((o) => o.id !== id).map((o) => o.v);
@@ -129,19 +129,25 @@ export function digitsFor(values: number[]): number {
 export const kneeWord = (knee: string) =>
   ({ r: "right", l: "left" })[knee.toLowerCase()] ?? knee.toLowerCase();
 
-/** Where a sample links: its newest run's review (the scan review shows a live run too). */
-export const scanHref = ({ runs: [run] }: StudyScanDetail) =>
-  run ? runHref({ runId: run.id }) : null;
+/** Where a sample links: its page on its newest run (the page shows a live run too); null before it has a run. */
+export const openHref = (studyId: string, input: StudyInputDetail) =>
+  input.runs[0] ? inputHref(studyId, input.member.inputId) : null;
+
+/** `?run=` for a value's link when the value comes from a run that is not the newest. */
+export const resultRunQuery = (input: StudyInputDetail): { run?: string } =>
+  input.resultRunId !== null && input.resultRunId !== input.runs[0]?.id
+    ? { run: input.resultRunId }
+    : {};
 
 /** One task of one sample: where its newest run is; outside that run's plan, skipped. */
-function taskState(scan: StudyScanDetail, taskId: string): TaskState {
-  const states = scan.taskState;
+function taskState(input: StudyInputDetail, taskId: string): TaskState {
+  const states = input.taskState;
   return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
 }
 
 /** Whether the sample's newest run has task states or final outputs, which its bar is read from. */
-export const hasBar = (scan: StudyScanDetail) =>
-  Object.keys(scan.taskState).length > 0 || Object.keys(scan.outputStatus).length > 0;
+export const hasBar = (input: StudyInputDetail) =>
+  Object.keys(input.taskState).length > 0 || Object.keys(input.outputStatus).length > 0;
 
 /**
  * One measurement of one sample, as its bar segment and Compare's cell show it:
@@ -171,8 +177,12 @@ export const SEGMENT_WORD: Record<Segment, string> = {
  * reported is being made while the run goes, missing once it completed, else stopped. An output
  * not among the run's final outputs is outside its plan.
  */
-function outputSegment(scan: StudyScanDetail, status: OutputStatus | undefined, reported: boolean) {
-  const state = scan.runs[0]?.state;
+function outputSegment(
+  input: StudyInputDetail,
+  status: OutputStatus | undefined,
+  reported: boolean,
+) {
+  const state = input.runs[0]?.state;
   switch (status) {
     case "to-check":
       return "check";
@@ -193,11 +203,15 @@ function outputSegment(scan: StudyScanDetail, status: OutputStatus | undefined, 
   }
 }
 
-export function segmentOf(scan: StudyScanDetail, output: OutputEntry): Segment {
-  if (Object.keys(scan.outputStatus).length > 0)
-    return outputSegment(scan, scan.outputStatus[output.id], scan.values[output.id] !== undefined);
-  const status = shownStatus(taskState(scan, output.task), scan.needsYou[output.task] ?? 0);
-  const reported = scan.values[output.id] !== undefined;
+export function segmentOf(input: StudyInputDetail, output: OutputEntry): Segment {
+  if (Object.keys(input.outputStatus).length > 0)
+    return outputSegment(
+      input,
+      input.outputStatus[output.id],
+      input.values[output.id] !== undefined,
+    );
+  const status = shownStatus(taskState(input, output.task), input.needsYou[output.task] ?? 0);
+  const reported = input.values[output.id] !== undefined;
   switch (status) {
     case "check":
       return "check";
@@ -207,7 +221,7 @@ export function segmentOf(scan: StudyScanDetail, output: OutputEntry): Segment {
     case "stopped":
       return "stopped";
     case "done":
-      return !reported && scan.resultRunId === scan.runs[0]?.id ? "missing" : "reported";
+      return !reported && input.resultRunId === input.runs[0]?.id ? "missing" : "reported";
     default:
       return reported ? "stale" : "waiting";
   }
@@ -224,58 +238,63 @@ export const PLACES: { place: Place; title: string }[] = [
 ];
 
 /**
- * A scan's place on the study page and Compare: its group in the Samples tree (`placeOfStatus`,
- * which also keeps an example's scans out of Needs you), or Not started with no run, which the
+ * An input's place on the study page and Compare: its group in the Samples tree (`placeOfStatus`,
+ * which also keeps an example's inputs out of Needs you), or Not started with no run, which the
  * tree leaves out.
  */
-export function placeOf(scan: StudyScanDetail, example: boolean): Place {
-  return scan.runs[0] ? placeOfStatus(scanStatus(scan).status, example) : "not-started";
+export function placeOf(input: StudyInputDetail, example: boolean): Place {
+  return input.runs[0] ? placeOfStatus(inputStatus(input).status, example) : "not-started";
 }
 
 export const placeParam = (value: string | null): Place | null =>
   PLACES.find((p) => p.place === value)?.place ?? null;
 
 /**
- * Where a scan's run stopped or failed, in the word its status uses: "Failed during Segmentation",
+ * Where an input's run stopped or failed, in the word its status uses: "Failed during Segmentation",
  * from the task it stopped or failed in; "Stopped before it finished" when no task says.
  */
-export function stoppedLine(scan: StudyScanDetail, workflow: BundledWorkflow): string | null {
-  const run = scan.runs[0];
+export function stoppedLine(input: StudyInputDetail, workflow: BundledWorkflow): string | null {
+  const run = input.runs[0];
   if (run?.state.status !== "ended" || run.state.outcome === "completed") return null;
   const word = run.state.outcome === "failed" ? "Failed" : "Stopped";
-  const id = Object.entries(scan.taskState).find(([, s]) => s === "stopped" || s === "failed")?.[0];
+  const id = Object.entries(input.taskState).find(
+    ([, s]) => s === "stopped" || s === "failed",
+  )?.[0];
   return id ? `${word} during ${workflow.taskTitle(id)}` : `${word} before it finished`;
 }
 
-/** A To check task's card nobody can accept (`unacceptable`): its task, why, and the review on it. */
-type Card = { taskId: string; title: string; href: string | null };
-
-const cardsOf = (scan: StudyScanDetail): Card[] =>
-  Object.entries(scan.unacceptable).map(([id, why]) => ({
-    taskId: id,
-    title: CARD_TITLE[why],
-    href: scan.runs[0]
-      ? itemHref({ runId: scan.runs[0].id, taskId: id, checkId: cardId(id) })
-      : null,
-  }));
+/** A To check task's card nobody can accept (`unacceptable`): its task and why. */
+const cardsOf = (input: StudyInputDetail) =>
+  Object.entries(input.unacceptable).map(([id, why]) => ({ taskId: id, title: CARD_TITLE[why] }));
 
 /** What waits on a sample, in a line: its acceptable checks' titles, then each card as "<task>: <why>". */
-export const waitsOn = (scan: StudyScanDetail, workflow: BundledWorkflow) =>
+export const waitsOn = (input: StudyInputDetail, workflow: BundledWorkflow) =>
   [
     ...new Set([
-      ...scan.acceptable.map((i) => i.title),
-      ...cardsOf(scan).map((c) => `${workflow.taskTitle(c.taskId)}: ${c.title}`),
+      ...input.acceptable.map((i) => i.title),
+      ...cardsOf(input).map((c) => `${workflow.taskTitle(c.taskId)}: ${c.title}`),
     ]),
   ].join(", ");
 
 /** The samples with items that need a person (`needsYouOf`), most first. */
-export const byMostToCheck = (scans: readonly StudyScanDetail[]) =>
-  scans.filter((s) => needsYouOf(s) > 0).sort((a, b) => needsYouOf(b) - needsYouOf(a));
+export const byMostToCheck = (inputs: readonly StudyInputDetail[]) =>
+  inputs.filter((s) => needsYouOf(s) > 0).sort((a, b) => needsYouOf(b) - needsYouOf(a));
 
-/** Where a sample opens: its first acceptable item, else its first card, else the scan. */
-export const reviewHref = (scan: StudyScanDetail) => {
-  const [item] = scan.acceptable;
-  return item ? itemHref(item) : (cardsOf(scan)[0]?.href ?? scanHref(scan));
+/** Where a sample opens: its first acceptable item, else its first card, else the input. */
+export const reviewHref = (studyId: string, input: StudyInputDetail) => {
+  const { inputId } = input.member;
+  const newest = input.runs[0]?.id;
+  const [item] = input.acceptable;
+  if (item)
+    // An item belongs to the newest completed run, which a run started since may have passed.
+    return itemHref(studyId, inputId, {
+      ...item,
+      ...(item.runId !== newest && { run: item.runId }),
+    });
+  const [card] = cardsOf(input);
+  return newest && card
+    ? itemHref(studyId, inputId, { taskId: card.taskId, checkId: cardId(card.taskId) })
+    : openHref(studyId, input);
 };
 
 /** The output a folded section shows: its task's headline measurement, else its first. */
@@ -286,7 +305,7 @@ export const keyOutput = (workflow: BundledWorkflow, section: Section): OutputEn
 /** One line of a study's recent activity, from its runs' own times. */
 export type Activity = {
   at: string;
-  scan: StudyScanDetail;
+  input: StudyInputDetail;
   kind: "added" | "started" | "completed" | "failed" | "stopped" | "reviewed";
   text: string;
 };
@@ -294,17 +313,17 @@ export type Activity = {
 /** Every run's start, end and review across the study, newest first. */
 export function activityOf(detail: StudyDetail): Activity[] {
   const lines: Activity[] = [];
-  for (const scan of detail.scans) {
-    for (const run of scan.runs) {
+  for (const input of detail.inputs) {
+    for (const run of input.runs) {
       const { state } = run;
       const at = (iso: string | null | undefined, kind: Activity["kind"], text: string) => {
-        if (iso) lines.push({ at: iso, scan, kind, text });
+        if (iso) lines.push({ at: iso, input, kind, text });
       };
       if (state.status === "queued") at(run.createdAt, "added", "waiting to start");
       if (state.status === "running" || state.status === "ended")
         at(state.startedAt, "started", "run started");
       if (state.status === "ended") {
-        const values = run.id === scan.resultRunId ? Object.keys(scan.values).length : 0;
+        const values = run.id === input.resultRunId ? Object.keys(input.values).length : 0;
         if (state.outcome === "completed")
           at(
             state.endedAt,
@@ -327,8 +346,8 @@ export function activityOf(detail: StudyDetail): Activity[] {
 }
 
 /** When a sample last changed: the latest time its runs carry. */
-export function changedAt(scan: StudyScanDetail): string | null {
-  const times = scan.runs.flatMap((run) => [
+export function changedAt(input: StudyInputDetail): string | null {
+  const times = input.runs.flatMap((run) => [
     run.createdAt,
     run.state.status === "running" || run.state.status === "ended" ? run.state.startedAt : null,
     run.state.status === "ended" ? run.state.endedAt : null,

@@ -6,9 +6,9 @@ import { FactSections, Facts, InfoButton, Popover } from "./popover";
 /**
  * **What:** facts about a thing, one click away. Escape or a click outside closes it.
  * **Why:** detail without leaving the page, in place of four hand-rolled popovers. **Where:**
- * Run details, a scan's facts, Study details, matrix hover. `Facts` lays out label and value
+ * Run details, an input's facts, Study details, matrix hover. `Facts` lays out label and value
  * pairs, `FactSections` several lists under titles. `InfoButton` is the (i) beside an agent, a
- * task or a reply: what it took, tried and cost, which a researcher asks for rather than scans.
+ * task or a reply: what it took, tried and cost, which a researcher asks for rather than inputs.
  */
 const mono = (v: string) => <span className="font-mono text-xs">{v}</span>;
 const runDetails = (

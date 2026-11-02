@@ -1,9 +1,9 @@
 /**
  * Task states as both screens show them. A started task under each run status: Waiting while the
  * run waits in line, Paused only while it waits for keys. During a correction: the study read and
- * the scan review must show the corrected task the same way, though `reviewState` holds the
+ * the input review must show the corrected task the same way, though `reviewState` holds the
  * correction's revision back for values and checks. Items that need a person: the study read
- * (`shownTasks` over `latestRevision`) counts each task as the scan review does (`openItems` over
+ * (`shownTasks` over `latestRevision`) counts each task as the input review does (`openItems` over
  * the live fold) in every state of the run. A mistake here is silent: one screen says Done while
  * the other says Running or To check.
  */
@@ -52,7 +52,7 @@ describe("taskStates during a correction", () => {
     if (!held || !live) throw new Error("no revision");
     // The held revision still says done: reading states from it is the trap.
     expect([...taskStates(held, run)]).toEqual([["a", "done"]]);
-    // The scan review reads the live fold; the study read, the open correction's revision.
+    // The input review reads the live fold; the study read, the open correction's revision.
     expect([...taskStates(live, run)]).toEqual([["a", "running"]]);
     expect([...taskStates(openCorrectionRevision(l.events) ?? held, run)]).toEqual([
       ["a", "running"],
@@ -81,7 +81,7 @@ describe("taskStates of a started task under each run status", () => {
   });
 });
 
-describe("items that need a person, in the study read and the scan review", () => {
+describe("items that need a person, in the study read and the input review", () => {
   type Log = ReturnType<typeof log>;
   /** Task `a` worked on by its AI; `then` writes the rest. */
   const taskA = (then: (l: Log) => void) => {
@@ -154,7 +154,7 @@ describe("items that need a person, in the study read and the scan review", () =
         correcting: openCorrectionRevision(events),
       }),
     });
-    // The scan review: the live fold (`runView`).
+    // The input review: the live fold (`runView`).
     const live = reviewState(events, { live: true }).revisions.at(-1);
     const task = live?.tasks.find((t) => t.id === "a");
     if (!live || !task) throw new Error("no task");

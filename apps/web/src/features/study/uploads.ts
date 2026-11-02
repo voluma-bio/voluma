@@ -29,7 +29,7 @@ import {
 } from "@voluma/contracts/run";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { holdLeave } from "../../shell/deploys";
-import type { ScanFile } from "./scan-files";
+import type { InputFile } from "./input-files";
 
 /** Files PUT at once; enough to fill a lab uplink without starving the page. */
 const PARALLEL = 4;
@@ -49,7 +49,7 @@ export type UploadState =
 
 interface Job {
   name: string;
-  files: ScanFile[];
+  files: InputFile[];
   created?: CreateUploadResponse;
   /** Completed: an input now, not an upload to cancel. */
   done?: true;
@@ -80,7 +80,7 @@ function createError(error: unknown): string {
 }
 
 /** Why a scan can't be uploaded at all, or undefined. */
-function refusal(name: string, files: ScanFile[]): string | undefined {
+function refusal(name: string, files: InputFile[]): string | undefined {
   const big = files.find((f) => f.file.size > MAX_UPLOAD_FILE_BYTES);
   if (big) return `${big.path} is over 5 GB, the largest file storage takes.`;
   const request = { name, files: files.map((f) => ({ path: f.path, size: f.file.size })) };
@@ -241,7 +241,7 @@ export function useUploads() {
   }, [run]);
 
   const add = useCallback(
-    (id: string, name: string, files: ScanFile[]) => {
+    (id: string, name: string, files: InputFile[]) => {
       const refused = refusal(name, files);
       jobs.current.set(id, {
         name,

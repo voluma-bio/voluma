@@ -7,7 +7,7 @@ import { StatusMark } from "./status-mark";
  * **What:** the one list part. A row shows a title, a subtitle, a status and cells; a row with
  * a next layer has a chevron and opens it in place, indented on a guide line, one level of detail
  * at a time. Selection (ice outline) drives the other views. **Why:** today there are nine ways
- * to expand something and six table-like grids; this is the one. **Where:** every list: scans,
+ * to expand something and six table-like grids; this is the one. **Where:** every list: inputs,
  * items to check, tasks, values, files, agents (study panel, To check, Scans, ScanQueue, Report,
  * Agents tree, Box bodies). Rows that go somewhere are `RowLink`.
  *

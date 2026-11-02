@@ -1,5 +1,5 @@
 /**
- * The browser's study routes (`@voluma/contracts/study`): create (a study, its scans and the
+ * The browser's study routes (`@voluma/contracts/study`): create (a study, its inputs and the
  * runs to start now, in one transaction), list and get. Reads take `requireReader`, create
  * takes `requireUser`; the queue holds visitor keys, so no handler logs a body.
  */
@@ -30,7 +30,7 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
         workflowId: body.workflowId,
         budgetUsd: body.budgetUsd ?? null,
       },
-      scans: body.scans.map(({ inputId, subject, group, attributes }) => ({
+      inputs: body.inputs.map(({ inputId, subject, group, attributes }) => ({
         inputId,
         subject,
         group: group ?? null,

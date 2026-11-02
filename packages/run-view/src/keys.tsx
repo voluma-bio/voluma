@@ -1,5 +1,5 @@
 /**
- * A visitor's own keys (`VisitorKeys`): asked on Run on new scans and again when a run is
+ * A visitor's own keys (`VisitorKeys`): asked on Run on new inputs and again when a run is
  * waiting for them. They stay in this browser's localStorage, under the user's id so another
  * user of the browser never sees them; the server holds them in memory only.
  */

@@ -32,19 +32,19 @@ export interface Dropped {
   path: string;
 }
 
-export interface ScanFile {
+export interface InputFile {
   file: File;
   /** Relative to the scan's folder. */
   path: string;
 }
 
-export interface DroppedScan {
+export interface DroppedInput {
   name: string;
-  files: ScanFile[];
+  files: InputFile[];
 }
 
 export interface Grouped {
-  scans: DroppedScan[];
+  scans: DroppedInput[];
   sheets: File[];
   /** Paths of files that are neither a scan nor a sheet. */
   skipped: string[];
@@ -60,7 +60,7 @@ const GENERIC =
 const REC = /_rec$/i;
 
 /** The nearest folder on `path` that names the scan (`OA6-1RK/DICOM` → `OA6-1RK`), else its last folder. */
-function scanName(path: string): string {
+function inputName(path: string): string {
   const parts = path.split("/");
   for (const part of [...parts].reverse()) {
     const name = part.replace(REC, "");
@@ -152,7 +152,7 @@ export function groupDropped(dropped: Dropped[], taken: Iterable<string> = []): 
     const isRoot = path === "";
     const folders = sliceFolders(dir);
     // A named folder whose slices all sit in one folder is one scan.
-    if (!isRoot && folders === 1) return whole(dir, path, scanName(path));
+    if (!isRoot && folders === 1) return whole(dir, path, inputName(path));
     // Skyscan: projections here, the reconstruction in `<name>_rec/`.
     const subs = [...dir.dirs.values()];
     const rec = subs.filter((d) => REC.test(d.name) && sliceFolders(d) === 1);
@@ -161,7 +161,7 @@ export function groupDropped(dropped: Dropped[], taken: Iterable<string> = []): 
       out.skipped.push(...own.map((f) => f.path));
       const others = subs.filter((d) => !rec.includes(d) && sliceFolders(d) > 0);
       // The rest of the folder (Skyscan's `.log` holds the pixel size) goes with the scan.
-      whole(dir, path, scanName(path), [...own, ...others.flatMap(everyFile)]);
+      whole(dir, path, inputName(path), [...own, ...others.flatMap(everyFile)]);
       for (const sub of others) visit(sub, `${path}/${sub.name}`);
       return;
     }
@@ -177,7 +177,7 @@ export function groupDropped(dropped: Dropped[], taken: Iterable<string> = []): 
     // Slices beside other scans' folders: one scan, named after where they sit.
     if (loose.length > 0) {
       out.scans.push({
-        name: isRoot ? looseName(loose) : scanName(path),
+        name: isRoot ? looseName(loose) : inputName(path),
         files: relativeTo(loose, path),
       });
     }

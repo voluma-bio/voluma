@@ -1,7 +1,7 @@
 /**
  * The Samples tree (on screen, `INPUT_WORD.Many`): the studies, each one's samples grouped Needs
  * you, Running and Done, and a search above them. A researcher jumps between samples with it
- * without leaving review: the study pages show it on the left, and the scan page's left side is
+ * without leaving review: the study pages show it on the left, and the input page's left side is
  * meant to show the same tree as a tab. Which branches are open is kept across pages
  * and visits; while a search is typed every branch with a match is open. Keys follow the ARIA
  * tree: Up and Down move, Left and Right close and open, Enter opens a sample, Home and End.
