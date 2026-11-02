@@ -5,6 +5,7 @@
  *
  * Lock order: `lockRun` (`pg-event-log.ts`).
  */
+import { approvalAnswerId, approvalSettledId } from "@voluma/contracts/agents";
 import { runEventSchema } from "@voluma/contracts/events";
 import { fold, redoRefusal } from "@voluma/contracts/fold";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
@@ -336,7 +337,7 @@ export async function answerApproval(
     workflows: run.workflows as WorkflowPin[],
   });
   const type = body.answer === "yes" ? "approval.given" : "approval.declined";
-  const answerId = `${requestId}:answer`;
+  const answerId = approvalAnswerId(requestId);
   // An answer already stored is answered even though the run's state has moved on since.
   const [stored] = await tx
     .select({ type: events.type })
@@ -357,7 +358,7 @@ export async function answerApproval(
   const request = log.find((e) => e.type === "approval.requested" && e.id === requestId);
   if (request?.type !== "approval.requested")
     throw new HTTPException(404, { message: "That request is not open." });
-  if (log.some((e) => e.id === `${requestId}:settled`))
+  if (log.some((e) => e.id === approvalSettledId(requestId)))
     throw new HTTPException(404, { message: "That request is not open." });
 
   if (run.state === "ended") await reopen(tx, runId, answerId, caller.userId);
