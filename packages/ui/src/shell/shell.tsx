@@ -663,6 +663,13 @@ export function useFullView(): [boolean, (full: boolean) => void] {
   return [shell.folded.left && shell.folded.right, (full) => shell.fold("both", full)];
 }
 
+/** Whether one side is folded, and a way for the screen to fold or unfold it. */
+export function useSideFold(side: ShellSide): [boolean, (folded: boolean) => void] {
+  const shell = useContext(ShellContext);
+  if (!shell) throw new Error("useSideFold must be used inside AppShell");
+  return [shell.folded[side], (folded) => shell.fold(side, folded)];
+}
+
 /** Opens a panel of this screen by id, beside what is open on its side. */
 export function useOpenPanel(): (id: string) => void {
   const shell = useContext(ShellContext);
