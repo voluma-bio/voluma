@@ -1,5 +1,5 @@
 /**
- * Run on new scans (`/new`): the scans first (dropped or picked, grouped by `scan-files.ts`,
+ * Run on new samples (`/new`): the samples first (dropped or picked, grouped by `scan-files.ts`,
  * uploading at once; or scans uploaded before), the intake table (`intake.ts`), the workflow,
  * then, for several scans, the study's name and how much runs now. One scan starts a study of
  * one named after it and opens its run; several start a study and open it.
@@ -28,6 +28,7 @@ import {
   Disclosure,
   EmptyState,
   ErrorState,
+  INPUT_WORD,
   LoadingState,
   PageHead,
   ShellHeading,
@@ -67,7 +68,7 @@ type SheetState =
 function startError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 403 && error.serverMessage) return error.serverMessage;
-    if (error.status === 404) return "A scan or the workflow is no longer available.";
+    if (error.status === 404) return `A ${INPUT_WORD.one} or the workflow is no longer available.`;
     if (error.status === 409)
       return "You already have a run going. Wait for it to finish or stop it, then start again.";
     if (error.status === 429) return "The run limit is reached for now. Try again later.";
@@ -210,7 +211,7 @@ export function NewPage() {
     table.length === 0
       ? undefined
       : broken.length > 0
-        ? `${broken.length === 1 ? "A scan didn't" : `${broken.length} scans didn't`} upload. Retry or remove ${broken.length === 1 ? "it" : "them"} first.`
+        ? `${broken.length === 1 ? `A ${INPUT_WORD.one} didn't` : `${broken.length} ${INPUT_WORD.many} didn't`} upload. Retry or remove ${broken.length === 1 ? "it" : "them"} first.`
         : missing > 0
           ? `Fill in the ${missing === 1 ? "empty cell" : `${missing} empty cells`} first.`
           : several && !studyName.trim()
@@ -290,11 +291,14 @@ export function NewPage() {
   return (
     <div className="shrink-0">
       <ShellHeading>
-        <Breadcrumb trail={[{ label: "Studies", to: linkTo("/") }]} current="Run on new scans" />
+        <Breadcrumb
+          trail={[{ label: "Studies", to: linkTo("/") }]}
+          current={`Run on new ${INPUT_WORD.many}`}
+        />
       </ShellHeading>
-      <PageHead title="Run on new scans" />
+      <PageHead title={`Run on new ${INPUT_WORD.many}`} />
       <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-6 pb-16 max-[760px]:px-4">
-        <Step n={1} title="Scans">
+        <Step n={1} title={INPUT_WORD.Many}>
           {canUpload ? (
             <DropZone compact={table.length > 0} onFiles={(d) => void addDropped(d)} />
           ) : (
@@ -303,7 +307,7 @@ export function NewPage() {
               <Button variant="link" onClick={() => signIn()}>
                 Sign in
               </Button>{" "}
-              or use a scan already here.
+              or use a {INPUT_WORD.one} already here.
             </p>
           )}
           {skipped.length > 0 && (
@@ -452,14 +456,14 @@ export function NewPage() {
           </Button>
           <span role="status" className="text-sm text-muted-foreground">
             {table.length === 0
-              ? "Add a scan to start."
+              ? `Add a ${INPUT_WORD.one} to start.`
               : (blocker ??
                 (armed
-                  ? `Starts when ${pending.length === 1 ? "the last scan finishes" : `${pending.length} scans finish`} uploading. Keep this page open until then.`
+                  ? `Starts when ${pending.length === 1 ? `the last ${INPUT_WORD.one} finishes` : `${pending.length} ${INPUT_WORD.many} finish`} uploading. Keep this page open until then.`
                   : pending.length > 0
                     ? pending.length === 1
-                      ? "A scan is still uploading. Start now and it begins once the upload finishes."
-                      : `${pending.length} scans are still uploading. Start now and they begin once the uploads finish.`
+                      ? `A ${INPUT_WORD.one} is still uploading. Start now and it begins once the upload finishes.`
+                      : `${pending.length} ${INPUT_WORD.many} are still uploading. Start now and they begin once the uploads finish.`
                     : "You can close this page once it starts; the runs carry on."))}
           </span>
           {start.isError && (
@@ -548,7 +552,7 @@ function DropZone({ compact, onFiles }: { compact: boolean; onFiles: (d: Dropped
   };
   return (
     <section
-      aria-label="Drop scans"
+      aria-label={`Drop ${INPUT_WORD.many}`}
       onDragOver={(e) => {
         e.preventDefault();
         setOver(true);
@@ -566,8 +570,8 @@ function DropZone({ compact, onFiles }: { compact: boolean; onFiles: (d: Dropped
     >
       <p className="text-muted-foreground">
         {compact
-          ? "Drop more scans or your sample sheet here"
-          : "Drop scans here: one file, a folder of them, and your sample sheet if you have one"}
+          ? `Drop more ${INPUT_WORD.many} or your sample sheet here`
+          : `Drop ${INPUT_WORD.many} here: one scan file, a folder of them, and your sample sheet if you have one`}
       </p>
       <div className="flex flex-wrap justify-center gap-2">
         <Button size="sm" onClick={() => files.current?.click()}>
@@ -644,7 +648,8 @@ function SheetLine({
     <p className="text-sm">
       Sample sheet <span className="font-medium">{sheet.sheet.name}</span>
       <span className="text-muted-foreground">
-        {total > 0 && `, groups for ${matched} of ${total} ${total === 1 ? "scan" : "scans"}`}
+        {total > 0 &&
+          `, groups for ${matched} of ${total} ${total === 1 ? INPUT_WORD.one : INPUT_WORD.many}`}
       </span>{" "}
       <Button variant="link" onClick={onRemove}>
         Remove
@@ -879,14 +884,19 @@ function Earlier({
     <Disclosure
       key={String(open)}
       defaultOpen={open}
-      label={`Or use a scan you uploaded before${list ? ` (${list.length})` : ""}`}
+      label={`Or use a ${INPUT_WORD.one} you uploaded before${list ? ` (${list.length})` : ""}`}
     >
       <div>
-        {inputs.isPending && <LoadingState rows={2} density="compact" label="Loading your scans" />}
-        {inputs.isError && (
-          <ErrorState title="Couldn't load your scans" onRetry={() => void inputs.refetch()} />
+        {inputs.isPending && (
+          <LoadingState rows={2} density="compact" label={`Loading your ${INPUT_WORD.many}`} />
         )}
-        {list?.length === 0 && <EmptyState title="No earlier scans" />}
+        {inputs.isError && (
+          <ErrorState
+            title={`Couldn't load your ${INPUT_WORD.many}`}
+            onRetry={() => void inputs.refetch()}
+          />
+        )}
+        {list?.length === 0 && <EmptyState title={`No earlier ${INPUT_WORD.many}`} />}
         <ul className="grid">
           {list?.map((input) => (
             <li key={input.id} className="border-t border-line-subtle first:border-t-0">
@@ -899,7 +909,7 @@ function Earlier({
                 />
                 <span className="min-w-0 flex-1 truncate">{input.name}</span>
                 {input.source === "reference" && (
-                  <span className="text-xs text-fg-subtle">Reference scan</span>
+                  <span className="text-xs text-fg-subtle">Reference {INPUT_WORD.one}</span>
                 )}
               </label>
             </li>
