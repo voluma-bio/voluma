@@ -254,14 +254,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       mainWorks: main.tools.includes("bash") && main.outputs === "write",
       signal: loopSignal,
     });
-    // Ends what the last claim left running before any thread resumes and is told.
     const bash = new BashRuntime({
       recorder,
       deliver: (id, text) => running.send(id, text, { kind: "runtime", notice: true }),
       cutOff,
       log: options.log,
     });
-    await bash.endCutOff();
     const running = threads(
       {
         recorder,
@@ -285,6 +283,8 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
         return running.start({ ...spec, input: { ...input, text } });
       },
     };
+    // Before any thread resumes: the commands the last claim left running are over.
+    await bash.endCutOff();
     const runtime = taskRuntime({
       recorder,
       evidence: options.evidence,
