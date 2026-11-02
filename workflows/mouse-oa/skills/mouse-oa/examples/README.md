@@ -29,7 +29,7 @@ of the plateau. The heights (#7–9) run along the shaft axis from the growth pl
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
 middle of the medial and the lateral compartment of the plateau.
 
-`plate_faces.py` proposes both faces of the growth plate for the iioc task, and the metaphyseal task checks them again. A worker
+`plate_faces.py` proposes both faces of the growth plate for the iioc step, and the metaphyseal-roi step checks them again. A worker
 checks the proposal against these: each proposed face lies on the plate's two edges, a few voxels apart, on every section; every
 flagged stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has your own dense points from its first to its last
 column, traced on a zoomed view; no straight line crosses a flagged stretch. `iioc.py` and `metaphysis_roi.py` stop on a stretch left
