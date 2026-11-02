@@ -1,13 +1,13 @@
 /**
- * What the study pages derive from one `StudyDetail`: each scan's task states, the
- * headline series by group, the far-from-group flag and the To check kinds. Pure functions, so
- * every tab reads the same numbers.
+ * What the study pages derive from one `StudyDetail`: each sample's place (Needs you, Running,
+ * Done…), its bar of measurements, the values and the far-from-group flag, and the study's recent
+ * activity. Pure functions, so the Studies pane, the study and Compare read the same numbers.
  *
- * Far from its group (plain statistics, no AI): a scan's value is far when it lies outside the
+ * Far from its group (plain statistics, no AI): a sample's value is far when it lies outside the
  * range of its group's other values by more than twice that range, or by more than 10% of their
  * median when they agree closely. It needs at least two other values in the group, so a group of
  * two never flags. With n = 3-8 per group a standard deviation is unstable; the range reads in
- * one sentence ("the other DMM scans measure 2.47-2.51 mm").
+ * one sentence ("the other DMM samples measure 2.47-2.51 mm").
  *
  * Units: a value counts only in the unit today's `outputs.json` declares. `report_output` already
  * refuses a unit that differs from the run's own plan, but that plan is the snapshot taken when
@@ -15,14 +15,12 @@
  * (210 µm beside 0.21 mm). Such a value stays out of the plot and the far rule and shows as
  * "reported in µm"; converting would guess what the agent meant.
  *
- * To check kinds: items group by task and check title, in workflow task order, then title.
- *
- * Task states: a scan's tasks are where its newest run is (`taskState`), the state the scan
- * review shows, derived once on the server with its items that need a person (`needsYou`),
- * counted as the scan review counts them. A workflow task outside that run's plan reads Skipped; with no plan yet,
- * Waiting. A task To check with no open item left reads Done, since its checks were accepted.
+ * A sample's bar: one segment per measurement of the workflow (`outputs.json`, kind
+ * `measurement`), in task order, each read from the sample's own data (`segmentOf`). Only a newest
+ * run with a task plan has one: a run of the agent loop has no task states in the study read, so
+ * its sample shows no bar rather than a made-up one.
  */
-import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
+import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
   CARD_TITLE,
@@ -31,26 +29,34 @@ import {
   groupOf,
   itemHref,
   needsYouOf,
-  runCost,
+  placeOfStatus,
   runHref,
-  type ScanGraphTask,
-  type StudyGraphTask,
+  scanStatus,
   shownStatus,
   type TaskState,
 } from "@voluma/run-view";
-import type { Status } from "@voluma/ui";
+import type { SampleGroup, Status } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
-
-/** What every run of the study has spent so far (`runCost`, as Run details shows each run's). */
-export const studySpend = (detail: StudyDetail) =>
-  detail.scans.flatMap((s) => s.runs).reduce((usd, run) => usd + runCost(run), 0);
+import { measurementsOf } from "../workflow-tasks";
 
 /** An output's declared unit; "" for one without. */
 export const unitOf = (output: OutputEntry) =>
   "unit" in output && typeof output.unit === "string" ? output.unit : "";
 
+/** The measurements under the task that reports them, in task order: the bar's and table's sections. */
+export type Section = { taskId: string; title: string; outputs: OutputEntry[] };
+
+export const sectionsOf = (workflow: BundledWorkflow): Section[] =>
+  workflow.tasks
+    .map((t) => ({
+      taskId: t.id,
+      title: workflow.taskTitle(t.id),
+      outputs: measurementsOf(workflow).filter((o) => o.task === t.id),
+    }))
+    .filter((s) => s.outputs.length > 0);
+
 /**
- * A scan's value for an output in its declared unit; null when it has none (not reported, no
+ * A sample's value for an output in its declared unit; null when it has none (not reported, no
  * number, or reported in another unit: `otherUnit`).
  */
 export function scanValue(scan: StudyScanDetail, output: OutputEntry): number | null {
@@ -58,7 +64,7 @@ export function scanValue(scan: StudyScanDetail, output: OutputEntry): number | 
   return reported && reported.unit === unitOf(output) ? reported.value : null;
 }
 
-/** The unit a scan reported an output's number in when it isn't the declared one, else null. */
+/** The unit a sample reported an output's number in when it isn't the declared one, else null. */
 export function otherUnit(scan: StudyScanDetail, output: OutputEntry): string | null {
   const reported = scan.values[output.id];
   return reported && reported.value !== null && reported.unit !== unitOf(output)
@@ -66,7 +72,7 @@ export function otherUnit(scan: StudyScanDetail, output: OutputEntry): string | 
     : null;
 }
 
-/** Every scan's value for an output, in its declared unit. */
+/** Every sample's value for an output, in its declared unit. */
 export const valuesOf = (detail: StudyDetail, output: OutputEntry) =>
   detail.scans.flatMap((s) => scanValue(s, output) ?? []);
 
@@ -76,7 +82,7 @@ export type Far = {
 };
 
 /**
- * Each scan's far-from-group verdict for one output, keyed by input id; see the header for the
+ * Each sample's far-from-group verdict for one output, keyed by input id; see the header for the
  * rule. Each value is compared with the range of the rest, so two similar outliers in one group
  * widen each other's range and neither flags.
  */
@@ -118,82 +124,85 @@ export function digitsFor(values: number[]): number {
   return top >= 100 ? 0 : top >= 10 ? 1 : top >= 1 ? 2 : 3;
 }
 
-export type CheckKind = {
-  key: string;
-  taskId: string;
-  taskTitle: string;
-  title: string;
-  /** In study order. */
-  items: { scan: StudyScanDetail; item: ToCheckItem }[];
-};
+/** A knee as people say it: "R" → "right", "L" → "left"; anything else as written. */
+export const kneeWord = (knee: string) =>
+  ({ r: "right", l: "left" })[knee.toLowerCase()] ?? knee.toLowerCase();
 
-export function checkKinds(detail: StudyDetail, workflow: BundledWorkflow): CheckKind[] {
-  const kinds = new Map<string, CheckKind>();
-  for (const scan of detail.scans) {
-    for (const item of scan.acceptable) {
-      const key = `${item.taskId}\n${item.title}`;
-      const kind = kinds.get(key) ?? {
-        key,
-        taskId: item.taskId,
-        taskTitle: workflow.taskTitle(item.taskId),
-        title: item.title,
-        items: [],
-      };
-      kind.items.push({ scan, item });
-      kinds.set(key, kind);
-    }
-  }
-  const order = new Map(workflow.tasks.map((t, i) => [t.id, i]));
-  const rank = (k: CheckKind) => order.get(k.taskId) ?? workflow.tasks.length;
-  return [...kinds.values()].sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
-}
-
-/** Where a scan links: its newest run's review (the scan review shows a live run too). */
+/** Where a sample links: its newest run's review (the scan review shows a live run too). */
 export const scanHref = ({ runs: [run] }: StudyScanDetail) =>
   run ? runHref({ runId: run.id }) : null;
 
-/** One task of one scan: where its newest run is; outside that run's plan, skipped. */
-export function taskState(scan: StudyScanDetail, taskId: string): TaskState {
+/** One task of one sample: where its newest run is; outside that run's plan, skipped. */
+function taskState(scan: StudyScanDetail, taskId: string): TaskState {
   const states = scan.taskState;
   return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
 }
 
+/** Whether the sample's newest run has task states, which its bar is read from. */
+export const hasBar = (scan: StudyScanDetail) => Object.keys(scan.taskState).length > 0;
+
 /**
- * A cell of the scan-by-task grid: one task of one scan, and its open items in the newest run,
- * read by the one status rule (`shownStatus`).
+ * One measurement of one sample, as its bar segment and Compare's cell show it:
+ * - `check`: its task is To check with items open (`shownStatus`, the rule every page uses);
+ * - `making`: its task is running or under its second check;
+ * - `reported`: its task is done;
+ * - `missing`: its task is done in the run the values come from, which reported no value for it;
+ * - `stale`: its task waits in a newer run (a rerun or a correction), so the value shown is the
+ *   last completed run's;
+ * - `waiting`: its task waits and there is no value yet (or the task is outside the run's plan);
+ * - `stopped`: its task failed or was stopped.
  */
-export function cellOf(scan: StudyScanDetail, taskId: string): { status: Status; open: number } {
-  const open = scan.needsYou[taskId] ?? 0;
-  return { status: shownStatus(taskState(scan, taskId), open), open };
+export type Segment = "check" | "making" | "reported" | "missing" | "stale" | "waiting" | "stopped";
+
+export const SEGMENT_WORD: Record<Segment, string> = {
+  check: "To check",
+  making: "Being made",
+  reported: "Reported",
+  missing: "Missing",
+  stale: "Out of date",
+  waiting: "Waiting",
+  stopped: "Stopped",
+};
+
+export function segmentOf(scan: StudyScanDetail, output: OutputEntry): Segment {
+  const status = shownStatus(taskState(scan, output.task), scan.needsYou[output.task] ?? 0);
+  const reported = scan.values[output.id] !== undefined;
+  switch (status) {
+    case "check":
+      return "check";
+    case "running":
+    case "checking":
+      return "making";
+    case "stopped":
+      return "stopped";
+    case "done":
+      return !reported && scan.resultRunId === scan.runs[0]?.id ? "missing" : "reported";
+    default:
+      return reported ? "stale" : "waiting";
+  }
 }
 
-/** The workflow at study size: each task with its state on every scan, in study order. */
-export const studyGraph = (detail: StudyDetail, workflow: BundledWorkflow): StudyGraphTask[] =>
-  workflow.tasks.map((t) => ({
-    id: t.id,
-    title: workflow.taskTitle(t.id),
-    dependsOn: t.dependsOn,
-    scans: detail.scans.map((s) => cellOf(s, t.id).status),
-  }));
+/** Where a sample sits on the study page and in its `?status=` filter. */
+export type Place = SampleGroup | "not-started";
 
-/** One scan's tasks at summary size: state, open checks and values, from the study read. */
-export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): ScanGraphTask[] {
-  return workflow.tasks.map((t) => ({
-    id: t.id,
-    title: workflow.taskTitle(t.id),
-    dependsOn: t.dependsOn,
-    state: taskState(scan, t.id),
-    open: scan.needsYou[t.id] ?? 0,
-    results: workflow.outputs
-      .filter((o) => o.task === t.id && o.kind === "measurement")
-      .flatMap((o) => {
-        const v = scanValue(scan, o);
-        return v === null
-          ? []
-          : [{ id: o.id, title: o.name, value: formatValue(v), unit: unitOf(o) }];
-      }),
-  }));
+export const PLACES: { place: Place; title: string }[] = [
+  { place: "needs-you", title: "Needs you" },
+  { place: "running", title: "Running" },
+  { place: "done", title: "Done" },
+  { place: "not-started", title: "Not started" },
+];
+
+/**
+ * A scan's place on the study page and Compare: its group in the Samples tree (`placeOfStatus`,
+ * which also keeps an example's scans out of Needs you), or Not started with no run, which the
+ * tree leaves out.
+ */
+export function placeOf(scan: StudyScanDetail, example: boolean): Place {
+  return scan.runs[0] ? placeOfStatus(scanStatus(scan).status, example) : "not-started";
 }
+
+export const placeParam = (value: string | null): Place | null =>
+  PLACES.find((p) => p.place === value)?.place ?? null;
 
 /**
  * Where a scan's run stopped or failed, in the word its status uses: "Failed during Segmentation",
@@ -207,52 +216,113 @@ export function stoppedLine(scan: StudyScanDetail, workflow: BundledWorkflow): s
   return id ? `${word} during ${workflow.taskTitle(id)}` : `${word} before it finished`;
 }
 
-/**
- * A To check task's card nobody can accept (`unacceptable`), as the study lists it: its task,
- * why it is there, and the scan review opened on it.
- */
-export type Card = { taskId: string; title: string; href: string | null };
+/** A To check task's card nobody can accept (`unacceptable`): its task, why, and the review on it. */
+type Card = { taskId: string; title: string; href: string | null };
 
-export const cardsOf = (scan: StudyScanDetail, taskId?: string): Card[] =>
-  Object.entries(scan.unacceptable)
-    .filter(([id]) => !taskId || id === taskId)
-    .map(([id, why]) => ({
-      taskId: id,
-      title: CARD_TITLE[why],
-      href: scan.runs[0]
-        ? itemHref({ runId: scan.runs[0].id, taskId: id, checkId: cardId(id) })
-        : null,
-    }));
+const cardsOf = (scan: StudyScanDetail): Card[] =>
+  Object.entries(scan.unacceptable).map(([id, why]) => ({
+    taskId: id,
+    title: CARD_TITLE[why],
+    href: scan.runs[0]
+      ? itemHref({ runId: scan.runs[0].id, taskId: id, checkId: cardId(id) })
+      : null,
+  }));
 
-/**
- * What waits on a scan (or one of its tasks), in a line: its acceptable checks' titles, then each
- * card as "<task>: <why>".
- */
-export const waitsOn = (scan: StudyScanDetail, workflow: BundledWorkflow, taskId?: string) =>
+/** What waits on a sample, in a line: its acceptable checks' titles, then each card as "<task>: <why>". */
+export const waitsOn = (scan: StudyScanDetail, workflow: BundledWorkflow) =>
   [
     ...new Set([
-      ...scan.acceptable.filter((i) => !taskId || i.taskId === taskId).map((i) => i.title),
-      ...cardsOf(scan, taskId).map((c) =>
-        taskId ? c.title : `${workflow.taskTitle(c.taskId)}: ${c.title}`,
-      ),
+      ...scan.acceptable.map((i) => i.title),
+      ...cardsOf(scan).map((c) => `${workflow.taskTitle(c.taskId)}: ${c.title}`),
     ]),
   ].join(", ");
 
-/** The scans with items that need a person (`needsYouOf`), most first: every queue's order. */
+/** The samples with items that need a person (`needsYouOf`), most first. */
 export const byMostToCheck = (scans: readonly StudyScanDetail[]) =>
   scans.filter((s) => needsYouOf(s) > 0).sort((a, b) => needsYouOf(b) - needsYouOf(a));
 
-/** Where "Review" on a scan leads: its first acceptable item, else its first card, else the scan. */
+/** Where a sample opens: its first acceptable item, else its first card, else the scan. */
 export const reviewHref = (scan: StudyScanDetail) => {
   const [item] = scan.acceptable;
   return item ? itemHref(item) : (cardsOf(scan)[0]?.href ?? scanHref(scan));
 };
 
-/** A measurement as the grid and the summary graph read it: about three significant figures. */
-export const formatValue = (v: number) => v.toFixed(digitsFor([v]));
+/** The output a folded section shows: its task's headline measurement, else its first. */
+export const keyOutput = (workflow: BundledWorkflow, section: Section): OutputEntry =>
+  // A section has at least one output (`sectionsOf` drops the rest).
+  section.outputs.find((o) => workflow.headline.includes(o)) ?? (section.outputs[0] as OutputEntry);
 
-/** The output a task's grid column shows: its headline measurement, else its first. */
-export function keyOutput(workflow: BundledWorkflow, taskId: string): OutputEntry | undefined {
-  const measures = workflow.outputs.filter((o) => o.task === taskId && o.kind === "measurement");
-  return measures.find((o) => workflow.headline.includes(o)) ?? measures[0];
+/** One line of a study's recent activity, from its runs' own times. */
+export type Activity = {
+  at: string;
+  scan: StudyScanDetail;
+  kind: "added" | "started" | "completed" | "failed" | "stopped" | "reviewed";
+  text: string;
+};
+
+/** Every run's start, end and review across the study, newest first. */
+export function activityOf(detail: StudyDetail): Activity[] {
+  const lines: Activity[] = [];
+  for (const scan of detail.scans) {
+    for (const run of scan.runs) {
+      const { state } = run;
+      const at = (iso: string | null | undefined, kind: Activity["kind"], text: string) => {
+        if (iso) lines.push({ at: iso, scan, kind, text });
+      };
+      if (state.status === "queued") at(run.createdAt, "added", "waiting to start");
+      if (state.status === "running" || state.status === "ended")
+        at(state.startedAt, "started", "run started");
+      if (state.status === "ended") {
+        const values = run.id === scan.resultRunId ? Object.keys(scan.values).length : 0;
+        if (state.outcome === "completed")
+          at(
+            state.endedAt,
+            "completed",
+            values
+              ? `run finished, ${values} ${values === 1 ? "value" : "values"}`
+              : "run finished",
+          );
+        else
+          at(
+            state.endedAt,
+            state.outcome === "failed" ? "failed" : "stopped",
+            state.outcome === "failed" ? "run failed" : "run stopped",
+          );
+      }
+      at(run.review?.reviewedAt, "reviewed", "marked reviewed");
+    }
+  }
+  return lines.sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/** When a sample last changed: the latest time its runs carry. */
+export function changedAt(scan: StudyScanDetail): string | null {
+  const times = scan.runs.flatMap((run) => [
+    run.createdAt,
+    run.state.status === "running" || run.state.status === "ended" ? run.state.startedAt : null,
+    run.state.status === "ended" ? run.state.endedAt : null,
+    run.review?.reviewedAt ?? null,
+  ]);
+  return times.reduce<string | null>((a, t) => (t && (!a || t > a) ? t : a), null);
+}
+
+const MINUTE = 60_000;
+
+/** "just now", "4 min ago", "3 h ago", "yesterday", "31 Oct" (with the year when not this one). */
+export function whenText(iso: string, now: number): string {
+  const then = new Date(iso);
+  const ago = now - then.getTime();
+  if (ago < MINUTE) return "just now";
+  if (ago < 60 * MINUTE) return `${Math.floor(ago / MINUTE)} min ago`;
+  const today = new Date(now);
+  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (sameDay(then, today)) return `${Math.floor(ago / (60 * MINUTE))} h ago`;
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (sameDay(then, yesterday)) return "yesterday";
+  return then.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    ...(then.getFullYear() !== today.getFullYear() && { year: "numeric" }),
+  });
 }

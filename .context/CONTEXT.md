@@ -80,7 +80,14 @@ and check threads.
   an image that cannot be read), each repair logged once per run as `history-repair: thread <id>: <rule>`. `apps/runner` wires it (see "The runner service" below).
   The sandbox is created on the first `bash` call and destroyed at the end (every exit path, and what a crash
   leaves: `apps/runner/.context/CONTEXT.md`). A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
-  in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
+  in `packages/harness/src/tools`; a command still running after `timeout_min` (default 2) is not
+  killed: `bash-runtime.ts` moves it to the background, holding one `exec` stream until it ends
+  (Modal counts a sandbox as active only while an exec runs), and `bash_manage` lists, reads,
+  waits for, kills or detaches it. `bash.backgrounded` is stored before the agent is told, `bash.ended`
+  before its end notice; a claim ends what the last one left running (`bash.ended {cutOff}`) and
+  the thread's next input says so. A thread that ends has its background commands stopped with its sandbox, and its next input says so. `BashRuntime.busy(threadId)` is true while a thread has an
+  undetached background command, and `takeNotices(threadId)` hands over notices a thread that was
+  not running could not take. It caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
 - **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` puts a
@@ -292,7 +299,9 @@ atomically upserts just the supplied fields. The client exports
 `useUpdateUserSettings(userId)`; the id scopes the query cache, never the API
 request. The shell's identity-keyed QueryClient keeps accounts separate.
 Settings at the foot of the rail (`shell/account.tsx`, a popover) holds the theme (Light /
-Dark) and who is signed in, with Sign in or Sign out; there is no settings page. It shows
+Dark) and who is signed in, with Sign in or Sign out. A guest also gets a labelled Sign in on
+the rail itself, above Settings: judges land as guests and are told only to "sign in". There is
+no settings page; `/settings` redirects to `/` with the popover open. It shows
 loading and failure; only a successful save changes the selected theme. The shell reads the same query and
 applies it to the document and frame on every route, defaulting to light while
 loading or when settings cannot be loaded. Settings failures never block the app.

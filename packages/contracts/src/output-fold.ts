@@ -43,7 +43,7 @@ export const OUTPUTS_MOUNT = "/outputs";
 // ---------------------------------------------------------------------------------------------
 // Versions and status
 
-export type ToCheckState = z.infer<typeof toCheckItemSchema> & {
+type ToCheckState = z.infer<typeof toCheckItemSchema> & {
   /** Set when the researcher accepted or corrected it (`tocheck.resolved`). */
   resolved?: { by: string; outcome: "accepted" | "corrected" };
 };

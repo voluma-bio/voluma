@@ -60,11 +60,15 @@ export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender
  * agent none. The supervisor is the root and runs no agent loop, so it is not started here.
  */
 type ThreadIdentity =
-  | { kind: "worker" | "check"; taskId: string }
-  | { kind: "main"; taskId?: undefined };
+  | { kind: "worker" | "check"; taskId: string; agent?: undefined }
+  | { kind: "main"; taskId?: undefined; agent?: undefined }
+  /** A thread of the agent model: no task, a name and a role (`harness/agents`). */
+  | { kind: "agent"; taskId?: undefined; agent: { name: string; role: "main" | "worker" } };
 
 export type StartThreadOptions = ThreadIdentity & {
   threadId: string;
+  /** How a message's sender reads in the thread's inbox ("From corin:"); default: the task loop's labels. */
+  labelOf?: (sender: UserSender) => string;
   /**
    * Builds the result of a tool call that a crash cut off, from the log (the caller knows what
    * the call did). `undefined` keeps the cautious default text.
@@ -247,7 +251,8 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   // The notices of each user message we prompt with (a brief has one), kept with the message
   // itself so each is recorded under its own sender.
   const noticesOf = new WeakMap<AgentMessage, Notice[]>();
-  const userMessage = (notices: Notice[], text = blockOf(notices)): AgentMessage => {
+  const label = options.labelOf ?? senderLabel;
+  const userMessage = (notices: Notice[], text = blockOf(notices, label)): AgentMessage => {
     const message: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
     noticesOf.set(message, notices);
     return message;
@@ -368,7 +373,10 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             const raw = message.role === "toolResult" ? message.content : [];
             const delivered = message.role === "toolResult" ? closeBatch(message) : [];
             if (delivered.length > 0 && message.role === "toolResult") {
-              message.content = [...raw, { type: "text", text: `\n\n${blockOf(delivered)}` }];
+              message.content = [
+                ...raw,
+                { type: "text", text: `\n\n${blockOf(delivered, label)}` },
+              ];
             }
             const ok = await persist(message);
             if (message.role === "assistant") {
@@ -509,8 +517,8 @@ const senderLabel = (s: UserSender) =>
   s.kind === "thread" ? "the main agent" : s.kind === "person" ? "the researcher" : "Voluma";
 
 /** The text the model reads for a set of notices, in arrival order. */
-const blockOf = (notices: Notice[]) =>
-  `New messages for you:\n\n${notices.map((n) => `From ${senderLabel(n.sender)}:\n${n.text}`).join("\n\n")}`;
+const blockOf = (notices: Notice[], label: (s: UserSender) => string) =>
+  `New messages for you:\n\n${notices.map((n) => `From ${label(n.sender)}:\n${n.text}`).join("\n\n")}`;
 
 /** The sender of compaction notices: the runtime, but not a nudge. */
 const NOTICE: UserSender = { kind: "runtime", notice: true };
@@ -551,7 +559,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
+  { threadId, kind, taskId, agent, sandbox, recorder }: StartThreadOptions,
   batchSize: (toolCallId: string) => number,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
@@ -567,8 +575,9 @@ function toAgentTool(
       try {
         result = await tool.execute(tool.input.parse(params), {
           threadId,
-          kind,
+          kind: agent ? agent.role : kind,
           ...(taskId && { taskId }),
+          ...(agent && { agent }),
           toolCallId,
           batchSize: batchSize(toolCallId),
           signal: signal ?? new AbortController().signal,

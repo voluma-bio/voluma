@@ -36,12 +36,12 @@ on.
 
 | # | Do | Script | Look at |
 |---|---|---|---|
-| 1 | Align the tibia (in the `iioc` task, `--out frame`: later tasks read `/outputs/iioc/frame/`): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` | `tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
-| 2 | Trace the growth plate's proximal face on coronal sections (annotation A) | you write `annotations.json` | coronal sections of `tibia-hu.npy` with a pixel grid, every 20 V indices over the epiphysis |
-| 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`: later tasks read `/outputs/iioc/iioc/`) | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc) |
+| 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` | `tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
+| 2 | Propose the growth plate's two faces, check them, and trace the proximal face (annotation A) | `plate_faces.py`, then you write `annotations.json` | `qc-plate-<n>.jpg`: every proposed section (the default), each framed on the U span the search covered, flagged stretches ticked red; then zoomed coronal sections of `tibia-hu.npy` with a pixel grid over each flagged or wrong stretch, and over each stretch you trace beyond the spans |
+| 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`; the later tibial steps read ROI-1 and its faces) | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc), and every `qc-faces-<n>.jpg`: the proximal face as delivered, on every traced section, which you open sheet by sheet before you report |
 | 4 | Trace the boundary under the subchondral plate (annotation B) | you | coronal sections with the ROI-1 outline |
 | 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py` | `qc-coronal.jpg` against `examples/README.md` (trabecular-roi) |
-| 6 | Trace the growth plate's distal face (annotation C), then ROI-3 and the cortex under the plate (`--out meta`: the `cortical` task reads `/outputs/metaphyseal-roi/meta/`) | `metaphysis_roi.py` | `qc-roi3.jpg` and `qc-roi3-axial.jpg` against `examples/README.md` (metaphyseal-roi) |
+| 6 | Check the distal face `plate_faces.py` proposed and retrace what is wrong or flagged (annotation C), then ROI-3 and the cortex under the plate (`--out meta`; the cortical step reads this cortex and face) | `metaphysis_roi.py` | `qc-roi3.jpg` and `qc-roi3-axial.jpg` against `examples/README.md` (metaphyseal-roi), and every `qc-faces-<n>.jpg`: both faces as delivered, on every traced section, which you open sheet by sheet |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes --output roi-iioc` and `roi-iioc-trabecular`; `trabecular --output roi-metaphyseal` | the QC images `trabecular` writes (`bone-morphometry`) |
 | 8 | Ct.Th at the two levels below the distal face (#24, #25), on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment (#11, #12) on the plate runs `iioc.py` wrote, under the articular top surface | `morphometry.py cortical --output roi-cortex-100um`, `roi-cortex-1000um`, `roi-subchondral-plate-medial` or `-lateral` (the slab's declared id; its depth and thickness are in the spec) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
 | 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
@@ -64,8 +64,32 @@ femoral landmarks are the exception: `[z, y, x]` on the scan grid.
 What the annotations are (their keys, which are required, and the refusals are in each script's `--help`; the curve
 schema is `regions-and-landmarks`'):
 
-- **A, for `iioc.py`.** The growth plate's proximal face, traced on at least two coronal sections across the whole
-  width (edge guesses will be wrong: trace what you see). Where part of the tibia label is really femur or fibula
+- **A, for `iioc.py`.** The growth plate's proximal face across the whole width, on at least two coronal sections.
+  `plate_faces.py` proposes it (and annotation C) from the densities: dense curves on every tenth section where the search finds the plate, and
+  no points where it is flagged. The proposal covers only part of the tibia (the V range and each section's U span are in `plate-faces.json`
+  and the script's output) and is where you start, not where you stop: you trace the plate over the whole tibia at plate level, on zoomed
+  views, past every span end, on the sections with no span, and out to the V ends. `iioc.py` and `metaphysis_roi.py` stop on a face whose
+  curves leave bone at plate level uncovered, by the spec's `max_gap_um` (about 24 rows): on a section, points more than that apart over its bone or the first or last point more than that short of
+  the bone's ends; across V, sections more than that apart over the rows with tibia at plate level or the first or last more than that short of those rows' ends. A span over columns
+  without bone does not count. A short section among full ones is refused: its points must cover its own bone. They name the V rows and U ranges; they also stop on a point more than
+  `off_tibia_margin_um` off the tibia mask. Say where the proposal covered and where you traced. Copy its two curve keys
+  (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
+  The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in two known ways, jumping up into
+  dark marrow spaces of the epiphysis and drawing a convincing sheet on the wrong structure where the plate is eroded.
+  One instruction covers a flagged stretch, a stretch that is wrong but not flagged, and every extension: you read each point's position
+  from a zoomed image by looking, on the plate band, and put the points no farther apart than `max_gap_um` (closer where it turns). Code may
+  write down the positions you read; a detector, an interpolation or a fill choosing the positions is not tracing, and a face that passes
+  the spacing and mask checks is not thereby on the plate. Correct means the same visible plate band, end to end: it can wrap down the
+  condyles at the sides (OA6-2RK V=220 and 225, where the plate turns steeply down the arch), and you follow it there; what is wrong is a
+  switch onto cortex or marrow. Where one height per (V, U) cannot represent what you see (OA6-2RK V=185, where the notch runs nearly in
+  the section's plane), read the neighbouring sections and a view across them, trace the nearest single-valued face, and raise it as a To
+  check item; do not flatten it and do not call it eroded. Look at every proposed section's render, and every `qc-faces-<n>.jpg` sheet (the
+  faces as delivered, solid where your points define them, dotted where the surface is held past them, over the tibia's outline, cropped to the faces' height range and 0.8 mm beyond it). Where
+  the plate is destroyed, mark the U range where it is gone in
+  `plate_eroded` (`{"<V>": [{"u": [first, last], "eroded": "<why>"}]}`, integer U) on every traced section it reaches, flagged or not
+  (add a section beside the span if it spills over), and trace the remaining bone there with both faces, the section's curve reaching both ends of the range: the mark
+  never replaces the points. Retrace a stretch that is wrong but not flagged the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
+  eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. Where part of the tibia label is really femur or fibula
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
   only what lies below. The U index of each plateau compartment's middle (a height point outside ROI-1's footprint
   stops the script: move it). The two width points (#10): the centre of the fibula–tibia junction on the tibial
@@ -76,11 +100,14 @@ schema is `regions-and-landmarks`'):
 - **B, for `tibial_trabecular.py`.** The boundary between the subchondral plate and the trabecular compartment,
   with the end points on the inner side of the cortex: the first and last point of each curve limit ROI-2 across.
   The V range it covers.
-- **C, for `metaphysis_roi.py`.** The growth plate's distal face, traced like the proximal one, over at least the
-  proximal face's V range. There is no thickness fallback: ROI-3 starts a fixed offset below this face (the spec's `start_um`), and a guessed band
-  thickness inside the 100 to 200 µm range seen on OA6-1RK moves ROI-3 BV/TV from 23% to 15%. OA6-1RK has a thin
-  perforated mineralized band, not a clean cartilage plate: trace the face you can see and look at it drawn on the
-  sections before you run.
+- **C, for `metaphysis_roi.py`.** The growth plate's distal face, over at least the proximal face's V range. `plate_faces.py`
+  proposes it with the proximal face (same sections, same flagged stretches): check and retrace it the same way, in step 6. There is no thickness
+  fallback: ROI-3 starts a fixed offset below this face (the spec's `start_um`), so a face a few tens of µm off moves ROI-3 (a
+  guessed band thickness on OA6-1RK moved ROI-3 BV/TV from 23% to 15%). Where the plate is eroded (OA6-1RK from U~296 on
+  section V=231) the two faces meet or cross: trace the remaining bone with both faces, densely, mark the U range where the plate is gone in `plate_eroded` on every traced section it reaches (a neighbouring section the proposal did not flag too),
+  and raise a To check item. `metaphysis_roi.py` then accepts faces that meet inside the marked range, cuts ROI-3 `start_um` below the
+  remaining bone, and reports the marked ranges and their share (`roi3.json`): say so in your report. OA6-1RK's eroded plate (bone destruction,
+  possibly age-related) is not representative of the lab's knees: OA6-2RK's is. Look at the faces drawn on the sections before you run.
 - **D, the landmark points files** (scan grid, each name once across the files, straight from `pick.py`: do not
   copy coordinates into a new file). `a` midpoint of the upper line of the intercondylar groove, `b` intercondylar
   notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck slide 7). `a` and

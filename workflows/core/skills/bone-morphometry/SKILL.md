@@ -1,7 +1,7 @@
 ---
 name: bone-morphometry
 description: >
-  Load when a task asks for volumes, BV/TV, Tb.Th, Tb.Sp, Tb.N, trabecular nodes and ends, cortical thickness,
+  Load when a step asks for volumes, BV/TV, Tb.Th, Tb.Sp, Tb.N, trabecular nodes and ends, cortical thickness,
   distances or ratios: each measurement's definition and method, its known bias, and what its QC image must show.
 ---
 

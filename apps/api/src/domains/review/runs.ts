@@ -8,6 +8,8 @@
  *                                   version's files and evidence, the agent loop's runs
  *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
  *                                   a presigned GET, the browser fetches the bytes from storage
+ *   GET /runs/:runId/thumbnail      a small WebP of the run, rendered once and kept (`thumbnail.ts`);
+ *                                   204 while the run has no converted intensity image yet
  *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
  *   POST /runs/:runId/tocheck/accept  Looks right on a To check item of an output version
  *                                   (`acceptToCheckRequestSchema`, the agent loop's runs)
@@ -53,6 +55,7 @@ import type { RunRecord } from "../../ports";
 import type { ReviewDeps } from ".";
 import { assetUrl, openFile } from "./files";
 import { reviewRun } from "./review-run";
+import { runThumbnail } from "./thumbnail";
 
 /** The image types a browser may render inline, by their leading bytes; anything else downloads. */
 function imageType(head: Uint8Array): string | null {
@@ -307,6 +310,27 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
       await openFile(store, messageSnapshotKey(runId, messageId), c.req.raw.signal),
       "private, max-age=86400, immutable",
     );
+  });
+
+  app.get("/runs/:runId/thumbnail", async (c) => {
+    const { runId } = c.req.param();
+    const reader = readerOf(c.var.user);
+    const readable = await runs.readable(reader, runId);
+    if (!readable) return c.json({ error: "not found" }, 404);
+    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
+    const webp = await runThumbnail(store, runId, readable.generation, async () => {
+      const record = await runs.load(reader, runId);
+      return record?.results.assets ?? null;
+    });
+    // Nothing to show yet: a list asks again on its next load, so this is not cached.
+    if (!webp) {
+      c.header("Cache-Control", "no-store");
+      return c.body(null, 204);
+    }
+    c.header("Content-Type", "image/webp");
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Cache-Control", "private, max-age=3600");
+    return c.body(webp as Uint8Array<ArrayBuffer>);
   });
 
   app.get("/runs/:runId/assets/:sha256/*", async (c) => {

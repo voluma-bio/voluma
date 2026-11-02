@@ -1,16 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { Status } from "@voluma/ui";
 import type { ResultRow, TaskState, Thread } from "./run-model";
-import { type ScanGraphTask, type StudyGraphTask, TaskGraph } from "./task-graph";
+import { type ScanGraphTask, TaskGraph } from "./task-graph";
 
 /**
  * **What:** the workflow as a graph of real nodes, one box per task laid out by its
- * dependencies, in three sizes: `study` (each box sums the study's scans, one cell per scan),
- * `summary` (one scan's tasks, small, left to right) and `report` (one scan's tasks top down in
+ * dependencies, in two sizes: `summary` (one scan's tasks, small, left to right) and `report` (one scan's tasks top down in
  * the scan review's Report panel; the selected, working or redone task lists its agents).
- * **Why:** one picture of what a scan or a study went through and where it is stuck, and the way
- * into a task. **Where:** the study dashboard and Workflow page (study), a scan row's quick
- * summary (summary), the scan review's Report panel (report).
+ * **Why:** one picture of what a scan went through and where it is stuck, and the way into a
+ * task. **Where:** a scan row's quick summary (summary), the scan review's Report panel (report).
  *
  * Sample data (stories only): the mouse OA workflow's nine tasks, as `tasks.json` plans them.
  */
@@ -171,51 +168,4 @@ export const ReportFailed: Story = {
 export const Summary: Story = {
   args: { size: "summary", tasks: finished, onSelect: () => {} },
   decorators: [(Story) => <div className="w-[760px]">{Story()}</div>],
-};
-
-const SCANS = 20;
-const spread = (counts: Partial<Record<Status, number>>): Status[] => {
-  const out: Status[] = [];
-  for (const [s, n] of Object.entries(counts))
-    for (let i = 0; i < (n ?? 0); i++) out.push(s as Status);
-  while (out.length < SCANS) out.push("waiting");
-  return out;
-};
-const STUDY: Record<string, Partial<Record<Status, number>>> = {
-  intake: { done: 17 },
-  orientation: { done: 15, stopped: 1, paused: 1 },
-  segmentation: { done: 9, check: 5, stopped: 1 },
-  iioc: { done: 6, check: 6, running: 1, paused: 1 },
-  "subchondral-plate": { done: 11, check: 1 },
-  "trabecular-roi": { done: 12 },
-  "metaphyseal-roi": { done: 11, running: 1 },
-  cortical: { done: 7, check: 4 },
-  "femoral-geometry": { done: 11, check: 1, running: 1 },
-};
-const study: StudyGraphTask[] = PLAN.map(([id, title, dependsOn]) => ({
-  id,
-  title,
-  dependsOn,
-  scans: spread(STUDY[id] ?? {}),
-}));
-
-/** The study dashboard: each box is one task across the study's 20 scans, and opens it. */
-export const Study: Story = {
-  args: { size: "study", tasks: study, taskLink: (id) => `#workflow?task=${id}` },
-  decorators: [(Story) => <div className="w-[720px]">{Story()}</div>],
-};
-
-/** The Workflow page: a box picks the task in place, and its edges light up. */
-export const StudyPicked: Story = {
-  args: { size: "study", tasks: study, selected: "iioc", onSelect: () => {} },
-  decorators: [(Story) => <div className="w-[720px]">{Story()}</div>],
-};
-
-/** Before any scan has a plan: every box waits. */
-export const StudyNothingYet: Story = {
-  args: {
-    size: "study",
-    tasks: PLAN.map(([id, title, dependsOn]) => ({ id, title, dependsOn, scans: spread({}) })),
-  },
-  decorators: [(Story) => <div className="w-[720px]">{Story()}</div>],
 };
