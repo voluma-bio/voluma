@@ -42,7 +42,7 @@ import type { Contrast } from "./compose";
 import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
-import { sharedLevel } from "./planes";
+import { holdLevel } from "./planes";
 import {
   type AssetLevel,
   capturePane,
@@ -527,9 +527,12 @@ export function Grid3D({
     const coarsest = all.length - 1;
     const target = volumeLevel(all);
     setVolumeLoad({ loading: true });
+    const held: { release(): void }[] = [];
     (async () => {
       for (const k of target === coarsest ? [coarsest] : [coarsest, target]) {
-        const { data } = await sharedLevel(base, all[k]!.path);
+        const level = holdLevel(base, all[k]!.path);
+        held.push(level);
+        const { data } = await level.read;
         if (abort.signal.aborted) return;
         setLevels((had) => [...had.filter((l) => l.k !== k), { k, values: data }]);
       }
@@ -541,7 +544,10 @@ export function Grid3D({
           error: `Couldn't load the volume: ${(cause as Error).message}`,
         });
     });
-    return () => abort.abort();
+    return () => {
+      abort.abort();
+      for (const level of held) level.release();
+    };
   }, [scene.image.base]);
   const shown = levels.reduce<(typeof levels)[number] | undefined>(
     (best, l) => (!best || l.k < best.k ? l : best),

@@ -42,18 +42,10 @@ import {
   type Vec3,
 } from "./frame";
 import { loadMesh, sliceSegment, surfaceTrace } from "./geometry";
-import {
-  angleDegrees,
-  areaMm2,
-  lengthMm,
-  probeText,
-  sliceShape,
-  thin,
-  useMarkLayer,
-} from "./marks";
+import { sliceShape, useMarkLayer } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { corners, quad, texture } from "./picture";
-import { type Plane, readPlane, sharedLevel } from "./planes";
+import { holdLevel, type Plane, readPlane } from "./planes";
 import { type Level3, resample, sampling, samplingCorners, valueAt, voxelAt } from "./reslice";
 import {
   type Axis,
@@ -526,7 +518,7 @@ export function SlicePane({
   }
 
   // A tilted pane reslices whole levels: the image's that 3D loads, and each overlay's nearest
-  // to it, no finer. Read once a pane tilts; shared with every pane and the 3D pane.
+  // to it, no finer. Held while the pane is tilted; shared with every pane and the 3D pane.
   const [volumes, setVolumes] = useState<{
     image: Level3;
     scale: number;
@@ -546,13 +538,17 @@ export function SlicePane({
       scale: l.scaleZyx,
       offset,
     });
+    const image = holdLevel(scene.image.base, imageLevel.path);
+    const held = [image];
     Promise.all([
-      sharedLevel(scene.image.base, imageLevel.path),
+      image.read,
       ...latestOverlays.current.map(async (o) => {
         const l =
           o.levels.find((x) => Math.max(...x.scaleZyx) >= Math.max(...imageLevel.scaleZyx)) ??
           o.levels.at(-1)!;
-        return [o.base, level3(await sharedLevel(o.base, l.path), l, o.offsetZyx)] as const;
+        const level = holdLevel(o.base, l.path);
+        held.push(level);
+        return [o.base, level3(await level.read, l, o.offsetZyx)] as const;
       }),
     ])
       .then(([image, ...overlays]) => {
@@ -569,6 +565,7 @@ export function SlicePane({
       });
     return () => {
       gone = true;
+      for (const level of held) level.release();
     };
   }, [whole, scene.image.base, overlayKey]);
 

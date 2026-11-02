@@ -45,7 +45,7 @@ import {
 } from "./frame";
 import { Grid3D } from "./Grid3D";
 import { NumberField } from "./number-field";
-import { sharedLevel } from "./planes";
+import { holdLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
 import type {
   Axis,
@@ -230,16 +230,19 @@ export function QuadViewer({
 
   // The contrast spans the coarsest level's values, so the first picture already uses it.
   useEffect(() => {
-    const abort = new AbortController();
-    const coarsest = scene.image.levels.at(-1)!;
-    sharedLevel(scene.image.base, coarsest.path)
+    let gone = false;
+    const coarsest = holdLevel(scene.image.base, scene.image.levels.at(-1)!.path);
+    coarsest.read
       .then((level) => {
-        if (!abort.signal.aborted) setContrast((had) => had ?? autoContrast(level.data));
+        if (!gone) setContrast((had) => had ?? autoContrast(level.data));
       })
       .catch((cause) => {
-        if (!abort.signal.aborted) setContrastError((cause as Error).message);
+        if (!gone) setContrastError((cause as Error).message);
       });
-    return () => abort.abort();
+    return () => {
+      gone = true;
+      coarsest.release();
+    };
   }, [scene.image.base]);
 
   /** Loads a target's frame; a fitted plane is also kept for the GP view. */

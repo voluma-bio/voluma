@@ -109,7 +109,9 @@ The task review's panes never tilt; everything here is the outputs review's.
 - **Where a pane lies.** Each slice pane has a basis in the grid's mm, (z, y, x): `right`, `down`,
   `normal` (`frame.ts`). On the grid's axes a pane reads whole slices from zarr as above. Tilted,
   it is resliced on the CPU (`reslice.ts`) from one whole level shared with the 3D pane
-  (`sharedLevel`, at most 16 M voxels): the image trilinear, overlays nearest. So a tilted pane is
+  (`holdLevel`, at most 16 M voxels): the image trilinear, overlays nearest. A whole level is
+  read once while anyone holds it and dropped when the last pane holding it unmounts or untilts;
+  nothing outlives the viewer. So a tilted pane is
   softer than an untilted one at high zoom. Its counter is primed (′) on the nearest axis and steps
   the grid's finest spacing along its normal; marks within half a step of the plane count as on it.
 - **Tilting by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
