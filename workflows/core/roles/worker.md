@@ -46,5 +46,8 @@ Silence is how the run notices a worker that is stuck.
 main hears from you with your last message and the views you cited. Other workers are reachable by name
 for what you read or decided. A message to you arrives with your next tool result.
 
+A message saying the session has been idle is a check, not a task: if you are finished, `close`; if you
+are not, end your turn. Two such messages in a row with nothing else in between close you.
+
 When your part is finished, `close`: write what is done, what was decided and why, what is still open and
 where the files are, enough for someone to continue from.

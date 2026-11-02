@@ -191,7 +191,8 @@ who ends it:
    Event and history writes share one retry rule in `send` (`request.ts`): a network or 5xx failure is retried until 120 s (`SELF_STOP_SECONDS`) after its first failure, or until the run stops; it logs the first failure and then every 30 s. When the time runs out the run client's `onUnreachable` stops the run, so it is released and resumed, not failed. The stop is `self-stop`, or `refused` (a strike) when a heartbeat was acknowledged since the first failure: the API is up and refuses these writes, so a route that fails for good ends the run after 3 claims instead of looping. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each and polls until Modal has reported every one terminated (a sandbox Modal no longer knows counts as gone) and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Transient Modal errors are retried with backoff and logged, a permanent one (a revoked token) fails the claim; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
-   `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
+   `.env`, at least 30; 120 s on a run pinned `agents`, `VOLUMA_AGENT_SANDBOX_IDLE_SECONDS`, whose
+   agents mostly wait and get a fresh machine with a restart note on their next call) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
    runs (`exitCode()`, 30-40 ms; null while it runs) and replaces a dead one (`stopped` with the exit code in its detail, then `starting`, `ready`
    events; Modal's SDK reports 124 for a timeout, 137 for any terminated sandbox (a terminate call or possibly an out-of-memory kill) and else the entrypoint's code). Modal also refuses commands for at least 15 s while it shuts a sandbox down,
@@ -454,7 +455,9 @@ claim (see `apps/api/.context/deploy.md`).
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check) and `RUNNER_ACTIVITY_MINUTES` (default 10; agent loop: minutes an
 agent may work without an `activity` line before it is reminded, and twice that before it stops
-holding the run open). The harness defaults the rest (`LoopConfig`). No other limit is
+holding the run open), `RUNNER_PING_MINUTES` (default 25: an idle agent gets one ping; main only while
+a worker runs) and `RUNNER_PING_CLOSE_MINUTES` (default 50: a worker pinged twice in a row is asked to
+wrap up only after this long idle). The harness defaults the rest (`LoopConfig`). No other limit is
 on time: a checker ends with its verdict or when it is stopped (a stale mark, feedback, the run's
 end).
 

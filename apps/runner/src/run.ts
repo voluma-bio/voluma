@@ -460,7 +460,12 @@ async function claimBody(
       outputs: r2Outputs(config.r2),
       createSandbox,
       // The image is recorded on the root's first event, so `sandboxImage` is the run's own.
-      sandbox: { ...config.sandbox, image: sandboxImage },
+      sandbox: {
+        image: sandboxImage,
+        lifetimeSeconds: config.sandbox.lifetimeSeconds,
+        idleSeconds:
+          harness === "agents" ? config.sandbox.agentIdleSeconds : config.sandbox.idleSeconds,
+      },
       // The token follows the tool grant: `superviseRun` asks for it only for a sandbox whose role holds `segment_sam`.
       gateway: config.gateway
         ? (sandbox) =>

@@ -222,6 +222,8 @@ export function runnerConfig() {
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),
       activityMinutes: positiveInt("RUNNER_ACTIVITY_MINUTES", 10),
+      pingMinutes: positiveInt("RUNNER_PING_MINUTES", 25),
+      pingCloseMinutes: positiveInt("RUNNER_PING_CLOSE_MINUTES", 50),
     },
     /**
      * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),
@@ -271,6 +273,8 @@ export function runnerConfig() {
       lifetimeSeconds: positiveInt("VOLUMA_SANDBOX_LIFETIME_SECONDS", 14400),
       // The floor keeps a sandbox from idling out before its inputs finish staging.
       idleSeconds: positiveInt("VOLUMA_SANDBOX_IDLE_SECONDS", 300, 30),
+      /** A run on the agent loop: its agents mostly wait, and each next call gets a fresh machine. */
+      agentIdleSeconds: positiveInt("VOLUMA_AGENT_SANDBOX_IDLE_SECONDS", 120, 30),
     },
   };
 }

@@ -35,6 +35,12 @@ export interface AgentRecord extends ThreadBase {
   spoke: boolean;
   /** When it last said what it is doing (`activity`), or else when it last started: the clock of its silence. */
   activityAt: number;
+  /** Pings recorded since it last received a real input or made a tool call (0: none). */
+  pings: number;
+  /** When its latest turn that came from a real input ended: where its idle time counts from. */
+  idleFrom: number;
+  /** A recorded ping not yet delivered (id), until a delivery or any other input follows. */
+  pendingPing: string | undefined;
   /** Its latest report: output id, version and the log position. */
   lastReport: { outputId: string; version: number; at: number } | undefined;
 }
@@ -109,6 +115,9 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       fromMain: prev === undefined || (continues && prev.fromMain),
       spoke: continues ? prev.spoke : false,
       activityAt: 0,
+      pings: prev?.pings ?? 0,
+      idleFrom: prev?.idleFrom ?? 0,
+      pendingPing: prev?.pendingPing,
       lastReport: prev?.lastReport,
     };
   });
@@ -118,6 +127,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   const notices: Notice[] = [];
   const deliveries: { at: number }[] = [];
   const idByName = new Map<string, string>();
+  const pingIds = new Set<string>();
   let cursor: string | undefined;
   let rootId: string | undefined;
   let rootEnded = false;
@@ -127,6 +137,16 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   let main: AgentRecord | undefined;
   let personAt = -1;
   let answeredAt = -1;
+
+  /** An input reached `record`: a ping's own delivery clears the pending ping; any other input also restarts the count of pings in a row. */
+  const receive = (record: AgentRecord, covers: string | undefined) => {
+    if (covers !== undefined && pingIds.has(covers)) {
+      if (record.pendingPing === covers) record.pendingPing = undefined;
+      return;
+    }
+    record.pings = 0;
+    record.pendingPing = undefined;
+  };
 
   for (const [at, e] of events.entries()) {
     written.set(e.id, at);
@@ -162,12 +182,15 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         }
         if (sender?.kind === "thread" && sender.messageId) delivered.add(sender.messageId);
         if (sender?.kind === "runtime" && sender.covers) delivered.add(sender.covers);
+        if (e.payload.input)
+          receive(record, sender?.kind === "runtime" ? sender.covers : undefined);
         break;
       }
       case "thread.ended":
         if (!record) break;
         record.endedAt = at;
         record.endedTime = e.createdAt;
+        if (record.pings === 0) record.idleFrom = Date.parse(e.createdAt);
         if (record.place === "worker") {
           const { status, error, note, summary } = e.payload;
           if (status === "cancelled" && summary) {
@@ -224,12 +247,26 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       case "activity":
         if (record) record.activityAt = Date.parse(e.createdAt);
         break;
+      case "ping": {
+        const target = fold.threads.get(e.payload.threadId);
+        if (target) {
+          target.pings += 1;
+          target.pendingPing = e.id;
+        }
+        pingIds.add(e.id);
+        break;
+      }
+      case "tool.call":
+        // A ping turn that did work was answered: the next idle stretch starts from zero.
+        if (record) record.pings = 0;
+        break;
       case "person.message":
         personAt = at;
         break;
       case "message": {
         if (!record || e.payload.role !== "user") break;
         const { sender } = e.payload;
+        receive(record, sender.kind === "runtime" ? sender.covers : undefined);
         if (sender.kind === "thread") {
           if (sender.messageId) delivered.add(sender.messageId);
           if (record.place === "worker" && fold.threads.get(sender.threadId)?.place === "main") {
@@ -237,7 +274,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
           }
         } else if (sender.kind === "runtime" && sender.covers) {
           delivered.add(sender.covers);
-          if (record.place === "main") {
+          if (record.place === "main" && !pingIds.has(sender.covers)) {
             cursor = sender.covers;
             deliveries.push({ at: written.get(sender.covers) ?? -1 });
           }
