@@ -55,7 +55,12 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
     └─► Grid3D ── readLevel (whole level) ──► volume rendering; meshes fetched once each
 ```
 
-- **Panes.** Axial holds array axis 0, coronal axis 2, sagittal axis 1 (DESIGN.md's axis colours).
+- **Panes.** Axial holds array axis 0, coronal axis 2, sagittal axis 1 (DESIGN.md's axis colours) in
+  `GridViewer`, the task review's. `QuadViewer`, the outputs review's, names planes by the grid's
+  axes (XY holds z, XZ y, YZ x) and colours them by the anatomy the caller gives per grid
+  (`planes`, from the base's catalog entry); without it they are uncoloured. Its views stay
+  mounted and move between CSS grid cells, so a chip swap, a layout change or full screen never
+  remounts a pane; the layout is the caller's, the seams the viewer's.
   Rows run down, so z runs down in every slice pane and in 3D (`camera.up` = −z).
 - **Levels.** A pane opens on the coarsest level and loads the level whose voxel still covers at
   least one device pixel at its zoom; the coarse picture shows meanwhile unless the finer one lands

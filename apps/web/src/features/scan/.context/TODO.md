@@ -45,3 +45,14 @@ None of these stops a review; each makes it slower.
 - **A lost send response can drop an answer to the AI's offer.** If the stored answer reaches the
   stream before the send's `onSuccess`, the stale-answer check in `ai-panel.tsx` clears the answer
   mode and a retry sends a plain message (refused 409). Reasoned from the code, not reproduced.
+
+## Outputs review
+
+- Marks made on an agent-loop run's panes are drawn but never sent: the conversation is read-only
+  there until corrections (phase 7). Send them, with the panes' snapshot, with the message.
+- The Final outputs and trail panels are plain containers: re-skin them with the side panels'
+  redesign (Andrew; source study under way). The trail panel's name and the slices' Lat/Med
+  letters are Andrew's.
+- Presets per output ("XZ at V 125"), the value pinned on its overlay, and the pane's slice
+  counter in the grid's own letters (U, V, W) wait for the workflow to define views.
+- A collection output opens as a table: not built ("Lists open here as a table in a later version").

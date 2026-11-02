@@ -14,3 +14,8 @@
 - 3D meshes build their bounds tree on the main thread as each loads: on OA6-1RK's six meshes
   (2.6 M triangles) 35 to 350 ms each, about 1 s in all. If that stall shows, build it in a worker
   (`three-mesh-bvh`'s `GenerateMeshBVHWorker`) or only once a tool that searches the surface is out.
+- `GridViewer` and `QuadViewer` share their crosshair, contrast and readiness code by copy. When
+  the task review goes, delete `GridViewer` (its snapshot moves to `QuadViewer` once messages
+  carry marks on agent-loop runs).
+- `QuadViewer`'s GP view (the plane along the growth plate), tilting, Align and Save view come with
+  the plane tools (phase 6, second half); GP is listed and disabled until then.

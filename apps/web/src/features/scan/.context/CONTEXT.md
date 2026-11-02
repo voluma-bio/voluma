@@ -126,3 +126,16 @@ stopped.
   carries neither. The tags reach the AI only through the picture: the contract's marks have no
   names.
 - Thread kinds are shown as labels only; nothing here branches on a kind or a role name.
+
+## The outputs review (agent-loop runs)
+
+`outputs-review.tsx`, for a run whose log has final outputs (`isAgentsRun`). The URL keeps
+`output` (the trail's root, picked in Final outputs), `trail` (an output of that trail: its
+report is open and the panes show it), `item` and `centre` (`run` for the whole run, `agents`).
+The panes' layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's
+Full view plus that pane: leaving Full view by any means gives the panes back. Esc goes, one
+thing per press: a mark being drawn, the tool, Full view (the shell), the whole run or agents,
+an open trail item. W toggles the whole run. The panes stay mounted (hidden) under the whole run
+and the agents. The marking tools are on the docked bar, but marks go nowhere yet: the
+conversation is read-only on these runs. Final outputs and the trail panel are deliberately plain
+until the side panels' redesign; the trail's data is `@voluma/run-view` `outputs-trail.ts`.

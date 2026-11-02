@@ -67,6 +67,10 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   grid) from `outputsFold` and the bundled catalog. Grid shapes come from the converted levels;
   spacing, crop offsets, surface axes and point/line ends come from the version's `detail` and are
   absent until the writer fills them (`.context/TODO.md`). Units are UCUM, shown by `unitText`.
+  The trail (`outputs-trail.ts`) is the data behind "How the AI got here": `trailOf` (one output's
+  upstream, breadth first, with roles and the version used), `madeFromIt` (what rests on it),
+  `runGraph` (the whole run by column), `versionWords` (a worker's message after its version) and
+  `workersOf`. Label links resolve to their map. No drawing lives there.
 - **Run-level data** is one `runView(events, state, providerCalls, halt)` (`run-model.ts`):
   threads, progress, and per plan task its state, threads, line, check, To check items, QC image,
   values and spend, memoized on the events. `withLiveCalls` overlays the tool calls being written
