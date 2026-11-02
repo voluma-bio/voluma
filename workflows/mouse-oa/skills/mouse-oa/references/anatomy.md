@@ -52,7 +52,7 @@ them is lab-confirmed or anatomically checked. Use the names as given; do not re
 
 The table above lists what a complete knee holds. A scan may not image all of it: a field of the bone ends only can leave out
 the patella, and a young or healthy joint may have none of the joint mineralizations. Take what is present from the scan's
-notes (`/outputs/intake/scan-notes.md`) and the keyframe, not from this table. A patella is a large bone (about 1 mm³) in
+notes (intake's `scan-notes.md`) and the keyframe, not from this table. A patella is a large bone (about 1 mm³) in
 front of the femur, in the trochlear groove; a small piece near the joint is a sesamoid or a fragment, whatever its box was
 called (in a field with no patella, the medial sesamoid, 0.06 mm³, was boxed as "patella"). What to do when a structure is
 missing: `segmentation-check`, section 2.

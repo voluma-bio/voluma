@@ -1,0 +1,23 @@
+/** What the host passes both loops: a thread's model setup and the run's tuning, with its defaults. */
+import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
+
+/** What the host decides about a thread's model; the loop adds the prompts, identity and tools. */
+export interface ModelSetup {
+  model: Model<Api>;
+  /** The Pi agent's thinking level, which Pi sends as `reasoning` and records on each reply. */
+  thinkingLevel: ThinkingLevel;
+  streamFn: StreamFn;
+}
+
+export interface LoopConfig {
+  /** `needs-review` rounds a task gets before it is left to-check. */
+  maxFixRounds: number;
+  /** Deliveries with no notice in a row before code ends the run. */
+  stuckLimit: number;
+}
+
+export const LOOP_DEFAULTS: LoopConfig = {
+  maxFixRounds: 2,
+  stuckLimit: 2,
+};

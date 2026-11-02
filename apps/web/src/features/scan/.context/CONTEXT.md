@@ -42,7 +42,7 @@ Without `item` or `task`, the task in view is the first open item's, else the pl
 
 ## Each grid keeps its viewer
 
-A task is shown on its own grid (`taskGrid`); mouse-oa has two, the Scan and the aligned tibia
+A task is shown on its own grid (`reviewGrid`); mouse-oa has two, the Scan and the aligned tibia
 grid. `TaskViewer` keeps one `GridViewer` per grid shown, at most two mounted at any commit
 (`MAX_KEPT`: each holds four WebGL contexts, and Chrome allows 16 per page), and hides the others
 (`hidden`). One function, `keep`, decides what is kept, both for what mounts in a render and for
@@ -113,7 +113,7 @@ stopped.
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark
   being drawn, then puts the tool away, then (the shell's) leaves Full view: one thing per press.
-  A new mark names the grid's image volume (`TaskGrid.imageId`) and gets a tag (P1, B1, L1, O1);
+  A new mark names the grid's image volume (`ReviewGrid.imageId`) and gets a tag (P1, B1, L1, O1);
   its local identity also pins the image hash, grid id, shape and affine. A redo that replaces
   the image cannot inherit its old marks just because it reuses a block id. The viewer draws
   and sends only marks matching that identity; other marks stay listed for inspection/deletion.

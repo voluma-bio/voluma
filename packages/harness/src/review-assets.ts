@@ -8,7 +8,7 @@
  * Queue: every `output` and `output.published` event in the recorder's view, from the first (a resume reads the whole
  * log), minus the files that already have an `assets.*` event; new
  * outputs join as the recorder stores them (polled, one cheap scan of the new events). One file at a
- * time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session, which
+ * time, in the run's `convert` sandbox (`convertLayout`, from the sandbox session, which
  * creates it at the first file and replaces one the provider ended, running a command it
  * refused once more). A conversion that fails is retried once (not after a timeout or bad
  * arguments, not when stopped) and then recorded; a sandbox that dies or cannot be created is
@@ -256,11 +256,14 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     }
   }
 
+  /** A path as one shell word: a version's folder carries the tool call id, which has a `|`. */
+  const quoted = (path: string) => `'${path.replaceAll("'", "'\\''")}'`;
+
   /** One conversion's result, or a throw when the sandbox failed. */
   async function convertInSandbox(job: Job): Promise<ConvertResult> {
     const box = await options.sandbox();
     const command =
-      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${job.source} ` +
+      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${quoted(job.source)} ` +
       `${job.flags} --out ${REVIEW}`;
     let stdout = "";
     let stderr = "";

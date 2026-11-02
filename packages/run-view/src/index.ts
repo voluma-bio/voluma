@@ -14,8 +14,6 @@ export { TaskInfo } from "./info";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
 export {
-  isAgentsRun,
-  type OutputBlocks,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
@@ -25,7 +23,6 @@ export {
   reviewAssetsOf,
   shownOf,
   undrawn,
-  unitText,
 } from "./outputs-model";
 export {
   type GraphNode,
@@ -67,7 +64,6 @@ export {
   runHref,
   runStatus,
   scanLabel,
-  studyStatus,
 } from "./run-status";
 export {
   RunStoreProvider,
@@ -76,7 +72,7 @@ export {
   useRunStore,
   useThreads,
 } from "./run-store";
-export { sampleTree } from "./samples";
+export { placeOfStatus, sampleTree } from "./samples";
 export {
   groupNames,
   groupOf,
@@ -89,7 +85,6 @@ export {
 export {
   type GraphTask,
   type ScanGraphTask,
-  type StudyGraphTask,
   shownStatus,
   TASK_STATUS,
   TaskGraph,
