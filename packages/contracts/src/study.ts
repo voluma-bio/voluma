@@ -76,7 +76,7 @@ const attributesSchema = z
   .record(z.string().min(1).max(100), z.union([z.string().max(500), z.number(), z.boolean()]))
   .refine((a) => Object.keys(a).length <= 50, "at most 50 attributes");
 
-/** One input of a study. `subject` is the specimen (a mouse id); the input's name when the caller gave none. */
+/** The study's row for one of its inputs. `subject` is the specimen (a mouse id); the input's name when the caller gave none. */
 export const studyMemberSchema = z.object({
   inputId: inputIdSchema,
   subject: label,

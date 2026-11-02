@@ -115,15 +115,15 @@ export function InputPage() {
   // With `?run=` the run read needs nothing from the study: start it now (`Input` reads the same query).
   useQuery({ ...runQuery(params.get("run") ?? ""), enabled: params.has("run") });
   const unavailable = <Unavailable query={study} />;
-  const member = study.data?.inputs.find((i) => i.member.inputId === inputId);
+  const entry = study.data?.inputs.find((i) => i.member.inputId === inputId);
   if (!study.data) return unavailable;
-  const runId = params.get("run") ?? member?.runs[0]?.id;
+  const runId = params.get("run") ?? entry?.runs[0]?.id;
   // The run must be one of this input's in this study: a run id from elsewhere is not found.
-  if (!member || !runId || !member.runs.some((r) => r.id === runId))
+  if (!entry || !runId || !entry.runs.some((r) => r.id === runId))
     return (
       <div className="mx-auto w-full max-w-2xl px-6 py-8">
         <ErrorState title={`This ${INPUT_WORD.one} isn't here`}>
-          {member && !runId
+          {entry && !runId
             ? "It has no run yet."
             : "It may have been removed, or it belongs to another lab."}{" "}
           <Button asChild variant="link">

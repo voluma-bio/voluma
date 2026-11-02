@@ -157,8 +157,7 @@ await db.transaction(async (tx) => {
     sameSharedRow(`study ${dump.study.id}`, stored, dump.study);
     for (const member of dump.studyMembers ?? []) {
       const [input] = await tx.select().from(inputs).where(eq(inputs.id, member.inputId));
-      if (!input || input.labId !== run.labId)
-        throw new Error(`missing study member ${member.inputId}`);
+      if (!input || input.labId !== run.labId) throw new Error(`missing input ${member.inputId}`);
       await tx.insert(studyMembers).values(member).onConflictDoNothing();
       const [storedMember] = await tx
         .select()

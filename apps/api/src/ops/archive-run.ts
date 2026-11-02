@@ -11,7 +11,7 @@
  * The copy must parse, its events must pass `runEventSchema` (as `import:run` demands), and
  * its file bytes must equal what was read. The delete runs in one transaction that rolls back
  * unless every deleted row equals the file's. Inputs are shared and stay. The run's study
- * is deleted with its study inputs when no other run is in it; import restores their original metadata.
+ * is deleted with its study members when no other run is in it; import restores their original metadata.
  */
 import { mkdir, open, readFile, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -152,7 +152,7 @@ await client.end();
 console.log(
   `deleted run ${runId} and ${describeCounts(deleted.counts)}; ${
     deleted.studyDeleted
-      ? `study ${dump.run.studyId} and its inputs (no other run in it)`
+      ? `study ${dump.run.studyId} and its members (no other run in it)`
       : "its study stays (other runs in it)"
   }; input ${dump.run.inputId} stays. R2 runs/${runId}/ untouched. Restore: import:run --from ${out}`,
 );

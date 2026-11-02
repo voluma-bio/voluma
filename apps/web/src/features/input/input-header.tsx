@@ -44,9 +44,9 @@ import { Link } from "react-router";
 
 /** "OA6-1, right knee", from the study's input; the input's file name when the study can't say. */
 export function inputTitle(run: Run, study: StudyDetail | undefined) {
-  const input = study?.inputs.find((s) => s.member.inputId === run.input.id)?.member;
-  if (!input) return { title: run.input.name, group: null };
-  return { title: inputLabel(input), group: input.group };
+  const member = study?.inputs.find((s) => s.member.inputId === run.input.id)?.member;
+  if (!member) return { title: run.input.name, group: null };
+  return { title: inputLabel(member), group: member.group };
 }
 
 /** The study's workflow by its name; a run pinned to an older path still names it. */

@@ -402,7 +402,7 @@ export function pgRunQueue(
           .where(and(readableStudies(reader), eq(studies.id, request.studyId)));
         if (!study) throw new HTTPException(404, { message: "unknown study" });
         if (study.example) throw new HTTPException(403, { message: "Examples are read-only." });
-        const [input] = await tx
+        const [member] = await tx
           .select({ inputId: studyMembers.inputId })
           .from(studyMembers)
           .where(
@@ -411,7 +411,7 @@ export function pgRunQueue(
               eq(studyMembers.inputId, request.inputId),
             ),
           );
-        if (!input) throw new HTTPException(404, { message: "unknown input" });
+        if (!member) throw new HTTPException(404, { message: "unknown input" });
         await checkInputs(tx, reader, caller, [request.inputId]);
         await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
