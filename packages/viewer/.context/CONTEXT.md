@@ -122,7 +122,9 @@ The task review's panes never tilt; everything here is the outputs review's.
   `fitsPlane` (mouse-oa: both growth-plate faces, so "GP"), and every other image grid's axes.
   Aligning to a plane turns the pane nearest it onto it, the others following by Gram–Schmidt;
   aligning to a grid takes its axes, flipped so no pane shows mirrored. The fitted plane also gives
-  the GP view, a fifth pane coloured as the nearest anatomy. A target with no published surface is
+  the GP view, a fifth pane coloured as the nearest anatomy. GP is data, not a side effect of
+  picking it: whenever the layout shows GP (picked, carried from another grid, or a reopened saved
+  view) the plane is fitted; a grid with nothing to fit shows the view GP replaced in that slot. A target with no published surface is
   listed as "Not traced yet". The fit uses each face's whole height field, rim included, so it can
   differ by a few degrees from a fit inside the bone only (ce5a0f21: 9.97° against the mockup's 12.16°).
 - **Tools.** Beyond the task review's: a point may carry a note (typed in place) or a probe value

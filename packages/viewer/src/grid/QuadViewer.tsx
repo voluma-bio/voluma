@@ -12,7 +12,8 @@
  * the grid's axes. The orientation is this grid's and holds while other outputs on it are shown.
  *
  * The layout (`QuadLayout`) is the caller's, so it holds when another output, on another grid,
- * is shown; the seams' positions are this grid's. Planes are coloured by the anatomy the grid's
+ * is shown; the seams' positions are this grid's. A layout naming GP fits the plane whenever GP
+ * is shown; on a grid with nothing to fit (or a failed fit) its slot shows the view GP replaced. Planes are coloured by the anatomy the grid's
  * catalog entry gives (`planes`), a tilted one by the grid plane nearest it, else left uncoloured.
  */
 import type { Anatomy } from "@voluma/contracts/output-catalog";
@@ -45,6 +46,7 @@ import {
 } from "./frame";
 import { Grid3D } from "./Grid3D";
 import { NumberField } from "./number-field";
+import { CHIP, PANE } from "./pane-style";
 import { holdLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
 import type {
@@ -163,7 +165,7 @@ const clampSplit = (f: number) => Math.min(0.8, Math.max(0.2, f));
 export function QuadViewer({
   scene,
   planes,
-  layout,
+  layout: given,
   onLayout,
   focus,
   notes = [],
@@ -217,9 +219,10 @@ export function QuadViewer({
   const [aligned, setAligned] = useState<{ id: string; name: string } | null>(null);
   const [aligning, setAligning] = useState<string>();
   const [alignError, setAlignError] = useState<string>();
-  // The fitted plane the GP view shows, once loaded.
+  // The fitted plane the GP view shows: loaded whenever GP is shown or Align fits it.
   const plateTarget = targets.find((t) => t.code);
-  const [plate, setPlate] = useState<Vec3>();
+  const [fitted, setFitted] = useState<{ id: string; normal?: Vec3; error?: string }>();
+  const plate = fitted?.id === plateTarget?.id ? fitted?.normal : undefined;
   const [noting, setNoting] = useState<{ view: QuadView; id: string; at: Zyx }>();
   const handles = useRef(
     Object.fromEntries(VIEW_ORDER.map((v) => [v, { current: null as PaneHandle | null }])),
@@ -252,7 +255,7 @@ export function QuadViewer({
     setAlignError(undefined);
     try {
       const frame = await target.load();
-      if (target.code && "normal" in frame) setPlate(frame.normal);
+      if (target.code && "normal" in frame) setFitted({ id: target.id, normal: frame.normal });
       return frame;
     } catch (cause) {
       setAlignError(`Couldn't align to ${target.name}: ${(cause as Error).message}`);
@@ -273,6 +276,40 @@ export function QuadViewer({
   };
   const lie = orientationWords(orientation, aligned?.name);
 
+  // The layout holds across grids and saved views, so it can name GP on a grid that has no fitted
+  // plane (or whose fit failed): there the slot shows the view GP replaced, the one it leaves out.
+  const gpFailed = fitted?.id === plateTarget?.id && !!fitted?.error;
+  const layout = useMemo(() => {
+    if (plateTarget?.load && !gpFailed) return given;
+    const spare = VIEW_ORDER.find((v) => v !== "gp" && !given.views.includes(v)) ?? "3d";
+    const swap = (v: QuadView) => (v === "gp" ? spare : v);
+    return { ...given, views: given.views.map(swap), full: given.full && swap(given.full) };
+  }, [given, !!plateTarget?.load, gpFailed]);
+  const shown: readonly QuadView[] = layout.full
+    ? [layout.full]
+    : layout.views.slice(0, layout.count);
+  const wantsPlate = shown.includes("gp") && !plate;
+  useEffect(() => {
+    const target = plateTarget;
+    if (!wantsPlate || !target?.load) return;
+    let gone = false;
+    target
+      .load()
+      .then((frame) => {
+        if (gone) return;
+        if ("normal" in frame) setFitted({ id: target.id, normal: frame.normal });
+        else setFitted({ id: target.id, error: "it isn't a plane" });
+      })
+      .catch((cause) => {
+        if (!gone) setFitted({ id: target.id, error: (cause as Error).message });
+      });
+    return () => {
+      gone = true;
+    };
+  }, [wantsPlate, plateTarget?.id, !!plateTarget?.load]);
+  const plateError =
+    gpFailed && plateTarget ? `Couldn't fit ${plateTarget.name}: ${fitted?.error}` : undefined;
+
   // A saved view: the planes, crosshair and window now, each pane's own view once they have turned.
   const [restoring, setRestoring] = useState<QuadState>();
   useEffect(() => {
@@ -284,12 +321,19 @@ export function QuadViewer({
     onLayout(restore.layout);
     setRestoring(restore);
   }, [restore]);
+  // GP mounts once its plane is fitted; its saved view waits for it.
   useEffect(() => {
     if (!restoring) return;
-    for (const [view, saved] of Object.entries(restoring.views))
-      if (saved) handles[view]?.current?.show(saved);
-    setRestoring(undefined);
-  }, [restoring]);
+    const waiting: QuadState["views"] = {};
+    for (const [view, saved] of Object.entries(restoring.views) as [QuadView, PaneView][]) {
+      const h = handles[view]?.current;
+      if (h) h.show(saved);
+      else if (view === "gp" && plateTarget?.load && !gpFailed) waiting.gp = saved;
+    }
+    if (!waiting.gp) setRestoring(undefined);
+    else if (Object.keys(restoring.views).length > 1)
+      setRestoring({ ...restoring, views: waiting });
+  }, [restoring, plate, gpFailed]);
 
   const save = () =>
     onSave?.({
@@ -306,10 +350,9 @@ export function QuadViewer({
       ),
     });
 
-  const mounted: readonly QuadView[] = plate ? VIEW_ORDER : VIEW_ORDER.filter((v) => v !== "gp");
-  const shown: readonly QuadView[] = layout.full
-    ? [layout.full]
-    : layout.views.slice(0, layout.count);
+  // GP while its plane is being fitted holds its cell with a loading pane.
+  const mounted: readonly QuadView[] =
+    plate || shown.includes("gp") ? VIEW_ORDER : VIEW_ORDER.filter((v) => v !== "gp");
   const ready = shown.every(
     (v) => !!contrast && status[v] !== undefined && status[v] !== "loading",
   );
@@ -343,10 +386,10 @@ export function QuadViewer({
     return `${slot < 2 ? 1 : 2} / ${(slot % 2) + 1}`;
   };
   const setFull = (view: QuadView | null) => onLayout({ ...layout, full: view });
-  /** Puts `view` in `slot`, loading the fitted plane first for GP. */
-  const pick = async (slot: number, view: QuadView) => {
-    if (view === "gp" && !plate && plateTarget && !(await loadTarget(plateTarget))) return;
-    onLayout(showIn(layout, slot, view));
+  /** Puts `view` in `slot`; GP after a failed fit tries the fit again. */
+  const pick = (slot: number, view: QuadView) => {
+    if (view === "gp" && gpFailed) setFitted(undefined);
+    onLayout(showIn(view === "gp" ? given : layout, slot, view));
   };
 
   const seam = (dir: "col" | "row") => {
@@ -438,7 +481,7 @@ export function QuadViewer({
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background" aria-label="Views">
-      {(notes.length > 0 || contrastError || alignError) && (
+      {(notes.length > 0 || contrastError || alignError || plateError) && (
         <div className="grid gap-1 px-3 py-2 text-xs text-muted-foreground">
           {notes.map((note) => (
             <p key={note}>{note}</p>
@@ -451,6 +494,11 @@ export function QuadViewer({
           {alignError && (
             <p className="text-destructive" role="alert">
               {alignError}
+            </p>
+          )}
+          {plateError && (
+            <p className="text-destructive" role="alert">
+              {plateError}
             </p>
           )}
         </div>
@@ -489,6 +537,14 @@ export function QuadViewer({
                 marks={marks}
                 onMark={markIn(view)}
               />
+            );
+          else if (view === "gp" && !plate)
+            pane = (
+              <div className={PANE}>
+                <span className={cx(CHIP, "top-2 right-2")} role="status">
+                  Fitting {plateTarget?.name ?? "the plane"}…
+                </span>
+              </div>
             );
           else if (view === "gp")
             pane = (
