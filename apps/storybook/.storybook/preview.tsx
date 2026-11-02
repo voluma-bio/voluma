@@ -2,6 +2,7 @@
 // settings. The toolbar can narrow it to one.
 import "../src/styles.css";
 import type { Decorator, Preview } from "@storybook/react-vite";
+import { ThemeScope } from "@voluma/ui";
 
 const themes = ["light", "dark"] as const;
 
@@ -13,9 +14,9 @@ const withThemes: Decorator = (Story, context) => {
       style={{ gridTemplateColumns: `repeat(${shown.length}, 1fr)` }}
     >
       {shown.map((t) => (
-        <div key={t} data-theme={t} className="bg-card p-6 text-foreground">
+        <ThemeScope key={t} theme={t} className="bg-card p-6 text-foreground">
           <Story />
-        </div>
+        </ThemeScope>
       ))}
     </div>
   );

@@ -13,7 +13,7 @@
 import { DropdownMenu as M } from "radix-ui";
 import type { ReactElement, ReactNode } from "react";
 import { cx } from "./cx";
-import { floatingClass, useThemedPortal } from "./portal";
+import { floatingClass, useTheme } from "./portal";
 
 export type MenuProps = {
   /** The element that opens it, usually a Button. */
@@ -35,15 +35,13 @@ export function Menu({
   onOpenChange,
   className,
 }: MenuProps) {
-  const portal = useThemedPortal(onOpenChange);
+  const theme = useTheme();
   return (
-    <M.Root open={open} onOpenChange={portal.onOpenChange}>
-      <M.Trigger asChild ref={portal.ref}>
-        {trigger}
-      </M.Trigger>
+    <M.Root open={open} onOpenChange={onOpenChange}>
+      <M.Trigger asChild>{trigger}</M.Trigger>
       <M.Portal>
         <M.Content
-          data-theme={portal.theme}
+          data-theme={theme}
           align={align}
           sideOffset={6}
           collisionPadding={8}
