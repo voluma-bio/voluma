@@ -86,4 +86,7 @@ None of these stops a review; each makes it slower.
   run once on mount and offer "A newer run started" instead.
 - **Approval cards' out-of-date list.** `ApprovalCard` takes `outOfDate` (names); `conversation()`
   passes nothing until R3c adds `outOfDate` to `approval.requested`. Then pass it through
-  (`conversation.ts`, `main-conversation.tsx`, by catalog name).
+  (`conversation.ts`, `main-conversation.tsx`, by catalog name). In the same switch-over, count
+  "Waiting on you" with `openApprovals(events).length` and key `conversation()`'s answers and
+  outcomes with `approvalAnswerId`/`approvalSettledId` (`agents.ts`), so one rule decides which
+  requests are open.
