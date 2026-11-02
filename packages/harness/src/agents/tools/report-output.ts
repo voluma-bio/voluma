@@ -32,7 +32,12 @@ import {
   outputRefSchema,
 } from "@voluma/contracts/output-catalog";
 import { OUTPUTS_MOUNT } from "@voluma/contracts/output-fold";
-import { relativePathSchema, versionPath, versionPrefix } from "@voluma/contracts/r2";
+import {
+  outputsPrefix,
+  relativePathSchema,
+  versionPath,
+  versionPrefix,
+} from "@voluma/contracts/r2";
 import { z } from "zod";
 import { EvidenceNotFound, EvidenceRefused } from "../../ports/evidence";
 import type { Tool } from "../../tools/tool";
@@ -118,7 +123,7 @@ function detailOf(entry: OutputEntry): Pick<Plan, "detail" | "shape"> {
  * What the review converter reads of a `.npy` that the sidecar beside it (`<name>.json`,
  * `workflows/core/skills/*\/resources/sidecar.py`) states: `dtype`; `gridId` of the grid it lives
  * on; `affine` (voxel (x, y, z) to mm, diagonal from `spacing_zyx_mm`: the sidecar knows no
- * rotation); a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is
+ * rotation), read from the caller's latest published copy when an earlier report moved it away; a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is
  * refused for a missing sidecar.
  */
 async function detailFromSidecar(
@@ -126,9 +131,12 @@ async function detailFromSidecar(
   kind: OutputKind,
   shape: string | undefined,
   key: string,
+  publishedKey: string | undefined,
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  const text = await deps.publish.read(key, { signal });
+  const text =
+    (await deps.publish.read(key, { signal })) ??
+    (publishedKey ? await deps.publish.read(publishedKey, { signal }) : undefined);
   let side: Record<string, unknown> = {};
   try {
     const parsed: unknown = text === undefined ? undefined : JSON.parse(text);
@@ -162,6 +170,20 @@ async function detailFromSidecar(
       typeof side.surface_axis === "number" && { axis: side.surface_axis }),
     ...(kind === "base" && unit && { unit }),
   };
+}
+
+/**
+ * Where the caller's latest published copy of `rel` is, for a sidecar already moved out of the
+ * folder: a file reported on its own (the scan's `hu.json`) is gone before the array it describes
+ * is reported.
+ */
+function publishedCopy(deps: OutputToolDeps, caller: Caller, rel: string): string | undefined {
+  const latest = [...foldOf(deps).byId.values()]
+    .flatMap((o) => o.versions)
+    .filter((v) => v.by === caller.name && v.files.some((f) => f.name === rel))
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .at(-1);
+  return latest && `${outputsPrefix(deps.runId)}${latest.path}/${rel}`;
 }
 
 const KEYS: Record<OutputKind, string> = {
@@ -342,12 +364,14 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
             );
 
         const first = layout.resolve(input.files?.[0] ?? "");
+        const sidecarPath = `${first.slice(0, -4)}.json`;
         const sidecar = first.endsWith(".npy")
           ? await detailFromSidecar(
               deps,
               plan.kind,
               plan.shape,
-              layout.keyOf(`${first.slice(0, -4)}.json`, "read"),
+              layout.keyOf(sidecarPath, "read"),
+              publishedCopy(deps, caller, inOwnFolder(layout.dir, sidecarPath, "The sidecar")),
               ctx.signal,
             )
           : {};
