@@ -49,3 +49,6 @@ after a fix, open both in one call.
 
 Before you open an image, write down what you expect to see and what would mean failure; a look without a
 criterion agrees with whatever it finds. After a fix, render the same view again and look again before you move on.
+
+When part of an image is unclear, render that region again (`quad_view.py --center`, `--zoom`, `--plane`) instead of
+reading more into a small picture or asking for a larger one.
