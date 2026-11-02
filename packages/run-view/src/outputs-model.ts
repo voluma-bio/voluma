@@ -13,7 +13,7 @@
  * line overlay's ends, world mm). Grid shapes come from the converted levels.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
+import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import type { OutputState, OutputsFold, OutputVersion } from "@voluma/contracts/output-fold";
 import { outputsPrefix } from "@voluma/contracts/r2";
 import type {
@@ -132,25 +132,32 @@ function itemsOf(fold: OutputsFold, id: string): OutputItem[] {
   });
 }
 
-/** The catalog entry, else the run's final list's (a final output added from the catalog of its own commit). */
-const entryOf = (catalog: OutputCatalog, state: OutputState): OutputEntry | undefined =>
-  catalog.find((e) => e.id === state.id) ?? state.entry;
+const strings = (x: unknown): string[] =>
+  Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : [];
 
 function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): OutputRow {
-  const entry = entryOf(catalog, state);
-  const value = state.latest?.value;
+  // The bundled catalog's entry, else the run's own (its final list's, written from the catalog
+  // of the run's commit, or a worker's description of an output the workflow does not declare).
+  const entry = catalog.find((e) => e.id === state.id);
+  const loose = state.entry;
+  const value = entry?.kind === "value" ? entry : undefined;
+  const description =
+    entry?.description ?? (typeof loose?.description === "string" ? loose.description : undefined);
+  const latest = state.latest;
   const links = (role: string) =>
-    state.latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
-  const valueEntry = entry?.kind === "value" ? entry : undefined;
+    latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
   return {
     id: state.id,
     name: outputName(catalog, state.id),
-    ...(entry?.description && { description: entry.description }),
+    ...(description && { description }),
     state,
-    ...(value && { value: { text: formatNumber(value.number), unit: unitText(value.unit) } }),
-    provisional: state.latest?.provisional === true || valueEntry?.provisional === true,
-    on: [...new Set([...(valueEntry?.on ?? []), ...links("on")])],
-    context: [...new Set([...(valueEntry?.context ?? []), ...links("context")])],
+    ...(latest?.value && {
+      value: { text: formatNumber(latest.value.number), unit: unitText(latest.value.unit) },
+    }),
+    provisional:
+      latest?.provisional === true || (value?.provisional ?? loose?.provisional === true),
+    on: [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])],
+    context: [...new Set([...(value?.context ?? strings(loose?.context)), ...links("context")])],
     items: itemsOf(fold, state.id),
   };
 }
@@ -205,10 +212,7 @@ type Detail = {
 };
 
 /** What review reads of a version's `detail`; anything malformed reads as absent. */
-function detailOf(v: OutputVersion): Detail {
-  const raw = (v as { detail?: unknown }).detail;
-  return raw && typeof raw === "object" ? (raw as Detail) : {};
-}
+const detailOf = (v: OutputVersion): Detail => (v.detail ?? {}) as Detail;
 
 const IDENTITY: Volume["affine"] = [
   [1, 0, 0, 0],
@@ -272,7 +276,7 @@ export function outputBlocks(
       gridId,
       data: {
         format: "npy",
-        key: key(v, file.path),
+        key: key(v, file.name),
         sha256,
         dtype: kind === "labels" ? "uint16" : "float32",
       },
@@ -299,7 +303,7 @@ export function outputBlocks(
         name,
         volumeId: o.base,
         voxels: {
-          mask: { key: key(v, file.path), sha256, shapeZyx: shapeOf(assets, sha256) },
+          mask: { key: key(v, file.name), sha256, shapeZyx: shapeOf(assets, sha256) },
           offsetZyx: zyx(d.offsetZyx) ?? [0, 0, 0],
         },
         missing: null,
@@ -310,7 +314,7 @@ export function outputBlocks(
         name,
         volumeId: o.base,
         axis: d.axis,
-        heights: { key: key(v, file.path), sha256 },
+        heights: { key: key(v, file.name), sha256 },
       });
     else if (shape === "point" || shape === "line") {
       const points = (Array.isArray(d.points) ? d.points : []).map(xyz);

@@ -469,6 +469,7 @@ export const FOLD_EVENT_TYPES = [
   "check.accepted",
   "review.completed",
   "outputs.changed",
+  "output.published",
   "tocheck.resolved",
 ] as const satisfies readonly RunEvent["type"][];
 
