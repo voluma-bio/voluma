@@ -20,6 +20,9 @@ import {
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
+  type AnswerApprovalRequest,
+  answerApprovalRequestSchema,
+  answerApprovalResponseSchema,
   type SendRunMessageRequest,
   type SendRunMessageResponse,
   sendRunMessageRequestSchema,
@@ -388,6 +391,25 @@ export async function sendRunMessage(
       method: "POST",
       body: sendRunMessageRequestSchema.parse(body),
     }),
+  );
+}
+
+/**
+ * Answers a call main holds for you (a run of the agent loop). `requestId` is the id of the
+ * `approval.requested` event. The answer comes back on the run's event stream as `approval.given`
+ * or `approval.declined`.
+ */
+export async function answerApproval(
+  runId: string,
+  requestId: string,
+  body: AnswerApprovalRequest,
+): Promise<void> {
+  await read(
+    answerApprovalResponseSchema,
+    await request(
+      `/review/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(requestId)}`,
+      { method: "POST", body: answerApprovalRequestSchema.parse(body) },
+    ),
   );
 }
 

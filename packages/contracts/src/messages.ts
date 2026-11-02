@@ -102,9 +102,11 @@
  * Stored data. All of this is additive: no stored event or run row changes shape.
  */
 import { z } from "zod";
+import { acceptToCheckRequestSchema, attachedSchema, MAX_VIEW_BYTES } from "./agent-events";
 import { userIdSchema } from "./auth";
 import { taskIdSchema } from "./ids";
 import { positionZyx } from "./output";
+import { outputRefSchema, viewSchema } from "./output-catalog";
 import { voxelBoxSchema, voxelIndexSchema } from "./review";
 import { runStateSchema } from "./run";
 
@@ -170,23 +172,44 @@ const messageBase = {
   /** A To check item's id, as the run view lists it (needs `taskId`; the route checks it is one of that task's). */
   itemId: z.string().min(1).optional(),
   go: z.literal(true).optional(),
+  /** Agent-loop runs: the output the message is about. */
+  output: outputRefSchema.optional(),
+  /** Agent-loop runs: the view open when it was sent, the `.view.json` format as `view.saved` holds it. */
+  view: viewSchema
+    .refine((v) => new TextEncoder().encode(JSON.stringify(v)).length <= MAX_VIEW_BYTES, {
+      message: "the view is too large",
+    })
+    .optional(),
+  /** Agent-loop runs: the To check item this corrects. */
+  toCheck: acceptToCheckRequestSchema.optional(),
 };
 
 type MessageRules = {
   text?: string;
+  attached?: unknown[];
+  markIds?: unknown[];
   marks?: unknown[];
   taskId?: string;
   itemId?: string;
   go?: true;
 };
 
-/** `text` unless `go`; `taskId` with `go` or with marks. */
+/**
+ * `text` unless `go` or attached marks (agent-loop runs: `markIds` in the request, `attached` in
+ * the stored payload); `taskId` with `go` or with marks.
+ */
 function messageRules<T extends z.ZodType<MessageRules>>(schema: T) {
   return schema
-    .refine((m) => m.go === true || (m.text !== undefined && m.text.trim() !== ""), {
-      path: ["text"],
-      message: "text is required unless go",
-    })
+    .refine(
+      (m) =>
+        m.go === true ||
+        (m.text !== undefined && m.text.trim() !== "") ||
+        (m.attached ?? m.markIds ?? []).length > 0,
+      {
+        path: ["text"],
+        message: "text is required unless go or marks are attached",
+      },
+    )
     .refine((m) => m.go !== true || m.taskId !== undefined, {
       path: ["taskId"],
       message: "go needs taskId",
@@ -202,13 +225,16 @@ function messageRules<T extends z.ZodType<MessageRules>>(schema: T) {
 }
 
 /**
- * The payload of a `person.message` event (`events.ts`). `text` is required unless `go`: the Go
- * button may send nothing else. `taskId` is the task the panel was showing; required with `go`
+ * The payload of a `person.message` event (`events.ts`). `text` is required unless `go` or
+ * `attached` is non-empty: the Go button, or marks alone, may be all a message holds. (The refine
+ * relaxed when `attached` came: an older parser rejects a stored message without text.) `taskId` is the task the panel was showing; required with `go`
  * (it tells the main agent it may now act on that task; code enforces it) and with marks.
  */
 export const personMessageSchema = messageRules(
   z.object({
     ...messageBase,
+    /** Agent-loop runs: the marks sent with the message, frozen from the log by the API at send time. */
+    attached: z.array(attachedSchema).max(MAX_MARKS).optional(),
     /** `messageSnapshotKey(runId, messageId)` (`r2.ts`), written by the route. */
     snapshotKey: z
       .string()
@@ -250,6 +276,8 @@ export const sendRunMessageRequestSchema = messageRules(
     /** Kept across retries of the same message. */
     id: z.uuid(),
     ...messageBase,
+    /** Agent-loop runs: marks already stored by `POST .../marks`; the API freezes them into `attached`. Task runs refuse it. */
+    markIds: z.array(z.uuid()).max(MAX_MARKS).optional(),
     /** PNG bytes as plain base64 (not a data URL), at most `MAX_MESSAGE_SNAPSHOT_BYTES` decoded. */
     snapshot: z
       .object({
@@ -268,3 +296,17 @@ export const sendRunMessageResponseSchema = z.object({
   state: runStateSchema,
 });
 export type SendRunMessageResponse = z.infer<typeof sendRunMessageResponseSchema>;
+
+/**
+ * The researcher answers a held call: `POST /api/review/runs/:runId/approvals/:requestId`, answered
+ * 200 `{}`. `requestId` is the id of the `approval.requested` event (`<threadId>:approval:<toolCallId>`,
+ * so encode it in the path). The API writes `approval.given` ("yes") or `approval.declined` ("no")
+ * under the id `<request id>:answer`: the same answer twice is 200 with nothing written, a different one 409;
+ * 404 for no open request. `text` is the researcher's words.
+ */
+export const answerApprovalRequestSchema = z.object({
+  answer: z.enum(["yes", "no"]),
+  text: z.string().max(MAX_TEXT).optional(),
+});
+export type AnswerApprovalRequest = z.infer<typeof answerApprovalRequestSchema>;
+export const answerApprovalResponseSchema = z.object({});
