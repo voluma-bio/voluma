@@ -249,9 +249,9 @@ An agent in its own worktree tries a workflow change on the real system like thi
    (this worktree's database, a per-launch secret) and a Cloudflare quick tunnel to it, and writes the
    tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
    `gateway https://…trycloudflare.com` line before starting the runner.
-2. `RUNNER_MODEL=deepseek/deepseek-v4-pro pnpm --filter @voluma/runner start` (set in `.env` or the shell:
-   one cheap model for every role; `RUNNER_THINKING` as usual). Agents test on `deepseek/deepseek-v4-pro` or
-   `meta/muse-spark-1.3-contributor` only, never on wonder, and never start a run on staging (Jimmy;
+2. `RUNNER_MODEL=meta/muse-spark-1.3-contributor pnpm --filter @voluma/runner start` (set in `.env` or the shell:
+   one model for every role; `RUNNER_THINKING` as usual). Agents test on `meta/muse-spark-1.3-contributor`
+   only: never `deepseek/deepseek-v4-pro`, never wonder, and never a run on staging (Jimmy;
    `deepseek/deepseek-flash` is too slow for a full run). Meta SAM is the only Meta call here, about $0.10 each.
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
