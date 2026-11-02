@@ -134,15 +134,3 @@ export const deliveryText = (p: DeliveryParts): string =>
   ]
     .filter(Boolean)
     .join("\n\n");
-
-/** The result of a call a restart cut off, when the log shows it took effect. */
-export function interruptedResult(
-  d: AgentLog,
-  eventIds: Record<string, string | undefined>,
-  tool: string,
-): string | undefined {
-  const id = eventIds[tool];
-  return id !== undefined && d.written.has(id)
-    ? `\`${tool}\` completed before the run was cut off.`
-    : undefined;
-}

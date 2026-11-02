@@ -10,17 +10,10 @@
  * sender's `messageId`, or a runtime sender's `covers`. Nothing else says what an agent has read.
  */
 import type { RunEvent } from "./events";
-import type { Harness } from "./ids";
 import type { ClaimEndReason } from "./runner";
 import { type ThreadBase, type ThreadRecords, threadRecords } from "./thread-records";
 
 type Payload<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>["payload"];
-
-/** The loop the run was pinned to at its first claim; a root with no `harness` is a task run. */
-export function harnessOf(events: readonly RunEvent[]): Harness | undefined {
-  const root = events.find((e) => e.type === "thread.started" && e.payload.parentThreadId === null);
-  return root?.type === "thread.started" ? (root.payload.harness ?? "tasks") : undefined;
-}
 
 export type AgentState = "working" | "idle" | "closing" | "closed" | "failed" | "cut-off";
 
@@ -36,8 +29,6 @@ export interface AgentRecord extends ThreadBase {
   /** The thread that started it and the tool call that did (a worker's brief and skills are read back from that call). */
   parentThreadId: string | null;
   spawnedBy: string | undefined;
-  /** When its latest invocation began (the start event's `createdAt`). */
-  startedTime: string;
   endedTime: string;
   /** The turn's input came from main (the brief, or a message from main) and it said nothing since: `silent` if the turn ends so. */
   fromMain: boolean;
@@ -112,7 +103,6 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       endedAt: prev?.endedAt ?? -1,
       closeAt: prev?.closeAt,
       closeBy: prev?.closeBy,
-      startedTime: "",
       endedTime: prev?.endedTime ?? "",
       fromMain: prev === undefined || (continues && prev.fromMain),
       spoke: continues ? prev.spoke : false,
@@ -154,7 +144,6 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       case "thread.started": {
         if (!record) break;
         record.startedAt = at;
-        record.startedTime = e.createdAt;
         idByName.set(record.name, record.id);
         if (record.place === "main") {
           main = record;

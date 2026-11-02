@@ -6,7 +6,6 @@
  * plain-language tool error naming what to do instead.
  */
 
-import { agentMessageSchema } from "@voluma/contracts/agent-events";
 import {
   type AgentLog,
   type AgentRecord,
@@ -105,13 +104,12 @@ const messageTool = (api: AgentsApi): Tool =>
   define({
     name: "message",
     description:
-      "Send a message to main, to a worker by name, or (main only) to the researcher. It reaches an idle agent as the start of its turn and a working one with its next tool result. `show` points the researcher at an output.",
+      "Send a message to main, to a worker by name, or (main only) to the researcher. It reaches an idle agent as the start of its turn and a working one with its next tool result.",
     input: z.object({
       to: z.string().min(1).describe("`main`, a worker's name, or `researcher` (main only)."),
       text: z.string().min(1),
-      show: agentMessageSchema.shape.show,
     }),
-    execute: ({ to, text: body, show }, ctx) =>
+    execute: ({ to, text: body }, ctx) =>
       run(() =>
         api.section(async () => {
           const { name, role, d, from } = caller(api, ctx);
@@ -132,12 +130,7 @@ const messageTool = (api: AgentsApi): Tool =>
                 `${to} is ${state} and takes no more messages; start a new worker.`,
               );
           }
-          await api.recorder.append(
-            ctx.threadId,
-            "agent.message",
-            { from, to, text: body, ...(show && { show }) },
-            id,
-          );
+          await api.recorder.append(ctx.threadId, "agent.message", { from, to, text: body }, id);
           api.changed();
           return text(`Sent to ${to}.`);
         }),

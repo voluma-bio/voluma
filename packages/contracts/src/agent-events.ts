@@ -97,7 +97,8 @@ export const outputPublishedSchema = z
 
 /**
  * A message between agents or to the researcher. `from` and `to` are `main`, a worker's name or
- * `researcher`. `show` points the researcher at an output, optionally in a view.
+ * `researcher`. `show` would point the researcher at an output, optionally in a view; no tool
+ * writes it and no screen reads it yet.
  */
 export const agentMessageSchema = z.object({
   from: nonEmpty,

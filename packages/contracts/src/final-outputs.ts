@@ -15,11 +15,11 @@ import { type OutputCatalog, outputKindSchema, outputRefSchema } from "./output-
 
 const nonEmpty = z.string().min(1);
 
+type OutputsChange = z.infer<typeof outputsChangedSchema>;
+
 /** A delivered output: its catalog entry (or the worker's own description of it), passed through. */
 const finalEntrySchema = z.looseObject({ id: outputRefSchema, kind: outputKindSchema });
 export type FinalEntry = z.infer<typeof finalEntrySchema>;
-
-export type OutputsChange = z.infer<typeof outputsChangedSchema>;
 
 /** One edit to the final outputs, in the order made. */
 const changeLogSchema = z.strictObject({

@@ -79,8 +79,6 @@ export function agentsWire(o: AgentsWireOptions): Wire {
   };
 }
 
-export type AgentsWire = ReturnType<typeof agentsWire>;
-
 async function runAgents(
   o: Shared,
   definition: AgentsDefinition,

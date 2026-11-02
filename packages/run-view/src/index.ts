@@ -14,8 +14,6 @@ export { TaskInfo } from "./info";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
 export {
-  isAgentsRun,
-  type OutputBlocks,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
@@ -25,7 +23,6 @@ export {
   reviewAssetsOf,
   shownOf,
   undrawn,
-  unitText,
 } from "./outputs-model";
 export { plainError, stoppedText } from "./run-error";
 export {
