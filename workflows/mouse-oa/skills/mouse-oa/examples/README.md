@@ -4,11 +4,11 @@ For each placement a task makes: the criterion, and the lab's figure of it done 
 these; a checker writes down what it expects from them before it opens the worker's images. Every figure is a
 crop from the lab's parameter deck unless its name says otherwise.
 
-## orientation
+## intake
 
-The keyframe cuts the femur and the tibia in one slice through the joint, with the joint space between them dark
-and open, and the patella too when the scan's notes put it in the field. No deck figure: the frame is ours, not
-the lab's.
+The keyframe of the rough orientation cuts the femur and the tibia in one slice through the joint, with the joint
+space between them dark and open, and the patella too when the scan's notes put it in the field. The view says which
+bone is on top. No deck figure of the keyframe: the frame is ours, not the lab's.
 
 ## segmentation
 
