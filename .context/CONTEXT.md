@@ -25,7 +25,7 @@ packages/
   viewer        the grid viewer (three.js, zarr in a worker) and the grid a review task is shown on
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
-workflows/      `core/` (role files, generic micro-CT skills, Python requirements) and one directory per workflow (`outputs.json`, `tasks.json`, `skills/`), with their Python skill resources
+workflows/      `core/` (role files, generic micro-CT skills, Python requirements) and one directory per workflow (`outputs.json`, `tasks.json`, `outputs.yaml`, `skills/`), with their Python skill resources
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```

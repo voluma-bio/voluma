@@ -22,6 +22,7 @@ const MARK: Record<Thread["status"], string> = {
   completed: "bg-primary-tint text-primary-strong",
   failed: "bg-destructive-tint text-destructive",
   cancelled: "bg-muted text-muted-foreground",
+  closed: "bg-primary-tint text-primary-strong",
 };
 
 export function AgentMark({ thread }: { thread: Thread }) {
@@ -87,6 +88,7 @@ export const THREAD_STATUS: Record<Thread["status"], Status> = {
   completed: "done",
   failed: "stopped",
   cancelled: "stopped",
+  closed: "done",
 };
 
 /** A thread's status word: the mark's, except where the thread's state is more exact. */

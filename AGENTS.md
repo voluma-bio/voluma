@@ -189,7 +189,9 @@ they need:
 - Workflows and analysis code live in `workflows/`. `workflows/core/` is shared
   by every run: the role files (`agents/`) and the generic micro-CT skills
   (`skills/`). A workflow is `workflows/<name>/`: `outputs.json` (every output
-  a run can produce), `tasks.json` (the task list) and `skills/<skill>/`
+  a run can produce), `tasks.json` (the task list), `outputs.yaml` (the same
+  catalog in the agent model's format, `packages/contracts/src/output-catalog.ts`;
+  nothing reads it at runtime yet) and `skills/<skill>/`
   (`SKILL.md`, `references/`, `resources/`), e.g. `workflows/mouse-oa`, the mouse
   knee workflow. Models come from runner config. A run snapshots `core/` and its
   workflow's directory and nothing else. Python lives only in

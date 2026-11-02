@@ -251,7 +251,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       if (e.type === "attempt.opened" && e.payload.taskId === taskId) opened.push(e.id);
       if (e.type === "task" && e.payload.taskId === taskId && e.payload.status === "under-review")
         checked.add(e.payload.attemptId);
-      if (e.type === "output" && e.payload.taskId === taskId) {
+      if (e.type === "output" && e.payload.taskId === taskId && e.payload.attemptId) {
         const ids = reported.get(e.payload.attemptId) ?? new Set<string>();
         reported.set(e.payload.attemptId, ids.add(e.payload.outputId));
       }

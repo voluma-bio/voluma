@@ -1,0 +1,594 @@
+# Every output a run of the mouse OA workflow can produce, in the agent model's format
+# (packages/contracts/src/output-catalog.ts). Today's task loop still reads outputs.json and
+# tasks.json beside this file.
+#
+# Bones are overlays on `scan`: each is one label of the `bone-labels` map, which is reported once.
+# Values are the outputs a researcher can select; their `on` and `context` overlays are shown
+# with them.
+
+# Files and bases
+
+- id: header
+  kind: file
+  name: Scan header
+  description:
+    "hu.json from scan-intake: voxel spacing (z, y, x, mm), shape, calibration evidence and
+    the grid id every later step uses"
+  mediaType: application/json
+  expect:
+    - The spacing and size come from the files themselves, with the file or header each came from.
+
+- id: frame
+  kind: file
+  name: Orientation frame
+  description:
+    "frame.json from orient-joint: intake's rough orientation of the knee (the shaft axes,
+    the bending plane and the keyframe the oriented stack is cut on)"
+  mediaType: application/json
+  expect:
+    - The keyframe cuts the femur and the tibia through the joint, and the patella when it is in the
+      field, and says which bone is on top, as
+      /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (intake) describes.
+
+- id: scan
+  kind: base
+  name: Scan
+  description: hu.npy from scan-intake, in HU, with the affine from hu.json
+  expect:
+    - Holder, padding and debris are set to air under a removal mask on the scan grid, and the scan
+      is unchanged outside it; a piece that may be anatomy stays, with a To check item. Both are
+      shown on a 3D view of the cleaned scan and one of the mask.
+
+- id: tibia-grid
+  kind: base
+  name: Aligned tibia grid
+  description: the tibia resampled onto the oriented grid; the regions and surfaces below sit on it
+  from: scan
+  expect:
+    - +U is medial on this knee, confirmed on the frame's QC montage against the fibula (lateral); a
+      left knee flips the sign rule.
+
+- id: scan-notes
+  kind: file
+  name: Scan notes
+  description: "scan-notes.md from scan-intake: the researcher's account of the field"
+  mediaType: text/markdown
+  expect:
+    - Every fact names the file in /inputs it came from; a heading with nothing under it says
+      "nothing stated".
+
+- id: bone-pieces
+  kind: file
+  name: Bone pieces
+  description: "pieces.md from intake: each bone piece of the cleaned scan, named"
+  mediaType: text/markdown
+  expect:
+    - Each piece from `components.py` is named as a bone of the knee, or unknown with a To check
+      item.
+
+- id: small-structures
+  kind: file
+  name: Small structures
+  description: "small-structures.md from segmentation: an account of each of labels 5 to 12"
+  mediaType: text/markdown
+  expect:
+    - "Accounts for each of labels 5 to 12
+      (/workflow/workflows/mouse-oa/skills/mouse-oa/references/anatomy.md): labelled, absent with
+      the reason and the view it rests on, or unresolved with a To check item."
+
+# Overlays
+- id: removal-mask
+  kind: overlay
+  name: Removal mask
+  description: "what intake set to air in the scan: holder, padding and debris"
+  base: scan
+
+- id: bone-labels
+  kind: overlay
+  name: Bone labels
+  description: labels.npy on the scan grid; the bones below are values in it
+  base: scan
+  expect:
+    - Every label is one structure, and every piece present is labelled or raised as a To check
+      item, checked on the 3D sheet and the label checks, as
+      /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (segmentation) describes.
+
+- id: disagreement
+  kind: overlay
+  name: Segmentation disagreement
+  description:
+    "disagreement.npy from disagree.py on the scan grid: the regions where your labels and
+    the classic method's differ, for To check items to point at"
+  base: scan
+
+- id: femur
+  kind: overlay
+  name: Femur
+  base: scan
+  label: { of: bone-labels, value: 1 }
+
+- id: tibia
+  kind: overlay
+  name: Tibia
+  base: scan
+  label: { of: bone-labels, value: 2 }
+
+- id: patella
+  kind: overlay
+  name: Patella
+  base: scan
+  label: { of: bone-labels, value: 3 }
+
+- id: fibula
+  kind: overlay
+  name: Fibula
+  base: scan
+  label: { of: bone-labels, value: 4 }
+
+- id: medial-meniscus-osteophyte
+  kind: overlay
+  name: Medial meniscus/osteophyte
+  base: scan
+  label: { of: bone-labels, value: 5 }
+
+- id: lateral-meniscus-osteophyte
+  kind: overlay
+  name: Lateral meniscus/osteophyte
+  base: scan
+  label: { of: bone-labels, value: 6 }
+
+- id: roi-iioc
+  kind: overlay
+  name: ROI-1 (IIOC)
+  description: "the voxels measured for deck #4-6: growth plate to articular surface"
+  base: tibia-grid
+  expect:
+    - ROI-1 runs from the growth plate's proximal face to the articular surface, as
+      /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (iioc) describes, checked on a
+      render with the tibia plateau up, as in the deck figure.
+
+- id: roi-iioc-trabecular
+  kind: overlay
+  name: ROI-2 (IIOC trabecular)
+  description: "the voxels measured for deck #13-15"
+  base: tibia-grid
+  expect:
+    - ROI-2 excludes the subchondral plate and the cortical line and covers the trabecular core over
+      ROI-1's whole front-to-back extent, as
+      /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (trabecular-roi) describes.
+
+- id: roi-metaphyseal
+  kind: overlay
+  name: ROI-3 (metaphyseal)
+  description: "the voxels measured for deck #16-23"
+  base: tibia-grid
+  expect:
+    - ROI-3 is a band in the marrow below the growth plate's distal face and clear of the cortical
+      wall, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (metaphyseal-roi)
+      describes; its offset, length and clearance are the protocol's, in the record's params.
+
+- id: roi-subchondral-plate-medial
+  kind: overlay
+  name: Medial subchondral plate
+  description: "the voxels measured for deck #11"
+  base: tibia-grid
+  expect: &a1
+    - Each slab sits inside the subchondral plate under the articular surface, in the compartment the
+      tibia-grid names medial or lateral, as
+      /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (subchondral-plate) describes,
+      with the render it was read from.
+
+- id: roi-subchondral-plate-lateral
+  kind: overlay
+  name: Lateral subchondral plate
+  description: "the voxels measured for deck #12"
+  base: tibia-grid
+  expect: *a1
+
+- id: roi-cortex-100um
+  kind: overlay
+  name: Cortex at 100 µm
+  description: "the voxels measured for deck #24"
+  base: tibia-grid
+  expect: &a2
+    - Measured on the `cortex` and `growth-plate-distal-face` the metaphysis step reported (the face
+      is not traced again), as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md
+      (cortical) describes.
+
+- id: roi-cortex-1000um
+  kind: overlay
+  name: Cortex at 1000 µm
+  description: "the voxels measured for deck #25"
+  base: tibia-grid
+  expect: *a2
+
+- id: cortex
+  kind: overlay
+  name: Cortex
+  description: the cortical shell mask the cortical task reads
+  base: tibia-grid
+  expect:
+    - The cortical wall only, all round, never reaching the fibula.
+
+- id: articular-surface
+  kind: overlay
+  name: Articular surface
+  description: the top of the articular bone as a height field
+  base: tibia-grid
+  shape: surface
+
+- id: growth-plate-proximal-face
+  kind: overlay
+  name: Growth plate, proximal face
+  description: traced once; the later tasks read it
+  base: tibia-grid
+  shape: surface
+
+- id: growth-plate-distal-face
+  kind: overlay
+  name: Growth plate, distal face
+  description: traced once; the later tasks read it
+  base: tibia-grid
+  shape: surface
+
+- id: under-plate-boundary
+  kind: overlay
+  name: Under-plate boundary
+  description: the lower edge of the subchondral plate
+  base: tibia-grid
+  shape: surface
+
+- id: dfl-ruler
+  kind: overlay
+  name: DFL ruler
+  description: "from point a to the intercondylar notch point b of deck #26"
+  base: scan
+  shape: line
+  expect:
+    - Points a–d sit where /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md
+      (femoral-geometry) puts them, each checked on a second view.
+
+- id: dfw-ruler
+  kind: overlay
+  name: DFW ruler
+  description: "from point c to point d of deck #27"
+  base: scan
+  shape: line
+  expect:
+    - Points a–d sit where /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md
+      (femoral-geometry) puts them, each checked on a second view.
+
+- id: iioc-height-ruler
+  kind: overlay
+  name: IIOC height ruler
+  description: "deck #7"
+  base: tibia-grid
+  shape: line
+
+- id: iioc-medial-ruler
+  kind: overlay
+  name: Medial IIOC height ruler
+  description: "deck #8"
+  base: tibia-grid
+  shape: line
+
+- id: iioc-lateral-ruler
+  kind: overlay
+  name: Lateral IIOC height ruler
+  description: "deck #9"
+  base: tibia-grid
+  shape: line
+
+- id: tibial-width-ruler
+  kind: overlay
+  name: Tibial width ruler
+  description: "deck #10"
+  base: tibia-grid
+  shape: line
+
+# Values
+- id: patella-volume
+  kind: value
+  name: Patella volume
+  description: patella label, thresholded voxels
+  source: "deck #1"
+  unit: mm3
+  on: [patella]
+  selectable: true
+  expect: &a3
+    - Counted on the final labels (label voxels, not BV).
+
+- id: lateral-meniscus-osteophyte-volume
+  kind: value
+  name: Lateral meniscus/osteophyte volume
+  description:
+    "lateral meniscus and its spurs together, one volume per side (the lab cannot separate
+    them); on OA6-1RK label 6. Open: whether label 9's pieces and tibial margin fragments 10 and 11
+    count"
+  source: "deck #2"
+  unit: mm3
+  on: [lateral-meniscus-osteophyte]
+  selectable: true
+  expect: *a3
+
+- id: medial-meniscus-osteophyte-volume
+  kind: value
+  name: Medial meniscus/osteophyte volume
+  description: "medial meniscus and its spurs together, one volume per side (the lab cannot separate
+    them); on OA6-1RK label 5. Open: whether label 9's pieces and tibial margin fragments 10 and 11
+    count"
+  source: "deck #3"
+  unit: mm3
+  on: [medial-meniscus-osteophyte]
+  selectable: true
+  expect: *a3
+
+- id: bone-threshold
+  kind: value
+  name: Bone threshold
+  description: the HU threshold that separates bone from soft tissue in the segmentation (review
+    derives the bone inside a region from it)
+  unit: "[hnsf'U]"
+  on: [bone-labels]
+  selectable: true
+
+- id: tv-tibial-iioc
+  kind: value
+  name: TV, tibial IIOC
+  description: "ROI-1: growth plate to articular surface"
+  source: "deck #4"
+  unit: mm3
+  on: [roi-iioc]
+  context: [growth-plate-proximal-face]
+  selectable: true
+
+- id: bv-tibial-iioc
+  kind: value
+  name: BV, tibial IIOC
+  description: ROI-1
+  source: "deck #5"
+  unit: mm3
+  on: [roi-iioc]
+  context: [growth-plate-proximal-face]
+  selectable: true
+
+- id: bv-tv-tibial-iioc
+  kind: value
+  name: BV/TV, tibial IIOC
+  description: ROI-1
+  source: "deck #6"
+  unit: "%"
+  on: [roi-iioc]
+  context: [growth-plate-proximal-face]
+  headline: true
+  selectable: true
+
+- id: iioc-height
+  kind: value
+  name: IIOC height
+  description: middle of the growth plate to the top of the articular bone, vertical
+  source: "deck #7"
+  unit: mm
+  on: [iioc-height-ruler]
+  context: [roi-iioc, growth-plate-proximal-face, articular-surface]
+  selectable: true
+  expect: &a4
+    - Measured along the shaft axis (the deck value), with the perpendicular height and the
+      growth-plate plane residual beside it; which the lab means is open.
+
+- id: iioc-height-medial-compartment
+  kind: value
+  name: IIOC height, medial compartment
+  description: "as #7, medial"
+  source: "deck #8"
+  unit: mm
+  on: [iioc-medial-ruler]
+  context: [roi-iioc, growth-plate-proximal-face, articular-surface]
+  selectable: true
+  expect: *a4
+
+- id: iioc-height-lateral-compartment
+  kind: value
+  name: IIOC height, lateral compartment
+  description: "as #7, lateral"
+  source: "deck #9"
+  unit: mm
+  on: [iioc-lateral-ruler]
+  context: [roi-iioc, growth-plate-proximal-face, articular-surface]
+  selectable: true
+  expect: *a4
+
+- id: tibial-width-at-the-growth-plate
+  kind: value
+  name: Tibial width at the growth plate
+  description: "centre of the fibula–tibia junction on the tibial surface to the prominent point on
+    the other side (open question for the lab: confirm the endpoints on one annotated scan)"
+  source: "deck #10"
+  unit: mm
+  on: [tibial-width-ruler]
+  context: [growth-plate-proximal-face]
+  selectable: true
+  expect:
+    - From the centre of the fibula–tibia junction on the tibial surface to the most prominent point
+      on the other side, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (iioc)
+      describes.
+
+- id: subchondral-bone-plate-thickness-medial
+  kind: value
+  name: Subchondral bone plate thickness, medial
+  description: medial plate
+  source: "deck #11"
+  unit: mm
+  on: [roi-subchondral-plate-medial]
+  context: [articular-surface]
+  selectable: true
+
+- id: subchondral-bone-plate-thickness-lateral
+  kind: value
+  name: Subchondral bone plate thickness, lateral
+  description: lateral plate
+  source: "deck #12"
+  unit: mm
+  on: [roi-subchondral-plate-lateral]
+  context: [articular-surface]
+  selectable: true
+
+- id: tv-iioc-trab
+  kind: value
+  name: TV, IIOC-trab
+  description: "ROI-2: ROI-1 minus the subchondral plate and the cortical line next to the growth plate"
+  source: "deck #13"
+  unit: mm3
+  on: [roi-iioc-trabecular]
+  context: [under-plate-boundary]
+  selectable: true
+
+- id: bv-iioc-trab
+  kind: value
+  name: BV, IIOC-trab
+  description: ROI-2
+  source: "deck #14"
+  unit: mm3
+  on: [roi-iioc-trabecular]
+  context: [under-plate-boundary]
+  selectable: true
+
+- id: bv-tv-iioc-trab
+  kind: value
+  name: BV/TV, IIOC-trab
+  description: ROI-2
+  source: "deck #15"
+  unit: "%"
+  on: [roi-iioc-trabecular]
+  context: [under-plate-boundary]
+  selectable: true
+
+- id: metaphyseal-tv
+  kind: value
+  name: TV, proximal tibial trabeculae
+  description: "ROI-3: a band below the growth plate, clear of cortical bone (offsets in protocol.json)"
+  source: "deck #16"
+  unit: mm3
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: metaphyseal-bv
+  kind: value
+  name: BV, proximal tibial trabeculae
+  description: ROI-3
+  source: "deck #17"
+  unit: mm3
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: metaphyseal-bv-tv
+  kind: value
+  name: BV/TV, proximal tibial trabeculae
+  description: ROI-3
+  source: "deck #18"
+  unit: "%"
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: metaphyseal-tb-n
+  kind: value
+  name: Tb.N, proximal tibial trabeculae
+  description: ROI-3
+  source: "deck #19"
+  unit: 1/mm
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: metaphyseal-tb-th
+  kind: value
+  name: Tb.Th, proximal tibial trabeculae
+  description: ROI-3, largest contained sphere
+  source: "deck #20"
+  unit: mm
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: metaphyseal-tb-sp
+  kind: value
+  name: Tb.Sp, proximal tibial trabeculae
+  description: ROI-3, largest contained sphere in marrow
+  source: "deck #21"
+  unit: mm
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: metaphyseal-tb-nd
+  kind: value
+  name: Tb.Nd, trabecular nodes
+  description: ROI-3, 3D skeleton junctions of ≥3 struts (the lab reports a count per tissue volume)
+  source: "deck #22"
+  unit: 1/mm3
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: metaphyseal-tb-tm
+  kind: value
+  name: Tb.Tm, trabecular ends
+  description: ROI-3, skeleton free ends (the lab reports a count per tissue volume)
+  source: "deck #23"
+  unit: 1/mm3
+  on: [roi-metaphyseal]
+  context: [growth-plate-distal-face]
+  selectable: true
+
+- id: cortical-thickness-100-um-below-the-growth-plate
+  kind: value
+  name: Cortical thickness, 100 µm below the growth plate
+  description: cortical shell at that level
+  source: "deck #24"
+  unit: mm
+  on: [roi-cortex-100um]
+  context: [cortex, growth-plate-distal-face]
+  selectable: true
+
+- id: cortical-thickness-1000-um-below-the-growth-plate
+  kind: value
+  name: Cortical thickness, 1000 µm below the growth plate
+  description: "as #24"
+  source: "deck #25"
+  unit: mm
+  on: [roi-cortex-1000um]
+  context: [cortex, growth-plate-distal-face]
+  headline: true
+  selectable: true
+
+- id: distal-femoral-length-dfl
+  kind: value
+  name: Distal femoral length (DFL)
+  description: midpoint (a) of the upper line of the intercondylar groove to the intercondylar notch (b)
+  source: "deck #26"
+  unit: mm
+  on: [dfl-ruler]
+  headline: true
+  selectable: true
+
+- id: distal-femoral-width-dfw
+  kind: value
+  name: Distal femoral width (DFW)
+  description: "midpoint (c) of the ridge on the lateral condyle surface to the vertex (d) of the
+    medial condyle (open question for the lab: confirm the endpoints on one annotated scan)"
+  source: "deck #27"
+  unit: mm
+  on: [dfw-ruler]
+  selectable: true
+
+- id: width-length-ratio
+  kind: value
+  name: Width/length ratio
+  description: "#27 ÷ #26"
+  source: "deck #28"
+  unit: "1"
+  on: [dfl-ruler, dfw-ruler]
+  selectable: true
