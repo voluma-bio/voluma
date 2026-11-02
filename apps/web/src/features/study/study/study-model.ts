@@ -36,7 +36,7 @@ import {
   shownStatus,
   type TaskState,
 } from "@voluma/run-view";
-import type { SampleGroup, Status } from "@voluma/ui";
+import type { SampleGroup } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { measurementsOf } from "../workflow-tasks";
 
