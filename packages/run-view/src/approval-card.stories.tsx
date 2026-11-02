@@ -49,6 +49,7 @@ export const Done: Story = {
     settled: "done",
   },
 };
+/** No is final: no outcome follows, and nothing counts it as open. */
 export const Declined: Story = {
   args: {
     answer: { answer: "no", text: "Keep the face as it is; look at V=200 first.", time: "19:44" },

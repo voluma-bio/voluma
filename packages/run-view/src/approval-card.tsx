@@ -62,9 +62,11 @@ export function ApprovalCard({
         <h3 className="font-semibold">{title}</h3>
         {open ? (
           <span className="text-xs text-muted-foreground">waits for your answer</span>
-        ) : settled === "withdrawn" ? (
-          // Not a failure: main moved on without it.
-          <span className="text-xs text-muted-foreground">withdrawn</span>
+        ) : settled === "withdrawn" || (!settled && answer?.answer === "no") ? (
+          // Neither is a failure: main moved on without it, or you said no, which is final.
+          <span className="text-xs text-muted-foreground">
+            {settled === "withdrawn" ? "withdrawn" : "declined"}
+          </span>
         ) : settled ? (
           <StatusMark status={SETTLED[settled].status} label={SETTLED[settled].label} />
         ) : (
