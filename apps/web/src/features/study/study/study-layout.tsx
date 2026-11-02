@@ -27,7 +27,7 @@ import { ChevronRight, ListTree } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router";
 import { linkTo } from "../link";
-import { actHref, nextToAct, openHref, placeOf, reviewHref } from "./study-model";
+import { actHref, nextToAct, openHref, placeOf } from "./study-model";
 
 export type StudyContext = { detail: StudyDetail; workflow: BundledWorkflow; me: Me };
 
