@@ -186,9 +186,10 @@ gives the items. While the run is live and the last word was yours, "main is on 
 (Navigate: drag an end of your point, line or angle in a slice; a click on an end picks the mark),
 a deleted one (Delete or Backspace on the picked mark) and a published ruler's end dragged (a new
 line mark of yours, tag R<n>, `output` the ruler's) are written to the log at once and wait as chips
-beside the box. Which marks wait is derived, never kept: `useRunMarks`'s `changes` compares each of
-your marks with what the last `person.message` froze of it (`attached`, by mark id); a mark no
-message carried, one whose ends or note changed since, and one main was told of that you deleted.
+beside the box. Which marks wait is derived, never kept: `useRunMarks`'s `changes` judges each of your
+marks by the API's own rule (`toldMarks`, `changeOf` in `review-state.ts`): a mark no message of
+yours carried, one changed since, and one main was told of that you deleted. Someone who can't
+write to main sees no waiting chips.
 x on a chip undoes the change (a new mark goes; a moved or deleted one goes back to what main saw).
 Nothing is written into the box: main gets each attached mark with its change and positions, and
 the empty box shows what the marks say. Tags are never reused in a run (`MarkStore.tags`): a message

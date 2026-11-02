@@ -84,3 +84,6 @@ None of these stops a review; each makes it slower.
   newest run from the study query, which polls while a run is live. When a "run again" action
   exists, a new run remounts the page and drops the selection and unsent marks: resolve the newest
   run once on mount and offer "A newer run started" instead.
+- **Approval cards' out-of-date list.** `ApprovalCard` takes `outOfDate` (names); `conversation()`
+  passes nothing until R3c adds `outOfDate` to `approval.requested`. Then pass it through
+  (`conversation.ts`, `main-conversation.tsx`, by catalog name).

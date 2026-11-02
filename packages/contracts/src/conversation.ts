@@ -69,8 +69,6 @@ export type ConversationItem =
       args: unknown;
       /** What the call would do, in words; written by code. */
       summary: string;
-      /** The outputs it makes out of date if it runs, when the request names them. */
-      outOfDate?: string[];
       /** The researcher's answer, once given. */
       answer?: { answer: "yes" | "no"; text?: string; at: string };
       /** How it closed: the held call ran, was refused when it ran, or was withdrawn. */
@@ -106,7 +104,7 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         ...(toCheck && { toCheck }),
       });
     } else if (e.type === "approval.requested") {
-      const { tool, args, summary, outOfDate } = e.payload;
+      const { tool, args, summary } = e.payload;
       const item = {
         from: "approval" as const,
         id: e.id,
@@ -115,7 +113,6 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         tool,
         args,
         summary,
-        ...(outOfDate && { outOfDate }),
       };
       approvals.set(approvalIdOf(e.id, "answer"), item);
       approvals.set(approvalIdOf(e.id, "settled"), item);

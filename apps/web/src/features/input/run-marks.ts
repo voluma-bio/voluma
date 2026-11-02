@@ -5,23 +5,30 @@
  * The wire shape is `markPlacedSchema`, which also holds the mark in world mm with its pane's
  * frame, for sending it to main as a correction.
  *
- * Every change of yours waits for your next message to main (`changes`): a mark no message has
- * carried (or re-placed after main was told it was deleted), one moved or with a new note since
- * main was told of it (the last `person.message` that froze it), and one main was told of that you
- * deleted. A change undone (`discard`) is no change. A message waits for the writes of the marks it
- * names (`settled`): the API freezes them from the log.
+ * Every change of yours waits for your next message to main (`changes`), by the API's own rule
+ * (`toldMarks`, `changeOf`): your marks against what your last message naming each froze. A change
+ * undone (`discard`) is no change. A message waits for the writes of the marks it names
+ * (`settled`): the API freezes them from the log.
  */
-import { deleteMark, placeMark } from "@voluma/api-client";
-import type { PlaceMarkRequest } from "@voluma/contracts/agent-events";
+import { ApiError, deleteMark, placeMark } from "@voluma/api-client";
+import {
+  markPlacedSchema,
+  type PlaceMarkRequest,
+  placeMarkRequestSchema,
+} from "@voluma/contracts/agent-events";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Volume } from "@voluma/contracts/review";
-import { marksOf } from "@voluma/contracts/review-state";
-import { type GridMark, type MarkPlane, markPoints, worldOf } from "@voluma/viewer/grid";
+import { changeOf, markStatesOf, marksOf, toldMarks } from "@voluma/contracts/review-state";
+import { markPoints, worldOf } from "@voluma/viewer/grid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gridKeyOf, type MarkChange, type MarkStore, type YourMark } from "./marks-panel";
 import { NotSent } from "./message-send";
 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
+
+/** A write as the log will hold it once the API adds its author. */
+const asLogged = (body: PlaceMarkRequest, by: string): Placed =>
+  markPlacedSchema.parse({ ...body, by });
 
 const yours = (p: Placed, me: string): YourMark => ({
   id: p.id,
@@ -33,38 +40,6 @@ const yours = (p: Placed, me: string): YourMark => ({
   plane: p.plane,
   theirs: p.by !== me,
 });
-
-type Told = { change: string; mark: YourMark };
-
-// TODO: use toldMarks and changeOf from @voluma/contracts/review-state once #480 lands; this rule
-// is theirs (the API freezes by it), copied here until then.
-/** What the last message to carry each mark told main of it, by mark id. */
-function toldOf(events: readonly RunEvent[]): Map<string, Told> {
-  const told = new Map<string, Told>();
-  for (const e of events)
-    if (e.type === "person.message")
-      for (const a of e.payload.attached ?? []) {
-        const { id, output, tag, volume, gridKey, mark, plane } = a.mark;
-        if (typeof id === "string")
-          told.set(id, {
-            change: a.change,
-            mark: {
-              id,
-              tag,
-              taskId: output,
-              gridKey,
-              volumeId: volume,
-              mark: mark as GridMark,
-              plane: plane as MarkPlane | null,
-            },
-          });
-      }
-  return told;
-}
-
-const sameMark = (a: GridMark, b: GridMark) =>
-  JSON.stringify(markPoints(a)) === JSON.stringify(markPoints(b)) &&
-  ("point" in a ? a.note : undefined) === ("point" in b ? b.note : undefined);
 
 /** A mark write that failed: the message naming the mark waits. */
 const UNSAVED = "A mark of yours wasn't saved, so the message wasn't sent. Try again.";
@@ -93,13 +68,13 @@ export function useRunMarks({
 } {
   const logged = useMemo(() => marksOf(events), [events]);
   // id → the mark as written and not yet seen in the log; null for a deletion.
-  const [pending, setPending] = useState<ReadonlyMap<string, YourMark | null>>(new Map());
+  const [pending, setPending] = useState<ReadonlyMap<string, Placed | null>>(new Map());
   const [error, setError] = useState<string>();
   useEffect(() => {
     if (pending.size === 0) return;
     const seen = [...pending].filter(([id, m]) => {
       const l = logged.get(id);
-      return m === null ? !l : l && JSON.stringify(yours(l, me).mark) === JSON.stringify(m.mark);
+      return m === null ? !l : l && JSON.stringify(l.mark) === JSON.stringify(m.mark);
     });
     if (seen.length)
       setPending((had) => {
@@ -107,14 +82,14 @@ export function useRunMarks({
         for (const [id] of seen) next.delete(id);
         return next;
       });
-  }, [logged, pending, me]);
+  }, [logged, pending]);
 
   const gridKeys = useMemo(() => new Set(volumes.map(gridKeyOf)), [volumes]);
   // Every mark as you see it now: the log's, with your writes not back yet.
   const all = useMemo(() => {
     const now = new Map([...logged].map(([id, p]) => [id, yours(p, me)] as const));
     for (const [id, m] of pending)
-      if (m) now.set(id, m);
+      if (m) now.set(id, yours(m, me));
       else now.delete(id);
     return now;
   }, [logged, pending, me]);
@@ -122,7 +97,7 @@ export function useRunMarks({
     () => [...all.values()].filter((m) => gridKeys.has(m.gridKey)),
     [all, gridKeys],
   );
-  const told = useMemo(() => toldOf(events), [events]);
+  const told = useMemo(() => toldMarks(events, me), [events, me]);
   // Deleted marks keep their tags: a message may name them.
   const tags = useMemo(
     () => [
@@ -135,26 +110,29 @@ export function useRunMarks({
   );
   // A mark on an image the run has since replaced is gone from the panes, and from the next message.
   const changes = useMemo(() => {
+    const now = new Map(
+      [...markStatesOf(events, me)].map(([id, m]) => [id, { mark: m.mark, deleted: m.deleted }]),
+    );
+    for (const [id, m] of pending)
+      if (m) now.set(id, { mark: m, deleted: false });
+      else {
+        const had = now.get(id);
+        if (had) now.set(id, { ...had, deleted: true });
+      }
     const out: MarkChange[] = [];
-    for (const m of all.values()) {
-      if (m.theirs || !gridKeys.has(m.gridKey)) continue;
-      const t = told.get(m.id);
-      const change =
-        !t || t.change === "delete" ? "place" : sameMark(t.mark.mark, m.mark) ? null : "move";
-      if (change) out.push({ id: m.id, tag: m.tag, output: m.taskId, change });
+    for (const [id, m] of now) {
+      const change = gridKeys.has(m.mark.gridKey) ? changeOf(m, told.get(id)) : undefined;
+      if (change) out.push({ id, tag: m.mark.tag, output: m.mark.output, change });
     }
-    for (const [id, t] of told)
-      if (t.change !== "delete" && !all.has(id) && gridKeys.has(t.mark.gridKey))
-        out.push({ id, tag: t.mark.tag, output: t.mark.taskId, change: "delete" });
     return out;
-  }, [all, told, gridKeys]);
+  }, [events, me, pending, told, gridKeys]);
 
-  const latest = useRef({ volumes, run, reopen });
-  latest.current = { volumes, run, reopen };
+  const latest = useRef({ volumes, run, reopen, me });
+  latest.current = { volumes, run, reopen, me };
   // Each mark's writes go one after another, so the log ends with the last (a point, then its
   // note); a run lock can hold one while the next would overtake it. Each settles true when saved.
   const queues = useRef(new Map<string, Promise<boolean>>());
-  const write = useCallback((id: string, next: YourMark | null, send: () => Promise<void>) => {
+  const write = useCallback((id: string, next: Placed | null, send: () => Promise<void>) => {
     setError(undefined);
     setPending((had) => new Map(had).set(id, next));
     const sent = (queues.current.get(id) ?? Promise.resolve(true)).then(send).then(
@@ -170,7 +148,9 @@ export function useRunMarks({
           rest.delete(id);
           return rest;
         });
-        setError(e instanceof Error && e.message ? e.message : "Couldn't save the mark.");
+        setError(
+          (e instanceof ApiError && e.serverMessage) || "Couldn't save the mark. Try again.",
+        );
         return false;
       },
     );
@@ -203,7 +183,7 @@ export function useRunMarks({
           down: m.plane.down,
         },
       };
-      write(m.id, m, () => placeMark(r.id, body));
+      write(m.id, asLogged(body, latest.current.me), () => placeMark(r.id, body));
     },
     [write],
   );
@@ -217,10 +197,13 @@ export function useRunMarks({
   const discard = useCallback(
     (id: string) => {
       const t = latestTold.current.get(id);
-      if (t && t.change !== "delete") place(t.mark);
-      else erase(id);
+      if (!t || t.change === "delete") return erase(id);
+      // The frozen copy is stored JSON: parsed back into the request it was placed with.
+      const body = placeMarkRequestSchema.parse({ ...t.mark, id });
+      const { run: r, me } = latest.current;
+      write(id, asLogged(body, me), () => placeMark(r.id, body));
     },
-    [place, erase],
+    [write, erase],
   );
   return { marks, tags, full: false, place, erase, error, changes, discard, settled };
 }

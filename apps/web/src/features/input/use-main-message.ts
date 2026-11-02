@@ -94,7 +94,9 @@ export function useMainMessage({
   // The changes a sent message carried leave the composer before its event is back on the stream.
   const [sent, setSent] = useState<{ eventId: string; marks: string[] }>();
   const inLog = sent && events.some((e) => e.id === sent.eventId);
-  const attached = changes.filter((c) => inLog || !sent?.marks.includes(c.id));
+  const closed = run.cannotMessage ?? undefined;
+  // Someone who can't write to main has no changes waiting for it.
+  const attached = closed ? [] : changes.filter((c) => inLog || !sent?.marks.includes(c.id));
   const [unseen, setUnseen] = useState(false);
   const setState = useRunState(run.id);
   const { send, submit: post } = useIdempotentSend<{ marks: string[] }>({
@@ -109,7 +111,6 @@ export function useMainMessage({
       onSent();
     },
   });
-  const closed = run.cannotMessage ?? undefined;
   const tooMany =
     attached.length > MAX_MARKS
       ? `A message carries up to ${MAX_MARKS} marks. Undo some changes, or send and then the rest.`
