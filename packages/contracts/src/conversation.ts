@@ -8,6 +8,7 @@
  * thread's closing summary.
  */
 import type { AcceptToCheckRequest, Attached } from "./agent-events";
+import { approvalAnswerId, approvalSettledId } from "./agents";
 import type { RunEvent } from "./events";
 import { corrections } from "./fold";
 import type { Mark } from "./messages";
@@ -69,14 +70,15 @@ export type ConversationItem =
       args: unknown;
       /** What the call would do, in words; written by code. */
       summary: string;
+      /** The outputs it changes, when the request names them. */
+      outputs?: string[];
+      /** The outputs it makes out of date if it runs, when the request names them. */
+      outOfDate?: string[];
       /** The researcher's answer, once given. */
       answer?: { answer: "yes" | "no"; text?: string; at: string };
       /** How it closed: the held call ran, was refused when it ran, or was withdrawn. */
       settled?: { outcome: "done" | "refused" | "withdrawn"; at: string };
     };
-
-/** The id of a held call's answer (`approval.given`, `approval.declined`) or its outcome (`approval.settled`). */
-export const approvalIdOf = (requestId: string, of: "answer" | "settled") => `${requestId}:${of}`;
 
 /**
  * The person's messages, the agent's replies, the corrections' ends and the held calls, in log
@@ -104,7 +106,7 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         ...(toCheck && { toCheck }),
       });
     } else if (e.type === "approval.requested") {
-      const { tool, args, summary } = e.payload;
+      const { tool, args, summary, outputs, outOfDate } = e.payload;
       const item = {
         from: "approval" as const,
         id: e.id,
@@ -113,9 +115,11 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         tool,
         args,
         summary,
+        ...(outputs && { outputs }),
+        ...(outOfDate && { outOfDate }),
       };
-      approvals.set(approvalIdOf(e.id, "answer"), item);
-      approvals.set(approvalIdOf(e.id, "settled"), item);
+      approvals.set(approvalAnswerId(e.id), item);
+      approvals.set(approvalSettledId(e.id), item);
       items.push(item);
     } else if (e.type === "approval.given" || e.type === "approval.declined") {
       const request = approvals.get(e.id);

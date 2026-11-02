@@ -16,6 +16,7 @@ const meta = {
   args: {
     title: "Start a worker",
     summary: "Start worker `roi3-face-2` from `roi3-worker` for growth-plate-distal-face.",
+    changes: ["Growth plate distal face"],
     outOfDate: ["ROI-3", "Cortex 100", "Cortex 1000", "BV/TV", "Tb.Th"],
     yes: "Yes, start roi3-face-2",
     onAnswer: () => {},
@@ -30,6 +31,7 @@ export const SummaryOnly: Story = {
   args: {
     summary:
       "Start worker `roi3-face-2` from `roi3-worker` for growth-plate-distal-face. This makes out of date: roi-3, cortex-100, cortex-1000, 8 values.",
+    changes: undefined,
     outOfDate: undefined,
   },
 };

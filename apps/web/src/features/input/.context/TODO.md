@@ -54,7 +54,6 @@ None of these stops a review; each makes it slower.
 - **A published ruler's end dragged** is not yet seen on real data: no agent-loop run draws rulers
   yet. The drag shares the mark-end path that was walked; the ruler's candidates come from the
   scene's 2-point annotations.
-- **Approval cards** were walked in Storybook only: no local run held a call before R3c.
 - Ends drag only in slices, not in 3D; boxes, outlines and probes have no handles.
 - A sent message's picture isn't shown in the chat (`runMessageSnapshotUrl` is there).
 - Rests on rows have no swatch or eye: the panes can't yet show or hide one overlay from the list
@@ -73,7 +72,7 @@ None of these stops a review; each makes it slower.
   can't tell the kind.
 - `useSavedViews` (`saved-views.ts`) never clears `pendingFor`: after one save, any later
   `view.saved` for that output, another person's included, becomes the one shown.
-- Per-event costs: `marksOf`, `toldOf`, `openApprovals` and `conversation` each rescan the whole
+- Per-event costs: `marksOf`, `toldMarks`, `agentLog` and `conversation` each rescan the whole
   log per durable event.
 
 ## Outputs review while a run goes (#466)
@@ -84,9 +83,3 @@ None of these stops a review; each makes it slower.
   newest run from the study query, which polls while a run is live. When a "run again" action
   exists, a new run remounts the page and drops the selection and unsent marks: resolve the newest
   run once on mount and offer "A newer run started" instead.
-- **Approval cards' out-of-date list.** `ApprovalCard` takes `outOfDate` (names); `conversation()`
-  passes nothing until R3c adds `outOfDate` to `approval.requested`. Then pass it through
-  (`conversation.ts`, `main-conversation.tsx`, by catalog name). In the same switch-over, count
-  "Waiting on you" with `openApprovals(events).length` and key `conversation()`'s answers and
-  outcomes with `approvalAnswerId`/`approvalSettledId` (`agents.ts`), so one rule decides which
-  requests are open.

@@ -14,6 +14,8 @@ export type ApprovalCardProps = {
   title: string;
   /** What it would do, as code wrote it. */
   summary: string;
+  /** The outputs it changes, by name; absent when the request names none. */
+  changes?: readonly string[];
   /** The outputs it makes out of date if it runs, by name; absent when the request names none. */
   outOfDate?: readonly string[];
   /** The yes button's words: "Yes, start fix-labels". */
@@ -42,6 +44,7 @@ const SETTLED = {
 export function ApprovalCard({
   title,
   summary,
+  changes,
   outOfDate,
   yes = "Yes",
   answer,
@@ -79,6 +82,11 @@ export function ApprovalCard({
       </header>
       <div className="grid gap-1.5 px-3 py-2">
         <Markdown text={summary} className="text-sm" />
+        {changes && changes.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Changes: <span className="text-foreground">{changes.join(", ")}</span>
+          </p>
+        )}
         {outOfDate && outOfDate.length > 0 && (
           <p className="text-xs text-muted-foreground">
             Out of date if it runs: <span className="text-foreground">{outOfDate.join(", ")}</span>

@@ -177,7 +177,7 @@ whole run and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.
 The conversation is the only place anything on the run changes (design review.md, "Corrections",
 "Approvals"). It shows main's messages to the researcher, yours with the marks they carried, the
 views you saved and the calls main holds for your yes (`ApprovalCard`, `@voluma/run-view`: what the
-call does in code's words, with what it makes out of date; Yes and No with optional words through
+call does in code's words, what it changes and what it makes out of date, by catalog name; Yes and No with optional words through
 `answerApproval`; then the answer, and only the outcome's word: `approval.settled`'s text is
 written for main). `conversation()` (contracts)
 gives the items. While the run is live and the last word was yours, "main is on it".
@@ -204,7 +204,7 @@ item). Both composers send through `message-send.ts` (`useIdempotentSend`): a re
 and the exact request; refusals show the API's words. A message or an
 answer to an ended run reopens it: the page reconnects the stream and reads the run again.
 
-A run with a call open that you can answer reads "Waiting on you" in the heading (from the log,
-not the row). The Samples tree and the study rows can't say so yet: the
+A run with a call open that you can answer (`openApprovals`) reads "Waiting on you" in the heading
+(from the log, not the row); a No is final and ends the call. The Samples tree and the study rows can't say so yet: the
 study summaries carry no open-call count (`TODO.md`).
 

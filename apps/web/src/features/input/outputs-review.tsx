@@ -17,6 +17,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, acceptToCheck } from "@voluma/api-client";
 import { studyQuery } from "@voluma/api-client/query";
+import { agentLog, openApprovals } from "@voluma/contracts/agents";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
 import { outputsFold } from "@voluma/contracts/output-fold";
@@ -241,9 +242,7 @@ export function OutputsReview({
   const answers = useAnswers(run, sent);
   // Calls main holds for your yes: while one is open and you can answer, the run waits on you,
   // whatever its row says.
-  const waiting = answers.answer
-    ? said.filter((m) => m.from === "approval" && !m.answer && !m.settled).length
-    : 0;
+  const waiting = answers.answer ? openApprovals(agentLog(events).approvals).length : 0;
   const accepting: Accepting = {
     ...useAcceptToCheck(run, reopen),
     ...(!run.example && {

@@ -187,6 +187,8 @@ export function MainConversation({
                   <ApprovalCard
                     {...approvalWords(m.tool, m.args)}
                     summary={m.summary}
+                    changes={m.outputs?.map(nameOf)}
+                    outOfDate={m.outOfDate?.map(nameOf)}
                     answer={m.answer && { ...m.answer, time: clockOf(m.answer.at) }}
                     settled={m.settled?.outcome}
                     onAnswer={
