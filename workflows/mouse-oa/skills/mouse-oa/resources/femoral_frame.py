@@ -5,11 +5,15 @@ see ../references/oa-protocol.md for how to place them). The spec (--spec, proto
   a  midpoint of the upper line of the intercondylar groove      c  midpoint of the ridge on the lateral condyle
   b  intercondylar notch                                         d  vertex of the medial condyle
 DFL = |a - b|, DFW = |c - d|, W/L = DFW / DFL (deck #26-28), all straight 3D distances through physical spacing, computed by
-`measure.py`'s code from the spec's entries. The script also builds a frame (ML from d to c, SI from b to a made perpendicular to ML, normal = ML x SI) and checks the points against
-the femur label. A failed check stops the script (exit 2, nothing written): re-place the points, do not explain the check
-away. The checks: each landmark within 0.05 mm of femur bone; DFL at least 0.4 of DFW (an end-on view of the joint face
-puts a and b across the notch and DFL comes out a third of its size); and SI (b to a) pointing toward the shaft. Also
-refused: a missing landmark, coincident landmarks, a points file on another grid.
+`measure.py`'s code from the spec's entries. The script finds the femur's mediolateral (ML) axis from the label alone (the
+long axis of the condyles' cross-section, perpendicular to the shaft), builds a frame (that ML, SI from b to a made
+perpendicular to it, normal = ML x SI) and checks the points against the femur. A failed check stops the script (exit 2,
+nothing written): re-place the points, do not explain the check away. The checks: each landmark within 0.05 mm of femur
+bone; DFL at least 0.4 of DFW (an end-on view of the joint face puts a and b across the notch and DFL comes out a third of
+its size); a-b in the sagittal plane (|cos| to ML at most 0.5) and c-d across the condyles (|cos| to ML at least 0.7), so
+points placed with the sides and the front swapped (another scan's axes taken for this one's) are refused on any knee, left
+or right; and SI (b to a) pointing toward the shaft. Also refused: a missing landmark, coincident landmarks, a points file
+on another grid.
 
 Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
         distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml, si, normal vectors, zyx) and checks;
@@ -30,6 +34,12 @@ NAMES = ('a', 'b', 'c', 'd')
 DFL_ID, DFW_ID, RATIO_ID = 'distal-femoral-length-dfl', 'distal-femoral-width-dfw', 'width-length-ratio'
 MAX_OFF_BONE_MM = 0.05  # a landmark further than this from femur bone fails the check
 MIN_LENGTH_OVER_WIDTH = 0.4  # DFL / DFW below this fails. One scan (n=1): OA6-1RK reference 0.71, the end-on pick that was wrong 0.27
+EPIPHYSIS_MM = 1.5  # the distal end of the femur whose widest cross-axis is taken as mediolateral
+# |cos| of a ruler's angle to the femur's mediolateral axis. a-b lies in the sagittal plane (0 ideally), c-d runs side to
+# side (1 ideally); the axis itself is within about 20 degrees of the knee's bending-plane normal and the tibial plateau's
+# long axis on OA6-1RK and OA6-2RK. OA6-2RK run f45f630f, axes swapped: a-b 0.81, c-d 0.40; correct placements on both scans 0.02 to 0.09 and 0.99.
+MAX_LENGTH_ML = 0.5
+MIN_WIDTH_ML = 0.7
 
 
 def unit(v):
@@ -37,6 +47,30 @@ def unit(v):
     if n == 0:
         sidecar.fail('two landmarks coincide: re-place them')
     return v / n
+
+
+def main_axis(p):
+    q = p - p.mean(axis=0)
+    return np.linalg.eigh(q.T @ q)[1][:, -1]
+
+
+def femur_axes(femur, sp, distal_mm):
+    """The femur's shaft axis (toward the hip) and its mediolateral axis (sign arbitrary), zyx unit vectors in mm space, from
+    the label alone. `distal_mm` is a point near the knee end (the landmarks' centroid). The mediolateral axis is the long
+    axis of the distal EPIPHYSIS_MM's cross-section: the condyles are wider side to side than front to back (standard
+    deviation 0.90 against 0.51 mm on OA6-1RK, 0.92 against 0.56 on OA6-2RK)."""
+    p = np.argwhere(femur[::2, ::2, ::2]) * 2 * sp
+    long = main_axis(p)
+    if (distal_mm - p.mean(axis=0)) @ long > 0:
+        long = -long
+    t = (p - p.mean(axis=0)) @ long
+    shaft = main_axis(p[t > np.median(t)])  # the proximal half, so the condyles do not pull it
+    shaft = shaft if shaft @ long > 0 else -shaft
+    s = p @ shaft
+    q = p[s < s.min() + EPIPHYSIS_MM]
+    q = q - q.mean(axis=0)
+    q = q - np.outer(q @ shaft, shaft)
+    return shaft, np.linalg.eigh(q.T @ q)[1][:, -1]
 
 
 def off_bone_mm(point, femur, vox):
@@ -71,19 +105,6 @@ def main():
     dfl, dfw = values[DFL_ID]['value'], values[DFW_ID]['value']
     pm = {i: p[i] * sp for i in names}  # mm, zyx
     checks = {}
-    si_seed = pm['a'] - pm['b']
-    ml = unit(pm['c'] - pm['d'])
-    si_perp = si_seed - (si_seed @ ml) * ml
-    if np.linalg.norm(si_perp) < 0.01:
-        sidecar.fail('the length axis a-b is parallel to the width axis c-d: re-place the landmarks')
-    si = unit(si_perp)
-    frame = {
-        'ml_vector_zyx': ml.tolist(),
-        'si_vector_zyx': si.tolist(),
-        'normal_vector_zyx': np.cross(ml, si).tolist(),
-        'note': 'ml: d to c; si: b toward a, made perpendicular to ml (toward the shaft); normal = ml x si, '
-        'anterior or posterior depending on the knee: confirm on a render before using its sign',
-    }
     femur = np.asarray(np.load(a.labels, mmap_mode='r')) == a.label
     checks['off_bone_mm'] = {i: off_bone_mm(p[i], femur, sp[0]) for i in names}
     far = [i for i, d in checks['off_bone_mm'].items() if d is None or d > MAX_OFF_BONE_MM]
@@ -95,6 +116,28 @@ def main():
         sidecar.fail(f'DFL {dfl:.3f} mm is under {MIN_LENGTH_OVER_WIDTH} of DFW {dfw:.3f} mm: a and b were probably placed on an '
                      'end-on view of the joint face, so a-b runs across the notch. Render a view along the shaft '
                      '(regions-and-landmarks) and re-place a and b on it')
+    shaft, ml = femur_axes(femur, sp, np.mean(list(pm.values()), axis=0))
+    checks['a_b_cos_to_ml'] = abs(unit(pm['a'] - pm['b']) @ ml)
+    checks['c_d_cos_to_ml'] = abs(unit(pm['c'] - pm['d']) @ ml)
+    side = (f"the femur's mediolateral axis, the long axis of its condyles' cross-section, is {np.round(ml, 2).tolist()} "
+            '(scan z, y, x): name the sides and the front from that axis on this scan, never from another scan')
+    if checks['a_b_cos_to_ml'] > MAX_LENGTH_ML:
+        sidecar.fail(f"a-b runs side to side (|cos| {checks['a_b_cos_to_ml']:.2f} to the mediolateral axis, at most "
+                     f'{MAX_LENGTH_ML}), but DFL runs from the front of the groove to the notch, in the sagittal plane; {side}. '
+                     'Re-place a and b')
+    if checks['c_d_cos_to_ml'] < MIN_WIDTH_ML:
+        sidecar.fail(f"c-d does not run side to side (|cos| {checks['c_d_cos_to_ml']:.2f} to the mediolateral axis, at least "
+                     f'{MIN_WIDTH_ML}), but DFW spans the two condyles; {side}. Re-place c and d')
+    si_seed = pm['a'] - pm['b']
+    si = unit(si_seed - (si_seed @ ml) * ml)
+    frame = {
+        'ml_vector_zyx': ml.tolist(),
+        'si_vector_zyx': si.tolist(),
+        'normal_vector_zyx': np.cross(ml, si).tolist(),
+        'shaft_vector_zyx': shaft.tolist(),
+        'note': "ml: the femur label's condylar long axis, sign arbitrary; si: b toward a, made perpendicular to ml (toward "
+        'the shaft); normal = ml x si, anterior or posterior depending on the knee: confirm on a render before using its sign',
+    }
     centroid = np.argwhere(femur[::4, ::4, ::4]).mean(axis=0) * 4 * sp
     if (centroid - (pm['c'] + pm['d']) / 2) @ si <= 0:
         sidecar.fail('SI (b toward a) points away from the femoral bulk: a is not the groove end nearer the shaft, or the '
