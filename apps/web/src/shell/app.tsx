@@ -5,10 +5,9 @@
  * shown in Storybook (apps/storybook), not in the app.
  */
 import { Button } from "@voluma/ui";
-import { createBrowserRouter, Link } from "react-router";
+import { createBrowserRouter, Link, Navigate } from "react-router";
 import { RouterProvider } from "react-router/dom";
 import { scanRoutes } from "../features/scan";
-import { settingsRoutes } from "../features/settings";
 import { studyRoutes } from "../features/study";
 import { SignedIn } from "./signed-in";
 
@@ -18,7 +17,8 @@ const router = createBrowserRouter([
     children: [
       ...studyRoutes,
       ...scanRoutes,
-      ...settingsRoutes,
+      // The old Settings page: the theme and account now live in the rail's Settings.
+      { path: "settings", element: <Navigate to="/" replace state={{ openSettings: true }} /> },
       { path: "*", element: <NotFound /> },
     ],
   },
