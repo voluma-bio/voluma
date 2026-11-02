@@ -92,6 +92,8 @@ export interface OutputState {
   outOfDate: boolean;
   /** Out of date, and in a final output's trail: main must decide it before it closes. */
   undecided: boolean;
+  /** Final, with an open To check item on its latest version or on one it was made from. */
+  needsYou: boolean;
   /** Oldest first. */
   versions: OutputVersion[];
   latest?: OutputVersion;
@@ -223,6 +225,17 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   // A final label overlay is walked as its map, so only the map is ever undecided.
   for (const e of finalEntries) walk(mapOf(e.id));
 
+  // Needs you: a final output whose own or any made-from latest version has an open To check item.
+  const needsYou = (root: string) => {
+    const seen = new Set([mapOf(root)]);
+    for (const id of seen) {
+      const latest = latestOf(id);
+      if (latest?.toCheck.some((t) => !t.resolved)) return true;
+      for (const link of latest?.madeFrom ?? []) seen.add(mapOf(link.id));
+    }
+    return false;
+  };
+
   const sectionOf = new Map<string, string>();
   for (const s of sectionsOf(list)) for (const o of s.outputs) sectionOf.set(o.id, s.title);
   const missing = new Map((list?.missing ?? []).map((m) => [m.id, m.reason]));
@@ -260,6 +273,7 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       ...(isMissing && !covered && { missingReason: missing.get(missingId) }),
       outOfDate: stale,
       undecided: stale && trail.has(id),
+      needsYou: !!entry && needsYou(id),
       versions: vs,
       ...(latest && { latest }),
     } as OutputState;
@@ -300,25 +314,12 @@ export function finalValues(fold: OutputsFold): Map<string, { number: number; un
 
 /**
  * The final outputs that need a person: each with an open To check item on its latest version or
- * on one it was made from, through latest versions (a link to a label overlay with no version of
- * its own goes to its map, as the run's list names it). What "Needs you" counts on the sample page
- * and on every row that shows an agent-loop sample, so the number seen before opening a sample is
- * the one found on it.
+ * on one it was made from, through latest versions (`OutputState.needsYou`). What "Needs you"
+ * counts on the sample page and on every row that shows an agent-loop sample, so the number seen
+ * before opening a sample is the one found on it.
  */
-export function needingYou(fold: OutputsFold): Set<string> {
-  const to = (id: string) => (fold.byId.get(id)?.latest ? id : (fold.labels.get(id) ?? id));
-  const open = (id: string) => fold.byId.get(id)?.latest?.toCheck.some((t) => !t.resolved);
-  const needs = (root: string) => {
-    // A final label overlay with no version of its own is its map's, as any link to it is.
-    const seen = new Set([to(root)]);
-    for (const id of seen) {
-      if (open(id)) return true;
-      for (const link of fold.byId.get(id)?.latest?.madeFrom ?? []) seen.add(to(link.id));
-    }
-    return false;
-  };
-  return new Set(fold.outputs.filter((o) => o.final && needs(o.id)).map((o) => o.id));
-}
+export const needingYou = (fold: OutputsFold): Set<string> =>
+  new Set(fold.outputs.filter((o) => o.needsYou).map((o) => o.id));
 
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>

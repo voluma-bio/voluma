@@ -7,7 +7,13 @@ import {
   refuseOutputsChange,
 } from "./final-outputs";
 import { type OutputCatalog, outputCatalogSchema } from "./output-catalog";
-import { finalOutputs, outputsFold, pendingFinal, undecidedOutOfDate } from "./output-fold";
+import {
+  finalOutputs,
+  needingYou,
+  outputsFold,
+  pendingFinal,
+  undecidedOutOfDate,
+} from "./output-fold";
 
 type Link = { id: string; version: number; role: "on" | "base" | "input" };
 const sha = (n: string) => n.padEnd(64, "0");
@@ -189,6 +195,30 @@ describe("label overlays", () => {
     expect(stale(r.events)).toEqual([]);
     r.publish("labels", 2, { "l.npy": "a2" });
     expect(stale(r.events)).toContain("femurvol");
+  });
+});
+
+describe("needing you", () => {
+  it("counts a final label overlay and a value on it through the map's open item", () => {
+    const r = run();
+    r.final(scan, overlay("labels"), {
+      kind: "overlay",
+      id: "femur",
+      name: "femur",
+      base: "scan",
+      label: { of: "labels", value: 1 },
+    } as OutputEntry);
+    r.publish("labels", 1, { "l.npy": "a1" }, [], { toCheck: [{ title: "edge" }] });
+    r.publish("femurvol", 1, { "f.json": "f1" }, [{ id: "femur", version: 1, role: "input" }]);
+    expect([...needingYou(outputsFold(r.events))]).toEqual(["labels", "femur"]);
+    r.push("tocheck.resolved", {
+      output: "labels",
+      version: 1,
+      item: 0,
+      by: "u",
+      outcome: "accepted",
+    });
+    expect(needingYou(outputsFold(r.events)).size).toBe(0);
   });
 });
 

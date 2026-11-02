@@ -5,8 +5,8 @@
  * the whole-run graph, Run details), so a new look changes only the drawing. Rules: the agent-model
  * design's `review.md` (Layout, Panels and views) and `outputs.md` (Stale).
  *
- * A link to an output with a version of its own is a link to it. A link to a label overlay with no
- * version of its own (a bone of the labels map) is a link to its map (`labelMapOf`): the version it
+ * A link to a label overlay (a bone of
+ * the labels map) is a link to its map (`resolveLink`): an overlay has no versions, the version it
  * names is the map's. A link from an output to its own earlier version is not drawn.
  *
  * Two walks share one breadth-first walker (`walk`): the trail behind a published version
@@ -16,7 +16,7 @@
  */
 import { type AgentState, agentLog, agentState } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
-import type { LinkRole, OutputCatalog } from "@voluma/contracts/output-catalog";
+import { type LinkRole, labelMapOf, type OutputCatalog } from "@voluma/contracts/output-catalog";
 import type {
   OutputState,
   OutputStatus,
@@ -47,15 +47,9 @@ export type TrailRow = {
   from: number[];
 };
 
-/** The map a label overlay is a value of: the catalog's `label.of`, else the run's own list's. */
-export function labelMapOf(fold: OutputsFold, catalog: OutputCatalog, id: string) {
-  const entry = catalog.find((e) => e.id === id);
-  return (entry?.kind === "overlay" && entry.label?.of) || fold.labels.get(id);
-}
-
-/** What a link to `id` is a link to: `id` once it has a version of its own, else a label's map. */
+/** What a link to `id` is a link to: its map for a label overlay (always: it has no versions), else `id`. */
 export const resolveLink = (fold: OutputsFold, catalog: OutputCatalog, id: string) =>
-  fold.byId.get(id)?.latest ? id : (labelMapOf(fold, catalog, id) ?? id);
+  fold.labels.get(id) ?? labelMapOf(catalog, id);
 
 type Link = { id: string; role?: LinkRole; version?: number };
 
@@ -133,8 +127,8 @@ function spineOf(fold: OutputsFold, catalog: OutputCatalog, id: string, on: stri
           (ls) => ls.length > 0,
         );
   if (published?.length) return published.map((l) => ({ id: l.id }));
-  const map = labelMapOf(fold, catalog, id);
-  if (map) return [{ id: map }];
+  const map = resolveLink(fold, catalog, id);
+  if (map !== id) return [{ id: map }];
   const back =
     entry?.kind === "overlay" ? entry.base : entry?.kind === "base" ? entry.from : state?.base;
   return back ? [{ id: back }] : [];
