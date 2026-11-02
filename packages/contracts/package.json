@@ -31,7 +31,8 @@
     "./study": "./src/study.ts",
     "./workflow-files": "./src/workflow-files.ts",
     "./output-catalog": "./src/output-catalog.ts",
-    "./agent-events": "./src/agent-events.ts"
+    "./agent-events": "./src/agent-events.ts",
+    "./agents": "./src/agents.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
