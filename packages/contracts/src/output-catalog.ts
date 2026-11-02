@@ -1,7 +1,8 @@
 /**
- * The outputs of a workflow in the agent model: what `workflows/<name>/outputs.yaml` declares and
- * what `/run/final-outputs.yaml` lists for one run. Nothing here is about one domain: a workflow
- * names its own things (bones, molecules) in the files, not in this schema.
+ * The outputs of a workflow in the agent model: what `workflows/<name>/outputs.yaml` declares.
+ * Nothing here is about one domain: a workflow names its own things (bones, molecules) in the
+ * file, not in this schema. This is an authoring schema: no stored payload embeds it
+ * (`packages/contracts/.context/CONTEXT.md`).
  *
  * An output is one of five kinds. A `base` is what a scene is drawn on and fixes its coordinates;
  * an `overlay` is drawn on a base; a `value` is a number with a UCUM unit, always measured `on`
@@ -10,14 +11,27 @@
  * outputs have a role (`linkRoleSchema`): `on` and `context` of a value, `base` of an overlay,
  * `input` for what a step read (reported with a version, in `madeFrom`; not declared here).
  *
- * Both files are strict and cross-checked: a dangling id, a link to the wrong kind or a cycle
- * fails with the path to it. `loadWorkflow` (`packages/workflow`) parses `outputs.yaml`;
- * `outputs.json`, which today's task loop reads, is `workflow-files.ts`.
+ * The file is strict and cross-checked: a dangling id, a link to the wrong kind or a cycle fails
+ * with the path to it. `loadWorkflow` (`packages/workflow`) parses it for runs of the agent loop;
+ * `outputs.json`, which today's task loop reads, is `workflow-files.ts`. Write `"on":` quoted:
+ * PyYAML reads a bare `on` key as `True`, and the loader refuses it.
  */
 import { z } from "zod";
 import { segmentSchema } from "./ids";
 
 const nonEmpty = z.string().min(1);
+
+/**
+ * An output as other outputs and events name it: its catalog id, or `<worker>/<id>` for one a
+ * worker reported that the catalog does not declare (so two workers' local masks never become
+ * versions of one output). Every place a stored payload names an output takes this.
+ */
+export const outputRefSchema = z
+  .string()
+  .regex(/^[^/]+(\/[^/]+)?$/)
+  .refine((s) => s.split("/").every((p) => segmentSchema.safeParse(p).success), {
+    message: "must be an output id, or <worker>/<id>",
+  });
 
 export const outputKindSchema = z.enum(["base", "overlay", "value", "file", "collection"]);
 export type OutputKind = z.infer<typeof outputKindSchema>;
@@ -32,8 +46,16 @@ export type LinkRole = z.infer<typeof linkRoleSchema>;
  * zoom, the layers shown), so a view an agent looked at and one a researcher saves are the same
  * thing. A preset in `outputs.yaml` holds the part that is not specific to one scan.
  */
-export const viewSchema = z.looseObject({ shown: z.array(segmentSchema).optional() });
+export const viewSchema = z.looseObject({ shown: z.array(outputRefSchema).optional() });
 export type View = z.infer<typeof viewSchema>;
+
+/**
+ * What an overlay is stored as: `labels` (an integer map, one value per structure), `mask`
+ * (binary voxels), `surface` (a height map over an axis), `point` and `line` (annotations a
+ * ruler or a landmark draws). These are today's `outputs.json` kinds `volume` of `labels`,
+ * `structure`, `surface` and `annotation`.
+ */
+export const overlayShapeSchema = z.enum(["labels", "mask", "surface", "point", "line"]);
 
 const entryBase = {
   id: segmentSchema,
@@ -47,11 +69,11 @@ const entryBase = {
   expect: z.array(nonEmpty).optional(),
   /** The researcher can pick it at the start of a run. */
   selectable: z.boolean().optional(),
-  /** How it opens in review: its one preset. */
-  view: viewSchema.optional(),
+  /** How it opens in review: its presets, the first the default. */
+  views: z.array(viewSchema).min(1).optional(),
 };
 
-/** A member of a collection: typed like an output, linked to its siblings by member name. */
+/** A member of a collection: typed like an output; a link names a sibling member first, then a catalog id. */
 const memberSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("base") }),
   z.strictObject({ kind: z.literal("overlay"), base: segmentSchema }),
@@ -75,11 +97,17 @@ export const outputEntrySchema = z.discriminatedUnion("kind", [
     kind: z.literal("overlay"),
     /** The base it is drawn on. */
     base: segmentSchema,
-    /** A hint to the viewer for how it is drawn (a surface, a line); the workflow's converter reads it. */
-    shape: nonEmpty.optional(),
+    /**
+     * How it is represented, for the viewer and the workflow's converter. Required, except on a
+     * label overlay, which has the map's.
+     */
+    shape: overlayShapeSchema.optional(),
     /**
      * This overlay is one value of another overlay's label map: the map holds the voxels, this
-     * names the part of it. It is reported with the map, never as a file of its own.
+     * names the part of it. It is reported with the map, never as a file of its own, so a link to
+     * it (`on`, `context`, `madeFrom`) resolves to the map's version: fixing one label makes
+     * everything linked to any label of that map out of date, and main keeps the rest in one
+     * call. The map must be an overlay of shape `labels` that is itself no label.
      */
     label: z.strictObject({ of: segmentSchema, value: z.int().positive() }).optional(),
   }),
@@ -113,12 +141,6 @@ export const outputEntrySchema = z.discriminatedUnion("kind", [
 ]);
 export type OutputEntry = z.infer<typeof outputEntrySchema>;
 
-/** Where an entry sits in the file being checked, so a problem reports its path. */
-interface Located {
-  entry: OutputEntry;
-  path: (string | number)[];
-}
-
 /** The ids `entry` links to, for the cycle check. */
 function linksOf(entry: OutputEntry): string[] {
   switch (entry.kind) {
@@ -133,73 +155,77 @@ function linksOf(entry: OutputEntry): string[] {
   }
 }
 
-/** Every problem across `located`: ids, link kinds, label maps, views, collection members and cycles. */
-function problemsOf(located: Located[]): { path: (string | number)[]; message: string }[] {
-  const problems: { path: (string | number)[]; message: string }[] = [];
-  const issue = (path: (string | number)[], message: string) => {
+type Path = (string | number)[];
+
+/** Every problem in `entries`: ids, link kinds, label maps, views, collection members and cycles. */
+function problemsOf(entries: OutputEntry[]): { path: Path; message: string }[] {
+  const problems: { path: Path; message: string }[] = [];
+  const issue = (path: Path, message: string) => {
     problems.push({ path, message });
   };
-  const byId = new Map<string, Located>();
-  for (const l of located) {
-    if (byId.has(l.entry.id)) issue([...l.path, "id"], `duplicate id "${l.entry.id}"`);
-    else byId.set(l.entry.id, l);
+  const byId = new Map<string, { entry: OutputEntry; index: number }>();
+  for (const [index, entry] of entries.entries()) {
+    if (byId.has(entry.id)) issue([index, "id"], `duplicate id "${entry.id}"`);
+    else byId.set(entry.id, { entry, index });
   }
   const kindOf = (id: string) => byId.get(id)?.entry.kind;
-  /** Checks that `id` exists and has `kind`; the message names the field. */
-  const expectKind = (l: Located, field: (string | number)[], id: string, kind: OutputKind) => {
+  /** Checks that `id` is a catalog output of `kind`; `at` names the field. */
+  const expectKind = (at: Path, id: string, kind: OutputKind) => {
     const found = kindOf(id);
-    if (!found) issue([...l.path, ...field], `"${id}" is not an output of this file`);
+    if (!found) issue(at, `"${id}" is not an output of this file`);
     else if (found !== kind)
-      issue(
-        [...l.path, ...field],
-        `"${id}" is a ${found}, not ${kind === "overlay" ? "an overlay" : `a ${kind}`}`,
-      );
+      issue(at, `"${id}" is a ${found}, not ${kind === "overlay" ? "an overlay" : `a ${kind}`}`);
   };
 
   const labelValues = new Map<string, Set<number>>();
-  for (const l of located) {
-    const e = l.entry;
-    if (e.kind === "base" && e.from) expectKind(l, ["from"], e.from, "base");
+  for (const [index, e] of entries.entries()) {
+    const at = (...field: Path) => [index, ...field];
+    if (e.kind === "base" && e.from) expectKind(at("from"), e.from, "base");
     if (e.kind === "overlay") {
-      expectKind(l, ["base"], e.base, "base");
+      expectKind(at("base"), e.base, "base");
+      if (!e.label && !e.shape) issue(at("shape"), "an overlay that is no label has a shape");
       if (e.label) {
-        expectKind(l, ["label", "of"], e.label.of, "overlay");
+        if (e.shape) issue(at("shape"), "a label overlay has the shape of its map");
+        expectKind(at("label", "of"), e.label.of, "overlay");
         const map = byId.get(e.label.of)?.entry;
-        if (map?.kind === "overlay" && map.base !== e.base)
-          issue(
-            [...l.path, "label", "of"],
-            `"${map.id}" is drawn on "${map.base}", not on "${e.base}"`,
-          );
+        if (map?.kind === "overlay") {
+          if (map.label)
+            issue(at("label", "of"), `"${map.id}" is itself a label of "${map.label.of}"`);
+          else if (map.shape !== "labels")
+            issue(at("label", "of"), `"${map.id}" is not a labels overlay`);
+          if (map.base !== e.base)
+            issue(at("label", "of"), `"${map.id}" is drawn on "${map.base}", not on "${e.base}"`);
+        }
         const seen = labelValues.get(e.label.of) ?? new Set<number>();
         if (seen.has(e.label.value))
-          issue(
-            [...l.path, "label", "value"],
-            `label ${e.label.value} of "${e.label.of}" is taken`,
-          );
+          issue(at("label", "value"), `label ${e.label.value} of "${e.label.of}" is taken`);
         seen.add(e.label.value);
         labelValues.set(e.label.of, seen);
       }
     }
     if (e.kind === "value") {
-      for (const [i, id] of e.on.entries()) expectKind(l, ["on", i], id, "overlay");
+      for (const [i, id] of e.on.entries()) expectKind(at("on", i), id, "overlay");
       for (const [i, id] of (e.context ?? []).entries())
-        expectKind(l, ["context", i], id, "overlay");
+        expectKind(at("context", i), id, "overlay");
     }
-    e.view?.shown?.forEach((id, i) => {
-      const k = kindOf(id);
-      if (!k) issue([...l.path, "view", "shown", i], `"${id}" is not an output of this file`);
-      else if (k !== "overlay" && k !== "base")
-        issue([...l.path, "view", "shown", i], `"${id}" is a ${k}, which a view cannot draw`);
-    });
+    for (const [v, view] of (e.views ?? []).entries())
+      view.shown?.forEach((id, i) => {
+        const k = kindOf(id);
+        const where = at("views", v, "shown", i);
+        if (!k) issue(where, `"${id}" is not an output of this file`);
+        else if (k !== "overlay" && k !== "base")
+          issue(where, `"${id}" is a ${k}, which a view cannot draw`);
+      });
     if (e.kind === "collection") {
+      // A member's link names a sibling first, then a catalog output.
+      const resolve = (id: string) => e.members[id]?.kind ?? kindOf(id);
       for (const [name, m] of Object.entries(e.members)) {
-        const at = [...l.path, "members", name];
-        if (m.kind === "overlay" && e.members[m.base]?.kind !== "base")
-          issue([...at, "base"], `"${m.base}" is not a base member`);
+        const member = (...field: Path) => at("members", name, ...field);
+        if (m.kind === "overlay" && resolve(m.base) !== "base")
+          issue(member("base"), `"${m.base}" is not a base`);
         if (m.kind === "value")
           m.on.forEach((id, i) => {
-            if (e.members[id]?.kind !== "overlay")
-              issue([...at, "on", i], `"${id}" is not an overlay member`);
+            if (resolve(id) !== "overlay") issue(member("on", i), `"${id}" is not an overlay`);
           });
       }
     }
@@ -210,14 +236,16 @@ function problemsOf(located: Located[]): { path: (string | number)[]; message: s
   const visit = (id: string, trail: string[]) => {
     if (state.get(id) === "done") return;
     if (state.get(id) === "open") {
-      const at = byId.get(id);
-      if (at) issue(at.path, `cycle: ${[...trail.slice(trail.indexOf(id)), id].join(" -> ")}`);
+      const found = byId.get(id);
+      if (found)
+        issue([found.index], `cycle: ${[...trail.slice(trail.indexOf(id)), id].join(" -> ")}`);
       return;
     }
     state.set(id, "open");
-    const l = byId.get(id);
-    if (l)
-      for (const target of linksOf(l.entry)) if (byId.has(target)) visit(target, [...trail, id]);
+    const found = byId.get(id);
+    if (found)
+      for (const target of linksOf(found.entry))
+        if (byId.has(target)) visit(target, [...trail, id]);
     state.set(id, "done");
   };
   for (const id of byId.keys()) visit(id, []);
@@ -229,52 +257,6 @@ export const outputCatalogSchema = z
   .array(outputEntrySchema)
   .min(1)
   .superRefine((entries, ctx) => {
-    for (const p of problemsOf(entries.map((entry, i) => ({ entry, path: [i] }))))
-      ctx.addIssue({ code: "custom", ...p });
+    for (const p of problemsOf(entries)) ctx.addIssue({ code: "custom", ...p });
   });
 export type OutputCatalog = z.infer<typeof outputCatalogSchema>;
-
-/** The ids of `catalog` a researcher can pick when starting a run. */
-export const selectableIds = (catalog: OutputCatalog) =>
-  catalog.filter((o) => o.selectable).map((o) => o.id);
-
-/** One edit to a run's final outputs, in the order made. Mirrors `outputs.changed` (`agent-events.ts`). */
-const changeSchema = z.strictObject({
-  at: z.iso.datetime(),
-  by: z.enum(["runner", "main"]),
-  reason: nonEmpty,
-  add: z.array(segmentSchema).optional(),
-  drop: z.array(segmentSchema).optional(),
-  missing: z.array(segmentSchema).optional(),
-});
-
-/**
- * `/run/final-outputs.yaml`, written by code from the run's `outputs.changed` events for main and
- * the workers to read. The entries are the catalog's, copied in, so a reader needs no other file.
- * An entry's links name entries of this file, so a value's basis is listed with it.
- */
-export const finalOutputsSchema = z
-  .strictObject({
-    sections: z
-      .array(z.strictObject({ title: nonEmpty, outputs: z.array(outputEntrySchema).min(1) }))
-      .min(1),
-    /** Outputs of the sections that cannot be made on this scan, with why. Only main marks one. */
-    missing: z.array(z.strictObject({ id: segmentSchema, reason: nonEmpty })).optional(),
-    changes: z.array(changeSchema),
-  })
-  .superRefine((file, ctx) => {
-    const located = file.sections.flatMap((s, i) =>
-      s.outputs.map((entry, j) => ({ entry, path: ["sections", i, "outputs", j] })),
-    );
-    for (const p of problemsOf(located)) ctx.addIssue({ code: "custom", ...p });
-    const listed = new Set(located.map((l) => l.entry.id));
-    file.missing?.forEach((m, i) => {
-      if (!listed.has(m.id))
-        ctx.addIssue({
-          code: "custom",
-          path: ["missing", i, "id"],
-          message: `"${m.id}" is not listed`,
-        });
-    });
-  });
-export type FinalOutputs = z.infer<typeof finalOutputsSchema>;

@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
-import { parse as parseYaml } from "yaml";
+import { isScalar, parseDocument, parse as parseYaml, visit } from "yaml";
 import { z } from "zod";
 import {
   type AgentDefinition,
@@ -39,7 +39,11 @@ export interface LoadOptions {
   commit: string;
   /** The tool names a role may list (the harness's tool registry). */
   knownTools: readonly string[];
+  /** The loop the run is pinned to; only `agents` parses `outputs.yaml`. Default `tasks`. */
+  harness?: Harness;
 }
+
+export type Harness = "tasks" | "agents";
 
 /** Every run's shared directory: the role files and the generic skills. */
 const CORE = "workflows/core";
@@ -281,15 +285,21 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     );
   }
 
-  const yaml = texts.get(`${dir}/outputs.yaml`);
+  // Only the agent loop reads the catalog, so a later change to its schema never stops a task-loop run resuming.
+  const yaml = options.harness === "agents" ? texts.get(`${dir}/outputs.yaml`) : undefined;
   let outputCatalog: OutputCatalog | undefined;
   if (yaml !== undefined) {
-    let data: unknown;
-    try {
-      data = parseYaml(yaml);
-    } catch (e) {
-      throw new WorkflowParseError(`${dir}/outputs.yaml`, `invalid YAML: ${(e as Error).message}`);
-    }
+    const file = `${dir}/outputs.yaml`;
+    const doc = parseDocument(yaml);
+    if (doc.errors[0]) throw new WorkflowParseError(file, `invalid YAML: ${doc.errors[0].message}`);
+    // PyYAML (YAML 1.1) reads a bare `on` key as `True`; the file and its copies are read from Python.
+    visit(doc, {
+      Pair(_, pair) {
+        if (isScalar(pair.key) && pair.key.type === "PLAIN" && pair.key.value === "on")
+          throw new WorkflowParseError(file, 'write the key as "on": quoted');
+      },
+    });
+    const data: unknown = doc.toJS();
     const catalog = outputCatalogSchema.safeParse(data);
     if (!catalog.success) {
       const issue = catalog.error.issues[0];
