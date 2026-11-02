@@ -1,8 +1,8 @@
 /**
- * The grid a review task is shown on, and what the viewer draws there, from the run's published
- * blocks: blocks share a grid when their volumes share a `gridId`, and every position comes from
- * the run (crop offsets, the volume's own affine). Nothing is aligned or resampled here, and a
- * block on another grid is listed, never drawn.
+ * The grid a review subject (a task, or an output of the agent loop) is shown on, and what the
+ * viewer draws there, from the run's published blocks: blocks share a grid when their volumes
+ * share a `gridId`, and every position comes from the run (crop offsets, the volume's own affine).
+ * Nothing is aligned or resampled here, and a block on another grid is listed, never drawn.
  */
 import type { Focus, ReviewAssets, ReviewTask, Revision, Volume } from "@voluma/contracts/review";
 import { readLevel } from "./planes";
@@ -14,7 +14,7 @@ export type StructureDisplay = Record<string, { visible: boolean; opacity: numbe
 /** Label values of a labels volume on the grid; none means every nonzero value. */
 export type FocusLabels = { source: ZarrSource; labels: number[] };
 
-export type TaskGrid =
+export type ReviewGrid =
   | { state: "none" | "preparing" | "failed"; message: string }
   | {
       state: "ready";
@@ -28,13 +28,17 @@ export type TaskGrid =
       focus?: Zyx;
       /** Else the focused labels, whose middle `labelsMiddle` finds. */
       focusLabels?: FocusLabels;
-      /** What the task names that isn't drawn here, and why. */
+      /** What the subject names that isn't drawn here, and why. */
       notes: string[];
     };
 
+/** The blocks a grid is drawn from: a revision's, or those built from output versions. */
+export type Blocks = Pick<Revision, "volumes" | "structures" | "surfaces" | "annotations">;
+
 type Input = {
-  revision: Revision;
-  task: ReviewTask;
+  revision: Blocks;
+  /** The block ids the subject shows, before the focused check's (`taskBlocks` for a task). */
+  shown: readonly string[];
   assets: Record<string, ReviewAssets>;
   display: StructureDisplay;
   labels?: boolean;
@@ -45,16 +49,35 @@ type Input = {
   token(name: string): string;
 };
 
-export function taskGrid({
+/**
+ * What a task shows: what its numbers are measured on and drawn with, then the blocks it
+ * reported itself.
+ */
+export function taskBlocks(revision: Blocks, task: ReviewTask): string[] {
+  const measured = [...task.measurements, ...task.scores];
+  const ids = [
+    ...revision.volumes,
+    ...revision.structures,
+    ...revision.surfaces,
+    ...revision.annotations,
+  ].map((b) => b.id);
+  return [
+    ...measured.flatMap((m) => m.on),
+    ...measured.flatMap((m) => m.context),
+    ...ids.filter((id) => id.startsWith(`${task.id}/`)),
+  ];
+}
+
+export function reviewGrid({
   revision,
-  task,
+  shown,
   assets,
   display,
   labels: showLabels = false,
   focus,
   assetBase,
   token,
-}: Input): TaskGrid {
+}: Input): ReviewGrid {
   const volumes = new Map(revision.volumes.map((v) => [v.id, v]));
   const blocks = new Map<string, { volumeId: string | null }>([
     ...revision.volumes.map((v) => [v.id, { volumeId: v.id }] as const),
@@ -66,15 +89,8 @@ export function taskGrid({
     const volumeId = blocks.get(id)?.volumeId;
     return volumeId ? volumes.get(volumeId)?.gridId : undefined;
   };
-  // What the task shows: the focused check's blocks, what its numbers are measured on and
-  // drawn with, then the blocks it reported itself.
-  const measured = [...task.measurements, ...task.scores];
-  const named = unique([
-    ...(focus?.on ?? []),
-    ...measured.flatMap((m) => m.on),
-    ...measured.flatMap((m) => m.context),
-    ...[...blocks.keys()].filter((id) => id.startsWith(`${task.id}/`)),
-  ]);
+  // What the subject shows: the focused check's blocks, then its own.
+  const named = unique([...(focus?.on ?? []), ...shown]);
   // The scan's grid is the first image volume's; a focus point or box is in its voxels.
   const scanGrid = revision.volumes.find((v) => v.kind === "image")?.gridId;
   // A check's `volumeId` is a labels volume (a disagreement mask) it points into.
@@ -87,7 +103,7 @@ export function taskGrid({
     (v) => v.gridId === gridId && v.kind === "image" && v.data?.format === "npy",
   );
   if (!gridId || !image || image.data?.format !== "npy")
-    return { state: "none", message: "This task has no image to show." };
+    return { state: "none", message: "There is no image to show this on." };
   const imageAssets = assets[image.data.sha256];
   if (!imageAssets) return { state: "preparing", message: `Preparing ${image.name} for viewing…` };
   if (imageAssets.state === "failed")
@@ -353,7 +369,7 @@ function spacingZyx(volume: Volume): Zyx {
  */
 function focusPoint(
   focus: Focus,
-  revision: Revision,
+  revision: Blocks,
   image: Volume,
   onScanGrid: boolean,
 ): Zyx | undefined {

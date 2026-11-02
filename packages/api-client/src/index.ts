@@ -5,6 +5,11 @@
  * fails its schema is a `ContractError`, handed to the app's `onContractError`
  * handler so the app can move to the deployed code.
  */
+import {
+  type AcceptToCheckRequest,
+  acceptToCheckRequestSchema,
+  acceptToCheckResponseSchema,
+} from "@voluma/contracts/agent-events";
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
@@ -292,6 +297,20 @@ export async function acceptCheck(
       `/review/runs/${encodeURIComponent(runId)}/checks/${encodeURIComponent(checkId)}/accept`,
       { method: "POST", body: acceptCheckRequestSchema.parse(body) },
     ),
+  );
+}
+
+/**
+ * Looks right on one To check item of an output version (a run of the agent loop). The decision
+ * comes back on the run's event stream as `tocheck.resolved`: reconnect it to see it.
+ */
+export async function acceptToCheck(runId: string, body: AcceptToCheckRequest): Promise<void> {
+  await read(
+    acceptToCheckResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/tocheck/accept`, {
+      method: "POST",
+      body: acceptToCheckRequestSchema.parse(body),
+    }),
   );
 }
 

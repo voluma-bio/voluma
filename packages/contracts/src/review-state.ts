@@ -2,6 +2,7 @@
 import type { RunEvent } from "./events";
 import { corrections, type FoldedTask, fold } from "./fold";
 import type { TaskState, TaskStatus } from "./ids";
+import { outputsFold } from "./output-fold";
 import type { ReviewSummary, Unacceptable } from "./review";
 import type { RunState } from "./run";
 
@@ -49,7 +50,8 @@ export function reviewState(events: readonly RunEvent[], { live = false } = {}) 
         reviewedAt: completed?.createdAt ?? null,
       }
     : null;
-  return { revisions, summary, assets: folded.assets };
+  // The agent loop's outputs; empty for a run of the task loop, which publishes no versions.
+  return { revisions, summary, assets: folded.assets, outputs: outputsFold(events) };
 }
 
 /**

@@ -7,10 +7,13 @@
  *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
  *                                   a presigned GET, the browser fetches the bytes from storage
  *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
+ *   POST /runs/:runId/tocheck/accept  Looks right on a To check item of an output version
+ *                                   (`acceptToCheckRequestSchema`, the agent loop's runs)
  *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
  *                                   the snapshot is checked and stored here, the Run domain judges
  *                                   and stores the message
  */
+import { acceptToCheckRequestSchema } from "@voluma/contracts/agent-events";
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
   type PersonMessage,
@@ -120,6 +123,26 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     });
     if (!record) return c.json({ error: "not found" }, 404);
     return c.json(decisionResponse(record));
+  });
+
+  app.post("/runs/:runId/tocheck/accept", async (c) => {
+    const { output, version, item } = await parseJson(c, acceptToCheckRequestSchema);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      if (record.run.example)
+        throw new HTTPException(403, { message: "Example runs can't be changed." });
+      const published = record.results.outputs.byId
+        .get(output)
+        ?.versions.find((v) => v.version === version);
+      const check = published?.toCheck[item];
+      if (!check) throw new HTTPException(404, { message: "To check item not found." });
+      if (check.resolved) return null;
+      return {
+        type: "tocheck.resolved",
+        payload: { output, version, item, by: c.var.user.userId, outcome: "accepted" },
+      };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json({});
   });
 
   app.post("/runs/:runId/messages", async (c) => {
