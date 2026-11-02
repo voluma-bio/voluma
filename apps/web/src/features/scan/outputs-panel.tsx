@@ -45,12 +45,6 @@ export const statusOf = (row: OutputRow, live: boolean) =>
     ? { ...OUTPUT_STATUS.pending, word: "not yet" }
     : OUTPUT_STATUS[row.state.status];
 
-const needsYou = (r: OutputRow) => r.items.some((i) => !i.resolved);
-
-/** The final outputs with an open To check item, theirs or one they rest on. */
-export const needingYou = (review: OutputsReview) =>
-  new Set([...review.rows.values()].filter((r) => r.state.final && needsYou(r)).map((r) => r.id));
-
 export type FinalOutputsProps = {
   review: OutputsReview;
   /** The value open in place. */
@@ -95,7 +89,7 @@ function Values(props: FinalOutputsProps) {
         </EmptyState>
       </div>
     );
-  const needing = needingYou(review);
+  const needing = review.needing;
   const groups = [
     ...sections,
     ...(undeclared.length > 0 ? [{ title: "Not in the workflow", rows: undeclared }] : []),

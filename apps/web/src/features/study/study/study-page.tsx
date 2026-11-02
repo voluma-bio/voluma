@@ -12,6 +12,7 @@ import {
   kneeOf,
   liveStatus,
   needsYouOf,
+  needsYouText,
   plural,
   scanStatus,
   useNow,
@@ -198,7 +199,7 @@ function StatusLine({
   let mark = <StatusMark {...status} />;
   let more: string | null = null;
   if (run && status.status === "check") {
-    mark = <StatusMark status="check" label={`${needsYouOf(scan)} to check`} />;
+    mark = <StatusMark status="check" label={needsYouText(needsYouOf(scan), run.harness)} />;
     more = waitsOn(scan, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
     mark = <StatusMark {...liveStatus(run)} />;
