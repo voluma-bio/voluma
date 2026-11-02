@@ -2,8 +2,10 @@
 
 Studies (`/`, `studies-page.tsx`), Run on new scans (`/new`, `new-page.tsx`), Workflows
 (`/workflows`, `workflows-page.tsx`) and a study's two pages (`/studies/:id` and
-`/studies/:id/compare`, `study/`). On screen one scanned knee is a **sample**; "scan" stays for
-the scan review and uploads. Every run
+`/studies/:id/compare`, `study/`). On screen one scanned knee is a **scan** (agent-model `review.md`,
+Naming: "Scan" stays for now; the mockups' "sample" was not adopted). Write the word only through
+`INPUT_WORD` (`@voluma/ui`), so a rename is one edit; code names (`SampleTree`, `SampleBar`) keep
+"sample". Every run
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
 shown as its scan and linked straight to its scan review (`/scans/:runId`, `runHref`).
 The deleted study pages' paths redirect (`index.tsx`): `check` to `?status=needs-you`, `results` to
@@ -16,11 +18,12 @@ hackathon judges' notes link the example's study), so keep these until there is 
   study" opens it. The list reads `listStudies` alone (each scan's newest run in brief), refetched
   every 5 s while a run is live; the pane reads the selected study's `getStudy`. There are no
   thumbnails: no run makes one yet (the mockup's were made up).
-- **A sample's place** (`placeOf`): Needs you (To check, paused for keys, failed or stopped),
-  Running (live or queued), Done, then Not started (no run). It is the Samples tree's grouping
-  (`sampleTree` in run-view), so a sample sits in the same group in the tree and on the page;
-  `?status=<place>` shows one group, on the study page and on Compare. An example's samples are
-  always Done: nobody can change an example, so it never needs you.
+- **A scan's place** (`placeOf`): Needs you (To check, paused for keys, failed or stopped),
+  Running (live or queued), Done, then Not started (no run). The group comes from one function,
+  `placeOfStatus(status, example)` in run-view, which the tree, the Studies counts, the study
+  page, Compare and "Next scan that needs you" all use, so a scan sits in the same group
+  everywhere; an example's scans are always Done, since nobody can change an example.
+  `?status=<place>` shows one group, on the study page and on Compare.
 - **A sample's bar** (`SampleBar`, rule in `study-model.ts`'s header and `segmentOf`): one segment
   per measurement of the workflow (29 for mouse OA today, the mockup's "28" plus bone threshold),
   in task order, each from the study read's own fields: its task's state in the newest run
@@ -63,7 +66,7 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `runStatus` and `runHref` take a run's `state` and `review`, which a full `Run` and a
   `newestRuns` entry both carry. Every page uses this mapping; don't add another.
 - **A study's pages** sit under `study/study-layout.tsx`, which loads the study once, renders the
-  header line (breadcrumb, "Next sample that needs you") and the Samples tree on the left side
+  header line (breadcrumb, "Next scan that needs you") and the scan tree on the left side
   (`SidePanel`, `SampleTree` from `@voluma/ui`), and hands the study to each page through
   `useStudy`. A page renders the centre and, if it has one, its right side beside the tree. They
   derive everything from one `StudyDetail` in `study/study-model.ts` (pure; its header states the
@@ -79,7 +82,7 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `shownStatus` turns state and count into the status every page shows.
 - **To check means needs you.** Two counts, named apart in contracts: `needsYou` (what needs a
   person: open checks plus the card of a To check task with no check, such as one the second AI
-  sent back) is what every "N to check" reads: a sample's status and "Next sample that needs you"
+  sent back) is what every "N to check" reads: a scan's status and "Next scan that needs you"
   (`scanNeedsYou` / `needsYouOf`). `acceptable` is only what "Looks right" can accept, which only
   the scan review offers; here it gives a sample's line its items' titles (`waitsOn`, with each
   card nobody can accept as "<task>: <why>"). A live or stopped rerun's items show on its tasks,

@@ -15,6 +15,7 @@ import type { StudyDetail, StudyRunSummary, StudySummary } from "@voluma/contrac
 import {
   isLive,
   liveStatus,
+  placeOfStatus,
   plural,
   runHref,
   runStatus,
@@ -27,6 +28,7 @@ import {
   cx,
   EmptyState,
   ErrorState,
+  INPUT_WORD,
   LoadingState,
   Progress,
   ShellHeading,
@@ -38,7 +40,7 @@ import { workflowById } from "@voluma/workflow/bundled";
 import { ChevronRight, Info, Plus } from "lucide-react";
 import { type KeyboardEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { PLACES, type Place, placeOf, placeOfStatus, whenText } from "./study/study-model";
+import { PLACES, type Place, placeOf, whenText } from "./study/study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study/study-side";
 
 const LIVE = 5000;
@@ -59,9 +61,7 @@ function marksOf(study: StudySummary): Status[] {
 function placeCounts(study: StudySummary): Map<Place, number> {
   const counts = new Map<Place, number>();
   const add = (p: Place, n = 1) => counts.set(p, (counts.get(p) ?? 0) + n);
-  // Nobody can change an example, so it never needs you (as in the Samples tree).
-  for (const run of study.newestRuns)
-    add(study.example ? "done" : placeOfStatus(runStatus(run).status));
+  for (const run of study.newestRuns) add(placeOfStatus(runStatus(run).status, study.example));
   if (study.scanCount > study.newestRuns.length)
     add("not-started", study.scanCount - study.newestRuns.length);
   return counts;
@@ -161,7 +161,8 @@ export function StudiesPage() {
             <h1 className="m-0 text-xl font-semibold">Studies</h1>
             {list.length > 0 && (
               <span className="text-sm text-muted-foreground">
-                {plural(list.length, "study", "studies")} · {plural(samples, "sample")}
+                {plural(list.length, "study", "studies")} ·{" "}
+                {plural(samples, INPUT_WORD.one, INPUT_WORD.many)}
               </span>
             )}
           </header>
@@ -213,7 +214,7 @@ function StudyRow({
           <span className="truncate text-sm text-muted-foreground">
             {[
               workflow?.name ?? study.workflowId,
-              plural(study.scanCount, "sample"),
+              plural(study.scanCount, INPUT_WORD.one, INPUT_WORD.many),
               study.example && "an example",
             ]
               .filter(Boolean)
@@ -279,13 +280,20 @@ function Latest({ study, now }: { study: StudySummary; now: number }) {
 
 /** The selected study, described: what you came to do first, then what it is and what moved. */
 function StudyPane({ study }: { study: StudySummary }) {
-  const detail = useQuery(studyQuery(study.id));
+  // Polls like the study page while a run is live; the list (polling too) notices a new one.
+  const detail = useQuery({
+    ...studyQuery(study.id),
+    refetchInterval: (q) =>
+      study.newestRuns.some(isLive) || q.state.data?.scans.some((s) => isLive(s.runs[0]))
+        ? LIVE
+        : false,
+  });
   const workflow = workflowById(study.workflowId);
   return (
     <div className="grid content-start gap-7 px-4 pt-3 pb-6">
       <Button asChild className="justify-self-start">
         <Link to={hrefOf(study)}>
-          {study.scanCount === 1 ? "Open sample" : "Open study"}
+          {study.scanCount === 1 ? `Open ${INPUT_WORD.one}` : "Open study"}
           <ChevronRight aria-hidden />
         </Link>
       </Button>
@@ -313,13 +321,16 @@ function StudyPane({ study }: { study: StudySummary }) {
 function SamplesBlock({ study, detail }: { study: StudySummary; detail: StudyDetail }) {
   const counts = PLACES.map((p) => ({
     ...p,
-    n: detail.scans.filter((s) => placeOf(s) === p.place).length,
+    n: detail.scans.filter((s) => placeOf(s, detail.study.example) === p.place).length,
   })).filter((p) => p.n > 0);
   const grouped = detail.scans.some((s) => s.scan.group !== null);
   const groups = [...new Set(detail.scans.map((s) => s.scan.group ?? ""))];
   const many = study.scanCount > 1;
   return (
-    <SideBlock title="Samples" aside={<span className="text-fg-subtle">{study.scanCount}</span>}>
+    <SideBlock
+      title={INPUT_WORD.Many}
+      aside={<span className="text-fg-subtle">{study.scanCount}</span>}
+    >
       {many && (
         <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-sm">
           {counts.map((p) => (

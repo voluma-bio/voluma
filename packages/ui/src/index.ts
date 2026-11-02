@@ -85,7 +85,6 @@ export {
 export {
   AppShell,
   ShellHeading,
-  ShellLink,
   ShellPanel,
   type ShellPanelProps,
   type ShellSide,

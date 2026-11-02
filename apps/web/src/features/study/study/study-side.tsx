@@ -6,7 +6,7 @@
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import { groupNames, groupOf, kneeOf, plural, useNow } from "@voluma/run-view";
-import { Button, cx, Facts, type Status, StatusGlyph, StripPlot } from "@voluma/ui";
+import { Button, cx, Facts, INPUT_WORD, type Status, StatusGlyph, StripPlot } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
@@ -54,7 +54,9 @@ function groupLines(detail: StudyDetail): string[] {
     const scans = detail.scans.filter((s) => groupOf(s, grouped) === g);
     const knees = [...new Set(scans.map(kneeOf))];
     const knee = knees.length === 1 && knees[0] ? ` · ${kneeWord(knees[0])} knees` : "";
-    return grouped ? `${g}, ${scans.length}${knee}` : `${plural(scans.length, "sample")}${knee}`;
+    return grouped
+      ? `${g}, ${scans.length}${knee}`
+      : `${plural(scans.length, INPUT_WORD.one, INPUT_WORD.many)}${knee}`;
   });
 }
 
@@ -74,7 +76,7 @@ export function StudyFacts({
           `${workflow.name} · ${plural(measurementsOf(workflow).length, "measurement")}`,
         ],
         [
-          grouped ? "Groups" : "Samples",
+          grouped ? "Groups" : INPUT_WORD.Many,
           <span key="g" className="grid">
             {groupLines(detail).map((line) => (
               <span key={line}>{line}</span>
@@ -104,7 +106,7 @@ export function StudyFacts({
 
 /** Who a far sample is compared with: its group's other samples. */
 const others = (scan: StudyScanDetail) =>
-  scan.scan.group ? `other ${scan.scan.group} samples` : "other samples";
+  scan.scan.group ? `other ${scan.scan.group} ${INPUT_WORD.many}` : `other ${INPUT_WORD.many}`;
 
 /**
  * A sample has a dot when its value is in the declared unit, or counts as "to come" while its run
@@ -179,7 +181,7 @@ export function HeadlineBlock({
         <MeasurePlot detail={detail} output={output} />
       ) : (
         <p className="m-0 text-sm text-muted-foreground">
-          No values yet. Each sample's appear when its run finishes.
+          No values yet. Each {INPUT_WORD.one}'s values appear when its run finishes.
         </p>
       )}
       {detail.scans.length > 1 && (

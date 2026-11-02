@@ -9,7 +9,7 @@
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import { kneeOf, runHref, scanStatus } from "@voluma/run-view";
-import { Button, Count, cx, StatusGlyph, StatusMark } from "@voluma/ui";
+import { Button, Count, cx, INPUT_WORD, StatusGlyph, StatusMark } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -61,7 +61,7 @@ export function ComparePage() {
         </section>
       ) : (
         <p className="m-0 border-b border-border px-6 py-4 text-sm text-muted-foreground">
-          No values to compare yet. Each sample's appear when its run finishes.
+          No values to compare yet. Each {INPUT_WORD.one}'s values appear when its run finishes.
         </p>
       )}
       <ValuesTable
@@ -107,7 +107,7 @@ function ValuesTable({
   const digits = new Map(columns.map((o) => [o.id, digitsFor(valuesOf(detail, o))]));
   const groups = PLACES.map((p) => ({
     ...p,
-    scans: detail.scans.filter((s) => placeOf(s) === p.place),
+    scans: detail.scans.filter((s) => placeOf(s, detail.study.example) === p.place),
   })).filter((g) => g.scans.length > 0 && (!only || g.place === only));
   const toggle = (taskId: string) =>
     setFolded((now) => {
@@ -152,7 +152,7 @@ function ValuesTable({
                 scope="col"
                 className="sticky left-0 z-[2] min-w-56 border-r border-b border-border bg-card px-4 py-1.5 text-left align-bottom text-xs font-medium text-muted-foreground"
               >
-                Sample
+                {INPUT_WORD.One}
               </th>
               {shown.map((s) => (
                 <th
@@ -335,7 +335,7 @@ function exportCsv(detail: StudyDetail, outputs: OutputEntry[]) {
   // a leading tab or carriage return can hide one.
   const text = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
   const head = [
-    "Sample",
+    INPUT_WORD.One,
     "Group",
     "Knee",
     ...outputs.map((o) => text(`${o.name} (${unitOf(o) || "-"})`)),
