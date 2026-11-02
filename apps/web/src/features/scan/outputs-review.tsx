@@ -49,8 +49,8 @@ import {
   SampleTree,
   SidePanel,
   StatusMark,
+  useFoldWhile,
   useFullView,
-  useSideFold,
 } from "@voluma/ui";
 import {
   type GridPlanes,
@@ -227,50 +227,38 @@ export function OutputsReview({
   const views = useSavedViews(run, reopen);
 
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
-  // leaving Full view (Esc, F, opening a panel) puts the panes back.
+  // leaving Full view (Esc, F, opening a panel) puts the panes back. The page keeps only which
+  // view fills; whether it shows is the shell's.
   const [shellFull, setShellFull] = useFullView();
-  // The whole run folds Final outputs to its strip while it is up, so the graph gets the width,
-  // and unfolds it after; unfolding the strip during it leaves the whole run.
-  const [rightFolded, foldRight] = useSideFold("right");
-  const runFolded = useRef(false);
-  const toggleRun = useCallback(() => {
-    if (keys.current.centre === "run") return select({ centre: null });
-    if (!keys.current.rightFolded) {
-      runFolded.current = true;
-      foldRight(true);
-    }
-    select({ centre: "run" });
-  }, [select, foldRight]);
-  // Acts on changes only: the fold and the URL's `centre` don't land in the same render.
-  const was = useRef({ centre, rightFolded });
-  useEffect(() => {
-    const before = was.current;
-    was.current = { centre, rightFolded };
-    if (!runFolded.current) return;
-    if (before.centre === "run" && centre !== "run") {
-      runFolded.current = false;
-      foldRight(false);
-    } else if (centre === "run" && before.rightFolded && !rightFolded) {
-      runFolded.current = false;
-      select({ centre: null });
-    }
-  }, [centre, rightFolded, foldRight, select]);
-  const [layout, setLayout] = useState<QuadLayout>(QUAD_START);
-  const keys = useRef({ layout, centre, trailOpen, shellFull, rightFolded });
-  keys.current = { layout, centre, trailOpen, shellFull, rightFolded };
+  const [arranged, setArranged] = useState<QuadLayout>(QUAD_START);
+  const [fill, setFill] = useState<QuadLayout["full"]>(null);
+  // Forgotten once Full view is left, so F later folds the sides without filling a pane.
+  if (!shellFull && fill) setFill(null);
+  const layout = useMemo(
+    () => ({ ...arranged, full: shellFull ? fill : null }),
+    [arranged, shellFull, fill],
+  );
   const onLayout = useCallback(
     (next: QuadLayout) => {
+      setArranged(next);
+      setFill(next.full);
       if (!!next.full !== !!keys.current.layout.full) setShellFull(!!next.full);
-      setLayout(next);
     },
     [setShellFull],
   );
-  const wasFull = useRef(shellFull);
-  useEffect(() => {
-    if (wasFull.current && !shellFull)
-      setLayout((had) => (had.full ? { ...had, full: null } : had));
-    wasFull.current = shellFull;
-  }, [shellFull]);
+  // The whole run folds Final outputs to its strip while it is up, so the graph gets the width;
+  // unfolding the strip during it leaves the whole run.
+  useFoldWhile(
+    "right",
+    centre === "run",
+    useCallback(() => select({ centre: null }), [select]),
+  );
+  const toggleRun = useCallback(
+    () => select({ centre: keys.current.centre === "run" ? null : "run" }),
+    [select],
+  );
+  const keys = useRef({ layout, centre, trailOpen, shellFull });
+  keys.current = { layout, centre, trailOpen, shellFull };
   // W: the whole run and back. Esc, once a mark and the tool are put away (`useMarking`, on the
   // document, first) and Full view is left (the shell's): the whole run or the agents, then an
   // open trail item.

@@ -147,9 +147,10 @@ The URL keeps `output` (the value open), `trail` (an output it rests on, open), 
 `centre` (`run` for the whole run, `agents`). An `output` that isn't a listed value opens under
 the first value resting on it (`show`, also what a click in the whole run does). The panes'
 layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
-(both sides folded) plus that pane: leaving it by any means gives the panes back. The whole run
-folds Final outputs while it is up and unfolds it after; unfolding the strip during it leaves
-it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
+(both sides folded) plus that pane: the page keeps only which view fills and derives the rest
+from the shell, so leaving Full view by any means gives the panes back. The whole run folds Final
+outputs while it is up and unfolds it after (the shell's `useFoldWhile`); unfolding the strip
+during it leaves it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
 whole run and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.tsx`): Navigate
 (V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
