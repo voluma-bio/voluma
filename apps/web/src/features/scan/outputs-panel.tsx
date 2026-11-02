@@ -13,6 +13,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { LinkRole } from "@voluma/contracts/output-catalog";
 import type { OutputStatus, OutputsFold } from "@voluma/contracts/output-fold";
 import {
+  itemsOfVersion,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
@@ -23,14 +24,7 @@ import {
 import { cx, EmptyState, type Status, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  type Accepting,
-  clockOf,
-  Items,
-  itemsOfVersion,
-  Report,
-  VersionLine,
-} from "./version-report";
+import { type Accepting, clockOf, Items, Report, VersionLine } from "./version-report";
 
 /** Each output status on the shared status marks, in the design's words. */
 export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {

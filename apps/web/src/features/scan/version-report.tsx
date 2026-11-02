@@ -83,19 +83,6 @@ export function Items({
   );
 }
 
-/** The items a version raised, as `OutputItem`s. */
-export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
-  return v.toCheck.map((t, i) => ({
-    key: `${id}/${v.version}/${i}`,
-    output: id,
-    version: v.version,
-    item: i,
-    title: t.title,
-    ...(t.focus && { focus: t.focus }),
-    resolved: t.resolved !== undefined,
-  }));
-}
-
 const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 
 /** A version's report: why it was kept, the worker's own words, its evidence, what it was made from. */

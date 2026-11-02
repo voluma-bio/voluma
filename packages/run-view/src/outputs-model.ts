@@ -104,19 +104,22 @@ export function unitText(ucum: string): string {
 }
 
 function itemsOf(fold: OutputsFold, id: string): OutputItem[] {
-  return trailOf(fold, id).flatMap(({ id: output, state }) => {
-    const v = state?.latest;
-    if (!v) return [];
-    return v.toCheck.map((t, item) => ({
-      key: `${output}/${v.version}/${item}`,
-      output,
-      version: v.version,
-      item,
-      title: t.title,
-      ...(t.focus && { focus: t.focus }),
-      resolved: t.resolved !== undefined,
-    }));
-  });
+  return trailOf(fold, id).flatMap(({ id: output, state }) =>
+    state?.latest ? itemsOfVersion(output, state.latest) : [],
+  );
+}
+
+/** The To check items version `v` of output `id` raised; `key` is the URL's `item`. */
+export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
+  return v.toCheck.map((t, item) => ({
+    key: `${id}/${v.version}/${item}`,
+    output: id,
+    version: v.version,
+    item,
+    title: t.title,
+    ...(t.focus && { focus: t.focus }),
+    resolved: t.resolved !== undefined,
+  }));
 }
 
 const strings = (x: unknown): string[] =>
