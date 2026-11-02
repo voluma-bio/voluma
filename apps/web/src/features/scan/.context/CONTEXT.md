@@ -1,7 +1,8 @@
 # Scan review
 
 One screen, `/scans/:runId` (the user's theme, dark image wells): one scan's run, live while it goes and for review once
-it ends. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
+it ends. A run of the agent loop gets the outputs review (last section). A task-loop run keeps the
+review below, inside the shell's rail. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
 Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i (c on agent-loop runs); Marks only while you have a mark). Study replaces the left panel
 without navigating; To check keeps its URL selection and panel scroll position when reopened.
 Each visit to a scan opens To check and The AI, including after Home or a reload. Panel choices
@@ -129,18 +130,30 @@ stopped.
 
 ## The outputs review (agent-loop runs)
 
-`outputs-review.tsx`, for a run whose log has final outputs (`isAgentsRun`). The URL keeps
-`output` (the trail's root, picked in Final outputs), `trail` (an output of that trail: its
-report is open and the panes show it), `item` and `centre` (`run` for the whole run, `agents`).
-The panes' layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's
-Full view plus that pane: leaving Full view by any means gives the panes back. Esc goes, one
-thing per press: a mark being drawn, the tool, Full view (the shell), the whole run or agents,
-an open trail item. W toggles the whole run. The panes stay mounted (hidden) under the whole run
-and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.tsx`): Navigate (V), Point
-with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I, so The AI panel's key is C here).
-Your marks are page state and wait in "With your next message:" above the composer; the
-conversation is read-only on these runs, so they go nowhere yet (sending them is phase 7, through
-`messageMark`, which drops what a contract `Mark` can't hold). Save view posts `view.saved`
+`outputs-review.tsx`, for a run whose log has final outputs (`isAgentsRun`). It lays out the
+shell's two `SidePanel`s around the centre. Left: Conversation (default; badged with the
+`approval.requested` main still holds) and Samples (the shared `SampleTree`, from `sampleTree`
+over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds Needs you and
+Whole run. The value picked opens in place under its row: its version line and Report, its open
+To check items (with those of what it rests on), and Rests on (direct links, ordered measured
+on, beside, made from, drawn on) with Further back (the rest of `trailOf`, nearest first, each
+saying which row it feeds). A row there opens its report under it and frames the panes on it;
+the value's items carried by that row shrink to one line. Reports and items are
+`version-report.tsx`.
+
+The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item` and
+`centre` (`run` for the whole run, `agents`). An `output` that isn't a listed value opens under
+the first value resting on it (`show`, also what a click in the whole run does). The panes'
+layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
+(both sides folded) plus that pane: leaving it by any means gives the panes back. The whole run
+folds Final outputs while it is up and unfolds it after; unfolding the strip during it leaves
+it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
+run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
+whole run and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.tsx`): Navigate
+(V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I). Your marks are page
+state and wait in "With your next message:" above the conversation's footer; the conversation is
+read-only on these runs, so they go nowhere yet (sending them is phase 7, through `messageMark`,
+which drops what a contract `Mark` can't hold). Save view posts `view.saved`
 (`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
-"Saved views" menu reopens it on its grid. Final outputs and the trail panel are deliberately plain
-until the side panels' redesign; the trail's data is `@voluma/run-view` `outputs-trail.ts`.
+"Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
+`outputs-trail.ts`.

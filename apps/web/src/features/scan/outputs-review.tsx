@@ -50,6 +50,7 @@ import {
   SidePanel,
   StatusMark,
   useFullView,
+  useSideFold,
 } from "@voluma/ui";
 import {
   type GridPlanes,
@@ -218,9 +219,35 @@ export function OutputsReview({
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
   // leaving Full view (Esc, F, opening a panel) puts the panes back.
   const [shellFull, setShellFull] = useFullView();
+  // The whole run folds Final outputs to its strip while it is up, so the graph gets the width,
+  // and unfolds it after; unfolding the strip during it leaves the whole run.
+  const [rightFolded, foldRight] = useSideFold("right");
+  const runFolded = useRef(false);
+  const toggleRun = useCallback(() => {
+    if (keys.current.centre === "run") return select({ centre: null });
+    if (!keys.current.rightFolded) {
+      runFolded.current = true;
+      foldRight(true);
+    }
+    select({ centre: "run" });
+  }, [select, foldRight]);
+  // Acts on changes only: the fold and the URL's `centre` don't land in the same render.
+  const was = useRef({ centre, rightFolded });
+  useEffect(() => {
+    const before = was.current;
+    was.current = { centre, rightFolded };
+    if (!runFolded.current) return;
+    if (before.centre === "run" && centre !== "run") {
+      runFolded.current = false;
+      foldRight(false);
+    } else if (centre === "run" && before.rightFolded && !rightFolded) {
+      runFolded.current = false;
+      select({ centre: null });
+    }
+  }, [centre, rightFolded, foldRight, select]);
   const [layout, setLayout] = useState<QuadLayout>(QUAD_START);
-  const keys = useRef({ layout, centre, trailOpen, shellFull });
-  keys.current = { layout, centre, trailOpen, shellFull };
+  const keys = useRef({ layout, centre, trailOpen, shellFull, rightFolded });
+  keys.current = { layout, centre, trailOpen, shellFull, rightFolded };
   const onLayout = useCallback(
     (next: QuadLayout) => {
       if (!!next.full !== !!keys.current.layout.full) setShellFull(!!next.full);
@@ -250,7 +277,7 @@ export function OutputsReview({
       const k = keys.current;
       if (event.key.toLowerCase() === "w") {
         event.preventDefault();
-        select({ centre: k.centre === "run" ? null : "run" });
+        toggleRun();
       } else if (event.key === "Escape" && !k.shellFull) {
         if (k.centre) select({ centre: null });
         else if (k.trailOpen) select({ trail: null, item: null });
@@ -258,7 +285,7 @@ export function OutputsReview({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [select]);
+  }, [select, toggleRun]);
 
   let panes: React.ReactNode;
   if (!inView)
@@ -393,7 +420,7 @@ export function OutputsReview({
                 variant={centre === "run" ? "secondary" : "ghost"}
                 aria-pressed={centre === "run"}
                 aria-keyshortcuts="w"
-                onClick={() => select({ centre: centre === "run" ? null : "run" })}
+                onClick={toggleRun}
               >
                 <Workflow aria-hidden />
                 Whole run

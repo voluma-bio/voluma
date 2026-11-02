@@ -50,9 +50,10 @@ None of these stops a review; each makes it slower.
 
 - Marks made on an agent-loop run's panes are drawn but never sent: the conversation is read-only
   there until corrections (phase 7). Send them, with the panes' snapshot, with the message.
-- The Final outputs and trail panels are plain containers: re-skin them with the side panels'
-  redesign (Andrew; source study under way). The trail panel's name and the slices' Lat/Med
-  letters are Andrew's.
+- Rests on rows have no swatch or eye: the panes can't yet show or hide one overlay from the list
+  (mockup C's legend). The slices' Lat/Med letters are Andrew's call.
+- The task review still uses the shell's docked `ShellPanel`s; it goes with the task loop
+  (`packages/ui/.context/TODO.md`).
 - Presets per output ("XZ at V 125"), the value pinned on its overlay, and the pane's slice
   counter in the grid's own letters (U, V, W) wait for the workflow to define views.
 - A collection output opens as a table: not built ("Lists open here as a table in a later version").
