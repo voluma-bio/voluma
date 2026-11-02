@@ -160,11 +160,14 @@ async function runAgents(
       }
       return `${main.dir}/${file}`;
     },
-    leave: (api, threadId, eventId, outputId, ended) =>
-      leaveToResearcher(outputDeps(api), threadId, eventId, outputId, {
-        by: ended.by,
-        labels: ended.labels.map((id) => catalog.find((e) => e.id === id)?.name ?? id),
-      }),
+    leave: (api, threadId, eventId, outputId, labels) =>
+      leaveToResearcher(
+        outputDeps(api),
+        threadId,
+        eventId,
+        outputId,
+        labels.map((id) => catalog.find((e) => e.id === id)?.name ?? id),
+      ),
     async approved(call, api) {
       const record = api.log().records.get(call.threadId);
       if (!record) throw new Error(`${call.threadId} has no thread.started`);

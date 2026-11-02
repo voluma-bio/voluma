@@ -41,7 +41,8 @@ export function gate(tool: Tool, gated: ReadonlySet<string>, deps: GateDeps): To
         // `close` would end the run, and with it the review, before the held call is answered.
         if (tool.name === "close")
           return {
-            output: "Call close on its own: the researcher has to answer a call of yours first.",
+            output:
+              "Call close on its own: another call in this batch may be held for the researcher's answer, and close would end the run before it.",
             isError: true,
             truncated: false,
           };

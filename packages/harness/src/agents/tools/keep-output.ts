@@ -106,7 +106,7 @@ async function keep(
 
 /**
  * A keep or redo of `id` (an output, never a label: the caller resolves a label to its map) ended
- * without running: the researcher declined it, or the run closed with it withdrawn. The output is
+ * without running: the researcher declined it. The output is
  * kept as it is and left to them, with one To check item saying what changed beneath it and that
  * nobody has re-checked it; `labels` are the names of the label overlays the call named, which
  * the item lists. Called by the loop inside its step, with the thread that made the call; a
@@ -117,7 +117,7 @@ export async function leaveToResearcher(
   threadId: string,
   eventId: string,
   id: string,
-  ended: { by: "declined" | "withdrawn"; labels: readonly string[] },
+  labels: readonly string[],
 ): Promise<boolean> {
   if (eventById(deps, eventId)) return false;
   const fold = foldOf(deps);
@@ -131,13 +131,9 @@ export async function leaveToResearcher(
   const why = stale
     ? `Made from ${stale.id} v${stale.version}, since replaced by v${fold.byId.get(fold.labels.get(stale.id) ?? stale.id)?.latest?.version}; `
     : "Something it was made from changed; ";
-  const what =
-    ended.by === "declined"
-      ? "the AI's keep or redo was declined"
-      : "the AI's keep or redo was withdrawn when the run closed";
-  const names = ended.labels.length > 0 ? `${ended.labels.join(", ")}: ` : "";
+  const names = labels.length > 0 ? `${labels.join(", ")}: ` : "";
   await keep(deps, threadId, eventId, id, { reason: "left to the researcher" }, [
-    { title: `${names}${why}${what}, so this has not been re-checked.` },
+    { title: `${names}${why}the AI's keep or redo was declined, so this has not been re-checked.` },
   ]);
   return true;
 }

@@ -282,7 +282,7 @@ function startRefusals(
   if (started?.spawnedBy === toolCallId) return true;
   if (!NAME.test(name) || RESERVED.includes(name))
     throw new Refusal(
-      "A worker's name is lowercase letters, digits and dashes, starts with a letter, and is not main, researcher or supervisor.",
+      "A worker's name is lowercase letters, digits and dashes, starts with a letter, and is not main, researcher, supervisor or person.",
     );
   if (started) throw new Refusal(`The name ${name} was used in this run; pick another.`);
   const unknown = skills.find((s) => !api.skills.includes(s));

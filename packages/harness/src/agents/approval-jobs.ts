@@ -33,9 +33,8 @@ export interface ApprovalJobs {
   /** Starts the next approved call that has no job running; true when one started. */
   start(d: AgentLog): boolean;
   /**
-   * A call that ended without running (declined, or withdrawn when the run closed) leaves the
-   * outputs it named that were undecided at that point in the log to the researcher, a label
-   * overlay as its map, once. True when one was left.
+   * A declined call leaves the outputs it named that were undecided at the answer's position in
+   * the log to the researcher, a label overlay as its map, once. True when one was left.
    */
   leave(d: AgentLog): Promise<boolean>;
   /** The failure of storing an outcome, for the step to throw. */
@@ -50,7 +49,7 @@ export function approvalJobs(o: {
     threadId: string,
     eventId: string,
     outputId: string,
-    ended: { by: "declined" | "withdrawn"; labels: readonly string[] },
+    labels: readonly string[],
   ): Promise<boolean>;
   signal?: AbortSignal;
   nudge(): void;
@@ -93,14 +92,6 @@ export function approvalJobs(o: {
     }
   }
 
-  /** Where the request ended without running, as a log position, and how. */
-  const endedAt = (a: ApprovalRecord) =>
-    a.answer?.kind === "declined"
-      ? { by: "declined" as const, at: a.answer.at }
-      : a.settled?.outcome === "withdrawn"
-        ? { by: "withdrawn" as const, at: a.settled.at }
-        : undefined;
-
   return {
     start(d) {
       const next = running.size === 0 ? givenApprovals(d.approvals)[0] : undefined;
@@ -111,11 +102,10 @@ export function approvalJobs(o: {
     },
     async leave(d) {
       for (const a of d.approvals) {
-        const end = endedAt(a);
-        if (!end) continue;
+        if (a.answer?.kind !== "declined") continue;
         let state = endState.get(a.requestId);
         if (!state) {
-          const fold = outputsFold(o.recorder.events().slice(0, end.at + 1));
+          const fold = outputsFold(o.recorder.events().slice(0, a.answer.at + 1));
           state = {
             labels: fold.labels,
             undecided: new Set(fold.outputs.filter((x) => x.undecided).map((x) => x.id)),
@@ -131,7 +121,7 @@ export function approvalJobs(o: {
         for (const [map, labels] of byMap) {
           const eventId = approvalLeftId(a.requestId, map);
           if (!state.undecided.has(map) || d.written.has(eventId)) continue;
-          if (await o.leaveOutput(a.threadId, eventId, map, { by: end.by, labels })) return true;
+          if (await o.leaveOutput(a.threadId, eventId, map, labels)) return true;
         }
       }
       return false;

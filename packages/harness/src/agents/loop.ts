@@ -143,7 +143,7 @@ interface AgentLoopOptions {
     threadId: string,
     eventId: string,
     outputId: string,
-    ended: { by: "declined" | "withdrawn"; labels: readonly string[] },
+    labels: readonly string[],
   ): Promise<boolean>;
   /** Copies a researcher's screenshot (its stored key) into main's `/work` folder, and returns the path main reads; undefined when the file is gone. */
   stageScreenshot(snapshotKey: string): Promise<string | undefined>;
@@ -257,8 +257,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const jobs = approvalJobs({
     recorder,
     approved: (call) => o.approved(call, api),
-    leaveOutput: (threadId, eventId, outputId, ended) =>
-      o.leave(api, threadId, eventId, outputId, ended),
+    leaveOutput: (threadId, eventId, outputId, labels) =>
+      o.leave(api, threadId, eventId, outputId, labels),
     signal: o.signal,
     nudge: shell.nudge,
   });
@@ -335,6 +335,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       r.parentThreadId ?? root,
       {
         input: { text, sender },
+        ...(takeover.takeover !== undefined && { covers: d.lastEventId }),
       },
     );
   }
@@ -595,6 +596,17 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     });
   }
 
+  /** A screenshot that cannot be staged is dropped from the delivery: the notice still carries the text. */
+  async function stagedScreenshot(key: string) {
+    try {
+      return await o.stageScreenshot(key);
+    } catch (error) {
+      if (o.signal?.aborted) throw error;
+      console.error(`could not stage screenshot ${key}:`, error);
+      return undefined;
+    }
+  }
+
   /**
    * What main is told in its next delivery, as one text. `takeover`: the text of a replacement
    * main's first message: the notices it would be delivered, the researcher's messages the one
@@ -610,11 +622,11 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const screenshots = new Map<string, string>();
     for (const n of owed) {
       const key = n.kind === "person" ? n.message.snapshotKey : undefined;
-      const path = key && (await o.stageScreenshot(key));
+      const path = key && (await stagedScreenshot(key));
       if (path) screenshots.set(n.eventId, path);
     }
     return deliveryText({
-      notices: personFirst(owed).map((n) => noticeLine(n, events, screenshots)),
+      notices: personFirst(owed).map((n) => noticeLine(n, events, d.approvals, screenshots)),
       receipts: receipts(d, cut),
       agents: agentList(d, stateOf, now()),
       outOfDate: outOfDateIds(),
@@ -806,8 +818,6 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     await recorder.flush(); // a thread's end is stored before it is read
     const d = derive();
     if (d.rootEnded) {
-      // A close withdraws the open requests in the step that ends the run: their outputs are left now.
-      if (await jobs.leave(d)) return "acted";
       // The run is over: main's plan, and the notes of workers it ended without their own close.
       for (const r of d.records.values()) await o.keepNotes({ name: r.name, role: r.place });
       return "done";

@@ -7,6 +7,7 @@ import {
   type AgentLog,
   type AgentRecord,
   type AgentState,
+  type ApprovalRecord,
   approvalLeftPrefix,
   type Notice,
 } from "@voluma/contracts/agents";
@@ -52,6 +53,7 @@ export const STUCK_REASON = "the run stopped before this was made";
 export const noticeLine = (
   n: Notice,
   events: readonly RunEvent[],
+  approvals: readonly ApprovalRecord[],
   screenshots: ReadonlyMap<string, string>,
 ): string => {
   switch (n.kind) {
@@ -88,7 +90,7 @@ export const noticeLine = (
     case "person":
       return personLines(n.message, events, screenshots.get(n.eventId));
     case "approval":
-      return approvalLine(n, events);
+      return approvalLine(n, events, approvals);
   }
 };
 
@@ -98,12 +100,10 @@ const WITHDRAWN = "The run was closed";
 function approvalLine(
   n: Extract<Notice, { kind: "approval" }>,
   events: readonly RunEvent[],
+  approvals: readonly ApprovalRecord[],
 ): string {
-  const request = events.find((e) => e.type === "approval.requested" && e.id === n.requestId);
-  const call =
-    request?.type === "approval.requested"
-      ? `${request.payload.tool} (${request.payload.summary})`
-      : n.toolCallId;
+  const request = approvals.find((a) => a.requestId === n.requestId);
+  const call = request ? `${request.tool} (${request.summary})` : n.toolCallId;
   switch (n.outcome) {
     case "done":
       return `- The researcher approved ${call}, and it ran: ${n.text}`;
