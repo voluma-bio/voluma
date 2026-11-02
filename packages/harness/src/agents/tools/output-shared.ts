@@ -69,7 +69,10 @@ export function answerOf(p: OutputEvent) {
     path: folder,
     ...(p.files && { files: p.files.map((f) => `${folder}${f.name}`) }),
     ...(p.kept && { kept: p.kept.reason }),
-    note: "Listed in /run/outputs.yaml.",
+    ...(p.files && {
+      note: "Listed in /run/outputs.yaml. The files were moved out of your folder; each has a .removed.txt pointer where it was.",
+    }),
+    ...(!p.files && { note: "Listed in /run/outputs.yaml." }),
   };
 }
 
