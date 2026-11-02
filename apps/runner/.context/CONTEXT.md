@@ -454,9 +454,10 @@ claim (see `apps/api/.context/deploy.md`).
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check) and `RUNNER_ACTIVITY_MINUTES` (default 10; agent loop: minutes an
-agent may work without an `activity` line before it is reminded, and twice that before it stops
-holding the run open), `RUNNER_PING_MINUTES` (default 25: an idle agent gets one ping; main only while
-a worker runs) and `RUNNER_PING_CLOSE_MINUTES` (default 50: a worker pinged twice in a row is asked to
+agent may work outside tool calls without an `activity` line before it is reminded, and twice that
+without progress (an activity line or a tool result) before it stops holding the run open; main cannot
+start workers until it has sent the researcher its plan note), `RUNNER_PING_MINUTES` (default 25: an idle agent gets one ping; main only while
+a worker works or its own background command runs; an `activity`, `read` or `bash_manage` call is no answer) and `RUNNER_PING_CLOSE_MINUTES` (default 50: a worker pinged twice in a row is asked to
 wrap up only after this long idle). The harness defaults the rest (`LoopConfig`). No other limit is
 on time: a checker ends with its verdict or when it is stopped (a stale mark, feedback, the run's
 end).
