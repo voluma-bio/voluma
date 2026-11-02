@@ -13,6 +13,7 @@ import type { ThreadLayout } from "./layout";
 import type { LoopConfig, ModelSetup } from "./loop-config";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
+import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
 import type { Publish } from "./ports/publish";
 import type { PayloadOf, Recorder } from "./recorder";
@@ -49,6 +50,8 @@ export interface Shared {
   config?: Partial<LoopConfig>;
   providerError?(error: string): ProviderError | undefined;
   files: Files;
+  /** The agents' stored conversations (`agents/transcript.ts` renders one). */
+  history: History;
   evidence: Evidence;
   outputs: Outputs;
   /** Moves a file an agent named into a published output version (the agent loop's). */

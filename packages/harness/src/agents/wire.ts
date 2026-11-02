@@ -3,7 +3,7 @@
  * and the read-only shared mounts), the tools its role holds, its prompts and model, and the
  * loop on the shared shell's pool and lock. Task-loop wiring is `tasks-wire.ts`.
  */
-import { agentLog } from "@voluma/contracts/agents";
+import { type AgentLog, agentLog } from "@voluma/contracts/agents";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
 import type { AgentsDefinition } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
@@ -16,6 +16,7 @@ import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
 import { buildAgentTools } from "./tools/registry";
+import { writeTranscript } from "./transcript";
 
 interface AgentsWireOptions {
   runId: string;
@@ -55,10 +56,11 @@ export function agentsWire(o: AgentsWireOptions): Wire {
     if (!record) throw new Error(`${threadId} has no thread.started`);
     return record;
   };
-  const forAgent = (name: string, role: "main" | "worker"): ThreadLayout =>
+  const forAgent = (name: string, role: "main" | "worker", blind: boolean): ThreadLayout =>
     layout.forAgent({
       name,
       role,
+      blind,
       tools: roles[role]?.tools ?? [],
       // A sandbox mounts the folders of the agents that exist when it is created; a new one is seen after the idle timeout.
       peers: [...agentLog(recorder.events()).records.values()].map((r) => r.name),
@@ -66,7 +68,7 @@ export function agentsWire(o: AgentsWireOptions): Wire {
   return {
     sandboxOf: (threadId: string): ThreadLayout => {
       const r = recordOf(threadId);
-      return forAgent(r.name, r.place);
+      return forAgent(r.name, r.place, r.blind !== undefined);
     },
     nameOf: (threadId: string) => recordOf(threadId).name,
     /** An agent keeps its sandbox between turns; only one that has ended gives it up. */
@@ -78,10 +80,16 @@ export function agentsWire(o: AgentsWireOptions): Wire {
   };
 }
 
+/** The closed worker a new one starts from, and the note it closed with. */
+const startedFrom = (d: AgentLog, name: string) => ({
+  name,
+  note: [...d.records.values()].find((r) => r.name === name)?.end?.note ?? "",
+});
+
 async function runAgents(
   o: Shared,
   definition: AgentsDefinition,
-  forAgent: (name: string, role: "main" | "worker") => ThreadLayout,
+  forAgent: (name: string, role: "main" | "worker", blind: boolean) => ThreadLayout,
 ): Promise<void> {
   const { recorder } = o;
   const catalog = definition.outputCatalog;
@@ -99,11 +107,19 @@ async function runAgents(
     bash: o.bash,
     release: o.release,
     keepNotes: (agent) => keepNotes(o.publish, o.runId, agent, o.signal),
+    writeTranscript: (agent) =>
+      writeTranscript({
+        history: o.history,
+        files: o.files,
+        runId: o.runId,
+        agent,
+        signal: o.signal,
+      }),
     providerError: o.providerError,
     config: o.config,
     signal: o.signal,
     setup(agent, api) {
-      const layout = forAgent(agent.name, agent.role);
+      const layout = forAgent(agent.name, agent.role, agent.blind !== undefined);
       const recorded = api.log().records.get(agent.id)?.model;
       const setup = o.model(agent.role, recorded);
       const start: AgentStart =
@@ -119,6 +135,8 @@ async function runAgents(
               role: "worker",
               name: agent.name,
               brief: agent.brief ?? "",
+              ...(agent.blind && { blind: true }),
+              ...(agent.from && { from: startedFrom(api.log(), agent.from) }),
               ...(agent.skills && { skills: agent.skills }),
             };
       return {
@@ -138,7 +156,7 @@ async function runAgents(
             layoutOf: (threadId) => {
               const r = api.log().records.get(threadId);
               if (!r) throw new Error(`${threadId} has no thread.started`);
-              return forAgent(r.name, r.place);
+              return forAgent(r.name, r.place, r.blind !== undefined);
             },
             hashIn: async (threadId, path, signal) =>
               sandboxHash(await o.session.get(threadId, { note: false }), path, signal),

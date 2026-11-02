@@ -13,7 +13,7 @@
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
  * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
  *
- * The agent model (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work`
+ * The agent model (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work` (a blind worker's: only its own)
  * (so main's `plan.md` too), `/outputs` (the published versions), `/run` (the files rendered from the
  * events), `/inputs` and `/workflow` read-only. Mounts must not overlap (a nested one is unreliable on
  * Modal: the same spec once wrote and once failed read-only), so the sandbox mounts each peer folder that
@@ -118,6 +118,8 @@ export interface RunLayout {
     tools: readonly string[];
     /** The `/work` folders of the other agents that exist now: mounted read-only in the sandbox. */
     peers: readonly string[];
+    /** A blind worker (`start_worker {blind}`): only its own folder is under `/work`, in the sandbox and host-side. */
+    blind: boolean;
   }): ThreadLayout;
 }
 
@@ -284,15 +286,17 @@ export function runLayout({
   };
 
   return {
-    forAgent({ name, role, tools, peers }) {
+    forAgent({ name, role, tools, peers, blind }) {
       const folder = role === "main" ? "main" : name;
       const dir = `${WORK}/${folder}`;
       const work = workPrefix(runId);
       const own: SandboxMount = { path: dir, prefix: `${work}${folder}/`, access: "read-write" };
-      const peerMounts: SandboxMount[] = [...new Set(peers)]
+      const peerMounts: SandboxMount[] = [...new Set(blind ? [] : peers)]
         .filter((p) => p !== folder)
         .map((p) => ({ path: `${WORK}/${p}`, prefix: `${work}${p}/`, access: "read-only" }));
-      const hostWork: SandboxMount[] = [{ path: WORK, prefix: work, access: "read-only" }];
+      const hostWork: SandboxMount[] = blind
+        ? []
+        : [{ path: WORK, prefix: work, access: "read-only" }];
       const mounts: SandboxMount[] = [
         inputs(false),
         workflow,
@@ -320,7 +324,10 @@ export function runLayout({
         gateway: tools.includes("segment_sam"),
         description:
           `${common(false)}- ${OUTPUTS} holds every published output version, one folder per version: read it, do not modify it. ${RUN}/outputs.yaml lists the versions and ${RUN}/final-outputs.yaml the outputs the researcher asked for; both are rewritten as the run goes.\n` +
-          `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, and the other agents' folders under ${WORK} are read-only to you; read their files, never change them. A folder of an agent that started after your sandbox did is visible to read at once, and to bash after the sandbox restarts. ` +
+          `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, ` +
+          (blind
+            ? `and it is the only folder under ${WORK} you can see: you work blind, so no other agent's files are open to you.\n`
+            : `and the other agents' folders under ${WORK} are read-only to you; read their files, never change them. A folder of an agent that started after your sandbox did is visible to read at once, and to bash after the sandbox restarts. `) +
           `Reporting an output moves the files you name out of your folder into ${OUTPUTS}, leaving a <file>.removed.txt that says where.`,
         restartNote: `The sandbox was restarted. ${dir} was kept, and local files elsewhere (including /tmp) are gone.`,
         toolOutputPath: (toolCallId) => `${dir}/.tool-output/${toolCallId}`,

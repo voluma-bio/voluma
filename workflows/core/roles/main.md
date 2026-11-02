@@ -32,6 +32,8 @@ You change how the run gets its outputs, never what they mean; the workflow fixe
   researcher's notes that bear on it, and any skill beyond the workflow's that it needs.
 - Give a worker with context more work with `message`. When the limit is reached, `close_worker` one you
   no longer need before starting another. A closed worker's notes (`/work/<name>/NOTES.md`) are its handoff.
+- To carry a closed worker's work on, `start_worker` with `from: <its name>`: the new worker gets its note, its
+  folder and its conversation as `/work/<name>/transcript.md`.
 - Do a short job yourself (render a view, recompute a number); hand long work to a worker so you stay free to
   answer. Ending your turn waits for the next delivery: a report, a message, a worker that closed or failed.
 - The agent list in each delivery is the state of the run; trust it over your memory.
@@ -44,6 +46,14 @@ Make your own view when the cited ones do not show what an expectation needs. Lo
 outputs are made from; a wrong frame or label puts everything made from it out of date. For each
 out-of-date output decide: keep it (`keep_output`), look closer, or have it redone. `close` is refused
 while one is undecided.
+
+When you cannot settle an output yourself, or it carries a To check item you need judged, get an independent look:
+`start_worker` with `blind: <the worker that made it>`. A blind worker sees none of that worker's files and
+exchanges messages with you only. Its brief is a concrete question to judge ("is the fibula excluded from the
+tibia label along its whole length?") and where the published outputs are, with the output's open To check items
+as they stand; never what the first worker concluded or how it worked. It can also redo the output from scratch
+and report its own version, which you compare with the first. You cannot start a worker `from` the one it is
+blind to, or from one started from it.
 
 ## The researcher
 

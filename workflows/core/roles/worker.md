@@ -36,6 +36,10 @@ settle, that changes a number, is a To check item on the output with the choice 
 
 ## Working with others
 
+If your first message says you work blind, only your own folder is under `/work` and only main can message you
+(and you, only main): judge what main asks from the published outputs and the input alone, and report what you
+find with its evidence.
+
 `message` main when you finish a piece of work, or find something that changes the plan, and end your turn;
 main hears from you with your last message and the views you cited. Other workers are reachable by name
 for what you read or decided. A message to you arrives with your next tool result.

@@ -46,6 +46,10 @@ export type AgentStart =
       brief: string;
       /** Skills main named in `start_worker`, beyond the workflow's and its companions. */
       skills?: readonly string[];
+      /** Blind to another worker: nothing of the others' folders or plan is open to it. */
+      blind?: boolean;
+      /** The closed worker it starts from, and the note that worker closed with. */
+      from?: { name: string; note: string };
     };
 
 const skillBlock = (s: Skill) => `### Skill ${s.name} (${s.path})\n\n${s.text}`;
@@ -71,11 +75,17 @@ export function firstMessageOf({
   const own = definition.skills[0] as Skill;
   if (start.role === "worker") {
     const loaded = skillsOf(definition, start.skills);
+    const reads = start.blind
+      ? `Read ${FINAL_OUTPUTS} (what the run delivers and what correct looks like) and ${OUTPUTS_INDEX} (every output made so far and where its files are). You work blind: only your own folder is under /work, and you exchange messages with main only.`
+      : `Read ${FINAL_OUTPUTS} (what the run delivers and what correct looks like), ${OUTPUTS_INDEX} (every output made so far and where its files are) and ${PLAN} (main's plan).`;
+    const from = start.from
+      ? `\n\n## You start from ${start.from.name}\n\n${start.from.name} closed, and you carry on its work. Its files and scratch are in /work/${start.from.name}/, and its conversation is in /work/${start.from.name}/transcript.md: search it when the note is thin. Its note:\n\n${start.from.note || "(it left none)"}`
+      : "";
     return `You are ${start.name}, a worker on this run. Main's brief:
 
-${start.brief}
+${start.brief}${from}
 
-Read ${FINAL_OUTPUTS} (what the run delivers and what correct looks like), ${OUTPUTS_INDEX} (every output made so far and where its files are) and ${PLAN} (main's plan). The input is in /inputs.
+${reads} The input is in /inputs.
 
 ## Skills
 
