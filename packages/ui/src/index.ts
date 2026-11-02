@@ -117,3 +117,4 @@ export {
 } from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
 export { Tooltip, type TooltipProps } from "./tooltip";
+export { INPUT_WORD } from "./words";
