@@ -129,7 +129,7 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
   const links = (role: string) =>
     latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
   const on = [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])];
-  const trail = trailOf(fold, catalog, state.id);
+  const trail = trailOf(fold, state.id);
   return {
     id: state.id,
     name: outputName(catalog, state.id),
