@@ -2,11 +2,11 @@
  * Tooltip: a control's name and, when it has one, the key that does the same. Built on Radix, so
  * it opens on hover and on keyboard focus, closes on Escape, and renders in a portal clear of any
  * clipping panel. The child must be one element that takes a ref (a button). The portal sits
- * outside the trigger's `data-theme` subtree, so the tooltip copies the trigger's theme (`useThemedPortal`).
+ * outside the trigger's `data-theme` subtree, so the tooltip copies the surrounding `ThemeScope`'s theme (`useTheme`).
  */
 import { Tooltip as Radix } from "radix-ui";
 import type { ReactElement } from "react";
-import { useThemedPortal } from "./portal";
+import { useTheme } from "./portal";
 
 export type TooltipProps = {
   /** The control's name, e.g. "Full view". */
@@ -18,16 +18,14 @@ export type TooltipProps = {
 };
 
 export function Tooltip({ label, shortcut, side = "top", children }: TooltipProps) {
-  const portal = useThemedPortal();
+  const theme = useTheme();
   return (
     <Radix.Provider delayDuration={400} skipDelayDuration={300}>
-      <Radix.Root onOpenChange={portal.onOpenChange}>
-        <Radix.Trigger ref={portal.ref} asChild>
-          {children}
-        </Radix.Trigger>
+      <Radix.Root>
+        <Radix.Trigger asChild>{children}</Radix.Trigger>
         <Radix.Portal>
           <Radix.Content
-            data-theme={portal.theme}
+            data-theme={theme}
             side={side}
             sideOffset={6}
             collisionPadding={8}
