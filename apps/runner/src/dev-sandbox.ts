@@ -29,6 +29,7 @@ import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
 import type { Sandbox } from "@voluma/harness/ports/sandbox";
 import { specOf } from "@voluma/harness/sandbox-specs";
+import { HARNESSES } from "@voluma/harness/supervise-run";
 import { segmentSamTool } from "@voluma/harness/tools/segment-sam";
 import { runnerConfig } from "./config.ts";
 import { holdLease } from "./lease.ts";
@@ -59,7 +60,7 @@ const apiHost = new URL(config.api.baseUrl).hostname;
 if (!["localhost", "127.0.0.1", "[::1]"].includes(apiHost) && !values["allow-remote"])
   throw new Error(`${apiHost} is not this machine: pass --allow-remote to claim a run there`);
 
-const claim = await claimRun(config.api, "dev-sandbox");
+const claim = await claimRun(config.api, "dev-sandbox", HARNESSES);
 if (!claim) throw new Error("no queued run: start one in the web app (pnpm dev) first");
 const { run, leaseToken } = claim;
 if (run.id !== values.run) {

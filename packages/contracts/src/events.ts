@@ -44,6 +44,8 @@ import {
   bashBackgroundedSchema,
   bashEndedSchema,
   closeRequestedSchema,
+  markDeletedSchema,
+  markPlacedSchema,
   outputPublishedSchema,
   outputsChangedSchema,
   pingSchema,
@@ -53,6 +55,7 @@ import {
   viewSavedSchema,
 } from "./agent-events";
 import {
+  harnessSchema,
   modelRefSchema,
   runIdSchema,
   taskIdSchema,
@@ -227,7 +230,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * first one decides it, so a resume keeps the loop the run began on (`pinnedImageOf` pins the
          * sandbox image the same way). Absent means the task loop.
          */
-        harness: z.enum(["tasks", "agents"]).optional(),
+        harness: harnessSchema.optional(),
       })
       .refine((p) => p.parentThreadId !== null || p.workflows !== undefined, {
         path: ["workflows"],
@@ -674,6 +677,8 @@ export const runEventSchema = z.discriminatedUnion("type", [
     payload: approvalAnsweredSchema,
   }),
   z.object({ ...envelope, ...stored, type: z.literal("view.saved"), payload: viewSavedSchema }),
+  z.object({ ...envelope, ...stored, type: z.literal("mark.placed"), payload: markPlacedSchema }),
+  z.object({ ...envelope, ...stored, type: z.literal("mark.deleted"), payload: markDeletedSchema }),
 ]);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];

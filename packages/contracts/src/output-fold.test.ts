@@ -7,7 +7,7 @@ import {
   refuseOutputsChange,
 } from "./final-outputs";
 import { type OutputCatalog, outputCatalogSchema } from "./output-catalog";
-import { finalOutputs, latest, outputsFold, pendingFinal, undecidedOutOfDate } from "./output-fold";
+import { finalOutputs, outputsFold, pendingFinal, undecidedOutOfDate } from "./output-fold";
 
 type Link = { id: string; version: number; role: "on" | "base" | "input" };
 const sha = (n: string) => n.padEnd(64, "0");
@@ -77,6 +77,9 @@ const stale = (events: RunEvent[]) =>
   outputsFold(events)
     .outputs.filter((o) => o.outOfDate)
     .map((o) => o.id);
+
+const latest = (events: Parameters<typeof outputsFold>[0], id: string) =>
+  outputsFold(events).byId.get(id)?.latest;
 
 describe("out of date", () => {
   it("is clean while every link names the latest version", () => {

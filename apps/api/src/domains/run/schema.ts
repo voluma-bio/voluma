@@ -142,6 +142,8 @@ export const runs = pgTable(
     credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
     /** The model every role of the run uses (`runSchema.model`); null for runs made before the choice existed. */
     model: text(),
+    /** The loop that drives the run (`runSchema.harness`); null for runs made before the choice: the task loop. */
+    harness: text({ enum: ["tasks", "agents"] }),
     example: boolean().notNull().default(false),
     createdAt: timestamptz().notNull().defaultNow(),
     state: text({ enum: ["queued", "running", "awaiting-keys", "ended"] }).notNull(),

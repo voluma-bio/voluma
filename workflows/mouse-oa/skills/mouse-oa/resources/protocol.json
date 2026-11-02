@@ -9,6 +9,30 @@
     "definition": "deck #3: the lab's working reading of meniscus plus spurs on the medial side (not anatomically checked)"
   },
 
+  "plate-faces": {
+    "smooth_sigma_um": [31.5, 84, 84],
+    "valley_hu": [800, 4500],
+    "search_start_um": 84,
+    "search_end_um": 1500,
+    "dp_max_slope": 3,
+    "dp_step_penalty_per_um": 0.0346,
+    "face_reach_um": 126,
+    "dip_smooth_um": [10.5, 21, 21],
+    "median_um": 52.5,
+    "flag_slope": 2.5,
+    "flag_min_dip_hu": -1000,
+    "flag_pad_um": 21,
+    "flag_min_area_um2": 6600,
+    "max_surface_slope": 1.5,
+    "min_run_um": 315,
+    "bridge_um": 1000,
+    "section_step_um": 105,
+    "point_step_um": 42,
+    "max_gap_um": 250,
+    "off_tibia_margin_um": 105,
+    "qc_panels": 6
+  },
+
   "roi-iioc": {
     "region": "ROI-1",
     "values": { "TV": "tv-tibial-iioc", "BV": "bv-tibial-iioc", "BV/TV": "bv-tv-tibial-iioc" },

@@ -39,6 +39,7 @@ import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
+import { AGENT_TOOL_NAMES } from "@voluma/harness/agents/tools/registry";
 import { errorText } from "@voluma/harness/error-text";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import {
@@ -54,7 +55,7 @@ import {
   type ModelSetup,
   type Outcome,
   type Prepared,
-  pinnedImageOf,
+  pinOf,
   type Supervised,
   superviseRun,
 } from "@voluma/harness/supervise-run";
@@ -75,6 +76,7 @@ import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
 import { storeEvidence } from "./store-evidence.ts";
 import { storeFiles } from "./store-files.ts";
+import { storePublish } from "./store-publish.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
@@ -256,9 +258,12 @@ async function claimBody(
     const stored = await client.storedEvents();
     // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
     // run to different dependencies. A run made before this was recorded is refused here.
-    const pinnedImage = pinnedImageOf(runId, stored);
-    const sandboxImage = pinnedImage ?? config.sandbox.image;
-    log(`sandbox image: ${sandboxImage} (${pinnedImage ? "the run's own" : "this runner's"})`);
+    const pin = pinOf(runId, stored);
+    const sandboxImage = pin?.image ?? config.sandbox.image;
+    const harness = pin?.harness ?? run.harness ?? "tasks";
+    log(
+      `sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"}); loop: ${harness}`,
+    );
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {
@@ -346,7 +351,8 @@ async function claimBody(
           prefix: workflowSnapshotPrefix(runId),
           root: REPO_ROOT,
           commit: config.commit,
-          knownTools: TOOL_NAMES,
+          knownTools: harness === "agents" ? AGENT_TOOL_NAMES : TOOL_NAMES,
+          harness,
         }),
       );
       // The model every role uses: `RUNNER_MODEL` (a plumbing check) over the run's own model
@@ -423,7 +429,7 @@ async function claimBody(
       };
       return {
         definition,
-        plan: computePlan(definition.files, run.selectedOutputs).tasks,
+        plan: "files" in definition ? computePlan(definition.files, run.selectedOutputs).tasks : [],
         model: (role, recorded) => ({
           model: threadModel(setupOf(role).model, recorded),
           thinkingLevel: setupOf(role).thinkingLevel,
@@ -433,6 +439,7 @@ async function claimBody(
     };
     supervised = superviseRun({
       runId,
+      harness,
       prepare: (signal) =>
         prepare(signal).catch((e) => {
           logStack(e);
@@ -449,6 +456,7 @@ async function claimBody(
       history: client,
       evidence: storeEvidence(objects),
       files: storeFiles(objects),
+      publish: storePublish(objects),
       outputs: r2Outputs(config.r2),
       createSandbox,
       // The image is recorded on the root's first event, so `sandboxImage` is the run's own.

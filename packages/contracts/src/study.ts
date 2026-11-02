@@ -44,6 +44,7 @@
  */
 import { z } from "zod";
 import {
+  harnessSchema,
   inputIdSchema,
   modelRefSchema,
   runIdSchema,
@@ -210,6 +211,8 @@ export const createStudyRequestSchema = z
     keys: visitorKeysSchema.optional(),
     /** For every run started by this call, as in `startRunRequestSchema`. */
     model: modelRefSchema.optional(),
+    /** For every run started by this call, as in `startRunRequestSchema`. */
+    harness: harnessSchema.optional(),
   })
   .refine((r) => new Set(r.scans.map((s) => s.inputId)).size === r.scans.length, {
     path: ["scans"],

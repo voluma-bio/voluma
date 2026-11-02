@@ -100,7 +100,7 @@ def load_series(source, out):
         volume[z] = d.pixel_array.astype(np.float32) * cal['slope'] + cal['intercept']
         sources.append({'path': str(p.resolve()), 'sha256': sidecar.sha256_file(p)})
     np.save(dest, volume)
-    meta = {'shape_zyx': list(volume.shape), 'spacing_zyx_mm': spacing_xyz[::-1], 'spacing_xyz_mm': spacing_xyz,
+    meta = {'shape_zyx': list(volume.shape), 'units': cal['units'], 'spacing_zyx_mm': spacing_xyz[::-1], 'spacing_xyz_mm': spacing_xyz,
                 'affine_xyz_to_world_mm': affine.tolist(), 'calibration': cal, 'sources': sources,
                 'coordinate_note': 'Array indices are Z,Y,X; the affine consumes X,Y,Z voxel-center indices',
                 'status': 'Calibrated from header metadata; no independent phantom validation'}

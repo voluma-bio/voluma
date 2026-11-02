@@ -15,38 +15,54 @@
  * destroys the sandboxes, which the host orders after the lease and the report.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { Harness } from "@voluma/contracts/ids";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
+import {
+  type AgentsDefinition,
+  OLDER_VERSION_MESSAGE,
+  type WorkflowDefinition,
+} from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
+import type { UserSender } from "./adapters/pi/start-thread";
+import { agentsWire } from "./agents/wire";
+import { BashRuntime } from "./bash-runtime";
 import { errorText } from "./error-text";
-import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
-import { keepOutputs } from "./outputs-backup";
+import type { ProviderError } from "./failure-policy";
+import { convertLayout, type SandboxLayout } from "./layout";
+import type { LoopConfig, ModelSetup } from "./loop-config";
+import { runLock, type Wire } from "./loop-shell";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
+import type { Publish } from "./ports/publish";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { failUnfinishedAssets, type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
-import { type LoopConfig, type ModelSetup, type ProviderError, runLoop } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
-import { type PlanTask, taskRuntime } from "./task-runtime";
+import type { PlanTask } from "./task-runtime";
+import { type TasksWireOptions, tasksWire } from "./tasks-wire";
 import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
-import { threads } from "./threads";
-import { buildTools } from "./tools/registry";
+import { type Threads, threads } from "./threads";
+
+/** The sender of a background command's notices. */
+const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
 export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
 
 /** How long threads get to end after a cut-off or `fail` before the result settles anyway. */
 const WIND_DOWN_MS = 5_000;
 
+/** The loops this build can run; a runner lists them on its claim, so it is handed no other run. */
+export const HARNESSES: readonly Harness[] = ["tasks", "agents"];
+
 /** What `prepare` returns: the workflow and what depends on its roles. */
 export interface Prepared {
   /** The role files, skills and task files of the run's workflow snapshot. */
-  definition: WorkflowDefinition;
+  definition: WorkflowDefinition | AgentsDefinition;
   /** The plan computed from the user's selection; the run starts with it (the main agent may change it). */
   plan: readonly PlanTask[];
   /**
@@ -74,6 +90,11 @@ export interface SuperviseRunOptions {
   inputPrefix: string;
   /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
   previousClaim?: ClaimEndReason;
+  /**
+   * The loop that drives the run: the pin's, or the runner's setting for a run's first claim.
+   * Every claim writes it on the root, so pass the pinned value (`pinOf`), never the config's.
+   */
+  harness: Harness;
   /** The workflow packages the run starts from; the root's first event records each at the snapshot's commit. */
   workflows: WorkflowPin[];
   recorder: Recorder;
@@ -83,6 +104,8 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
+  /** How an agent's named file becomes a published output version (the agent loop's `report_output`). */
+  publish: Publish;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
   createSandbox: CreateSandbox;
   /** Size and lifetime of every sandbox. */
@@ -118,44 +141,54 @@ export interface Supervised {
   close(): Promise<void>;
 }
 
-/**
- * Each role's layout facts and the tools it holds: its file's list, less `segment_sam` where it
- * cannot be used. That needs the gateway and a sandbox that produces results: one with `/outputs`
- * writable. A role that only inspects (its `/outputs` is read-only) never holds it: it does not
- * redo the task.
- */
-function rolesOf(def: WorkflowDefinition, gateway: boolean): RunLayoutOptions["roles"] {
-  return Object.fromEntries(
-    Object.values(def.agents).map(({ name, tools, scratch, outputs, checkedBy, subagents }) => {
-      const analyses = tools.includes("bash") && outputs === "write";
-      const held = tools.filter((t) => t !== "segment_sam" || (gateway && analyses));
-      return [name, { scratch, outputs, checkedBy, subagents, tools: held }];
-    }),
-  );
-}
-
 const ROOT_NAME = "supervisor";
 
+/** What a run began on, read from its root's `thread.started`: the sandbox image and the loop. */
+export interface Pin {
+  image: string;
+  harness: Harness;
+}
+
 /**
- * The image a run began on, read from its root's `thread.started`; undefined for a run with no
- * log yet. A log whose root is not the one this version mints (`<runId>.supervisor`, an id from
- * before ids were derived), or whose root records no image, was made by an older Voluma: resuming
- * it would mint a second root or change its dependencies, so it is refused.
+ * The pin of a run, or undefined for a run with no log yet. The first claim's root decides and
+ * every later one copies it, so a resumed run keeps its dependencies and its image. The loop is
+ * decided earlier, by `runs.harness` at the claim (which only hands a runner a run of a loop it
+ * lists); the root's `harness` records it for log readers. A root with no `harness` is a task run. A log whose root is not the one this version mints
+ * (`<runId>.supervisor`, an id from before ids were derived), or whose root records no image, was
+ * made by an older Voluma: resuming it would mint a second root or change its dependencies, so it
+ * is refused.
  */
-export function pinnedImageOf(runId: string, log: readonly RunEvent[]): string | undefined {
+export function pinOf(runId: string, log: readonly RunEvent[]): Pin | undefined {
   if (threadLog(log).root.id === undefined) return undefined;
   const root = threadIdOf(runId, ROOT_NAME);
-  const image = log.find(
+  const first = log.find(
     (e) => e.type === "thread.started" && e.threadId === root && e.payload.sandboxImage,
   );
-  if (image?.type !== "thread.started" || !image.payload.sandboxImage) {
+  if (first?.type !== "thread.started" || !first.payload.sandboxImage) {
     throw new Error(OLDER_VERSION_MESSAGE);
   }
-  return image.payload.sandboxImage;
+  return { image: first.payload.sandboxImage, harness: first.payload.harness ?? "tasks" };
+}
+
+/** The pinned loop's wire; the definition is that loop's own kind (the runner loaded it for the pin). */
+function wireOf(
+  harness: Harness,
+  o: Omit<TasksWireOptions, "definition"> & { definition: Prepared["definition"] },
+): Wire {
+  const { definition } = o;
+  if (harness === "agents") {
+    if (!("outputCatalog" in definition)) throw new Error("an agents run loaded a task workflow");
+    return agentsWire({ ...o, definition });
+  }
+  if (!("files" in definition)) throw new Error("a tasks run loaded an agents workflow");
+  return tasksWire({ ...o, definition });
 }
 
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, signal: cutOff } = options;
+  if (!HARNESSES.includes(options.harness)) {
+    throw new Error(`this build has no ${options.harness} loop`);
+  }
   const rootThreadId = threadIdOf(runId, ROOT_NAME);
   const CONVERT = `${runId}.convert`;
   // Ends the run's own threads: after `fail`, and once the loop has settled.
@@ -169,25 +202,19 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   let worker: ReviewAssetsWorker | undefined; // set once `prepare` has resolved
   const world = options.prepare(loopSignal).then((prepared) => {
     const { definition } = prepared;
-    const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
-    const layout = runLayout({
+    const wire = wireOf(options.harness, {
       runId,
       inputId: options.inputId,
       inputPrefix: options.inputPrefix,
-      skills: definition.skills,
-      roles: rolesOf(definition, options.gateway !== undefined),
-      // From the workflow's task, so a task the main agent adds from it keeps the flag.
-      copiesInputs: (id) => copyInputs.has(id),
+      recorder,
+      definition,
+      plan: prepared.plan,
+      gateway: options.gateway !== undefined,
     });
-    const recordOf = (threadId: string) => {
-      const record = threadLog(recorder.events()).threads.get(threadId);
-      if (!record) throw new Error(`${threadId} has no thread.started`);
-      return record;
-    };
-    // The sandboxes of the run: one per thread, and the review-asset converter's. A thread's
-    // `thread.started` is stored before its first sandbox call, so its layout is found by id.
+    const convert = convertLayout({ runId, inputId: options.inputId, skills: definition.skills });
+    // The sandboxes of the run: one per thread, and the review-asset converter's.
     const sandboxLayout = (id: string): SandboxLayout =>
-      id === CONVERT ? layout.convert : layout.forThread(recordOf(id));
+      id === CONVERT ? convert : wire.sandboxOf(id);
     const settings = { runId, ...options.sandbox };
     const session: SandboxSession = sandboxSession(
       (id) => {
@@ -206,7 +233,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
           recorder.emit(id, "sandbox", { name: sandboxLayout(id).name, state, detail });
       },
       // The convert sandbox's commands run with `note: false`, so its note is never read.
-      (id) => (id === CONVERT ? "" : layout.forThread(recordOf(id)).restartNote),
+      (id) => (id === CONVERT ? "" : wire.sandboxOf(id).restartNote),
     );
     const conversion = reviewAssetsWorker({
       runId,
@@ -218,14 +245,13 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       log: options.log,
     });
     worker = conversion;
-    return { prepared, layout, recordOf, session, conversion };
+    return { prepared, wire, session, conversion };
   });
   world.catch(() => {}); // the loop and the end read its failure
 
   const loop = async (): Promise<void> => {
-    const { prepared, layout, recordOf, session } = await world;
+    const { prepared, wire, session } = await world;
     const { definition } = prepared;
-    const main = definition.agents.main;
     // Not a derived id: each invocation of the root is a thread start of its own.
     recorder.emit(rootThreadId, "thread.started", {
       name: ROOT_NAME,
@@ -233,6 +259,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       kind: "supervisor",
       workflows: options.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
       sandboxImage: options.sandbox.image,
+      harness: options.harness,
     });
     // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
     // `claim.started` has one again, and says that instead. The schema's rule is
@@ -244,66 +271,62 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       ...(options.previousClaim && { after: options.previousClaim }),
       ...(reopened && { reopened }),
     });
-    // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
-    await keepOutputs({
-      runId,
-      rootThreadId,
+    const bash = new BashRuntime({
       recorder,
-      outputs: options.outputs,
-      mainWorks: main.tools.includes("bash") && main.outputs === "write",
-      signal: loopSignal,
+      deliver: (id, text) => running.send(id, text, BASH_NOTICE),
+      cutOff,
+      log: options.log,
     });
-    const pool = threads(
+    /** A thread whose sandbox the run is done with: its commands stop, then the sandbox goes. */
+    const release = (id: string) =>
+      bash
+        .release(id)
+        .then(() => session.release(id))
+        .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`));
+    const running = threads(
       {
         recorder,
-        history: withImageRefs(options.history, options.files, runId, (id) => recordOf(id).name),
+        history: withImageRefs(options.history, options.files, runId, wire.nameOf),
         sandbox: (id) => session.get(id),
-        release: (id) =>
-          session
-            .release(id)
-            .catch((e) => options.log(`releasing ${recordOf(id).name} failed: ${e}`)),
+        // Each end of a task thread releases its sandbox; an agent keeps its sandbox between
+        // turns (the idle timeout ends it) and is released when its loop says it really ended.
+        release: (id) => {
+          if (!wire.keepsSandbox(id)) void release(id);
+        },
       },
       loopSignal,
     );
-    const runtime = taskRuntime({
-      recorder,
-      evidence: options.evidence,
-      runId,
-      layoutOf: layout.forThread,
-      sandbox: (id, o) => session.get(id, o),
-      rootThreadId,
-      plan: prepared.plan,
-      abortThread: (id) => {
-        if (pool.started(id)) pool.abort(id);
+    // An input to a thread that was not running carries the notices it missed.
+    const pool: Threads = {
+      ...running,
+      start(spec) {
+        const handle = running.start(spec);
+        if (spec.input) {
+          for (const text of bash.takeNotices(spec.threadId)) handle.send(text, BASH_NOTICE);
+        }
+        return handle;
       },
-    });
-    await runLoop({
+    };
+    // Before any thread resumes: the commands the last claim left running are over.
+    await bash.endCutOff();
+    await wire.run({
       runId,
       rootThreadId,
       recorder,
-      runtime,
-      threads: pool,
-      layout,
-      definition,
+      model: prepared.model,
       selectedOutputs: options.selectedOutputs,
       notes: options.notes,
-      model: prepared.model,
       config: options.config,
-      tools: (thread, agents) =>
-        buildTools(thread.tools, {
-          layout: thread,
-          files: options.files,
-          runtime,
-          main: {
-            rootThreadId,
-            recorder,
-            runtime,
-            agents,
-            subagents: thread.subagents,
-            workflow: definition.files,
-          },
-        }),
       providerError: options.providerError,
+      files: options.files,
+      evidence: options.evidence,
+      outputs: options.outputs,
+      publish: options.publish,
+      session,
+      pool,
+      bash,
+      release,
+      section: runLock(),
       signal: loopSignal,
     });
   };

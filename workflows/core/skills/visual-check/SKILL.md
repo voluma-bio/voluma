@@ -9,7 +9,7 @@ description: >
 
 Render a view, open it with `view_image`, and decide from what you see. Every label you keep,
 every frame you accept and every region or point you hand on passes one look first, and the image goes in your
-evidence, so the checker and the researcher see what you saw.
+evidence, so whoever checks it and the researcher see what you saw.
 
 ## Which view answers which question
 

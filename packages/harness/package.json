@@ -25,7 +25,9 @@
     "./tools": "./src/tools/registry.ts",
     "./tools/segment-sam": "./src/tools/segment-sam.ts",
     "./ports/publish": "./src/ports/publish.ts",
+    "./agents/keep-notes": "./src/agents/keep-notes.ts",
     "./agents/sandbox-hash": "./src/agents/sandbox-hash.ts",
+    "./agents/tools/registry": "./src/agents/tools/registry.ts",
     "./agents/tools/report-output": "./src/agents/tools/report-output.ts",
     "./agents/tools/keep-output": "./src/agents/tools/keep-output.ts",
     "./tools/tool": "./src/tools/tool.ts"

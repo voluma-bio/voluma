@@ -8,9 +8,9 @@ where it is used.
 
 ## Two themes, one token set
 
-- **Light by default**, with a personal Light / Dark choice in Account → Settings → Appearance.
-  The choice applies to home, study and scan review, including navigation, reports, controls and
-  pane headings. The 3D and slice image wells stay dark in both themes for anatomy contrast.
+- **Light by default**, with a personal Light / Dark choice under Settings on the rail. The
+  choice applies to every page, including navigation, reports, controls and pane headings. The
+  3D and slice image wells stay dark in both themes for anatomy contrast.
 - Components use semantic token utilities (`bg-card`, `text-muted-foreground`,
   `border-border`), never raw colours. The names are shadcn/ui's, with our palette as the values;
   `accent` is shadcn's hover fill and `primary` the ink-filled main action. A colour a screen needs goes into
@@ -20,8 +20,9 @@ where it is used.
 
 ## Status
 
-- **Status lives in the list, never in mesh colour.** Task, run and
-  structure status shows as a `StatusMark` (glyph and word) in lists and reports.
+- **Status lives in the list, never in mesh colour.** An output's status (pending, reported,
+  to check, missing, out of date) and a run's show as a `StatusMark` (glyph and word) in lists
+  and reports.
 - The one exception: the region under check is outlined in amber
   (`--check-outline`) on the slices and in 3D.
 - Amber always means To check; violet means running or checking; green means
@@ -30,31 +31,43 @@ where it is used.
 
 ## Comparing scans
 
+- **Comparisons live on a study's Compare page**, not on the study page, which stays calm: which
+  scan needs you.
 - **Groups of scans compare as strip plots, not bars** (`StripPlot`): every scan a dot, a tick for the
   group mean. Groups hold 1 to 8 scans, and a bar or box hides them.
 - Dots are ink; only a scan far from its group turns amber, with its name beside it. Nothing else
   in a chart gets colour.
 
+## The shell
+
+- **One shell on every page**: a 44 px rail at the far left (Studies, Workflows, Settings), one
+  panel on each side, the page's work in the centre. A side holds one panel, with tabs when it
+  has more than one thing to show. Both sides resize by dragging, keep their width across pages,
+  and fold to 28 px icon strips. Panels push the centre aside; nothing floats.
+- **No divider lines in lists or between side blocks.** Spacing separates them.
+
 ## The review
 
-- **One selection drives the report, the 3D view and the slices.** Selecting
-  a task, value or structure anywhere moves all of them.
-- **Up front is what the researcher reviews.** Statuses, verdicts, values, To check, the AI's
+- **One selection drives the Final outputs panel and all four panes.** Selecting an output
+  anywhere moves all of them; the planes' orientation stays as the researcher left it.
+- **Four equal panes**, or one or two. Each pane can go full screen. A chip on each pane picks
+  what it shows: 3D, a slice named by the grid's axes (XY, YZ, XZ), or GP, the plane along the
+  growth plate. The whole-run graph shows in place of the panes when the researcher asks for it.
+- **Up front is what the researcher reviews.** Statuses, values, To check, the AI's
   words, QC images and the viewer's controls show. How long something took, tries, counts, cost,
   tokens and ids sit behind an info button (`InfoButton`) or Run details, with the numbers someone
   fixing a run needs after the researcher's.
 - **Labels show only for the selection.** Everything else stays unlabelled.
 - **Bone renders ivory by default** (`--bone`); structure label colours
   (`--label-*`) appear only with the Labels toggle.
-- Slice planes keep their colour by anatomy on every grid: coronal (XZ) `--axis-x` red,
-  sagittal (YZ) `--axis-y` green, axial (XY) `--axis-z` blue; a tilted plane takes its nearest
-  plane's. Text in the chrome (an axis letter, a mark's tag) takes the matching ink,
-  `--axis-*-text` or `--mark-mine-text`: the solids are made for the dark image wells and fail
-  4.5:1 on light surfaces.
+- **Plane colours follow the anatomy on every grid**: coronal red, sagittal green, axial blue,
+  whether the scan sits on its own grid or the tibia's. A tilted plane (GP) takes the colour of
+  the anatomical plane its normal is nearest. The solids are made for the dark image wells and
+  fail 4.5:1 on light surfaces, so text in the chrome (an axis letter, a mark's tag) takes the
+  matching text ink from `tokens.css`.
 - Rulers are `--ruler`; a ruler being corrected is `--ruler-edit`; a landmark
   more than 0.03 mm off the surface is `--landmark-warn`.
-- Panels dock and resize by dragging; nothing floats. The 3D and slice views
-  never remount when a panel resizes.
+- The 3D and slice views never remount when a panel resizes or folds.
 
 ## Layout
 
@@ -65,7 +78,7 @@ where it is used.
 
 ## Copy
 
-- Plain labels: "Runs", "To check", "Rerun for this sample".
+- Plain labels: "Runs", "To check", "Rerun for this scan".
 - Choices are worded as the user's decisions ("Accept", "Move endpoints",
   "Rerun and save to task list"), not as system states.
 - Screens show state. Teach a concept once, where it first appears, then

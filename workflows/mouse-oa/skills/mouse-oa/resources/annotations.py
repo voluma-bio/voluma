@@ -6,14 +6,17 @@ curves use the schema of `region_from_curves.py` (core `regions-and-landmarks/SK
 """
 
 import json
+from itertools import pairwise
 from pathlib import Path
 
+import numpy as np
 import sidecar
 from region_from_curves import surface_from_curves
+from scipy import ndimage as ndi
 
 KEYS = (
     'grid_id', 'growth_plate_curves', 'growth_plate_distal_curves', 'under_plate_curves', 'articular_corrections',
-    'width_points_uvw', 'compartment_midpoint_u', 'growth_plate_mid_u', 'height_section_v', 'v_limits', 'plate_patches',
+    'width_points_uvw', 'compartment_midpoint_u', 'growth_plate_mid_u', 'height_section_v', 'v_limits', 'plate_patches', 'plate_eroded',
 )  # every key check_bounds covers: a script reads no other, so a misspelt optional key cannot silently fall back to its default
 
 
@@ -118,6 +121,26 @@ def check_bounds(ann, shape):
     if 'v_limits' in ann:
         for x in listof('v_limits', ann['v_limits'], 2, '[first V, last V] with two numbers'):
             scalar('v_limits', x, V, 'V', 'limit')
+    marks = mapping('plate_eroded', ann.get('plate_eroded', {}), '{"<V>": [{"u": [first, last], "eroded": "<why>"}]}')
+    for k, runs in marks.items():
+        try:
+            section = int(k)
+        except ValueError:
+            malformed('plate_eroded', f'integer section keys, got "{k}"')
+        inside('plate_eroded', 'V section', section, V, 'V')
+        for run in listof('plate_eroded', runs, None, f'a list of {{"u": [first, last], "eroded": "<why>"}} marks on section {k}'):
+            mapping('plate_eroded', run, f'marks as {{"u": [first, last], "eroded": "<why>"}} on section {k}')
+            if 'u' not in run or 'eroded' not in run:
+                malformed('plate_eroded', f'every mark on section {k} to have "u": [first, last] and "eroded": "<why>"')
+            listof('plate_eroded', run['u'], 2, f'"u": [first, last], the U range where the plate is gone, on section {k}')
+            for x in run['u']:
+                if isinstance(x, bool) or not isinstance(x, int):
+                    malformed('plate_eroded', f'"u": [first, last] with two integers on section {k}')
+                inside('plate_eroded', f'section {k}: a U', x, U, 'U')
+            if run['u'][0] > run['u'][1]:
+                malformed('plate_eroded', f'"u": [first, last] with first <= last on section {k}')
+            if not (isinstance(run['eroded'], str) and run['eroded'].strip()):
+                malformed('plate_eroded', f'"eroded" on section {k} to say why the plate is gone, as a sentence')
     patches = mapping('plate_patches', ann.get('plate_patches', {}), '{"medial": {"u": [lo, hi], "v": [lo, hi]}, "lateral": {...}}')
     for side, patch in patches.items():
         mapping(f'plate_patches.{side}', patch, '{"u": [lo, hi], "v": [lo, hi]}')
@@ -142,3 +165,114 @@ def traced_surface(spec, key, shape):
         sidecar.fail(f'"{key}" needs curves on at least two coronal sections (V indices): trace more sections')
     H, *_, valid = surface_from_curves(spec, shape)
     return H, valid
+
+
+def refuse_off_tibia(ann, key, tib, spec_path, vox):
+    """Refuse curve points that lie off the tibia: on the section's coronal cut of the tibia mask (axes W, U), farther than the spec's
+    `off_tibia_margin_um` (entry plate-faces) from any tibia voxel. A line run across empty space or up a cortical wall's far side is
+    an invented face, so the script stops and names the section, the count and the first point."""
+    margin = round(sidecar.protocol(spec_path, 'plate-faces', 'off_tibia_margin_um')['off_tibia_margin_um'] / 1000 / vox)
+    refused = []
+    for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
+        dist = ndi.distance_transform_edt(~tib[:, int(k), :])
+        off = [(w, u) for w, u in pts if dist[min(max(round(w), 0), dist.shape[0] - 1), min(max(round(u), 0), dist.shape[1] - 1)] > margin]
+        if off:
+            refused.append(f'V={k}: {len(off)} of {len(pts)} points, the first at W={off[0][0]:g}, U={off[0][1]:g}')
+    if refused:
+        shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more sections' if len(refused) > 6 else '')
+        sidecar.fail(f'"{key}" has points more than {margin * vox * 1000:.0f} um off the tibia: {shown}. Trace the face on the bone only')
+
+
+def refuse_gaps(ann, key, tib, spec_path, vox):
+    """Refuse a face that leaves bone at plate level untraced. "Bone at plate level" is the tibia within the spec's `max_gap_um`
+    (entry plate-faces) of the curve's W at that column. On each traced section, neighbouring points are at most that far apart
+    over the section's bone (a span over columns without bone does not count: the notch between the condyles) and the first and last
+    point are within it of the bone's ends (past the end points, bone is any tibia within the section's own W band). Across V, traced sections are at most that far apart over the rows where the tibia exists
+    at plate level, and the first and last one are within it of those rows' ends. The stop names each stretch."""
+    gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
+    um = vox * 1000
+    cum = np.concatenate([np.zeros((1, *tib.shape[1:]), np.uint16), np.cumsum(tib, axis=0, dtype=np.uint16)])  # tibia voxels above each W, per (V, U)
+
+    def near_tibia(v, w):
+        """Bool over U: tibia on section v within the gap of W `w`."""
+        lo, hi = np.clip(np.floor(w - gap), 0, tib.shape[0]).astype(int), np.clip(np.floor(w + gap) + 1, 0, tib.shape[0]).astype(int)
+        u = np.arange(tib.shape[2])
+        return cum[hi, v, u] > cum[lo, v, u]
+
+    def count_between(mask, a, b):
+        """Columns of `mask` strictly between positions a and b."""
+        lo, hi = int(np.floor(a)) + 1, int(np.ceil(b))
+        return int(mask[lo:hi].sum())
+
+    problems = []
+    for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
+        v = int(k)
+        pts = np.array(sorted(pts, key=lambda p: p[1]), float)
+        bone = near_tibia(v, np.interp(np.arange(tib.shape[2]), pts[:, 1], pts[:, 0]))
+        # past the end points the curve has no height: any tibia in the section's own W band counts
+        lo, hi = int(max(np.floor(pts[:, 0].min() - gap), 0)), int(np.floor(pts[:, 0].max() + gap)) + 1
+        outside = np.arange(tib.shape[2])
+        outside = (outside < pts[0, 1]) | (outside > pts[-1, 1])
+        bone[outside] = tib[lo:hi, v, :].any(axis=0)[outside]
+        cols = np.flatnonzero(bone)
+        if not len(cols):
+            continue
+        us = pts[:, 1]
+        for a, b in pairwise(us):
+            n = count_between(bone, a, b)
+            if n > gap:
+                problems.append(f'V={v}: U={a:g}..{b:g} has {n} bone columns between two points')
+        if us[0] - cols[0] > gap:
+            problems.append(f'V={v}: the first point is at U={us[0]:g}, bone starts at U={cols[0]}')
+        if cols[-1] - us[-1] > gap:
+            problems.append(f'V={v}: the last point is at U={us[-1]:g}, bone ends at U={cols[-1]}')
+    levels = sorted(int(k) for k in ann[key]['slices'])
+    H, *_ = surface_from_curves(ann[key], tib.shape)  # callers have run traced_surface, so the spec is valid
+    rows = np.array([near_tibia(v, H[v]).any() for v in range(tib.shape[1])])
+    where = np.flatnonzero(rows)
+    if len(where):
+        for a, b in pairwise(levels):
+            n = count_between(rows, a, b)
+            if n > gap:
+                problems.append(f'sections V={a} and V={b} have {n} rows with bone at plate level between them')
+        if levels[0] - where[0] > gap:
+            problems.append(f'the first traced section is V={levels[0]}, the plate starts at V={where[0]}')
+        if where[-1] - levels[-1] > gap:
+            problems.append(f'the last traced section is V={levels[-1]}, the plate ends at V={where[-1]}')
+    if problems:
+        shown = '; '.join(problems[:6]) + (f'; and {len(problems) - 6} more' if len(problems) > 6 else '')
+        sidecar.fail(f'"{key}" leaves bone at plate level untraced at more than {gap * um:.0f} um spacing (points on a section, sections in V, '
+                     f'or the ends of the bone): {shown}. Trace the plate there ({len(levels)} traced sections: V={levels[0]}..{levels[-1]})')
+
+
+def eroded_marks(ann, key, shape, on_bone):
+    """The worker's `ann["plate_eroded"]` ranges for the curves `key`, which must lie on a section with a curve whose points reach both
+    ends of the range (a mark never replaces points; the curve follows the remaining bone through it). Returns (eroded, record):
+    `eroded`, bool (V, U): the marked ranges, on the rows between two traced sections where both mark (a face is linear in V between
+    traced sections), and `record`, the dict the script reports: the marked ranges with their share of the tibia's width on their
+    section, and the eroded share of the footprint `on_bone` over the traced V range."""
+    slices = ann[key]['slices']
+    reasons = {(int(k), *run['u']): run['eroded'] for k, runs in ann.get('plate_eroded', {}).items() for run in runs}
+    refused = []
+    marked = {}  # V -> bool U array of the marked ranges on that section
+    for v, a, b in sorted(reasons):
+        us = [p[1] for p in slices.get(str(v), [])]
+        if not us:
+            refused.append(f'V={v}, U={a}..{b}: the section has no curve')
+        elif min(us) > a or max(us) < b:
+            refused.append(f'V={v}, U={a}..{b}: the curve spans only U={min(us):g}..{max(us):g}')
+        marked.setdefault(v, np.zeros(shape[2], bool))[a : b + 1] = True
+    if refused:
+        shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more' if len(refused) > 6 else '')
+        sidecar.fail(f'"plate_eroded" marks {len(refused)} range(s) the curves "{key}" do not trace: {shown}. Trace the remaining bone through each marked range')
+    sections = sorted(int(k) for k in slices)
+    eroded = np.zeros(shape[1:], bool)
+    for v in range(sections[0], sections[-1] + 1):
+        lo = max(s for s in sections if s <= v)
+        hi = min(s for s in sections if s >= v)
+        eroded[v] = marked.get(lo, False) & marked.get(hi, False) if lo != hi else marked.get(lo, False)
+    eroded &= on_bone
+    eroded_runs = [{'v': v, 'u': [a, b], 'reason': r, 'width_fraction': on_bone[v, a : b + 1].sum() / max(on_bone[v].sum(), 1)} for (v, a, b), r in sorted(reasons.items())]
+    rows = on_bone[sections[0] : sections[-1] + 1]
+    record = {'eroded_stretches': eroded_runs, 'eroded_fraction': float(eroded[sections[0] : sections[-1] + 1].sum() / max(rows.sum(), 1))}
+    return eroded, record
