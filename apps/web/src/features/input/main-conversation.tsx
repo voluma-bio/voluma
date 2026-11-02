@@ -199,7 +199,7 @@ export function MainConversation({
       </div>
       <form
         ref={form}
-        className="grid gap-2 border-t border-border p-3"
+        className="grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-border p-3"
         onSubmit={(e) => {
           e.preventDefault();
           submit();
