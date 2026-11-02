@@ -12,7 +12,11 @@ import {
   type AgentState,
   openWorkers,
 } from "@voluma/contracts/agents";
-import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
+import {
+  entriesOf,
+  labelOverlaysUnder,
+  refuseOutputsChange,
+} from "@voluma/contracts/final-outputs";
 import {
   type OutputCatalog,
   outputKindSchema,
@@ -330,12 +334,18 @@ const changeOutputsTool = (api: AgentsApi): Tool =>
           if (role !== "main") throw new Refusal("Only main changes the final outputs.");
           const id = changeOutputsId(ctx.threadId, ctx.toolCallId);
           if (d.written.has(id)) return text("The final outputs are changed.");
+          const list = outputsFold(api.recorder.events()).list;
           const change = { by: "main" as const, ...input };
-          const why = refuseOutputsChange(
-            outputsFold(api.recorder.events()).list,
-            change,
-            api.catalog,
-          );
+          if (input.add)
+            change.add = [
+              ...input.add,
+              ...labelOverlaysUnder(
+                api.catalog,
+                input.add,
+                new Set(entriesOf(list).map((e) => e.id)),
+              ),
+            ];
+          const why = refuseOutputsChange(list, change, api.catalog);
           if (why) throw new Refusal(why);
           await api.recorder.append(ctx.threadId, "outputs.changed", change, id);
           await api.refreshRunFiles();

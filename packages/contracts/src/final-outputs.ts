@@ -11,7 +11,12 @@
  */
 import { z } from "zod";
 import type { outputsChangedSchema } from "./agent-events";
-import { type OutputCatalog, outputKindSchema, outputRefSchema } from "./output-catalog";
+import {
+  type OutputCatalog,
+  type OutputEntry,
+  outputKindSchema,
+  outputRefSchema,
+} from "./output-catalog";
 
 const nonEmpty = z.string().min(1);
 
@@ -134,6 +139,28 @@ export function applyOutputsChange(
       },
     ],
   };
+}
+
+/**
+ * The label overlays that the values in `chosen` are `on` or have as `context`, and `listed` lacks:
+ * the fold reads a label's map from the `outputs.changed` entry that lists it (`labels`), so a
+ * writer that adds a value adds these with it.
+ */
+export function labelOverlaysUnder(
+  catalog: readonly OutputEntry[],
+  chosen: readonly { id: string }[],
+  listed: ReadonlySet<string> = new Set(),
+): OutputEntry[] {
+  const have = new Set([...listed, ...chosen.map((e) => e.id)]);
+  const links = new Set(
+    chosen.flatMap((c) => {
+      const e = catalog.find((x) => x.id === c.id);
+      return e?.kind === "value" ? [...e.on, ...(e.context ?? [])] : [];
+    }),
+  );
+  return catalog.filter(
+    (e) => e.kind === "overlay" && e.label && links.has(e.id) && !have.has(e.id),
+  );
 }
 
 /**

@@ -10,6 +10,9 @@
  * (each names a published version; a value is `on` the overlays the catalog lists, an overlay has
  * its base) and, for an id the catalog does not declare, that it is `<you>/<id>` with its `kind`.
  *
+ * A point or line overlay's file holds voxels; the version's `detail.points` holds them in world mm
+ * (`pointsOf`), because that is what the review draws.
+ *
  * Version numbers: assigned inside the run's section, as the next after the output's latest
  * version, in the same step that appends the event. One runner holds a run's lease and a lease
  * lost stops the recorder, so no second writer exists to race for a number; the fold keeps the
@@ -38,6 +41,8 @@ import {
   versionPath,
   versionPrefix,
 } from "@voluma/contracts/r2";
+import type { Volume } from "@voluma/contracts/review";
+import { toWorld } from "@voluma/contracts/ruler";
 import { z } from "zod";
 import { EvidenceNotFound, EvidenceRefused } from "../../ports/evidence";
 import type { Tool } from "../../tools/tool";
@@ -107,16 +112,75 @@ interface Plan {
   shape?: string;
 }
 
-const SHAPE_AS = { labels: "labels", mask: "mask", surface: "surface" } as const;
+/** The shapes the review converter reads from a `.npy` (`detail.as`); a point or line has no array. */
+const CONVERTED_SHAPES = new Set<string>(["labels", "mask", "surface"]);
 
 /** The converter's representation of a listed output, where the catalog fixes it. */
 function detailOf(entry: OutputEntry): Pick<Plan, "detail" | "shape"> {
   if (entry.kind === "base") return { detail: { as: "image" } };
-  const as =
-    entry.kind === "overlay" && entry.shape
-      ? SHAPE_AS[entry.shape as keyof typeof SHAPE_AS]
-      : undefined;
-  return as ? { detail: { as }, shape: as } : {};
+  if (entry.kind !== "overlay" || !entry.shape) return {};
+  return CONVERTED_SHAPES.has(entry.shape)
+    ? { detail: { as: entry.shape }, shape: entry.shape }
+    : { shape: entry.shape };
+}
+
+const zyxSchema = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
+const gridIdSchema = z.string().min(1);
+/** An object entry of `objects.py` (`line`, `point`): a record's `objects[<id>]`, or the whole file. */
+const annotationFileSchema = z.object({
+  kind: z.literal("annotation"),
+  annotation: z.discriminatedUnion("kind", [
+    z.object({ gridId: gridIdSchema, kind: z.literal("point"), zyx: zyxSchema }),
+    z.object({ gridId: gridIdSchema, kind: z.literal("line"), aZyx: zyxSchema, bZyx: zyxSchema }),
+  ]),
+});
+
+/**
+ * `detail.points` of a point or line overlay: its ends in world mm, which is what the review draws.
+ * The file (`objects.py`'s entry for the output, bare or as `objects[<id>]` of a result record)
+ * holds voxels `[z, y, x]` on its grid; the affine is the base version's the call names in
+ * `madeFrom`, the one `toWorld` uses for the task loop's annotations. A file on another grid than
+ * the base, or a base with no affine, is refused: an unconverted point would be drawn in the wrong place.
+ */
+async function pointsOf(
+  deps: OutputToolDeps,
+  input: ReportOutputInput,
+  plan: Plan,
+  fileKey: string,
+  signal: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const text = await deps.publish.read(fileKey, { signal }).catch((error: unknown) => {
+    if (error instanceof EvidenceRefused) throw new Refusal(error.message);
+    throw error;
+  });
+  let json: unknown;
+  try {
+    json = text === undefined ? undefined : JSON.parse(text);
+  } catch {}
+  const record = json as { objects?: Record<string, unknown> } | undefined;
+  const parsed = annotationFileSchema.safeParse(record?.objects?.[input.id] ?? json);
+  const form = plan.shape === "line" ? "line" : "point";
+  if (!parsed.success || parsed.data.annotation.kind !== form)
+    throw new Refusal(
+      `${input.id} is a ${form} overlay: its first file must be JSON holding its object (objects.py ${form}, the entry {kind: "annotation", annotation: {gridId, kind: "${form}", ...}}, or a result record whose objects names ${input.id}).`,
+    );
+  const { annotation } = parsed.data;
+  const baseLink = input.madeFrom.find((l) => l.role === "base" && l.id === plan.base);
+  const base = foldOf(deps)
+    .byId.get(plan.base ?? "")
+    ?.versions.find((v) => v.version === baseLink?.version);
+  const baseDetail = (base?.detail ?? {}) as { affine?: Volume["affine"]; gridId?: string };
+  const { affine, gridId: baseGrid } = baseDetail;
+  if (!affine)
+    throw new Refusal(
+      `${plan.base} version ${baseLink?.version} has no affine, so the voxels of ${input.id} cannot be placed in mm. Report the base with its sidecar (.json beside the .npy).`,
+    );
+  if (baseGrid && baseGrid !== annotation.gridId)
+    throw new Refusal(
+      `${input.id} was made on grid ${annotation.gridId.slice(0, 12)}…, but its base ${plan.base} is on ${baseGrid.slice(0, 12)}…. Redo it on the base's grid.`,
+    );
+  const ends = annotation.kind === "point" ? [annotation.zyx] : [annotation.aZyx, annotation.bZyx];
+  return { points: ends.map((zyx) => toWorld(affine, zyx)) };
 }
 
 /**
@@ -204,6 +268,11 @@ function planOf(deps: OutputToolDeps, caller: Caller, input: ReportOutputInput):
   const entry: OutputEntry | undefined = deps.catalog.find((e) => e.id === id);
   let plan: Plan;
   if (entry) {
+    // Its voxels are its map's: the map's version covers it (`resolvedId`, `outputBlocks`).
+    if (entry.kind === "overlay" && entry.label)
+      throw new Refusal(
+        `${id} is label ${entry.label.value} of ${entry.label.of}: report ${entry.label.of}; its version covers ${id}.`,
+      );
     if (input.kind && input.kind !== entry.kind)
       throw new Refusal(`${id} is ${KEYS[entry.kind]} in this workflow, not ${KEYS[input.kind]}.`);
     if (input.base && (entry.kind !== "overlay" || input.base !== entry.base))
@@ -384,6 +453,10 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
               ctx.signal,
             )
           : {};
+        const points =
+          plan.shape === "line" || plan.shape === "point"
+            ? await pointsOf(deps, input, plan, layout.keyOf(first, "read"), ctx.signal)
+            : {};
         const [files, evidence] = await Promise.all([
           Promise.all((input.files ?? []).map((f) => publishFile(f, ""))),
           Promise.all(input.evidence.map((f) => publishFile(f, "evidence/"))),
@@ -409,8 +482,8 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
             ...(evidence.length > 0 && { evidence }),
             ...(input.toCheck && { toCheck: input.toCheck }),
             ...((input.provisional || plan.provisional) && { provisional: true }),
-            ...((plan.detail || Object.keys(sidecar).length > 0) && {
-              detail: { ...sidecar, ...plan.detail },
+            ...((plan.detail || Object.keys(sidecar).length > 0 || "points" in points) && {
+              detail: { ...sidecar, ...points, ...plan.detail },
             }),
           };
           await recorder.append(ctx.threadId, "output.published", payload, id);

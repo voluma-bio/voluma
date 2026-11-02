@@ -234,13 +234,15 @@ function compute(events: readonly RunEvent[]): OutputsFold {
     const stale = outOfDate(id);
     const kind = kinds.get(id);
     const baseOf = kind?.base ?? (typeof entry?.base === "string" ? entry.base : undefined);
-    const status: OutputStatus = !latest
+    // A label has no version of its own: its map's version covers it.
+    const covered = latest ?? latestOf(id);
+    const status: OutputStatus = !covered
       ? missing.has(id)
         ? "missing"
         : "pending"
       : stale
         ? "out-of-date"
-        : latest.toCheck.some((t) => !t.resolved)
+        : covered.toCheck.some((t) => !t.resolved)
           ? "to-check"
           : "reported";
     return {
