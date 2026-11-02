@@ -17,11 +17,11 @@ import { ApiError, getMe, onSignedOut, startGuest } from "@voluma/api-client";
 import { userSettingsQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { DEFAULT_USER_SETTINGS } from "@voluma/contracts/settings";
-import { AppShell, Button, LoadingState, ShellLink } from "@voluma/ui";
-import { House, Workflow } from "lucide-react";
+import { AppShell, Button, LoadingState, Rail, RailLink } from "@voluma/ui";
+import { Layers, Workflow } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation, useNavigate } from "react-router";
-import { AccountMenu, BrandLockup } from "./account";
+import { Link, Outlet, useLocation } from "react-router";
+import { RailMark, SettingsMenu } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
 
 type Session =
@@ -138,35 +138,36 @@ function Shell({ me }: { me: Me }) {
       delete document.documentElement.dataset.theme;
     };
   }, [theme]);
-  const navigate = useNavigate();
   const { pathname } = useLocation();
+  const inWorkflows = pathname === "/workflows";
   return (
     <QueryClientProvider client={queryClient}>
       <AppShell
         theme={theme}
-        logo={
-          <Link to="/" className="rounded-md">
-            <BrandLockup className="gap-2 [&_svg]:size-5" />
-          </Link>
+        rail={
+          <Rail
+            home={
+              <Link to="/" aria-label="Voluma, studies" className="rounded-md">
+                <RailMark />
+              </Link>
+            }
+            end={<SettingsMenu me={me} />}
+          >
+            <RailLink
+              label="Studies"
+              icon={<Layers />}
+              active={!inWorkflows}
+              to={(props) => <Link to="/" {...props} />}
+            />
+            <RailLink
+              label="Workflows"
+              icon={<Workflow />}
+              active={inWorkflows}
+              to={(props) => <Link to="/workflows" {...props} />}
+            />
+          </Rail>
         }
-        account={<AccountMenu me={me} />}
       >
-        <ShellLink
-          id="home"
-          group="app"
-          label="Home"
-          icon={<House />}
-          active={pathname === "/"}
-          go={() => navigate("/")}
-        />
-        <ShellLink
-          id="workflows"
-          group="app"
-          label="Workflows"
-          icon={<Workflow />}
-          active={pathname === "/workflows"}
-          go={() => navigate("/workflows")}
-        />
         <Outlet context={me} />
       </AppShell>
     </QueryClientProvider>
