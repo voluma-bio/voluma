@@ -10,6 +10,7 @@
  * sender's `messageId`, or a runtime sender's `covers`. Nothing else says what an agent has read.
  */
 import type { RunEvent } from "./events";
+import type { PersonMessage } from "./messages";
 import type { ClaimEndReason } from "./runner";
 import { type ThreadBase, type ThreadRecords, threadRecords } from "./thread-records";
 
@@ -55,6 +56,15 @@ export type Notice = { eventId: string; at: number; agent: string } & (
   | { kind: "silent"; reply: string }
   /** The loop stopped a worker (it could not be resumed); `reason` says why. */
   | { kind: "stopped"; reason: string }
+  /** The researcher wrote (`agent` is `researcher`); the payload is the stored message. */
+  | { kind: "person"; message: PersonMessage }
+  /** A held call ended without running as asked: declined by the researcher, refused, or withdrawn; or ran (`done`). `text` is their words or the tool's result. */
+  | {
+      kind: "approval";
+      outcome: "done" | "declined" | "refused" | "withdrawn";
+      toolCallId: string;
+      text: string;
+    }
 );
 
 export interface AgentLog {
@@ -224,6 +234,33 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       }
       case "person.message":
         personAt = at;
+        notices.push({
+          kind: "person",
+          eventId: e.id,
+          at,
+          agent: "researcher",
+          message: e.payload,
+        });
+        break;
+      case "approval.declined":
+        notices.push({
+          kind: "approval",
+          eventId: e.id,
+          at,
+          agent: "researcher",
+          outcome: "declined",
+          toolCallId: e.payload.toolCallId,
+          text: e.payload.text ?? "",
+        });
+        break;
+      case "approval.settled":
+        notices.push({
+          kind: "approval",
+          eventId: e.id,
+          at,
+          agent: "researcher",
+          ...e.payload,
+        });
         break;
       case "message": {
         if (!record || e.payload.role !== "user") break;
@@ -304,6 +341,21 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   };
   memo.set(events, { length: events.length, value });
   return value;
+}
+
+/** A held call the researcher has not answered: requested, with no `approval.given`, `approval.declined` or `approval.settled` for its tool call. */
+export function openApprovals(events: readonly RunEvent[]): Payload<"approval.requested">[] {
+  const open = new Map<string, Payload<"approval.requested">>();
+  for (const e of events) {
+    if (e.type === "approval.requested") open.set(e.payload.toolCallId, e.payload);
+    else if (
+      e.type === "approval.given" ||
+      e.type === "approval.declined" ||
+      e.type === "approval.settled"
+    )
+      open.delete(e.payload.toolCallId);
+  }
+  return [...open.values()];
 }
 
 const idOf = (idByName: Map<string, string>, name: string) => idByName.get(name) ?? "";

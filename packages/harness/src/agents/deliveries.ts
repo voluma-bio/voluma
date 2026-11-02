@@ -60,6 +60,11 @@ export const noticeLine = (n: Notice, events: readonly RunEvent[]): string => {
       return `- ${n.agent} was stopped: ${n.reason}. Start a new worker if its work is not done.`;
     case "silent":
       return `- ${n.agent} ended its turn without a report, a message to you or a close.${n.reply ? ` Its last words: ${n.reply}` : ""}`;
+    // R3a placeholders so the union stays exhaustive; no writer exists yet. R3c writes the real text.
+    case "person":
+      return `- The researcher wrote: ${n.message.text ?? ""}`;
+    case "approval":
+      return `- ${n.outcome}: ${n.text}`;
   }
 };
 
