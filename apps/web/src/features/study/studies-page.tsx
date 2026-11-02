@@ -20,7 +20,6 @@ import {
   liveStatus,
   placeOfStatus,
   plural,
-  runStatus,
   useNow,
   whenText,
 } from "@voluma/run-view";
@@ -54,7 +53,7 @@ const hrefOf = (study: StudySummary) => {
 
 /** One mark per sample: its newest run's status; a sample with no run waits. */
 function marksOf(study: StudySummary): Status[] {
-  const ran = study.newestRuns.map((r) => runStatus(r).status);
+  const ran = study.newestRuns.map((r) => liveStatus(r).status);
   return [...ran, ...Array<Status>(Math.max(0, study.inputCount - ran.length)).fill("waiting")];
 }
 
@@ -62,10 +61,19 @@ function marksOf(study: StudySummary): Status[] {
 function placeCounts(study: StudySummary): Map<Place, number> {
   const counts = new Map<Place, number>();
   const add = (p: Place, n = 1) => counts.set(p, (counts.get(p) ?? 0) + n);
-  for (const run of study.newestRuns) add(placeOfStatus(runStatus(run).status, study.example));
+  for (const run of study.newestRuns) add(placeOfStatus(liveStatus(run).status, study.example));
   if (study.inputCount > study.newestRuns.length)
     add("not-started", study.inputCount - study.newestRuns.length);
   return counts;
+}
+
+/** The samples whose newest run waits on the researcher; they are counted here, not under "need you". */
+function takeWaiting(study: StudySummary, counts: Map<Place, number>): number {
+  const waiting = study.newestRuns.filter((r) => r.waiting > 0).length;
+  const rest = (counts.get("needs-you") ?? 0) - waiting;
+  if (rest > 0) counts.set("needs-you", rest);
+  else counts.delete("needs-you");
+  return waiting;
 }
 
 const COUNT_WORD: Record<Place, string> = {
@@ -191,6 +199,7 @@ function StudyRow({
 }) {
   const workflow = workflowById(study.workflowId);
   const counts = placeCounts(study);
+  const waiting = takeWaiting(study, counts);
   return (
     // The listbox owns the keys (aria-activedescendant); a row is chosen by pointer.
     // biome-ignore lint/a11y/useKeyWithClickEvents: the listbox handles the keys.
@@ -224,22 +233,15 @@ function StudyRow({
       <div className="grid justify-items-end gap-1.5">
         <Progress states={marksOf(study)} className="max-w-60" />
         <span className="flex gap-3 text-sm whitespace-nowrap">
+          {waiting > 0 && <Count n={waiting} word="waiting on you" emphasis />}
           {PLACES.filter((p) => counts.has(p.place)).map((p) => (
-            <span
+            <Count
               key={p.place}
-              className={cx(
-                "inline-flex items-center gap-1",
-                p.place === "needs-you" ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {p.place !== "needs-you" && (
-                <StatusGlyph status={COUNT_MARK[p.place]} className="size-3" />
-              )}
-              <span className={cx("tabular-nums", p.place === "needs-you" && "font-semibold")}>
-                {counts.get(p.place)}
-              </span>
-              {COUNT_WORD[p.place]}
-            </span>
+              n={counts.get(p.place) ?? 0}
+              word={COUNT_WORD[p.place]}
+              mark={p.place !== "needs-you" ? COUNT_MARK[p.place] : undefined}
+              emphasis={p.place === "needs-you"}
+            />
           ))}
         </span>
       </div>
@@ -256,6 +258,32 @@ function StudyRow({
         <ChevronRight aria-hidden className="size-4" />
       </button>
     </div>
+  );
+}
+
+/** One status count of a study row; the emphasised ones are what the researcher has to act on. */
+function Count({
+  n,
+  word,
+  mark,
+  emphasis = false,
+}: {
+  n: number;
+  word: string;
+  mark?: Status;
+  emphasis?: boolean;
+}) {
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center gap-1",
+        emphasis ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      {mark && <StatusGlyph status={mark} className="size-3" />}
+      <span className={cx("tabular-nums", emphasis && "font-semibold")}>{n}</span>
+      {word}
+    </span>
   );
 }
 

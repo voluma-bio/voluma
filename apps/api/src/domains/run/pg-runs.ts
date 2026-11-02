@@ -4,6 +4,7 @@
  * is just absent. Every state change is in pg-queue.ts.
  */
 
+import { approvalRecords, openApprovals } from "@voluma/contracts/agents";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
 import { outputsIn } from "@voluma/contracts/output-fold";
@@ -257,12 +258,15 @@ export type RunFold = {
   open: readonly string[];
   /** The threads whose latest end failed (`failedThreads`). */
   failed: ReadonlySet<string>;
+  /** The calls main holds for the researcher's answer (`openApprovals`); who may answer is the reader's. */
+  waiting: number;
   /** The stored fold events that did not parse and are missing from `results`. */
   skipped: number;
 };
 
 const foldRun = (log: RunEvent[], skipped = 0): RunFold => ({
   skipped,
+  waiting: openApprovals(approvalRecords(log)).length,
   results: reviewState(log),
   correcting: openCorrectionRevision(log),
   open: openThreads(log),

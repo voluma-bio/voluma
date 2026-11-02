@@ -48,9 +48,6 @@ None of these stops a review; each makes it slower.
 
 ## Outputs review
 
-- **Waiting on you outside the page.** A run waiting on the researcher (root ended, a call open)
-  reads Done in the Samples tree, the Studies list and the study rows: `studyRunSummarySchema` has
-  no open-call count. Needs an API field (asked of the run model lead, 2 Nov).
 - **A published ruler's end dragged** is not yet seen on real data: no agent-loop run draws rulers
   yet. The drag shares the mark-end path that was walked; the ruler's candidates come from the
   scene's 2-point annotations.

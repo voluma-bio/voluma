@@ -4,6 +4,9 @@
  * values, open checks and each input's task states and open items. Reads apply the caller's `ReadScope` as
  * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
  * inputs' values, checks and states are read from each fold here. Writes are the queue's.
+ *
+ * A run's `waiting` is the open calls its fold counted, kept only when the caller can answer
+ * them (`CanAnswer`): the rule the run read applies as `cannotMessage`.
  */
 import { unitAsWritten } from "@voluma/contracts/output-catalog";
 import { finalValues, needingYou } from "@voluma/contracts/output-fold";
@@ -37,6 +40,14 @@ const toStudy = (row: typeof studies.$inferSelect): Study => ({
   example: row.example,
   createdAt: row.createdAt.toISOString(),
 });
+
+/** Whether the caller may answer this run's held calls: the run read's `cannotMessage` is null. */
+export type CanAnswer = (run: Run) => Promise<boolean>;
+
+/** A run's open calls the caller can answer; the check runs only for a run that holds any. */
+async function waitingOf({ run, waiting }: RunResult, canAnswer: CanAnswer) {
+  return waiting > 0 && (await canAnswer(run)) ? waiting : 0;
+}
 
 const completed = ({ state }: Run) => state.status === "ended" && state.outcome === "completed";
 
@@ -105,7 +116,12 @@ const outputStatusOf = (newest: RunResult | undefined): StudyInputDetail["output
 const tasksOf = (newest: RunResult | undefined) =>
   shownTasks(newest && { ...newest, state: newest.run.state, revision: latestRevision(newest) });
 
-function summarize(study: Study, inputCount: number, results: RunResult[]): StudySummary {
+async function summarize(
+  study: Study,
+  inputCount: number,
+  results: RunResult[],
+  canAnswer: CanAnswer,
+): Promise<StudySummary> {
   const { newest, newestCompleted } = newestOf(results);
   let lastActivityAt = study.createdAt;
   for (const { run } of results) {
@@ -122,18 +138,21 @@ function summarize(study: Study, inputCount: number, results: RunResult[]): Stud
     inputCount,
     inputsCompleted: newestCompleted.size,
     lastActivityAt,
-    newestRuns: [...newest.values()].map(
-      (result): StudyRunSummary => ({
-        runId: result.run.id,
-        inputId: result.run.input.id,
-        inputName: result.run.input.name,
-        state: result.run.state,
-        tasks: result.run.tasks,
-        ...(result.run.outputs && { outputs: result.run.outputs }),
-        ...(result.run.harness && { harness: result.run.harness }),
-        review: reviewOf(result),
-        example: result.run.example,
-      }),
+    newestRuns: await Promise.all(
+      [...newest.values()].map(
+        async (result): Promise<StudyRunSummary> => ({
+          runId: result.run.id,
+          inputId: result.run.input.id,
+          inputName: result.run.input.name,
+          state: result.run.state,
+          tasks: result.run.tasks,
+          ...(result.run.outputs && { outputs: result.run.outputs }),
+          ...(result.run.harness && { harness: result.run.harness }),
+          review: reviewOf(result),
+          waiting: await waitingOf(result, canAnswer),
+          example: result.run.example,
+        }),
+      ),
     ),
   };
 }
@@ -141,7 +160,7 @@ function summarize(study: Study, inputCount: number, results: RunResult[]): Stud
 export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
   return {
     /** The caller's readable studies, newest activity first. */
-    list: (reader: ReadScope) =>
+    list: (reader: ReadScope, canAnswer: CanAnswer) =>
       db.transaction(
         async (tx): Promise<StudySummary[]> => {
           const rows = await tx.select().from(studies).where(readableStudies(reader));
@@ -163,17 +182,23 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             group.push(result);
             byStudy.set(result.run.studyId, group);
           }
-          return rows
-            .map((row) =>
-              summarize(toStudy(row), inputCount.get(row.id) ?? 0, byStudy.get(row.id) ?? []),
-            )
-            .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+          const summaries = await Promise.all(
+            rows.map((row) =>
+              summarize(
+                toStudy(row),
+                inputCount.get(row.id) ?? 0,
+                byStudy.get(row.id) ?? [],
+                canAnswer,
+              ),
+            ),
+          );
+          return summaries.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
         },
         { isolationLevel: "repeatable read" },
       ),
 
     /** One study with its inputs and runs; null when absent or unreadable. */
-    get: (reader: ReadScope, studyId: string) =>
+    get: (reader: ReadScope, studyId: string, canAnswer: CanAnswer) =>
       db.transaction(
         async (tx): Promise<StudyDetail | null> => {
           const [row] = await tx
@@ -196,6 +221,13 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           for (const { run } of found) {
             runsOf.set(run.input.id, [...(runsOf.get(run.input.id) ?? []), run]);
           }
+          const waiting = new Map(
+            await Promise.all(
+              [...newest].map(
+                async ([inputId, r]) => [inputId, await waitingOf(r, canAnswer)] as const,
+              ),
+            ),
+          );
           return {
             study: toStudy(row),
             inputs: members.map(({ member, input }) => {
@@ -211,6 +243,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 input: toInput(input),
                 runs: runsOf.get(member.inputId) ?? [],
                 review: newestRun ? reviewOf(newestRun) : null,
+                waiting: waiting.get(member.inputId) ?? 0,
                 outputStatus: outputStatusOf(newestRun),
                 resultRunId: result?.run.id ?? null,
                 ...(result ? resultOf(result) : { values: {}, acceptable: [] }),

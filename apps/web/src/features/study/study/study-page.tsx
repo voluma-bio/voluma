@@ -201,11 +201,11 @@ function StatusLine({
   const status = inputStatus(input);
   let mark = <StatusMark {...status} />;
   let more: string | null = null;
-  if (run && status.status === "check") {
+  if (run && status.status === "check" && input.waiting === 0) {
     mark = <StatusMark status="check" label={needsYouText(needsYouOf(input), run.harness)} />;
     more = waitsOn(input, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
-    mark = <StatusMark {...liveStatus(run)} />;
+    mark = <StatusMark {...liveStatus({ ...run, waiting: input.waiting })} />;
   } else if (status.status === "stopped") {
     more = stoppedLine(input, workflow);
   } else if (status.status === "done" && hasBar(input)) {

@@ -14,7 +14,7 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, answerApproval } from "@voluma/api-client";
-import { runQuery } from "@voluma/api-client/query";
+import { invalidateRun, runQuery } from "@voluma/api-client/query";
 import { MAX_VIEW_BYTES } from "@voluma/contracts/agent-events";
 import type { RunEvent } from "@voluma/contracts/events";
 import { MAX_MARKS } from "@voluma/contracts/messages";
@@ -173,6 +173,7 @@ export function useMainMessage({
  */
 export function useAnswers(run: RunRead, onSent: () => void) {
   const [error, setError] = useState<{ requestId: string; text: string }>();
+  const client = useQueryClient();
   const answer = useMutation({
     mutationFn: (a: { requestId: string; answer: "yes" | "no"; text: string }) =>
       answerApproval(run.id, a.requestId, {
@@ -180,7 +181,11 @@ export function useAnswers(run: RunRead, onSent: () => void) {
         ...(a.text && { text: a.text }),
       }),
     onMutate: (a) => setError((e) => (e?.requestId === a.requestId ? undefined : e)),
-    onSuccess: onSent,
+    // The studies' reads carry the run's open calls (`waiting`): they clear with the answer.
+    onSuccess: () => {
+      onSent();
+      void invalidateRun(client, run.id);
+    },
     onError: (e, a) => setError({ requestId: a.requestId, text: refusal(e, "answer") }),
   });
   // The API's rule, examples included.

@@ -445,7 +445,8 @@ type Attempt = {
 
 /**
  * Every event type `fold` (and `reviewState`'s overlay of `check.accepted` and
- * `review.completed`, its `outputsFold` and its `marksOf`) reads: a reader that loads only these gets the same result as one that
+ * `review.completed`, its `outputsFold` and its `marksOf`) reads, and the `approval.*` events the study reads
+ * count open calls from (`approvalRecords`): a reader that loads only these gets the same result as one that
  * loads the whole log. Add a type here when `fold` or `corrections` starts to read it.
  */
 export const FOLD_EVENT_TYPES = [
@@ -473,6 +474,10 @@ export const FOLD_EVENT_TYPES = [
   "tocheck.resolved",
   "mark.placed",
   "mark.deleted",
+  "approval.requested",
+  "approval.given",
+  "approval.declined",
+  "approval.settled",
 ] as const satisfies readonly RunEvent["type"][];
 
 /** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */
