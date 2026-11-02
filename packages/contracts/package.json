@@ -30,9 +30,12 @@
     "./messages": "./src/messages.ts",
     "./study": "./src/study.ts",
     "./workflow-files": "./src/workflow-files.ts",
+    "./final-outputs": "./src/final-outputs.ts",
     "./output-catalog": "./src/output-catalog.ts",
     "./agent-events": "./src/agent-events.ts",
-    "./agents": "./src/agents.ts"
+    "./agents": "./src/agents.ts",
+    "./output-fold": "./src/output-fold.ts",
+    "./output-files": "./src/output-files.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -43,6 +46,7 @@
     "vitest": "catalog:"
   },
   "dependencies": {
+    "yaml": "catalog:",
     "zod": "catalog:"
   }
 }
