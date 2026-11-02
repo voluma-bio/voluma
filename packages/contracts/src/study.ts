@@ -1,23 +1,23 @@
 /**
- * Studies, under `/api/run`: a study is a group of runs, one per scan, of one workflow. Every
- * run belongs to one (`runSchema.studyId`). A study of one is a study whose scan count is 1;
+ * Studies, under `/api/run`: a study is a group of runs, one per input, of one workflow. Every
+ * run belongs to one (`runSchema.studyId`). A study of one is a study whose input count is 1;
  * nothing marks it. The rules of `run.ts` (org scoping, limits, visitor keys) apply to every
  * call here.
  *
  *   POST /api/run/studies      body `createStudyRequestSchema` → 200 `studyDetailSchema`
- *                              (404: unknown `workflowId`, or a scan the caller can't read;
- *                              409: a scan still uploading, or the per-caller limit;
+ *                              (404: unknown `workflowId`, or an input the caller can't read;
+ *                              409: an input still uploading, or the per-caller limit;
  *                              429: the other limits, see `run.ts`; 400: `start` names a
- *                              scan the study lacks, a scan twice, or `selectedOutputs` names an
+ *                              input the study lacks, an input twice, or `selectedOutputs` names an
  *                              output that is not a measurement or score of the workflow)
  *   GET  /api/run/studies      → 200 `listStudiesResponseSchema`, newest activity first
  *   GET  /api/run/studies/:id  → 200 `studyDetailSchema` (404 when absent or unreadable)
  *
- * Creating a study stores it, its scans and one `queued` run for each `start` scan in one
+ * Creating a study stores it, its inputs and one `queued` run for each `start` input in one
  * transaction under the queue's lock. A refusal (a limit, a vault that is full) refuses the
- * whole call: no study is left behind. The scans not in `start` wait with no run
+ * whole call: no study is left behind. The inputs not in `start` wait with no run
  * ("not started"); `POST /api/run/runs` (`startRunRequestSchema`) starts them later, one at
- * a time. The stored scan row is the confirmed one: nothing runs until the researcher
+ * a time. The stored input row is the confirmed one: nothing runs until the researcher
  * confirms intake.
  *
  * Reads. `readableStudies` is the run rule on the study: the org matches and, under scope
@@ -28,21 +28,21 @@
  * Two counts, never swapped: `needsYou` is what needs a person, what every screen calls To check;
  * `acceptable` is only what "Looks right" can accept.
  *
- * `values` and `acceptable` come from each scan's **newest completed run** only (`resultRunId`):
+ * `values` and `acceptable` come from each input's **newest completed run** only (`resultRunId`):
  * accepting a check needs the latest completed result, so a live run's items would answer 409.
  * `values` is keyed by output id (the `outputs.json` id, not the fold's `taskId/outputId`)
  * and holds every measurement the run reported; for a run of the agent loop, every final value's
  * latest number, its UCUM unit written as `outputs.json` writes units (`unitAsWritten`).
  * `acceptable` lists task-loop checks only. A run of the agent loop has no tasks: its newest
- * run's `outputStatus` and `review` say where it is and what needs a person. `taskState` comes from the scan's **newest
+ * run's `outputStatus` and `review` say where it is and what needs a person. `taskState` comes from the input's **newest
  * run**, whatever its state, so the study shows where a live or stopped run is: the state the
- * scan review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
+ * input review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
  * task missing from it is outside the run's plan. `needsYou` and `unacceptable` come from the
- * same run and revision: what the scan review counts To check, so both screens agree on a task's
+ * same run and revision: what the input review counts To check, so both screens agree on a task's
  * status (`shownStatus`). They count items `acceptable` doesn't list: a live or stopped run's,
  * and the card of a To check task with no check (sent back by the second AI).
  *
- * The list is what Home renders: per study its counts and each scan's newest run in brief
+ * The list is what Home renders: per study its counts and each input's newest run in brief
  * (`studyRunSummarySchema`), so Home reads no run list.
  */
 import { z } from "zod";
@@ -76,14 +76,14 @@ const attributesSchema = z
   .record(z.string().min(1).max(100), z.union([z.string().max(500), z.number(), z.boolean()]))
   .refine((a) => Object.keys(a).length <= 50, "at most 50 attributes");
 
-/** One scan of a study. `subject` is the specimen (a mouse id); the input's name when the caller gave none. */
-export const studyScanSchema = z.object({
+/** The study's row for one of its inputs. `subject` is the specimen (a mouse id); the input's name when the caller gave none. */
+export const studyMemberSchema = z.object({
   inputId: inputIdSchema,
   subject: label,
   group: label.nullable(),
   attributes: attributesSchema,
 });
-export type StudyScan = z.infer<typeof studyScanSchema>;
+export type StudyMember = z.infer<typeof studyMemberSchema>;
 
 export const studySchema = z.object({
   id: studyIdSchema,
@@ -120,7 +120,7 @@ export const outputStatusSchema = z.enum([
   "out-of-date",
 ]) satisfies z.ZodType<OutputStatus>;
 
-/** A scan's newest run in brief, whatever its state: what Home shows of a study. */
+/** An input's newest run in brief, whatever its state: what Home shows of a study. */
 export const studyRunSummarySchema = z.object({
   runId: runIdSchema,
   inputId: inputIdSchema,
@@ -140,14 +140,14 @@ export type StudyRunSummary = z.infer<typeof studyRunSummarySchema>;
 
 /** A row of Home's study list. */
 export const studySummarySchema = studySchema.extend({
-  scanCount: z.number().int().nonnegative(),
-  /** Scans with a completed run, whether or not it is the newest. */
-  scansCompleted: z.number().int().nonnegative(),
-  /** What needs a person on each scan (`scanNeedsYou`), summed. */
+  inputCount: z.number().int().nonnegative(),
+  /** Inputs with a completed run, whether or not it is the newest. */
+  inputsCompleted: z.number().int().nonnegative(),
+  /** What needs a person on each input (`inputNeedsYou`), summed. */
   needsYou: z.number().int().nonnegative(),
   /** The latest of the study's creation and its runs' creation, start and end. */
   lastActivityAt: z.iso.datetime(),
-  /** Each scan's newest run, newest first; a scan with no run is absent. */
+  /** Each input's newest run, newest first; an input with no run is absent. */
   newestRuns: z.array(studyRunSummarySchema),
 });
 export type StudySummary = z.infer<typeof studySummarySchema>;
@@ -174,8 +174,8 @@ export const toCheckItemSchema = z.object({
 });
 export type ToCheckItem = z.infer<typeof toCheckItemSchema>;
 
-export const studyScanDetailSchema = z.object({
-  scan: studyScanSchema,
+export const studyInputDetailSchema = z.object({
+  member: studyMemberSchema,
   input: inputSchema,
   /** Newest first; empty: "not started". */
   runs: z.array(runSchema),
@@ -199,7 +199,7 @@ export const studyScanDetailSchema = z.object({
    */
   taskState: z.record(taskIdSchema, taskStateSchema),
   /**
-   * Task id → its items that need a person in the newest run, as the scan review counts them
+   * Task id → its items that need a person in the newest run, as the input review counts them
    * (`openItems`): checks not accepted, or the card of a To check task with none. What a screen
    * counts To check. Read from the same revision as `taskState`, whatever the run's state. A task
    * with none is absent.
@@ -208,54 +208,64 @@ export const studyScanDetailSchema = z.object({
   /** Task id → why its card without a check is there (`cardWithoutCheck`); nobody can accept it. */
   unacceptable: z.record(taskIdSchema, unacceptableSchema),
 });
-export type StudyScanDetail = z.infer<typeof studyScanDetailSchema>;
+export type StudyInputDetail = z.infer<typeof studyInputDetailSchema>;
 
 export const studyDetailSchema = z.object({
   study: studySchema,
   /** In study order. */
-  scans: z.array(studyScanDetailSchema),
+  inputs: z.array(studyInputDetailSchema),
 });
 export type StudyDetail = z.infer<typeof studyDetailSchema>;
 
-export const createStudyRequestSchema = z
-  .object({
-    name: label,
-    workflowId: workflowIdSchema,
-    /** Each input once; every one must be readable by the caller and complete. */
-    scans: z
-      .array(
-        z.object({
-          inputId: inputIdSchema,
-          subject: label.optional(),
-          group: label.optional(),
-          attributes: attributesSchema.optional(),
-        }),
-      )
-      .min(1)
-      .max(200),
-    /** The scans to run now, a subset of `scans`; the rest wait. May be empty. */
-    start: z.array(inputIdSchema),
-    budgetUsd: z.number().nonnegative().optional(),
-    /** For every run started by this call, as in `startRunRequestSchema`. */
-    selectedOutputs: selectedOutputsSchema.min(1).optional(),
-    notes: z.string().max(4000).optional(),
-    /** Present: these runs use these (`credentials: "visitor"`). */
-    keys: visitorKeysSchema.optional(),
-    /** For every run started by this call, as in `startRunRequestSchema`. */
-    model: modelRefSchema.optional(),
-    /** For every run started by this call, as in `startRunRequestSchema`. */
-    harness: harnessSchema.optional(),
-  })
-  .refine((r) => new Set(r.scans.map((s) => s.inputId)).size === r.scans.length, {
-    path: ["scans"],
-    message: "a scan appears twice",
-  })
-  .refine((r) => new Set(r.start).size === r.start.length, {
-    path: ["start"],
-    message: "a scan appears twice",
-  })
-  .refine((r) => r.start.every((id) => r.scans.some((s) => s.inputId === id)), {
-    path: ["start"],
-    message: "start names a scan the study lacks",
-  });
+// Delete the `scans` alias with its TODO (apps/api/.context/TODO.md): a /new tab opened before the
+// rename posts `scans`, and must not fail for the rest of the deploy overlap.
+const scansAsInputs = (body: unknown) =>
+  typeof body === "object" && body !== null && "scans" in body && !("inputs" in body)
+    ? { ...body, inputs: body.scans }
+    : body;
+
+export const createStudyRequestSchema = z.preprocess(
+  scansAsInputs,
+  z
+    .object({
+      name: label,
+      workflowId: workflowIdSchema,
+      /** Each input once; every one must be readable by the caller and complete. */
+      inputs: z
+        .array(
+          z.object({
+            inputId: inputIdSchema,
+            subject: label.optional(),
+            group: label.optional(),
+            attributes: attributesSchema.optional(),
+          }),
+        )
+        .min(1)
+        .max(200),
+      /** The inputs to run now, a subset of `inputs`; the rest wait. May be empty. */
+      start: z.array(inputIdSchema),
+      budgetUsd: z.number().nonnegative().optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      selectedOutputs: selectedOutputsSchema.min(1).optional(),
+      notes: z.string().max(4000).optional(),
+      /** Present: these runs use these (`credentials: "visitor"`). */
+      keys: visitorKeysSchema.optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      model: modelRefSchema.optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      harness: harnessSchema.optional(),
+    })
+    .refine((r) => new Set(r.inputs.map((s) => s.inputId)).size === r.inputs.length, {
+      path: ["inputs"],
+      message: "an input appears twice",
+    })
+    .refine((r) => new Set(r.start).size === r.start.length, {
+      path: ["start"],
+      message: "an input appears twice",
+    })
+    .refine((r) => r.start.every((id) => r.inputs.some((s) => s.inputId === id)), {
+      path: ["start"],
+      message: "start names an input the study lacks",
+    }),
+);
 export type CreateStudyRequest = z.infer<typeof createStudyRequestSchema>;

@@ -1,6 +1,6 @@
 /**
- * Progress: how far along a set of tasks or scans is, and where it's stuck. `cells` draws one cell
- * per task or scan in the given order; `bar` sums the same states into one thin bar (done, to
+ * Progress: how far along a set of tasks or inputs is, and where it's stuck. `cells` draws one cell
+ * per task or input in the given order; `bar` sums the same states into one thin bar (done, to
  * check, running, checking, paused, stopped; waiting is the empty rest), for sets too big to
  * draw cell by cell. Its accessible name counts each state.
  */
@@ -9,7 +9,7 @@ import { cx } from "./cx";
 import { STATUS_WORD, type Status } from "./status-mark";
 
 export type ProgressProps = {
-  /** One state per task or scan. */
+  /** One state per task or input. */
   states: Status[];
   look?: "cells" | "bar";
   /** Shown after it in mono, e.g. "11 of 20". */

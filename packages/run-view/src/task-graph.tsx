@@ -1,8 +1,8 @@
 /**
  * The workflow as a graph of real nodes: one box per task, laid out by dependency depth, with an
  * edge for each dependency no longer path already implies. One component in two sizes:
- * - `summary`: left to right and small; one scan's tasks, each with its state and one line.
- * - `report`: top down, fitted to the scan review's Report panel: a layer wider than the panel
+ * - `summary`: left to right and small; one input's tasks, each with its state and one line.
+ * - `report`: top down, fitted to the input review's Report panel: a layer wider than the panel
  *   wraps onto more rows. The selected, working or redone task also lists its agents.
  * A box picks a task in place (`onSelect`).
  * Boxes are ordinary layout and may grow; the edges are measured from where the boxes are after
@@ -17,16 +17,16 @@ import { agentLabel, type TaskState, type TaskView, type Thread } from "./run-mo
 export type GraphTask = { id: string; title: string; dependsOn: string[] };
 
 /**
- * What a box at scan size needs of a task; the report size also lists its `threads`. `open`: its
- * items still open for a person, as the scan review counts them (`openItems`, review-state.ts).
+ * What a box at input size needs of a task; the report size also lists its `threads`. `open`: its
+ * items still open for a person, as the input review counts them (`openItems`, review-state.ts).
  */
-export type ScanGraphTask = Pick<TaskView, "id" | "title" | "dependsOn" | "state" | "results"> & {
+export type InputGraphTask = Pick<TaskView, "id" | "title" | "dependsOn" | "state" | "results"> & {
   open: number;
 } & Partial<Pick<TaskView, "threads">>;
 
 export type TaskGraphProps = {
   size: "summary" | "report";
-  tasks: ScanGraphTask[];
+  tasks: InputGraphTask[];
   selected?: string;
   onSelect?: (taskId: string) => void;
   /** Report size: opens one of a box's agents. */
@@ -112,7 +112,7 @@ export function TaskGraph(props: TaskGraphProps) {
   const boxes = new Map<string, ReactNode>(
     props.tasks.map((t) => [
       t.id,
-      <ScanBox
+      <InputBox
         key={t.id}
         task={t}
         size={props.size}
@@ -382,8 +382,8 @@ const CONTROL = cx(
   "after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-ring",
 );
 
-/** A box's one line at scan size: what needs you, what is going on, or its key value. */
-function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: string } {
+/** A box's one line at input size: what needs you, what is going on, or its key value. */
+function inputLine(task: InputGraphTask, open: number): { text: ReactNode; tone?: string } {
   if (shownStatus(task.state, open) === "check" && open > 0)
     return { text: `${open} to check`, tone: "font-medium text-check" };
   switch (task.state) {
@@ -403,7 +403,7 @@ function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: 
 }
 
 /** Its first value with its unit, the way a Readout reads it; "Done" when it reports none. */
-function keyValue(task: ScanGraphTask): { text: ReactNode } {
+function keyValue(task: InputGraphTask): { text: ReactNode } {
   const r = task.results.find((x) => x.value !== null);
   if (!r) return { text: "Done" };
   return {
@@ -417,14 +417,14 @@ function keyValue(task: ScanGraphTask): { text: ReactNode } {
   };
 }
 
-function ScanBox({
+function InputBox({
   task,
   size,
   selected,
   onSelect,
   onAgent,
 }: {
-  task: ScanGraphTask;
+  task: InputGraphTask;
   size: "summary" | "report";
   selected: boolean;
   onSelect?: (taskId: string) => void;
@@ -432,7 +432,7 @@ function ScanBox({
 }) {
   const { open } = task;
   const status = shownStatus(task.state, open);
-  const line = scanLine(task, open);
+  const line = inputLine(task, open);
   const idle = task.state === "waiting" || task.state === "ready" || task.state === "skipped";
   const threads = task.threads ?? [];
   const attempts = Math.max(0, ...threads.map((t) => t.attempts.length));

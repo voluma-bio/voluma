@@ -9,8 +9,8 @@ import { StoryRail } from "./story-rail";
 
 /**
  * **What:** a screen's side panel, one per side: tabs (the left side) or a title with tools (the
- * right side), a seam to resize it, and a fold button. **Why:** the scan and the study share one
- * frame whose sides keep their width across pages. **Where:** the scan page (Conversation and
+ * right side), a seam to resize it, and a fold button. **Why:** the input and the study share one
+ * frame whose sides keep their width across pages. **Where:** the input page (Conversation and
  * Scans; Final outputs) and the study pages.
  *
  * Try: drag a seam (or focus it and use the arrow keys); fold a side with its button, `\\` or `]`,

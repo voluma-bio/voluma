@@ -3,8 +3,8 @@
  *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
  * pi messages, snapshots and provider calls first. Dumps with study metadata restore the original
- * study and scans, refusing conflicting shared rows (a reference input matches by content, not
- * creation time: each database seeds its own on boot). Older dumps get a study of one scan.
+ * study and its inputs, refusing conflicting shared rows (a reference input matches by content, not
+ * creation time: each database seeds its own on boot). Older dumps get a study of one input.
  * The study's workflow is the one the dump names (the run's `workflowId` in older dumps, else its study's; their
  * pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
@@ -24,7 +24,7 @@ import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
 import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
-import { events, inputs, piMessages, runs, studies, studyScans } from "../domains/run/schema";
+import { events, inputs, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
 import { withLocalDir } from "./r2-dir";
 import { assertRestorable, countsOf, describeCounts } from "./run-dump";
@@ -44,17 +44,27 @@ function revive<T extends PgTable>(table: T, row: unknown): T["$inferInsert"] {
   return out as T["$inferInsert"];
 }
 
+/**
+ * Dumps written before the study's row for an input was named `member`: `studyScans` held those
+ * rows and `studyInputs` the input rows. Delete once no old dump remains (apps/api/.context/TODO.md).
+ */
+function readOldDump(json: Record<string, unknown>) {
+  if (!("studyScans" in json)) return json;
+  const { studyScans, studyInputs: inputRows, ...rest } = json;
+  return { ...rest, studyMembers: studyScans, inputs: inputRows };
+}
+
 const url = databaseUrl({ writes: true, remote: values.remote });
 const dump = await withLocalDir(
   values.from,
   async (dir) =>
-    JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
+    readOldDump(JSON.parse(await readFile(join(dir, "run.json"), "utf8"))) as {
       // `workflowId` is the column dumps carried before studies took it over.
       run: typeof runs.$inferSelect & { workflowId?: string; workflows: { path: string }[] };
       input: typeof inputs.$inferSelect | null;
       study?: typeof studies.$inferSelect;
-      studyScans?: (typeof studyScans.$inferSelect)[];
-      studyInputs?: (typeof inputs.$inferSelect)[];
+      studyMembers?: (typeof studyMembers.$inferSelect)[];
+      inputs?: (typeof inputs.$inferSelect)[];
       events: { id: string; seq: number; runId: string }[];
       // Dumps made before run-keyed rows also hold `threads` (ignored) and `pi_messages` without `runId`.
       piMessages: { runId?: string }[];
@@ -69,23 +79,23 @@ const studyId = `study-${runId}`;
 const workflow = assertRestorable(dump);
 
 const strays: string[] = [];
-if (!dump.study && (dump.studyScans || dump.studyInputs)) {
+if (!dump.study && (dump.studyMembers || dump.inputs)) {
   throw new Error("dump has study rows without their study");
 }
 if (dump.study) {
   if (dump.study.id !== dump.run.studyId || dump.study.labId !== dump.run.labId) {
     strays.push("study");
   }
-  if (!dump.studyScans?.some((scan) => scan.inputId === dump.run.inputId)) {
-    throw new Error("dump is missing the run's study scan");
+  if (!dump.studyMembers?.some((member) => member.inputId === dump.run.inputId)) {
+    throw new Error("dump is missing the run's study member");
   }
-  for (const scan of dump.studyScans) {
-    if (scan.studyId !== dump.study.id) strays.push(`scan of ${scan.studyId}`);
+  for (const member of dump.studyMembers) {
+    if (member.studyId !== dump.study.id) strays.push(`study member of ${member.studyId}`);
   }
-  for (const input of dump.studyInputs ?? []) {
+  for (const input of dump.inputs ?? []) {
     if (
       input.labId !== dump.run.labId ||
-      !dump.studyScans.some((scan) => scan.inputId === input.id)
+      !dump.studyMembers.some((member) => member.inputId === input.id)
     ) {
       strays.push(`input ${input.id}`);
     }
@@ -122,7 +132,7 @@ await db.transaction(async (tx) => {
   await tx.delete(events).where(eq(events.runId, runId));
   await tx.delete(runs).where(eq(runs.id, runId));
 
-  for (const input of dump.studyInputs ?? (dump.input ? [dump.input] : [])) {
+  for (const input of dump.inputs ?? (dump.input ? [dump.input] : [])) {
     await tx.insert(inputs).values(revive(inputs, input)).onConflictDoNothing();
     const [stored] = await tx.select().from(inputs).where(eq(inputs.id, input.id));
     // Each database seeds its own reference input on boot, so its creation time never matches.
@@ -145,16 +155,17 @@ await db.transaction(async (tx) => {
     await tx.insert(studies).values(revive(studies, dump.study)).onConflictDoNothing();
     const [stored] = await tx.select().from(studies).where(eq(studies.id, dump.study.id));
     sameSharedRow(`study ${dump.study.id}`, stored, dump.study);
-    for (const scan of dump.studyScans ?? []) {
-      const [input] = await tx.select().from(inputs).where(eq(inputs.id, scan.inputId));
-      if (!input || input.labId !== run.labId)
-        throw new Error(`missing study input ${scan.inputId}`);
-      await tx.insert(studyScans).values(scan).onConflictDoNothing();
-      const [storedScan] = await tx
+    for (const member of dump.studyMembers ?? []) {
+      const [input] = await tx.select().from(inputs).where(eq(inputs.id, member.inputId));
+      if (!input || input.labId !== run.labId) throw new Error(`missing input ${member.inputId}`);
+      await tx.insert(studyMembers).values(member).onConflictDoNothing();
+      const [storedMember] = await tx
         .select()
-        .from(studyScans)
-        .where(and(eq(studyScans.studyId, scan.studyId), eq(studyScans.inputId, scan.inputId)));
-      sameSharedRow(`scan ${scan.inputId}`, storedScan, scan);
+        .from(studyMembers)
+        .where(
+          and(eq(studyMembers.studyId, member.studyId), eq(studyMembers.inputId, member.inputId)),
+        );
+      sameSharedRow(`study member ${member.inputId}`, storedMember, member);
     }
     run.studyId = dump.study.id;
   } else if (!keep) {
@@ -168,7 +179,7 @@ await db.transaction(async (tx) => {
       example: run.example ?? false,
       createdAt: run.createdAt,
     });
-    await tx.insert(studyScans).values({
+    await tx.insert(studyMembers).values({
       studyId,
       inputId: run.inputId,
       subject: dump.input?.name ?? runId,
@@ -183,11 +194,11 @@ await db.transaction(async (tx) => {
       workflowId: workflow.id,
       example: run.example ?? false,
     });
-    const [scan] = await tx
+    const [member] = await tx
       .select()
-      .from(studyScans)
-      .where(and(eq(studyScans.studyId, keep), eq(studyScans.inputId, run.inputId)));
-    if (!scan) throw new Error(`study ${keep} has no scan for input ${run.inputId}`);
+      .from(studyMembers)
+      .where(and(eq(studyMembers.studyId, keep), eq(studyMembers.inputId, run.inputId)));
+    if (!member) throw new Error(`study ${keep} has no study member for input ${run.inputId}`);
     run.studyId = keep;
   }
   await tx.insert(runs).values(run);

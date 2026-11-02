@@ -4,9 +4,9 @@ import { StatusMark } from "./status-mark";
 
 /**
  * **What:** a row that is a place. The whole row navigates (an arrow shows on hover); its chevron
- * still opens the next layer in place. **Why:** lists of scans and tasks you go into were ad hoc
+ * still opens the next layer in place. **Why:** lists of inputs and tasks you go into were ad hoc
  * links; this keeps them one row. **Where:** Home's "Needs you" and "Your studies", the study
- * panel's scans, Scans rows, Box bodies.
+ * panel's inputs, Scans rows, Box bodies.
  *
  * `to` takes a URL, or a function that renders your router's link with the props it is given
  * (`to={(p) => <Link to={path} {...p} />}`), so this package needs no router.
@@ -30,7 +30,7 @@ const meta = {
       <RowLink
         title="OA7-6, left knee"
         subtitle="Tibial IIOC, task 4 of 9"
-        to="#scan"
+        to="#input"
         cells={[<StatusMark key="s" status="running" label="Task 4 of 9" />]}
       />
     </List>

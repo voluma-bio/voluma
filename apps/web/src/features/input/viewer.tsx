@@ -1,5 +1,5 @@
 /**
- * The scan review's main area: the subject in view (a task, or an output of the agent loop) on
+ * The input review's main area: the subject in view (a task, or an output of the agent loop) on
  * its own analysis grid in Andrew's grid viewer (3D and three slices through one crosshair), with
  * the blocks the subject names drawn on it, from the run's converted assets. Loaded lazily, with
  * three.js. Each grid gets its own viewer, kept mounted and hidden while another grid is shown;

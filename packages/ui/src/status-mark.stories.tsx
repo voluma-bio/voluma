@@ -2,11 +2,11 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { STATUS_WORD, type Status, StatusGlyph, StatusMark } from "./status-mark";
 
 /**
- * **What:** the state of a task, scan, item, run or agent: one glyph and one word. The glyph's
+ * **What:** the state of a task, input, item, run or agent: one glyph and one word. The glyph's
  * shape carries the state without colour (diamond to check, tick done, turning arc running,
  * turning arc round a tick checking, dashed ring waiting, bars paused, crossed square stopped). **Why:** one
  * name and one look per state; today "waiting" alone has ten names. **Where:** the study panel's
- * scan list, the scans x tasks matrix, task graph boxes, Scans, To check, the scan queue, the
+ * input list, the inputs x tasks matrix, task graph boxes, Scans, To check, the input queue, the
  * agents tree and the header line. A caller may give a more exact word ("2 to check", "Failed")
  * that keeps the state's meaning.
  */

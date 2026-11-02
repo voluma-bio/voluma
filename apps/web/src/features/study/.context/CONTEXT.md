@@ -4,9 +4,9 @@ Studies (`/`, `studies-page.tsx`), Run on new scans (`/new`, `new-page.tsx`), Wo
 (`/workflows`, `workflows-page.tsx`) and a study's two pages (`/studies/:id` and
 `/studies/:id/compare`, `study/`). On screen one scanned knee is a **sample** (agent-model `review.md`,
 Naming: the mouse-OA workflow's noun). Write the word only through `INPUT_WORD` (`@voluma/ui`), so
-a rename is one edit; code names and routes (`scan`, `input`, `/scans/…`) don't change with it. Every run
-belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
-shown as its scan and linked straight to its scan review (`/scans/:runId`, `runHref`).
+a rename is one edit; code names and routes say `input` (`/studies/:id/inputs/:inputId`) and don't change with it. Every run
+belongs to a study (`@voluma/contracts/study`); a study of one is a study whose input count is 1,
+shown as its input and linked straight to its page (`/studies/:id/inputs/:inputId`, `inputHref`). `/scans/:runId` and `/runs/:runId(/live)` redirect to it (`features/input/index.tsx`).
 The deleted study pages' paths redirect (`index.tsx`): `check` to `?status=needs-you`, `results` to
 Compare, `scans`, `details` and `workflow` to the study. Links to them are out in the world (the
 hackathon judges' notes link the example's study), so keep these until there is a reason not to.
@@ -40,7 +40,7 @@ hackathon judges' notes link the example's study), so keep these until there is 
 - **Recent activity** is built from the runs' own times (created, started, ended, reviewed); the
   study read has no event feed, so To check raised and corrections are not lines yet.
 - **Run on new scans** keeps no outputs checklist and no notes: a study runs every output (the
-  request sends no `selectedOutputs`). Grouping dropped files into scans is `scan-files.ts` (the
+  request sends no `selectedOutputs`). Grouping dropped files into scans is `input-files.ts` (the
   rule is its header); intake (mouse, knee, group from names and the sample sheet, no AI) is
   `intake.ts`, mouse-OA specific: the knee is stored as `attributes.knee`. With several scans,
   every row needs mouse, knee and group before Start; one scan needs none.
@@ -65,15 +65,15 @@ hackathon judges' notes link the example's study), so keep these until there is 
   budget cap, so the page never says a run stops at one.
 - **Excel sample sheets**: `xlsx.ts` reads the first worksheet with `fflate` (unzip) and
   `DOMParser`, loaded only when an `.xlsx` is dropped.
-- **Shared with `features/scan`** through `@voluma/run-view`: the run status words
+- **Shared with `features/input`** through `@voluma/run-view`: the run status words
   (`runStatus`, a word and a `StatusMark` state: Running, N to check, Checked, Reviewed, Failed,
   Stopped, Waiting, Needs your keys (paused)), `liveStatus` ("Task N of M" while a task-loop run runs, "Running · N of M in" while an agent-loop
   run does, from `outputs`, its final outputs in),
-  `scanStatus` (a sample's: its newest run's, "Not started" with no run), the Samples tree's data
+  `inputStatus` (a sample's: its newest run's, "Not started" with no run), the Samples tree's data
   (`sampleTree`), the run and item links, `ItemToCheck`, the formatters (`whenText` included), and visitor keys.
-  `runStatus` and `runHref` take a run's `state` and `review`. A `newestRuns` entry and a study
+  `runStatus` and `inputHref` take a run's `state` and `review`. A `newestRuns` entry and a study
   scan's `review` hold it for either loop (an agent-loop run's final outputs that need a person, `needingYou`, the sample page's Needs you count, worded "N needs you" by `needsYouText`);
-  a full `Run`'s `review` is the task loop's only, so `scanStatus` reads the scan's. Every page uses this mapping; don't add another.
+  a full `Run`'s `review` is the task loop's only, so `inputStatus` reads the scan's. Every page uses this mapping; don't add another.
 - **A study's pages** sit under `study/study-layout.tsx`, which loads the study once, renders the
   header line (breadcrumb, "Next scan that needs you") and the scan tree on the left side
   (`SidePanel`, `SampleTree` from `@voluma/ui`), and hands the study to each page through
@@ -92,11 +92,11 @@ hackathon judges' notes link the example's study), so keep these until there is 
 - **To check means needs you.** Two counts, named apart in contracts: `needsYou` (what needs a
   person: open checks plus the card of a To check task with no check, such as one the second AI
   sent back) is what every "N to check" reads: a scan's status and "Next scan that needs you"
-  (`scanNeedsYou` / `needsYouOf`). `acceptable` is only what "Looks right" can accept, which only
+  (`inputNeedsYou` / `needsYouOf`). `acceptable` is only what "Looks right" can accept, which only
   the scan review offers; here it gives a sample's line its items' titles (`waitsOn`, with each
   card nobody can accept as "<task>: <why>"). A live or stopped rerun's items show on its tasks,
   not in the counts.
-- **Links into the scan review**: a sample opens at `runHref`; a Needs you sample opens at its
+- **Links into the scan review**: a sample opens at `inputHref`; a Needs you sample opens at its
   first open item (`reviewHref`, `itemHref`: `?task=&item=`), so the review shows exactly that
   item. Adding scans to an existing study isn't designed, so there is no
   "Add scans". The knee reads from `attributes.knee`, as intake stores it.

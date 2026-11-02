@@ -1,5 +1,5 @@
 /**
- * The scan page's Samples tab (`INPUT_WORD`): every study's samples in the shared tree, this run's
+ * The input page's Samples tab (`INPUT_WORD`): every study's samples in the shared tree, this run's
  * study open and its sample highlighted. `studiesQuery` refetches while a run is live, so a running
  * sample's row ("Running · 1 of 2 in") keeps up.
  */
@@ -10,7 +10,7 @@ import { ErrorState, INPUT_WORD, LoadingState, SampleTree } from "@voluma/ui";
 import { useMemo } from "react";
 import { Link } from "react-router";
 
-export function Samples({ studyId, runId }: { studyId: string; runId: string }) {
+export function Samples({ studyId, inputId }: { studyId: string; inputId: string }) {
   const studies = useQuery(studiesQuery());
   const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);
   if (studies.isError)
@@ -29,7 +29,7 @@ export function Samples({ studyId, runId }: { studyId: string; runId: string }) 
     <SampleTree
       studies={tree}
       studyId={studyId}
-      sampleId={runId}
+      sampleId={inputId}
       renderLink={(href, props) => <Link to={href} {...props} />}
     />
   );

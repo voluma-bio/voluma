@@ -1,5 +1,5 @@
 /**
- * Report: the scan's task graph (report size), then the task in view: where it stands (what it
+ * Report: the input's task graph (report size), then the task in view: where it stands (what it
  * took and cost behind its info button), what it is for, its items, its values, how they compare with reference readers, its QC images
  * and its files. Picking a box sets up the views on that task; a box's agent opens its steps.
  */
@@ -35,7 +35,7 @@ export function ReportPanel({
   task: TaskView | undefined;
   /** Its review data (values, references, files), once the run has some. */
   reviewTask: ReviewTask | undefined;
-  /** Every item of the scan, reconciled with authoritative human decisions. */
+  /** Every item of the input, reconciled with authoritative human decisions. */
   items: NeedItem[];
   onTask: (taskId: string) => void;
   onItem: (item: NeedItem) => void;

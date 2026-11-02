@@ -5,11 +5,11 @@ import { StoryRail } from "./story-rail";
 
 /**
  * **What:** the one frame every screen sits in: a header line, the rail at the far left, the main
- * area. **Why:** moving between the study and a scan keeps the frame still; only the content
+ * area. **Why:** moving between the study and an input keeps the frame still; only the content
  * changes. **Where:** every signed-in screen (`SignedIn`). New screens lay out their own sides
  * with `SidePanel` (Shell/SidePanel).
  *
- * This story shows the older docked panels the scan page still uses:
+ * This story shows the older docked panels the input page still uses:
  * an icon strip at each edge, up to two panels per side. Try: click a strip button to open its
  * panel, again to close; Shift-click stacks a second panel; drag a side's inner edge to resize,
  * double-click it to fold; `\` and `]` fold a side; F for Full view, Esc to leave.
@@ -37,7 +37,7 @@ function Frame({ theme }: { theme: "light" | "dark" }) {
       <ShellPanel
         id="s-report"
         side="left"
-        group="scan"
+        group="input"
         label="Report"
         icon={<FileText />}
         shortcut="t"
@@ -48,7 +48,7 @@ function Frame({ theme }: { theme: "light" | "dark" }) {
       <ShellPanel
         id="s-agents"
         side="left"
-        group="scan"
+        group="input"
         label="Agents"
         icon={<Users />}
         shortcut="g"
@@ -78,7 +78,7 @@ export const StudyLight: Story = {
   globals: { theme: "light" },
   render: () => <Frame theme="light" />,
 };
-export const ScanReviewDark: Story = {
+export const InputReviewDark: Story = {
   globals: { theme: "dark" },
   render: () => <Frame theme="dark" />,
 };
