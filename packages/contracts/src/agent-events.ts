@@ -3,7 +3,7 @@
  * the design is `event-log.md` of the agent-model work). Nothing writes or reads most of them
  * yet: they are in the log's vocabulary first so every deployed parser accepts them before any
  * writer exists. The API writes `tocheck.resolved`, `approval.given`, `approval.declined` and
- * `view.saved`, `mark.placed` and `mark.deleted`; the runner writes the rest. Who an event is about is its envelope's thread.
+ * `view.saved`, `mark.placed` and `mark.deleted`; the runner writes the rest, `activity` among them. Who an event is about is its envelope's thread.
  *
  * Stored payloads never embed an authoring schema (`outputs.yaml`'s entries): a change to the
  * schema would then stop stored events parsing. Entries are kept loose here and checked strictly
@@ -144,6 +144,13 @@ export const closeRequestedSchema = z.object({
   threadId: nonEmpty,
   by: z.enum(["self", "main", "ping"]),
 });
+
+/**
+ * What the AI working on this thread is doing, in one sentence in the lab's words; each replaces
+ * the last, with no step, count or id. The envelope's thread says whose it is. Loose so it can
+ * grow without a migration.
+ */
+export const activitySchema = z.looseObject({ text: nonEmpty.max(300) });
 
 /** The idle ping was recorded, before it is sent. */
 export const pingSchema = z.object({ threadId: nonEmpty });

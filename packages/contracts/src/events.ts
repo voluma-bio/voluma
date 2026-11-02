@@ -38,6 +38,7 @@
  */
 import { z } from "zod";
 import {
+  activitySchema,
   agentMessageSchema,
   approvalAnsweredSchema,
   approvalRequestedSchema,
@@ -465,6 +466,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const agentMessage = event("agent.message", agentMessageSchema);
   const closeRequested = event("close.requested", closeRequestedSchema);
   const ping = event("ping", pingSchema);
+  const activity = event("activity", activitySchema);
   const approvalRequested = event("approval.requested", approvalRequestedSchema);
   const bashBackgrounded = event("bash.backgrounded", bashBackgroundedSchema);
   const bashEnded = event("bash.ended", bashEndedSchema);
@@ -612,6 +614,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     agentMessage,
     closeRequested,
     ping,
+    activity,
     approvalRequested,
     bashBackgrounded,
     bashEnded,
