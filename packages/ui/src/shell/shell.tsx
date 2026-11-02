@@ -3,9 +3,8 @@
  * the far left, and the main area. A screen lays out its own side panels (`SidePanel`): the shell
  * keeps each side's width and whether it is folded, so both carry across pages.
  *
- * Older screens still declare docked panels with `ShellPanel` and `ShellLink`, which put a
- * labelled icon strip at each edge with up to two panels per side (the task review, the study's
- * sections; they go when those screens move to `SidePanel`). Panels push the main area aside,
+ * The scan page still declares docked panels with `ShellPanel`, which put a labelled icon strip
+ * at each edge with up to two panels per side; they go when it moves to `SidePanel`. Panels push the main area aside,
  * never float over it, so the 3D views are never covered.
  *
  * A screen declares its panels by rendering `<ShellPanel>` anywhere inside its own tree: the panel
@@ -61,8 +60,6 @@ type Registration = Omit<ShellPanelProps, "children" | "tools" | "icon"> & {
    * strip reads the latest on its next render. */
   icon: { current: ReactNode };
   order: number;
-  /** A strip button that goes somewhere instead of opening a panel (`ShellLink`). */
-  link?: { active: boolean; go(): void };
 };
 
 type Layout = {
@@ -134,13 +131,7 @@ let nextOrder = 0;
 /** Registering the same panel again is a no-op, so a screen's re-render does not re-render the shell. */
 function sameRegistration(a: Registration | undefined, b: Registration) {
   if (!a) return false;
-  const { link: linkA, ...restA } = a;
-  const { link: linkB, ...restB } = b;
-  return (
-    Object.keys(restB).every(
-      (k) => restA[k as keyof typeof restA] === restB[k as keyof typeof restB],
-    ) && linkA?.active === linkB?.active
-  );
+  return Object.keys(b).every((k) => a[k as keyof Registration] === b[k as keyof Registration]);
 }
 
 export function AppShell({
@@ -253,7 +244,6 @@ export function AppShell({
 
   const toggle = useCallback(
     (reg: Registration, stack: boolean) => {
-      if (reg.link) return reg.link.go();
       fold(reg.side, false);
       setLayout((l) => {
         const open = folded[reg.side] ? [] : l.open[reg.side];
@@ -309,7 +299,7 @@ export function AppShell({
   const open = useCallback(
     (id: string) => {
       const reg = regsRef.current.get(id);
-      if (!reg || reg.link) return;
+      if (!reg) return;
       fold(reg.side, false);
       setLayout((l) =>
         l.open[reg.side].includes(id)
@@ -439,7 +429,7 @@ export function AppShell({
             {items
               .filter((r) => (r.group ?? "") === g)
               .map((r) => {
-                const active = r.link ? r.link.active : shown[side].includes(r.id);
+                const active = shown[side].includes(r.id);
                 return (
                   <button
                     key={r.id}
@@ -448,8 +438,7 @@ export function AppShell({
                       else triggers.current.delete(r.id);
                     }}
                     type="button"
-                    aria-pressed={r.link ? undefined : active}
-                    aria-current={r.link?.active ? "page" : undefined}
+                    aria-pressed={active}
                     title={r.shortcut ? `${r.label} (${r.shortcut.toUpperCase()})` : r.label}
                     onClick={(e) => toggle(r, e.shiftKey)}
                     className={cx(
@@ -681,45 +670,4 @@ export function useOpenPanel(): (id: string) => void {
 export function ShellHeading({ children }: { children: ReactNode }) {
   const slot = useContext(HeadingContext);
   return slot ? createPortal(children, slot) : null;
-}
-
-/** A strip button that goes to a page (a study section, Home) rather than opening a panel. */
-export function ShellLink({
-  id,
-  side = "left",
-  group,
-  label,
-  icon: iconNode,
-  count,
-  shortcut,
-  active,
-  go,
-}: Pick<ShellPanelProps, "id" | "group" | "label" | "icon" | "count" | "shortcut"> & {
-  side?: ShellSide;
-  active: boolean;
-  go(): void;
-}) {
-  const shell = useContext(ShellContext);
-  if (!shell) throw new Error("ShellLink must be rendered inside AppShell");
-  const order = useRef(nextOrder++).current;
-  const { register, unregister } = shell;
-  const goRef = useRef(go);
-  goRef.current = go;
-  const icon = useRef(iconNode);
-  icon.current = iconNode;
-  useEffect(() => {
-    register({
-      id,
-      side,
-      group,
-      label,
-      icon,
-      count,
-      shortcut,
-      order,
-      link: { active, go: () => goRef.current() },
-    });
-  }, [register, id, side, group, label, count, shortcut, order, active]);
-  useEffect(() => () => unregister(id), [unregister, id]);
-  return null;
 }

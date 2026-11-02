@@ -290,7 +290,7 @@ export function NewPage() {
   return (
     <div className="shrink-0">
       <ShellHeading>
-        <Breadcrumb trail={[{ label: "Home", to: linkTo("/") }]} current="Run on new scans" />
+        <Breadcrumb trail={[{ label: "Studies", to: linkTo("/") }]} current="Run on new scans" />
       </ShellHeading>
       <PageHead title="Run on new scans" />
       <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-6 pb-16 max-[760px]:px-4">

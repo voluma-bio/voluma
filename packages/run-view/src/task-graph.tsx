@@ -1,26 +1,20 @@
 /**
  * The workflow as a graph of real nodes: one box per task, laid out by dependency depth, with an
- * edge for each dependency no longer path already implies. One component in three sizes:
- * - `study`: left to right; each box sums the study's scans, one cell per scan, then counts.
- *   Its boxes share the graph's width down to `STUDY_BOX`, so a six-layer workflow fits a page
- *   column beside the Study panel at 1280 px.
+ * edge for each dependency no longer path already implies. One component in two sizes:
  * - `summary`: left to right and small; one scan's tasks, each with its state and one line.
  * - `report`: top down, fitted to the scan review's Report panel: a layer wider than the panel
  *   wraps onto more rows. The selected, working or redone task also lists its agents.
- * A box either opens somewhere (`taskLink`, a link) or picks a task in place (`onSelect`, a toggle).
+ * A box picks a task in place (`onSelect`).
  * Boxes are ordinary layout and may grow; the edges are measured from where the boxes are after
  * layout, so the drawing never needs to know a box's size.
  */
-import { cx, type LinkTo, Progress, STATUS_WORD, type Status, StatusGlyph } from "@voluma/ui";
+import { cx, STATUS_WORD, type Status, StatusGlyph } from "@voluma/ui";
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { THREAD_STATUS } from "./agents";
 import { agentLabel, type TaskState, type TaskView, type Thread } from "./run-model";
 
 /** One task as the graph places it. */
 export type GraphTask = { id: string; title: string; dependsOn: string[] };
-
-/** A task at study size: its state on each scan of the study, in the study's scan order. */
-export type StudyGraphTask = GraphTask & { scans: Status[] };
 
 /**
  * What a box at scan size needs of a task; the report size also lists its `threads`. `open`: its
@@ -30,27 +24,15 @@ export type ScanGraphTask = Pick<TaskView, "id" | "title" | "dependsOn" | "state
   open: number;
 } & Partial<Pick<TaskView, "threads">>;
 
-export type TaskGraphProps =
-  | {
-      size: "study";
-      tasks: StudyGraphTask[];
-      /** The task the page is filtered to; its edges light up. */
-      selected?: string;
-      /** Picks a task on this page: the box is a toggle, pressed when `selected`. */
-      onSelect?: (taskId: string) => void;
-      /** Where a box opens, when it leads to another page: the box is a link. */
-      taskLink?: (taskId: string) => LinkTo;
-      className?: string;
-    }
-  | {
-      size: "summary" | "report";
-      tasks: ScanGraphTask[];
-      selected?: string;
-      onSelect?: (taskId: string) => void;
-      /** Report size: opens one of a box's agents. */
-      onAgent?: (threadId: string) => void;
-      className?: string;
-    };
+export type TaskGraphProps = {
+  size: "summary" | "report";
+  tasks: ScanGraphTask[];
+  selected?: string;
+  onSelect?: (taskId: string) => void;
+  /** Report size: opens one of a box's agents. */
+  onAgent?: (threadId: string) => void;
+  className?: string;
+};
 
 /** A task's state in the one status vocabulary of `@voluma/ui`; skipped reads as waiting. */
 export const TASK_STATUS: Record<TaskState, Status> = {
@@ -96,11 +78,6 @@ export const taskStateWord = (state: TaskState) =>
  */
 const BOX_REM = 9.5;
 const BOX = `${BOX_REM}rem`;
-/**
- * A study box's least width: narrower than `BOX`, so the mouse OA workflow's six layers fit 784 px
- * (6 x 108 px boxes, 5 x 16 px gaps). A long name takes a third line there.
- */
-const STUDY_BOX = "6.75rem";
 /** The gap between top-down lanes, `gap-2`. */
 const LANE_GAP_REM = 0.5;
 
@@ -133,50 +110,34 @@ function useFit(lanes: number, on: boolean) {
 export function TaskGraph(props: TaskGraphProps) {
   const right = props.size !== "report";
   const boxes = new Map<string, ReactNode>(
-    props.size === "study"
-      ? props.tasks.map((t) => [
-          t.id,
-          <StudyBox
-            key={t.id}
-            task={t}
-            pressed={props.selected === t.id}
-            onSelect={props.onSelect}
-            link={props.taskLink?.(t.id)}
-          />,
-        ])
-      : props.tasks.map((t) => [
-          t.id,
-          <ScanBox
-            key={t.id}
-            task={t}
-            size={props.size}
-            selected={props.selected === t.id}
-            onSelect={props.onSelect}
-            onAgent={props.size === "report" ? props.onAgent : undefined}
-          />,
-        ]),
+    props.tasks.map((t) => [
+      t.id,
+      <ScanBox
+        key={t.id}
+        task={t}
+        size={props.size}
+        selected={props.selected === t.id}
+        onSelect={props.onSelect}
+        onAgent={props.size === "report" ? props.onAgent : undefined}
+      />,
+    ]),
   );
   const { layers, edges, lanes: all } = layout<GraphTask>(props.tasks);
   const { ref, paths } = useEdges(edges, right);
   const { ref: outer, fit: lanes } = useFit(all, !right);
   return (
     // Boxes keep their least width; a parent narrower than one box, or than a left-to-right
-    // graph's layers (a study workflow of 7 or more layers beside the Study panel), scrolls here.
+    // graph's layers, scrolls here.
     <div ref={outer} className={cx("overflow-x-auto", props.className)}>
       <div
         ref={ref}
         className={cx(
           "relative grid",
           right
-            ? cx(
-                "auto-cols-[minmax(var(--box),1fr)] grid-flow-col",
-                props.size === "study" ? "gap-x-4" : "gap-x-6",
-              )
+            ? "auto-cols-[minmax(var(--box),1fr)] grid-flow-col gap-x-6"
             : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(var(--box),1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-2",
         )}
-        style={
-          { "--lanes": lanes, "--box": props.size === "study" ? STUDY_BOX : BOX } as CSSProperties
-        }
+        style={{ "--lanes": lanes, "--box": BOX } as CSSProperties}
       >
         <svg
           aria-hidden
@@ -357,11 +318,9 @@ function Box({
   title,
   label,
   selected,
-  pressed,
   dim,
   compact,
   onSelect,
-  link,
   lead,
   children,
 }: {
@@ -369,11 +328,9 @@ function Box({
   /** The control's accessible name; the box's text says it to sighted readers. */
   label: string;
   selected?: boolean;
-  pressed?: boolean;
   dim?: boolean;
   compact?: boolean;
   onSelect?: () => void;
-  link?: LinkTo;
   lead?: ReactNode;
   children?: ReactNode;
 }) {
@@ -382,30 +339,22 @@ function Box({
       className={cx(
         "relative grid min-w-0 gap-0.5 rounded-lg bg-card text-left",
         compact ? "px-2 pt-1.5 pb-[7px]" : "px-2.5 pt-[7px] pb-2",
-        selected || pressed
+        selected
           ? "inset-ring-[1.5px] inset-ring-select"
           : dim
             ? "inset-ring inset-ring-border"
             : "inset-ring inset-ring-line-strong",
-        pressed && "bg-select-tint",
         onSelect && "has-[[data-box-control]:hover]:bg-accent",
-        // A link's stretched target covers the box, so hovering the box is hovering the link.
-        link && "hover:bg-accent",
       )}
     >
       <div className="flex min-w-0 items-start gap-1.5">
         {lead && <span className="mt-0.5 flex">{lead}</span>}
-        {link ? (
-          <BoxLink to={link} label={label} dim={dim}>
-            {title}
-          </BoxLink>
-        ) : onSelect ? (
+        {onSelect ? (
           <button
             type="button"
             data-box-control
             aria-label={label}
             aria-current={selected || undefined}
-            aria-pressed={pressed === undefined ? undefined : pressed}
             onClick={onSelect}
             className={cx(CONTROL, dim && "text-muted-foreground")}
           >
@@ -432,81 +381,6 @@ const CONTROL = cx(
   "min-w-0 flex-1 cursor-pointer text-left text-sm leading-snug font-medium hyphens-none [text-wrap:balance]",
   "after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-ring",
 );
-
-/** A box's title as a link: a plain URL, or the app's router link given the box's look. */
-function BoxLink({
-  to,
-  label,
-  dim,
-  children,
-}: {
-  to: LinkTo;
-  label: string;
-  dim?: boolean;
-  children: ReactNode;
-}) {
-  const className = cx(CONTROL, dim && "text-muted-foreground");
-  // A router link passes on only its props, so the accessible name is text, not `aria-label`.
-  const body = (
-    <>
-      <span className="sr-only">{label}</span>
-      <span aria-hidden>{children}</span>
-    </>
-  );
-  return typeof to === "string" ? (
-    <a href={to} className={className}>
-      {body}
-    </a>
-  ) : (
-    to({ className, children: body, "data-row-control": "" })
-  );
-}
-
-const COUNT_ORDER: { status: Status; word: string; tone?: string }[] = [
-  { status: "done", word: "done" },
-  { status: "check", word: "to check", tone: "font-medium text-check" },
-  { status: "running", word: "running", tone: "text-info" },
-  { status: "checking", word: "checking", tone: "text-info" },
-  { status: "stopped", word: "stopped", tone: "text-destructive" },
-  { status: "paused", word: "paused" },
-  { status: "waiting", word: "waiting" },
-];
-
-function StudyBox({
-  task,
-  pressed,
-  onSelect,
-  link,
-}: {
-  task: StudyGraphTask;
-  pressed: boolean;
-  onSelect?: (taskId: string) => void;
-  link?: LinkTo;
-}) {
-  const counts = COUNT_ORDER.map((c) => ({
-    ...c,
-    n: task.scans.filter((s) => s === c.status).length,
-  })).filter((c) => c.n > 0);
-  const summary = counts.map((c) => `${c.n} ${c.word}`).join(", ");
-  return (
-    <Box
-      title={task.title}
-      label={`${task.title}: ${summary || "no scans"}`}
-      pressed={onSelect ? pressed : undefined}
-      onSelect={onSelect && (() => onSelect(task.id))}
-      link={link}
-    >
-      <Progress states={task.scans} className="my-0.5" />
-      <p className="flex flex-wrap gap-x-2.5 text-xs leading-4 text-muted-foreground">
-        {counts.map((c) => (
-          <span key={c.status} className={c.tone}>
-            {c.n} {c.word}
-          </span>
-        ))}
-      </p>
-    </Box>
-  );
-}
 
 /** A box's one line at scan size: what needs you, what is going on, or its key value. */
 function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: string } {

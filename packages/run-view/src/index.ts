@@ -41,7 +41,6 @@ export {
   runHref,
   runStatus,
   scanLabel,
-  studyStatus,
 } from "./run-status";
 export {
   RunStoreProvider,
@@ -50,7 +49,7 @@ export {
   useRunStore,
   useThreads,
 } from "./run-store";
-export { sampleTree } from "./samples";
+export { placeOfStatus, sampleTree } from "./samples";
 export {
   groupNames,
   groupOf,
@@ -63,7 +62,6 @@ export {
 export {
   type GraphTask,
   type ScanGraphTask,
-  type StudyGraphTask,
   shownStatus,
   TASK_STATUS,
   TaskGraph,
