@@ -52,7 +52,7 @@ import { Refusal, result } from "./refusal";
 
 const inputSchema = z.object({
   id: outputRefSchema.describe(
-    "The output's id from /run/final-outputs.yaml or /run/outputs.yaml. One the workflow does not list is <your name>/<id>, and then kind (and base for an overlay, unit for a value) is required.",
+    "The output's id from /run/final-outputs.yaml or /run/outputs.yaml. The ids of the workflow's outputs.yaml (under /workflow) are used as they are, listed in the final outputs or not. One it does not list is <your name>/<id>, and then kind (and base for an overlay, unit for a value) is required.",
   ),
   value: z.number().finite().optional().describe("The number, for an output of kind value."),
   unit: z
@@ -192,6 +192,10 @@ function planOf(deps: OutputToolDeps, caller: Caller, input: ReportOutputInput):
     };
   } else {
     const [owner, own, ...rest] = id.split("/");
+    if (own && deps.catalog.some((e) => e.id === own))
+      throw new Refusal(
+        `${own} is an output of this workflow: report it as ${own}, not ${id}. The workflow's outputs.yaml (under /workflow) lists every id.`,
+      );
     if (!own || rest.length > 0 || owner !== caller.folder)
       throw new Refusal(
         `${id} is not an output of this workflow. To report one it does not list, name it ${caller.folder}/<id> and give its kind (base too for an overlay, unit for a value).`,
