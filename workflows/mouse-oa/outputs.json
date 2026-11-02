@@ -12,8 +12,8 @@
     "name": "Orientation frame",
     "kind": "file",
     "mediaType": "application/json",
-    "region": "frame.json from orient-joint: the shaft axes, the bending plane and the keyframe the oriented stack is cut on",
-    "task": "orientation"
+    "region": "frame.json from orient-joint: intake's rough orientation of the knee (the shaft axes, the bending plane and the keyframe the oriented stack is cut on)",
+    "task": "intake"
   },
   {
     "id": "scan",
