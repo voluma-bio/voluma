@@ -20,8 +20,10 @@ import {
   agentLog,
   agentState,
   type InboxItem,
+  silentMinutes,
+  stalledMinutes,
 } from "@voluma/contracts/agents";
-import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
+import { labelOverlaysUnder, refuseOutputsChange } from "@voluma/contracts/final-outputs";
 import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
@@ -36,10 +38,12 @@ import { threadIdOf } from "../thread-id";
 import type { ThreadSpec, Threads } from "../threads";
 import type { Tool } from "../tools/tool";
 import {
+  activityReminder,
   agentList,
   briefOf,
   deliveryText,
   noticeLine,
+  pingText,
   receipts,
   STUCK_REASON,
   STUCK_SUMMARY,
@@ -53,6 +57,8 @@ import {
   closeWorkerEndId,
   closeWorkerId,
   messageEventId,
+  pingCloseId,
+  pingId,
   reportOutputId,
   returnedId,
   startedId,
@@ -62,6 +68,9 @@ import type { AgentsApi } from "./tools/coordination";
 
 /** Workers open at once (X). */
 const WORKER_LIMIT = 4;
+
+/** How often the loop looks at the clock when nothing else wakes it. */
+const TICK_MS = 30_000;
 
 /** Who an agent is when a thread is built for it. */
 interface AgentIdentity {
@@ -110,7 +119,9 @@ interface AgentLoopOptions {
   prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
-  config?: Partial<Pick<LoopConfig, "stuckLimit">>;
+  config?: Partial<
+    Pick<LoopConfig, "stuckLimit" | "activityMinutes" | "pingMinutes" | "pingCloseMinutes">
+  >;
   providerError?(error: string): ProviderError | undefined;
   now?(): number;
   signal?: AbortSignal;
@@ -118,19 +129,23 @@ interface AgentLoopOptions {
 
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
-/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
+/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen, with the label overlays they rest on. */
 export function openingOutputs(
   catalog: readonly OutputEntry[],
   selected: readonly string[] | undefined,
 ) {
-  return selected
+  const chosen = selected
     ? catalog.filter((e) => selected.includes(e.id))
     : catalog.filter((e) => e.selectable);
+  return [...chosen, ...labelOverlaysUnder(catalog, chosen)];
 }
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, threads } = o;
   const stuckLimit = o.config?.stuckLimit ?? LOOP_DEFAULTS.stuckLimit;
+  const activityMinutes = o.config?.activityMinutes ?? LOOP_DEFAULTS.activityMinutes;
+  const pingMinutes = o.config?.pingMinutes ?? LOOP_DEFAULTS.pingMinutes;
+  const pingCloseMinutes = o.config?.pingCloseMinutes ?? LOOP_DEFAULTS.pingCloseMinutes;
   const now = o.now ?? Date.now;
   const derive = () => agentLog(recorder.events());
   const stateOf = (r: AgentRecord): AgentState =>
@@ -140,6 +155,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   /** Inbox items given to a running thread whose user message is not stored yet, by thread. */
   const handed = new Map<string, Set<string>>();
   const dealtWith = new Set<string>();
+  /** When each agent was last reminded to send an activity line. */
+  const reminded = new Map<string, { activityAt: number; minutes: number }>();
 
   const shell = loopShell({
     rootThreadId: root,
@@ -508,11 +525,82 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       .outputs.filter((x) => x.undecided)
       .map((x) => x.id);
 
+  /**
+   * An idle agent past the ping interval is pinged: the ping is recorded, then delivered as the
+   * start of a turn. A worker already pinged with nothing received since, and idle at least
+   * `pingCloseMinutes`, is asked to wrap up instead (as if it had called `close`). Main is
+   * pinged only while a worker works or its own background command runs, and never closed.
+   */
+  async function pingIdle(d: AgentLog): Promise<boolean> {
+    for (const r of d.records.values()) {
+      if (r.pendingPing || r.closeAt !== undefined || r.end === undefined) continue;
+      // Main's own background command makes it busy, not idle, yet it is pinged then (a worker's is not).
+      const idle = r.place === "main" ? turnState(r) === "idle" : stateOf(r) === "idle";
+      if (!idle || now() - Date.parse(r.endedTime) < pingMinutes * 60_000) continue;
+      if (r.place === "main") {
+        const somethingRuns =
+          o.bash.busy(r.id) ||
+          [...d.records.values()].some((x) => x.place === "worker" && stateOf(x) === "working");
+        if (!somethingRuns) continue;
+      } else if (r.pings > 0 && now() - r.idleFrom >= pingCloseMinutes * 60_000) {
+        await recorder.append(
+          r.id,
+          "close.requested",
+          { threadId: r.id, by: "ping" },
+          pingCloseId(r.id),
+        );
+        return true;
+      }
+      let n = 1;
+      while (d.written.has(pingId(r.id, n))) n++;
+      await recorder.append(r.id, "ping", { threadId: r.id }, pingId(r.id, n));
+      return true;
+    }
+    return false;
+  }
+
+  /** A recorded ping an idle agent has not received is delivered; one overtaken by other input is not (the fold clears it). */
+  async function deliverPings(d: AgentLog): Promise<boolean> {
+    for (const r of d.records.values()) {
+      if (!r.pendingPing || threads.running(r.id) || turnState(r) !== "idle") continue;
+      // Main's list may be as old as the interval: it gets the current one.
+      const text =
+        r.place === "main"
+          ? `${pingText(pingMinutes)}\n\nAgents:\n${agentList(d, stateOf, now())}`
+          : pingText(pingMinutes);
+      await resume(r, text, { kind: "runtime", covers: r.pendingPing });
+      return true;
+    }
+    return false;
+  }
+
+  /** An agent silent for a window is reminded, and again for each further window it stays silent. */
+  async function remindSilent(d: AgentLog): Promise<boolean> {
+    for (const r of d.records.values()) {
+      if (r.closeAt !== undefined) continue;
+      const silent = silentMinutes(r, threads.running(r.id), now());
+      const last = reminded.get(r.id);
+      // The level resets with the silence: a new activity line or start moves `activityAt`.
+      const level = last?.activityAt === r.activityAt ? last.minutes : 0;
+      if (silent < level + activityMinutes) continue;
+      if (threads.send(r.id, activityReminder(activityMinutes), RUNTIME)) {
+        reminded.set(r.id, { activityAt: r.activityAt, minutes: silent });
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Main is idle with nothing new: nudge it a few times, then end the run. */
   async function stuck(d: AgentLog): Promise<boolean> {
     const m = d.main;
     if (!m || stateOf(m) !== "idle" || d.undelivered.length > 0) return false;
-    if ([...d.records.values()].some((r) => stateOf(r) === "working")) return false;
+    // A working or closing agent holds the run open (main may end its turn while a worker winds
+    // up), unless it is silent for two windows: it did not answer its reminder.
+    const holdsRun = (r: AgentRecord) =>
+      ["working", "closing"].includes(stateOf(r)) &&
+      stalledMinutes(r, threads.running(r.id), now()) < 2 * activityMinutes;
+    if ([...d.records.values()].some(holdsRun)) return false;
     const events = recorder.events();
     if (d.emptyDeliveries < stuckLimit) {
       const state = `Agents:\n${agentList(d, stateOf, now())}`;
@@ -592,6 +680,9 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     if (await deliverBashNotices(d)) return "acted";
     if (await deliverInboxes(d)) return "acted";
     if (await deliverToMain(d)) return "acted";
+    if (await deliverPings(d)) return "acted";
+    if (await pingIdle(d)) return "acted";
+    if (await remindSilent(d)) return "acted";
     if (await stuck(d)) return "acted";
     return "idle";
   }
@@ -603,7 +694,13 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     if (e.type !== "message" || e.payload.role !== "user") return;
     if (e.payload.sender.kind === "runtime" && e.payload.sender.covers) shell.nudge();
   });
-  await shell.run(step);
+  // Silence is measured in minutes, and nothing else wakes an idle loop for it.
+  const tick = setInterval(shell.nudge, TICK_MS);
+  try {
+    await shell.run(step);
+  } finally {
+    clearInterval(tick);
+  }
 }
 
 /**

@@ -1,5 +1,11 @@
 # mouse-oa TODO
 
+- **`tibia_frame.py` on flexed or bowed tibiae (unconfirmed).** Preparing 17 lab scans for the growth-plate dataset, 4 gave
+  oblique aligned grids (OA7-5L, OA7-6L, OA7-8L, OA8-1R: shaft leaving the grid, plateau sloping steeply across coronal
+  sections, no clean plate level). Their tibia labels came from a quick threshold-and-erosion split
+  (`~/experiments/plate-data/scans/TIBIA-MASK.md`), not from segmentation, and OA7-8L's took femur pieces, so the cause may be
+  the label rather than the shaft-axis fit. Next: run `tibia_frame.py` on one of them with a checked tibia label; if still
+  oblique, the fit needs to follow the proximal shaft only. Notes per scan: `~/experiments/plate-data/scans/_skipped/<scan>/SKIPPED.md`.
 - **Each region mask is saved twice.** `iioc.py`, `tibial_trabecular.py` and `metaphysis_roi.py` write the full-grid array later
   scripts read (`iioc-tissue.npy`, `iioc-trab-tissue.npy`, `roi3-tissue.npy`, `cortex.npy`) and a cropped copy that is the mask object
   (`roi-iioc.npy`, `roi-iioc-trabecular.npy`, `roi-metaphyseal.npy`, `cortex-object.npy`). The voxels are identical. Direction: the
