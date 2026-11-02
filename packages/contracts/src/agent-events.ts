@@ -303,8 +303,9 @@ export const attachedWasSchema = attachedMarkSchema.pick({ world: true, plane: t
 
 /**
  * A mark attached to a researcher's message. `change`: `delete` (a `mark.deleted` follows its last
- * `mark.placed`), `move` (an earlier `mark.placed` of this id exists) or `place`. `was` is the state
- * main last saw, for a move of the researcher's own mark. `version` is the output's latest version
+ * `mark.placed`), `move` (main has seen an earlier state of this mark, a previous message having
+ * frozen it) or `place`. `was` is the state main last saw; it equals `mark` when it is sent again
+ * unmoved. `version` is the output's latest version
  * when the message was sent.
  */
 export const attachedSchema = z.object({

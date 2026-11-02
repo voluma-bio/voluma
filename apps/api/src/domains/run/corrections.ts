@@ -62,14 +62,16 @@ async function appendPersonEvent(
 
 /**
  * Reopens a finished run for the person's message `messageEventId`: `run.reopened` (id keyed to
- * the message), then the run to `queued` with its end, claim history and lease cleared.
+ * the message), then the run to `queued` with its end, claim history and lease cleared. Returns
+ * false, changing nothing, when that `run.reopened` is already stored.
  */
 export async function reopen(tx: Tx, runId: string, messageEventId: string, by: string) {
-  await appendPersonEvent(tx, runId, {
+  const [stored] = await appendPersonEvent(tx, runId, {
     id: `${messageEventId}:reopened`,
     type: "run.reopened",
     payload: { by },
   });
+  if (!stored) return false;
   await tx
     .update(runs)
     .set({
@@ -83,6 +85,7 @@ export async function reopen(tx: Tx, runId: string, messageEventId: string, by: 
       ...noLease,
     })
     .where(eq(runs.id, runId));
+  return true;
 }
 
 /**
@@ -328,6 +331,17 @@ export async function answerApproval(
     ...run,
     workflows: run.workflows as WorkflowPin[],
   });
+  const type = body.answer === "yes" ? "approval.given" : "approval.declined";
+  const answerId = `${requestId}:answer`;
+  // An answer already stored is answered even though the run's state has moved on since.
+  const [stored] = await tx
+    .select({ type: events.type })
+    .from(events)
+    .where(and(eq(events.runId, runId), eq(events.id, answerId)));
+  if (stored && refusal?.status !== 403) {
+    if (stored.type === type) return { duplicate: true };
+    throw new HTTPException(409, { message: "That request was answered the other way." });
+  }
   if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
   const { events: log, skipped } = readEvents(
     await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
@@ -339,13 +353,6 @@ export async function answerApproval(
   const request = log.find((e) => e.type === "approval.requested" && e.id === requestId);
   if (request?.type !== "approval.requested")
     throw new HTTPException(404, { message: "That request is not open." });
-  const type = body.answer === "yes" ? "approval.given" : "approval.declined";
-  const answerId = `${requestId}:answer`;
-  const given = log.find((e) => e.id === answerId);
-  if (given) {
-    if (given.type === type) return { duplicate: true };
-    throw new HTTPException(409, { message: "That request was answered the other way." });
-  }
   if (log.some((e) => e.id === `${requestId}:settled`))
     throw new HTTPException(404, { message: "That request is not open." });
 

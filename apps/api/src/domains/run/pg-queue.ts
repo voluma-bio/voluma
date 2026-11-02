@@ -734,8 +734,8 @@ export function pgRunQueue(
         } else {
           // The researcher wrote while the claim was ending: the run goes back to the queue.
           const late = run.harness === "agents" ? await lateWrite(tx, runId, report.readSeq) : null;
-          if (late) await reopen(tx, runId, late, run.startedBy);
-          else
+          // A reopen already stored for that write cannot queue the run again: it would loop.
+          if (!late || !(await reopen(tx, runId, late, run.startedBy)))
             await tx
               .update(runs)
               .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })

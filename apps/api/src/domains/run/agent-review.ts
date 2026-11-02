@@ -6,49 +6,38 @@
 import type { Attached } from "@voluma/contracts/agent-events";
 import type { RunEvent } from "@voluma/contracts/events";
 import { outputsFold } from "@voluma/contracts/output-fold";
+import { markStatesOf } from "@voluma/contracts/review-state";
 import { HTTPException } from "hono/http-exception";
 
-type Placed = Extract<RunEvent, { type: "mark.placed" }>;
-
-const sameState = (a: Pick<Attached["mark"], "world" | "plane">, b: typeof a) =>
-  JSON.stringify([a.world, a.plane]) === JSON.stringify([b.world, b.plane]);
-
 /**
- * The marks a message names, as the log holds them now (the browser sends ids, never geometry).
- * `change`: `delete` once a `mark.deleted` follows the last placement; `move` when main was last
- * told of a different state (a previous message's freeze, else the first placement); else `place`.
- * `version` is the mark's output's latest. 404 for an id the caller did not place.
+ * The marks a message names, as the log holds them now (the browser sends ids, never geometry),
+ * from the caller's own writes only. `delete` once the caller deleted it; `move` when main has
+ * seen an earlier state of this mark (a previous message froze it), with `was` that state, which
+ * equals the mark when it is sent again unmoved; else `place`. `version` is the mark's output's
+ * latest. 404 for an id the caller did not place.
  */
 export function freezeAttached(
   log: readonly RunEvent[],
   userId: string,
   markIds: readonly string[],
 ): Attached[] {
-  const placed = new Map<string, Placed[]>();
-  const deletedAt = new Map<string, number>();
+  const own = markStatesOf(log, userId);
   const told = new Map<string, Attached["mark"]>();
-  for (const e of log) {
-    if (e.type === "mark.placed")
-      placed.set(e.payload.id, [...(placed.get(e.payload.id) ?? []), e]);
-    else if (e.type === "mark.deleted") deletedAt.set(e.payload.id, e.seq);
-    else if (e.type === "person.message")
+  for (const e of log)
+    if (e.type === "person.message")
       for (const a of e.payload.attached ?? []) if (a.mark.id) told.set(a.mark.id, a.mark);
-  }
   const outputs = outputsFold(log).byId;
   return [...new Set(markIds)].map((id) => {
-    const history = placed.get(id) ?? [];
-    const last = history.at(-1);
-    if (!last || last.payload.by !== userId)
-      throw new HTTPException(404, { message: "Mark not found." });
-    const { by: _by, ...state } = last.payload;
+    const held = own.get(id);
+    if (!held) throw new HTTPException(404, { message: "Mark not found." });
+    const { by: _by, ...state } = held.mark;
     const version = outputs.get(state.output)?.latest?.version;
     if (version === undefined)
       throw new HTTPException(409, { message: "That output has no version yet." });
     const mark = { ...state, id } satisfies Attached["mark"];
-    if ((deletedAt.get(id) ?? 0) > last.seq) return { change: "delete", mark, version };
-    const before = told.get(id) ?? history[0]?.payload ?? mark;
-    // A first placement, or the state main was told of: nothing moved since.
-    if (sameState(before, mark)) return { change: "place", mark, version };
+    if (held.deleted) return { change: "delete", mark, version };
+    const before = told.get(id);
+    if (!before) return { change: "place", mark, version };
     return { change: "move", mark, was: { world: before.world, plane: before.plane }, version };
   });
 }

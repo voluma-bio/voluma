@@ -63,19 +63,33 @@ export function reviewState(events: readonly RunEvent[], { live = false } = {}) 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
 
 /**
- * The researchers' marks the log holds, by id, in the order first placed: `mark.placed` makes one
- * or, from its author, replaces it; the author's `mark.deleted` takes it away. Another person's
- * write to it changes nothing.
+ * Every mark the log ever held, by id, in the order first placed, with whether it was deleted
+ * since: `mark.placed` makes one or, from its author, replaces it; the author's `mark.deleted`
+ * flags it. Another person's write to it changes nothing. `by` keeps only that person's writes
+ * (their own view of ids they placed), so a mark someone else placed under the same id is not theirs.
  */
+export function markStatesOf(
+  events: readonly RunEvent[],
+  by?: string,
+): Map<string, { mark: Placed; deleted: boolean; seq: number }> {
+  const marks = new Map<string, { mark: Placed; deleted: boolean; seq: number }>();
+  for (const e of events) {
+    if (e.type === "mark.placed" && (by === undefined || e.payload.by === by)) {
+      const had = marks.get(e.payload.id);
+      if (!had || had.mark.by === e.payload.by)
+        marks.set(e.payload.id, { mark: e.payload, deleted: false, seq: e.seq });
+    } else if (e.type === "mark.deleted" && (by === undefined || e.payload.by === by)) {
+      const had = marks.get(e.payload.id);
+      if (had?.mark.by === e.payload.by) had.deleted = true;
+    }
+  }
+  return marks;
+}
+
+/** The researchers' marks the log holds now, by id, in the order first placed. */
 export function marksOf(events: readonly RunEvent[]): Map<string, Placed> {
   const marks = new Map<string, Placed>();
-  for (const e of events) {
-    if (e.type === "mark.placed") {
-      const had = marks.get(e.payload.id);
-      if (!had || had.by === e.payload.by) marks.set(e.payload.id, e.payload);
-    } else if (e.type === "mark.deleted" && marks.get(e.payload.id)?.by === e.payload.by)
-      marks.delete(e.payload.id);
-  }
+  for (const [id, m] of markStatesOf(events)) if (!m.deleted) marks.set(id, m.mark);
   return marks;
 }
 
