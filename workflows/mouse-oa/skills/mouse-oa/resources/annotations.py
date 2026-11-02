@@ -6,6 +6,7 @@ curves use the schema of `region_from_curves.py` (core `regions-and-landmarks/SK
 """
 
 import json
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -162,7 +163,7 @@ def traced_surface(spec, key, shape):
                      '{"<v>": [[w, u], ...]}} (a point is [row = W, column = U])')
     if len(spec.get('slices', {})) < 2:
         sidecar.fail(f'"{key}" needs curves on at least two coronal sections (V indices): trace more sections')
-    H, *_, valid, _ = surface_from_curves(spec, shape)
+    H, *_, valid = surface_from_curves(spec, shape)
     return H, valid
 
 
@@ -183,33 +184,60 @@ def refuse_off_tibia(ann, key, tib, spec_path, vox):
 
 
 def refuse_gaps(ann, key, tib, spec_path, vox):
-    """Refuse a face that leaves tibia at plate level untraced: a bone column whose `support` (surface_from_curves: the span of the
-    straight bridge its W lies on, along U within a section and along V between the two sections it is interpolated between, or
-    its distance from the end point or end section where it is held constant) exceeds the spec's `max_gap_um` (entry plate-faces).
-    "At plate level" is the tibia within the gap of the surface's own W at that column; a column without it (the notch between the
-    condyles) is not checked. A bridge that crosses such columns on its section is held from the nearer of its end points.
-    The stop names each row range and the uncovered U ranges."""
+    """Refuse a face that leaves bone at plate level untraced. "Bone at plate level" is the tibia within the spec's `max_gap_um`
+    (entry plate-faces) of the curve's W at that column. On each traced section, neighbouring points are at most that far apart
+    over the section's bone (a span over columns without bone does not count: the notch between the condyles) and the first and last
+    point are within it of the bone's ends. Across V, traced sections are at most that far apart over the rows where the tibia exists
+    at plate level, and the first and last one are within it of those rows' ends. The stop names each stretch."""
     gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
     um = vox * 1000
-    levels = sorted(int(k) for k in ann[key]['slices'])
     cum = np.concatenate([np.zeros((1, *tib.shape[1:]), np.uint16), np.cumsum(tib, axis=0, dtype=np.uint16)])  # tibia voxels above each W, per (V, U)
 
     def near_tibia(v, w):
-        """Bool over U: tibia on section(s) v within the gap of W `w`."""
+        """Bool over U: tibia on section v within the gap of W `w`."""
         lo, hi = np.clip(np.floor(w - gap), 0, tib.shape[0]).astype(int), np.clip(np.floor(w + gap) + 1, 0, tib.shape[0]).astype(int)
         u = np.arange(tib.shape[2])
         return cum[hi, v, u] > cum[lo, v, u]
 
-    H, *_, support = surface_from_curves(ann[key], tib.shape, near_tibia)  # callers have run traced_surface, so the spec is valid
-    plate = np.array([near_tibia(v, H[v]) for v in range(tib.shape[1])])
-    missing = plate & (support > gap)
-    labels, count = ndi.label(missing)
-    if count:
-        boxes = sorted((sl[0].start, sl[0].stop - 1, sl[1].start, sl[1].stop - 1, int((labels[sl] == i + 1).sum())) for i, sl in enumerate(ndi.find_objects(labels)))
-        shown = '; '.join(f'V={v0}..{v1}, U={u0}..{u1} ({n} columns)' for v0, v1, u0, u1, n in boxes[:6]) + (f'; and {count - 6} more stretches' if count > 6 else '')
-        sidecar.fail(f'"{key}" leaves {int(missing.sum())} columns of the plate not traced at {gap * um:.0f} um spacing or closer (points on a section, '
-                     f'sections in V, or the end of a curve or of the traced sections), where the surface would be a straight line or held constant: {shown}. '
-                     f'Trace the plate there (traced sections: V={levels[0]}..{levels[-1]}, {len(levels)} of them)')
+    def count_between(mask, a, b):
+        """Columns of `mask` strictly between positions a and b."""
+        lo, hi = int(np.floor(a)) + 1, int(np.ceil(b))
+        return int(mask[lo:hi].sum())
+
+    problems = []
+    for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
+        v = int(k)
+        pts = np.array(sorted(pts, key=lambda p: p[1]), float)
+        bone = near_tibia(v, np.interp(np.arange(tib.shape[2]), pts[:, 1], pts[:, 0]))
+        cols = np.flatnonzero(bone)
+        if not len(cols):
+            continue
+        us = pts[:, 1]
+        for a, b in pairwise(us):
+            n = count_between(bone, a, b)
+            if n > gap:
+                problems.append(f'V={v}: U={a:g}..{b:g} has {n} bone columns between two points')
+        if us[0] - cols[0] > gap:
+            problems.append(f'V={v}: the first point is at U={us[0]:g}, bone starts at U={cols[0]}')
+        if cols[-1] - us[-1] > gap:
+            problems.append(f'V={v}: the last point is at U={us[-1]:g}, bone ends at U={cols[-1]}')
+    levels = sorted(int(k) for k in ann[key]['slices'])
+    H, *_ = surface_from_curves(ann[key], tib.shape)  # callers have run traced_surface, so the spec is valid
+    rows = np.array([near_tibia(v, H[v]).any() for v in range(tib.shape[1])])
+    where = np.flatnonzero(rows)
+    if len(where):
+        for a, b in pairwise(levels):
+            n = count_between(rows, a, b)
+            if n > gap:
+                problems.append(f'sections V={a} and V={b} have {n} rows with bone at plate level between them')
+        if levels[0] - where[0] > gap:
+            problems.append(f'the first traced section is V={levels[0]}, the plate starts at V={where[0]}')
+        if where[-1] - levels[-1] > gap:
+            problems.append(f'the last traced section is V={levels[-1]}, the plate ends at V={where[-1]}')
+    if problems:
+        shown = '; '.join(problems[:6]) + (f'; and {len(problems) - 6} more' if len(problems) > 6 else '')
+        sidecar.fail(f'"{key}" leaves bone at plate level untraced at more than {gap * um:.0f} um spacing (points on a section, sections in V, '
+                     f'or the ends of the bone): {shown}. Trace the plate there ({len(levels)} traced sections: V={levels[0]}..{levels[-1]})')
 
 
 def eroded_marks(ann, key, shape, on_bone):

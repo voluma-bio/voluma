@@ -29,19 +29,12 @@ def other_axes(axis):
     return [i for i in range(3) if i != axis]
 
 
-def surface_from_curves(spec, shape, has_bone=None):
+def surface_from_curves(spec, shape):
     """Height map H[slice, other] (voxel index along the height axis) from polylines [row, col], one per slice.
 
     Each polyline is read as height = f(position along the other in-plane axis), interpolated linearly, constant
     beyond its ends; between traced slices H is interpolated linearly, constant beyond the first and last.
-    Also returns valid[slice, other]: True where the traced curves reach (their end points, interpolated across slices),
-    and support[slice, other]: how far H at that column is from the points that feed it, in voxels: the span of the straight
-    bridge it lies on, along the other axis within a slice (0 at a point, the distance to the end point where a curve is held
-    constant) and across slices (the span between the two traced slices it is interpolated between, or the distance to the
-    first or last one where it is held), whichever is larger. `has_bone(k, h)` (optional) says on traced slice k, for the
-    heights h of that slice's curve along the other axis, where the structure the surface describes exists; a bridge that
-    crosses columns without it (a notch) is held from the nearer of its two end points, since nothing there says what the
-    surface does.
+    Also returns valid[slice, other]: True where the traced curves reach (their end points, interpolated across slices).
     """
     axis = spec['axis']
     rows_ax, cols_ax = other_axes(axis)
@@ -50,8 +43,7 @@ def surface_from_curves(spec, shape, has_bone=None):
     levels = sorted(int(k) for k in spec['slices'])
     if not levels:
         sidecar.fail('the curves JSON has no slices')
-    per_slice, left, right, reach = [], [], [], []
-    pos = np.arange(shape[o_ax])
+    per_slice, left, right = [], [], []
     for k in levels:
         pts = np.asarray(spec['slices'][str(k)], float)
         if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 2:
@@ -60,29 +52,13 @@ def surface_from_curves(spec, shape, has_bone=None):
         order = np.argsort(o)
         left.append(o.min())
         right.append(o.max())
-        per_slice.append(np.interp(pos, o[order], h[order]))
-        o = o[order]
-        i = np.searchsorted(o, pos)
-        inside = (i > 0) & (i < len(o))
-        a, b = o[np.maximum(i - 1, 0)], o[np.minimum(i, len(o) - 1)]
-        wide = b - a
-        if has_bone is not None:
-            absent = np.concatenate([[0], np.cumsum(~has_bone(k, per_slice[-1]))])
-            first, last = np.clip(np.floor(a), 0, len(pos) - 1).astype(int), np.clip(np.ceil(b), 0, len(pos) - 1).astype(int)
-            wide = np.where(absent[last + 1] - absent[first] > 0, np.minimum(pos - a, b - pos), wide)
-        reach.append(np.where(np.isin(pos, o), 0, np.where(inside, wide, np.abs(pos - np.clip(pos, o[0], o[-1])))))
+        per_slice.append(np.interp(np.arange(shape[o_ax]), o[order], h[order]))
     per_slice = np.array(per_slice)
-    rows = np.arange(shape[axis])
-    below = np.searchsorted(levels, rows, side='right') - 1  # last traced slice at or before each slice
-    above = np.searchsorted(levels, rows, side='left')  # first traced slice at or after each slice
-    lo_k, hi_k = np.maximum(below, 0), np.minimum(above, len(levels) - 1)
-    lev = np.asarray(levels)
-    across = np.where(below < 0, lev[0] - rows, np.where(above >= len(levels), rows - lev[-1], np.where(lo_k == hi_k, 0, lev[hi_k] - lev[lo_k])))
-    support = np.maximum(np.maximum(np.array(reach)[lo_k], np.array(reach)[hi_k]), across[:, None])
-    H = np.array([np.interp(rows, levels, per_slice[:, j]) for j in range(shape[o_ax])]).T
-    lo = np.interp(rows, levels, left)[:, None]
-    hi = np.interp(rows, levels, right)[:, None]
-    return H, axis, h_ax, o_ax, (levels[0], levels[-1]), (pos[None, :] >= lo) & (pos[None, :] <= hi), support
+    H = np.array([np.interp(np.arange(shape[axis]), levels, per_slice[:, j]) for j in range(shape[o_ax])]).T
+    pos = np.arange(shape[o_ax])[None, :]
+    lo = np.interp(np.arange(shape[axis]), levels, left)[:, None]
+    hi = np.interp(np.arange(shape[axis]), levels, right)[:, None]
+    return H, axis, h_ax, o_ax, (levels[0], levels[-1]), (pos >= lo) & (pos <= hi)
 
 
 def surface_from_map(path, axis, height_axis, shape):
@@ -93,7 +69,7 @@ def surface_from_map(path, axis, height_axis, shape):
             f'height map {path} is {H.shape}: it must be (axis {axis} length, axis {o_ax} length) = '
             f'{(shape[axis], shape[o_ax])}'
         )
-    return H, axis, height_axis, o_ax, (0, shape[axis] - 1), np.ones(H.shape, bool), None
+    return H, axis, height_axis, o_ax, (0, shape[axis] - 1), np.ones(H.shape, bool)
 
 
 def load_surface(arg, shape, hint):
@@ -107,8 +83,8 @@ def load_surface(arg, shape, hint):
 def between(a, shape, grid):
     sp = np.asarray(grid['spacing_zyx_mm'], float)
     hint = (a.axis, a.height_axis) if a.axis is not None and a.height_axis is not None else None
-    Ha, axis, h_ax, o_ax, ra, va, _ = load_surface(a.surface_a, shape, hint)
-    Hb, axis_b, h_ax_b, _, rb, vb, _ = load_surface(a.surface_b, shape, hint)
+    Ha, axis, h_ax, o_ax, ra, va = load_surface(a.surface_a, shape, hint)
+    Hb, axis_b, h_ax_b, _, rb, vb = load_surface(a.surface_b, shape, hint)
     if (axis, h_ax) != (axis_b, h_ax_b):
         sidecar.fail('the two surfaces use different slice or height axes: trace both on the same slices and height')
     Ha = Ha + a.offset_a_mm / sp[h_ax]

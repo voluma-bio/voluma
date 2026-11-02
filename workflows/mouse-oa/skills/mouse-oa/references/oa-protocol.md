@@ -69,9 +69,9 @@ schema is `regions-and-landmarks`'):
   no points where it is flagged. The proposal covers only part of the tibia (the V range and each section's U span are in `plate-faces.json`
   and the script's output) and is where you start, not where you stop: you trace the plate over the whole tibia at plate level, on zoomed
   views, past every span end, on the sections with no span, and out to the V ends. `iioc.py` and `metaphysis_roi.py` stop on a face whose
-  curves leave a column of the tibia at plate level uncovered: a bone column the surface would bridge or hold over more than the spec's `max_gap_um`: points on a section more than that
-  apart along U, neighbouring sections more than that apart in V (about 24 rows), or a curve's end or the first or last section more than that short
-  of it. A short section among full ones does not make up for itself: the rows beside it rest on its missing stretch. They name the V rows and U ranges; they also stop on a point more than
+  curves leave bone at plate level uncovered, by the spec's `max_gap_um` (about 24 rows): on a section, points more than that apart over its bone or the first or last point more than that short of
+  the bone's ends; across V, sections more than that apart over the rows with tibia at plate level or the first or last more than that short of those rows' ends. A span over columns
+  without bone does not count. A short section among full ones is refused: its points must cover its own bone. They name the V rows and U ranges; they also stop on a point more than
   `off_tibia_margin_um` off the tibia mask. Say where the proposal covered and where you traced. Copy its two curve keys
   (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
   The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in two known ways, jumping up into

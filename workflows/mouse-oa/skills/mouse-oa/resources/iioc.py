@@ -13,9 +13,9 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections; a point more than
                           `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused, naming the section, and so
-                          is a face that leaves a column of the tibia at plate level untraced: a bone column the surface bridges or holds over more than `max_gap_um` of the spec (entry
-                          plate-faces), that is points on a section more than that apart along U, neighbouring sections more than that apart in V,
-                          or a curve's end or the first or last section more than that short of it; columns with no tibia at plate level are not demanded
+                          is a face that leaves bone at plate level untraced: over a section's bone, points more than `max_gap_um` of the spec (entry
+                          plate-faces) apart or the first or last point more than that short of the bone's ends; over the rows with tibia at plate
+                          level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count
   plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
                           of the curve, any U range (integers, first <= last). It never replaces points: the section's curve must
                           reach both ends of every marked range, or the script stops naming the section and U range; inside
