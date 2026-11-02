@@ -92,8 +92,7 @@ function reviewOf({ run, results }: RunResult): StudyRunSummary["review"] {
     return { acceptable, needsYou, reviewedAt };
   }
   if (!completed(run) || run.harness !== "agents") return null;
-  const needs = needingYou(results.outputs).size;
-  return { acceptable: needs, needsYou: needs, reviewedAt: null };
+  return { acceptable: 0, needsYou: needingYou(results.outputs).size, reviewedAt: null };
 }
 
 /** The newest run's final outputs' status, for a run of the agent loop; empty otherwise. */
@@ -119,9 +118,10 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
     }
   }
   let needsYou = 0;
+  // Each scan as the study page counts it (`needsYouOf`): the same function on the same fields.
   for (const [id, result] of newest) {
     const done = newestCompleted.get(id);
-    needsYou += scanNeedsYou(reviewOf(result), (done && reviewOf(done)?.acceptable) ?? 0);
+    needsYou += scanNeedsYou(reviewOf(result), done ? resultOf(done).acceptable.length : 0);
   }
   return {
     ...study,

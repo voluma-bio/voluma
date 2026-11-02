@@ -304,7 +304,8 @@ export function needingYou(fold: OutputsFold): Set<string> {
   const to = (id: string) => (fold.byId.get(id)?.latest ? id : (fold.labels.get(id) ?? id));
   const open = (id: string) => fold.byId.get(id)?.latest?.toCheck.some((t) => !t.resolved);
   const needs = (root: string) => {
-    const seen = new Set([root]);
+    // A final label overlay with no version of its own is its map's, as any link to it is.
+    const seen = new Set([to(root)]);
     for (const id of seen) {
       if (open(id)) return true;
       for (const link of fold.byId.get(id)?.latest?.madeFrom ?? []) seen.add(to(link.id));
