@@ -72,7 +72,7 @@ only, and never reaches the fibula.
 The distal face it starts from is the one `plate_faces.py` proposed, checked and retraced where flagged or wrong (see iioc,
 above); where the plate is eroded and the range marked so, the two faces meet, `metaphysis_roi.py` accepts that, ROI-3 starts below the
 remaining bone, and the result record lists the marked ranges and their share: report them with the To check item.
-The check opens every `qc-faces-<n>.jpg` of the task too: `metaphysis_roi.py` draws the distal face (magenta) and the proximal one (orange)
+The check opens every `qc-faces-<n>.jpg` of the step too: `metaphysis_roi.py` draws the distal face (magenta) and the proximal one (orange)
 as delivered on every traced section over the tibia's outline, and the distal line must lie on the plate's lower edge, on the bone, following the same band through any condylar wrap and not leaving it for cortex or marrow.
 
 ## cortical
