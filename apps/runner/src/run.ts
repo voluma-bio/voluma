@@ -390,11 +390,14 @@ async function claimBody(
         return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
       };
       // A role's file may set its thinking level; else the runner's; else none is sent ("off").
-      // The run's model gets the nearest level it supports (DeepSeek Flash has no `medium`).
+      // A forced model (`RUNNER_MODEL`) keeps the role's level unless `RUNNER_THINKING` sets one.
+      // A run's or forced model gets the nearest level it supports (DeepSeek Flash has no `medium`).
       const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
         if (visitor) return "off";
-        const wanted = config.modelForced ? config.thinking : (thinking ?? config.thinking);
-        const level = chosen ? nearestThinking(wanted, model) : wanted;
+        const wanted = config.modelForced
+          ? (config.thinking ?? thinking)
+          : (thinking ?? config.thinking);
+        const level = chosen || config.modelForced ? nearestThinking(wanted, model) : wanted;
         assertThinking(level, [model], `the ${name} role's`);
         return level ?? "off";
       };
