@@ -44,6 +44,8 @@ import {
   bashBackgroundedSchema,
   bashEndedSchema,
   closeRequestedSchema,
+  markDeletedSchema,
+  markPlacedSchema,
   outputPublishedSchema,
   outputsChangedSchema,
   pingSchema,
@@ -675,6 +677,8 @@ export const runEventSchema = z.discriminatedUnion("type", [
     payload: approvalAnsweredSchema,
   }),
   z.object({ ...envelope, ...stored, type: z.literal("view.saved"), payload: viewSavedSchema }),
+  z.object({ ...envelope, ...stored, type: z.literal("mark.placed"), payload: markPlacedSchema }),
+  z.object({ ...envelope, ...stored, type: z.literal("mark.deleted"), payload: markDeletedSchema }),
 ]);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
