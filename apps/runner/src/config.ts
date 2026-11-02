@@ -235,8 +235,8 @@ export function runnerConfig() {
      */
     thinking: thinkingLevel(),
     /**
-     * `RUNNER_MODEL` forces every role onto one model (a plumbing check); the role files' thinking
-     * levels are chosen for their own models, so then `RUNNER_THINKING` alone sets the level.
+     * `RUNNER_MODEL` forces every role onto one model (a test run); each role keeps its file's
+     * thinking level, at the nearest the forced model supports, unless `RUNNER_THINKING` sets one.
      */
     modelForced: optional("RUNNER_MODEL") !== undefined,
     /**
