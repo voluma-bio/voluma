@@ -106,8 +106,8 @@ interface AgentLoopOptions {
   release(threadId: string): Promise<void>;
   /** Keeps what an agent leaves in its `/work` folder past the folder's expiry (`keep-notes.ts`). */
   keepNotes(agent: { name: string; role: string }): Promise<void>;
-  /** Writes the agent's conversation as `/work/<name>/transcript.md` (`transcript.ts`). */
-  writeTranscript(agent: { id: string; name: string }): Promise<void>;
+  /** Renders the agent's conversation for `/work/<name>/transcript.md` (`transcript.ts`). */
+  prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
   config?: Partial<Pick<LoopConfig, "stuckLimit">>;
@@ -172,7 +172,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     limit: WORKER_LIMIT,
     skills: o.skills,
     catalog: o.catalog,
-    writeTranscript: o.writeTranscript,
+    prepareTranscript: o.prepareTranscript,
     startWorker: async ({ name, brief, skills, from, blind, spawnedBy, parentThreadId }) => {
       const id = threadIdOf(runId, name);
       await begin(

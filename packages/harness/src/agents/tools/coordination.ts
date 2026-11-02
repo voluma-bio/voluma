@@ -58,8 +58,8 @@ export interface AgentsApi {
     spawnedBy: string;
     parentThreadId: string;
   }): Promise<void>;
-  /** Writes the closed worker's `/work/<name>/transcript.md` from its stored history. */
-  writeTranscript(agent: { id: string; name: string }): Promise<void>;
+  /** Renders the closed worker's stored history now; the function it returns writes `/work/<name>/transcript.md`. */
+  prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
   /** Stops a running thread (its end is stored first). */
   abort(threadId: string): void;
   /** Rewrites `/run/*.yaml`; awaited, so the caller's next call sees them. */
@@ -226,8 +226,14 @@ const startWorkerTool = (api: AgentsApi): Tool =>
       blind: z.string().min(1).optional(),
     }),
     execute: ({ name, brief, skills = [], from, blind }, ctx) =>
-      run(() =>
-        api.section(async () => {
+      run(async () => {
+        // A closed worker's history no longer changes: render it before the lock, write it inside.
+        const closed = from ? byName(api.log(), from) : undefined;
+        const writeTranscript =
+          closed?.place === "worker" && api.state(closed) === "closed"
+            ? await api.prepareTranscript(closed)
+            : undefined;
+        return api.section(async () => {
           const { role, d } = caller(api, ctx);
           if (role !== "main") throw new Refusal("Only main starts workers: message main.");
           const workerId = threadIdOf(api.runId, name);
@@ -272,7 +278,7 @@ const startWorkerTool = (api: AgentsApi): Tool =>
               `${open.length} workers are open (${list}), the most allowed. Close one with close_worker first.`,
             );
           }
-          if (source) await api.writeTranscript(source);
+          await writeTranscript?.();
           await api.startWorker({
             name,
             brief,
@@ -285,8 +291,8 @@ const startWorkerTool = (api: AgentsApi): Tool =>
           return text(
             `Started ${name}. It begins with your brief; its reports and messages arrive in your next delivery.`,
           );
-        }),
-      ),
+        });
+      }),
   });
 
 const closeWorkerTool = (api: AgentsApi): Tool =>

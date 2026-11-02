@@ -13,7 +13,7 @@
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
  * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
  *
- * The agent model (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work` (a blind worker's: only its own)
+ * The agent model (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work` (a blind worker's: its own and the one it started from)
  * (so main's `plan.md` too), `/outputs` (the published versions), `/run` (the files rendered from the
  * events), `/inputs` and `/workflow` read-only. Mounts must not overlap (a nested one is unreliable on
  * Modal: the same spec once wrote and once failed read-only), so the sandbox mounts each peer folder that
@@ -120,6 +120,8 @@ export interface RunLayout {
     peers: readonly string[];
     /** A blind worker (`start_worker {blind}`): only its own folder is under `/work`, in the sandbox and host-side. */
     blind: boolean;
+    /** The closed worker this one started from (`start_worker {from}`): its folder stays readable to a blind worker. */
+    from?: string;
   }): ThreadLayout;
 }
 
@@ -286,12 +288,13 @@ export function runLayout({
   };
 
   return {
-    forAgent({ name, role, tools, peers, blind }) {
+    forAgent({ name, role, tools, peers, blind, from }) {
       const folder = role === "main" ? "main" : name;
       const dir = `${WORK}/${folder}`;
       const work = workPrefix(runId);
       const own: SandboxMount = { path: dir, prefix: `${work}${folder}/`, access: "read-write" };
-      const peerMounts: SandboxMount[] = [...new Set(blind ? [] : peers)]
+      const visible = blind ? (from ? [from] : []) : peers;
+      const peerMounts: SandboxMount[] = [...new Set(visible)]
         .filter((p) => p !== folder)
         .map((p) => ({ path: `${WORK}/${p}`, prefix: `${work}${p}/`, access: "read-only" }));
       const hostWork: SandboxMount[] = blind

@@ -16,7 +16,7 @@ import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
 import { buildAgentTools } from "./tools/registry";
-import { writeTranscript } from "./transcript";
+import { prepareTranscript } from "./transcript";
 
 interface AgentsWireOptions {
   runId: string;
@@ -56,11 +56,17 @@ export function agentsWire(o: AgentsWireOptions): Wire {
     if (!record) throw new Error(`${threadId} has no thread.started`);
     return record;
   };
-  const forAgent = (name: string, role: "main" | "worker", blind: boolean): ThreadLayout =>
+  const forAgent = (
+    name: string,
+    role: "main" | "worker",
+    blind: boolean,
+    from?: string,
+  ): ThreadLayout =>
     layout.forAgent({
       name,
       role,
       blind,
+      ...(from && { from }),
       tools: roles[role]?.tools ?? [],
       // A sandbox mounts the folders of the agents that exist when it is created; a new one is seen after the idle timeout.
       peers: [...agentLog(recorder.events()).records.values()].map((r) => r.name),
@@ -68,7 +74,7 @@ export function agentsWire(o: AgentsWireOptions): Wire {
   return {
     sandboxOf: (threadId: string): ThreadLayout => {
       const r = recordOf(threadId);
-      return forAgent(r.name, r.place, r.blind !== undefined);
+      return forAgent(r.name, r.place, r.blind !== undefined, r.from);
     },
     nameOf: (threadId: string) => recordOf(threadId).name,
     /** An agent keeps its sandbox between turns; only one that has ended gives it up. */
@@ -89,7 +95,7 @@ const startedFrom = (d: AgentLog, name: string) => ({
 async function runAgents(
   o: Shared,
   definition: AgentsDefinition,
-  forAgent: (name: string, role: "main" | "worker", blind: boolean) => ThreadLayout,
+  forAgent: (name: string, role: "main" | "worker", blind: boolean, from?: string) => ThreadLayout,
 ): Promise<void> {
   const { recorder } = o;
   const catalog = definition.outputCatalog;
@@ -107,8 +113,8 @@ async function runAgents(
     bash: o.bash,
     release: o.release,
     keepNotes: (agent) => keepNotes(o.publish, o.runId, agent, o.signal),
-    writeTranscript: (agent) =>
-      writeTranscript({
+    prepareTranscript: (agent) =>
+      prepareTranscript({
         history: o.history,
         files: o.files,
         runId: o.runId,
@@ -119,7 +125,7 @@ async function runAgents(
     config: o.config,
     signal: o.signal,
     setup(agent, api) {
-      const layout = forAgent(agent.name, agent.role, agent.blind !== undefined);
+      const layout = forAgent(agent.name, agent.role, agent.blind !== undefined, agent.from);
       const recorded = api.log().records.get(agent.id)?.model;
       const setup = o.model(agent.role, recorded);
       const start: AgentStart =
@@ -156,7 +162,7 @@ async function runAgents(
             layoutOf: (threadId) => {
               const r = api.log().records.get(threadId);
               if (!r) throw new Error(`${threadId} has no thread.started`);
-              return forAgent(r.name, r.place, r.blind !== undefined);
+              return forAgent(r.name, r.place, r.blind !== undefined, r.from);
             },
             hashIn: async (threadId, path, signal) =>
               sandboxHash(await o.session.get(threadId, { note: false }), path, signal),

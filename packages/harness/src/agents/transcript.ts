@@ -1,6 +1,6 @@
 /**
  * A closed worker's conversation as `/work/<name>/transcript.md`, written from its stored
- * History when a worker is started `from` it. A reader searches the file when the wrap-up note
+ * history when a worker is started `from` it. A reader searches the file when the wrap-up note
  * is thin, so a long message or tool result is cut and thinking and images are left out.
  */
 
@@ -12,6 +12,7 @@ import type { History } from "../ports/history";
 const RESULT_CHARS = 2_000;
 const MESSAGE_CHARS = 3_000;
 const CALL_CHARS = 1_000;
+const FILE_CHARS = 400_000;
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… (cut)` : s);
 
@@ -39,7 +40,7 @@ export function renderTranscript(rows: string[]): string {
         const blocks = Array.isArray(content) ? (content as Block[]) : [];
         const lines = blocks.flatMap((b) =>
           b.type === "text"
-            ? [b.text ?? ""]
+            ? [clip(b.text ?? "", MESSAGE_CHARS)]
             : b.type === "toolCall"
               ? [`Tool call ${b.name}: ${clip(JSON.stringify(b.arguments), CALL_CHARS)}`]
               : [],
@@ -52,20 +53,23 @@ export function renderTranscript(rows: string[]): string {
         break;
     }
   }
-  return `# Transcript\n\n${parts.join("\n\n")}\n`;
+  const body = parts.join("\n\n");
+  // Keep the end: the closing turns matter most.
+  const text =
+    body.length > FILE_CHARS
+      ? `(The start is cut: the transcript kept its last ${FILE_CHARS} characters.)\n\n${body.slice(-FILE_CHARS)}`
+      : body;
+  return `# Transcript\n\n${text}\n`;
 }
 
-export async function writeTranscript(o: {
+/** Loads and renders the history now; the returned function writes the file. */
+export async function prepareTranscript(o: {
   history: History;
   files: Files;
   runId: string;
   agent: { id: string; name: string };
   signal: AbortSignal;
-}): Promise<void> {
-  const rows = await o.history.load(o.agent.id);
-  await o.files.write(
-    `${workPrefix(o.runId)}${o.agent.name}/transcript.md`,
-    Buffer.from(renderTranscript(rows)),
-    o.signal,
-  );
+}): Promise<() => Promise<void>> {
+  const body = Buffer.from(renderTranscript(await o.history.load(o.agent.id)));
+  return () => o.files.write(`${workPrefix(o.runId)}${o.agent.name}/transcript.md`, body, o.signal);
 }
