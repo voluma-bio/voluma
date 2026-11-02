@@ -71,6 +71,10 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   upstream, breadth first, with roles and the version used), `madeFromIt` (what rests on it),
   `runGraph` (the whole run by column), `versionWords` (a worker's message after its version) and
   `workersOf` (the agents from `agentLog`, with what each reported). Label links resolve to their map. No drawing lives there.
+  The chain (`outputs-chain.ts`, `restsOnChain`) is what a final value is computed on, nearest first
+  (value `on` overlay, label to its map, overlay to its base, base to its `from`), shown while the run
+  goes: each step follows the published version's `on`/`base` links where it names some, else the
+  catalog's, so it exists before anything is published and can't disagree with what was.
 - **Run-level data** is one `runView(events, state, providerCalls, halt)` (`run-model.ts`):
   threads, progress, and per plan task its state, threads, line, check, To check items, QC image,
   values and spend, memoized on the events. `withLiveCalls` overlays the tool calls being written
