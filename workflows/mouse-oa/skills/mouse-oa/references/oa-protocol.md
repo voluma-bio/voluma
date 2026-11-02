@@ -93,7 +93,7 @@ schema is `regions-and-landmarks`'):
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
   only what lies below. The U index of each plateau compartment's middle (a height point outside ROI-1's footprint
   stops the script: move it). The two width points (#10), on one coronal section and on the growth plate's proximal
-  face (`iioc.py` stops on a point more than the spec's `width_point_off_face_um` from it along W): the centre of the
+  face (`iioc.py` stops on a point more than the spec's `width_point_off_face_um` from it on its section): the centre of the
   fibula–tibia junction on the tibial surface, and the most prominent point on the other side. Optional: where "the
   middle of the growth plate" is for #7 (default: midway between the width points), the coronal section the heights
   are measured on (default: where the footprint's growth-plate-to-top distance is largest), and the plate patches per

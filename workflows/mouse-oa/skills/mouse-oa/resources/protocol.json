@@ -37,7 +37,7 @@
     "region": "ROI-1",
     "values": { "TV": "tv-tibial-iioc", "BV": "bv-tibial-iioc", "BV/TV": "bv-tv-tibial-iioc" },
     "plate_patch_width_um": 500,
-    "width_point_off_face_um": 400
+    "width_point_off_face_um": 200
   },
   "roi-iioc-trabecular": {
     "region": "ROI-2",

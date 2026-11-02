@@ -28,8 +28,8 @@ or from another grid is refused). This script reads these keys; any other key is
                           point outside the ROI-1 footprint (or within 3 voxels of its edge) stops the script: move the point
   width_points_uvw        required: two [u, v, w] points (deck #10) on the growth plate's proximal face, on one coronal section:
                           the centre of the fibula-tibia junction on the tibial surface, and the most prominent point on the
-                          other side. Points more than 1 apart in V are refused, and so is a point more than `width_point_off_face_um`
-                          (spec, entry roi-iioc) along W from the face at its (V, U)
+                          other side. Points more than 2 apart in V are refused, and so is a point more than `width_point_off_face_um`
+                          (spec, entry roi-iioc) from the face on its coronal section (the nearest point of the face's curve there)
   growth_plate_mid_u      optional: U of "the middle of the growth plate" for height #7 (default: the mean U of the two width points)
   height_section_v        optional: the coronal section the heights are measured on (default: where the footprint's
                           growth-plate-to-top distance is largest)
@@ -133,20 +133,26 @@ def ray_length(roi, start, direction, step=0.05, max_lead=3.0):
 
 def refuse_width_points(wp, gp, off_face_um, vox):
     """Refuse width points (deck #10, [u, v, w] rows of `wp`) that are not on the growth plate's proximal face on one coronal
-    section: two points more than 1 apart in V, or a point farther than `off_face_um` along W from the face `gp` at its (V, U)."""
+    section: two points more than 2 apart in V, or a point farther than `off_face_um` from the face `gp` on its section (the
+    nearest point of the face's curve W(U) on row round(v), over U and W)."""
     (_, v0, _), (_, v1, _) = wp
-    if abs(v1 - v0) > 1:
-        sidecar.fail(f'"width_points_uvw" (#10) must be two points on one coronal section, but they are on V={v0:g} and V={v1:g}: '
-                     'put both on the same section, each on the growth plate\'s proximal face')
+    if abs(v1 - v0) > 2:
+        sidecar.fail(f'"width_points_uvw" (#10) must be two points on one coronal section, but they are on V={v0:g} and V={v1:g}, '
+                     'more than 2 apart: put both on the same section, each on the growth plate\'s proximal face')
+    cols = np.arange(gp.shape[1], dtype=float)
     off = []
     for u, v, w in wp:
-        face = gp[round(v), round(u)]
-        um = (w - face) * vox * 1000
-        if abs(um) > off_face_um:
-            off.append(f'[{u:g}, {v:g}, {w:g}] is {abs(um):.0f} um {"above" if um < 0 else "below"} the face (W={face:.0f} at U={u:g}, V={v:g})')
+        row = gp[round(v)]
+        dw = np.diff(row)  # the curve is linear between columns: the nearest point of each segment, then the nearest of those
+        t = np.clip(((u - cols[:-1]) + (w - row[:-1]) * dw) / (1 + dw**2), 0, 1)
+        nu, nw = cols[:-1] + t, row[:-1] + t * dw
+        um = np.hypot(nu - u, nw - w) * vox * 1000
+        i = int(um.argmin())
+        if um[i] > off_face_um:
+            off.append(f'[{u:g}, {v:g}, {w:g}] is {um[i]:.0f} um from it (the nearest face point is [{nu[i]:.1f}, {round(v)}, {nw[i]:.1f}])')
     if off:
         sidecar.fail(f'"width_points_uvw" (#10) must be two points on the growth plate\'s proximal face, but {" and ".join(off)}: '
-                     f'move each point onto the face, within {off_face_um:g} um of its W at that U and V')
+                     f'move each point onto the face, within {off_face_um:g} um of it on its coronal section')
 
 
 def first_run(bone, v, u):
