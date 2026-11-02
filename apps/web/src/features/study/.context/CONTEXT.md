@@ -15,7 +15,9 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `q24/c-quad-graph/study.html`) is a list with a details pane, like a file browser: a click
   selects a study and the right side describes it; the chevron, a double-click, Enter or "Open
   study" opens it. The list reads `listStudies` alone (each scan's newest run in brief), refetched
-  every 5 s while a run is live; the pane reads the selected study's `getStudy`. A scan's
+  every 5 s while a run is live; the pane reads the selected study's `getStudy`, which polls the
+  same way once it holds a live run (both rules live in `studiesQuery`/`studyQuery`), and refetches
+  when the list shows a new live run. A scan's
   picture is `Thumbnail` on its newest run's `runThumbnailUrl`, in the study's rows and the
   pane's Scans block (not in the Studies list rows). The API renders it once per run generation
   (`apps/api/src/domains/review/thumbnail.ts`), so a row costs one cached image request, never a
@@ -62,9 +64,10 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `DOMParser`, loaded only when an `.xlsx` is dropped.
 - **Shared with `features/scan`** through `@voluma/run-view`: the run status words
   (`runStatus`, a word and a `StatusMark` state: Running, N to check, Checked, Reviewed, Failed,
-  Stopped, Waiting, Needs your keys (paused)), `liveStatus` ("Task N of M" while running),
+  Stopped, Waiting, Needs your keys (paused)), `liveStatus` ("Task N of M" while a task-loop run runs, "Running · N of M in" while an agent-loop
+  run does, from `outputs`, its final outputs in),
   `scanStatus` (a sample's: its newest run's, "Not started" with no run), the Samples tree's data
-  (`sampleTree`), the run and item links, `ItemToCheck`, the formatters, and visitor keys.
+  (`sampleTree`), the run and item links, `ItemToCheck`, the formatters (`whenText` included), and visitor keys.
   `runStatus` and `runHref` take a run's `state` and `review`, which a full `Run` and a
   `newestRuns` entry both carry. Every page uses this mapping; don't add another.
 - **A study's pages** sit under `study/study-layout.tsx`, which loads the study once, renders the

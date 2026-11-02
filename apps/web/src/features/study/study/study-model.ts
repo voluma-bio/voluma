@@ -305,24 +305,3 @@ export function changedAt(scan: StudyScanDetail): string | null {
   ]);
   return times.reduce<string | null>((a, t) => (t && (!a || t > a) ? t : a), null);
 }
-
-const MINUTE = 60_000;
-
-/** "just now", "4 min ago", "3 h ago", "yesterday", "31 Oct" (with the year when not this one). */
-export function whenText(iso: string, now: number): string {
-  const then = new Date(iso);
-  const ago = now - then.getTime();
-  if (ago < MINUTE) return "just now";
-  if (ago < 60 * MINUTE) return `${Math.floor(ago / MINUTE)} min ago`;
-  const today = new Date(now);
-  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-  if (sameDay(then, today)) return `${Math.floor(ago / (60 * MINUTE))} h ago`;
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (sameDay(then, yesterday)) return "yesterday";
-  return then.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    ...(then.getFullYear() !== today.getFullYear() && { year: "numeric" }),
-  });
-}

@@ -280,6 +280,12 @@ export function outputsFold(events: readonly RunEvent[]): OutputsFold {
 export const finalOutputs = (events: readonly RunEvent[]): OutputState[] =>
   outputsFold(events).outputs.filter((o) => o.final);
 
+/** Final outputs with a version, of all final outputs: what "1 of 2 in" counts. */
+export function outputsIn(fold: OutputsFold): { done: number; total: number } {
+  const final = fold.outputs.filter((o) => o.final);
+  return { done: final.filter((o) => o.latest).length, total: final.length };
+}
+
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>
   finalOutputs(events)

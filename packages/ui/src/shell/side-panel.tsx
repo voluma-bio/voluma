@@ -80,6 +80,8 @@ export type SidePanelTab = {
 
 type Titled = {
   title: string;
+  /** A short fact beside the title, e.g. "1 of 2 in". */
+  meta?: ReactNode;
   icon: ReactNode;
   badge?: number;
   badgeLabel?: string;
@@ -95,6 +97,7 @@ type Tabbed = {
   tab: string;
   onTabChange(id: string): void;
   title?: never;
+  meta?: never;
 };
 
 export type SidePanelProps = { side: ShellSide } & (Titled | Tabbed);
@@ -130,7 +133,16 @@ export function SidePanel(props: SidePanelProps) {
           onChange={(id) => (props as Tabbed).onTabChange(id)}
         />
       ) : (
-        <h2 className="ml-1 truncate font-semibold text-base">{props.title}</h2>
+        <>
+          <h2 className={cx("ml-1 font-semibold text-base", props.meta ? "shrink-0" : "truncate")}>
+            {props.title}
+          </h2>
+          {props.meta && (
+            <span className="ml-1.5 min-w-0 truncate text-muted-foreground text-xs">
+              {props.meta}
+            </span>
+          )}
+        </>
       )}
       <span className="flex-1" />
       {!tabs && props.tools}

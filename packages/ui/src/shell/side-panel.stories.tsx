@@ -89,6 +89,7 @@ function Page({ theme, waiting }: { theme: "light" | "dark"; waiting?: boolean }
         <SidePanel
           side="right"
           title="Final outputs"
+          meta="1 of 2 in"
           icon={<Sigma />}
           badge={12}
           badgeLabel="12 need you"

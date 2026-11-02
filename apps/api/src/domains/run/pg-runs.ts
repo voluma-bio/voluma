@@ -6,6 +6,7 @@
 
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
+import { outputsIn } from "@voluma/contracts/output-fold";
 import { openCorrectionRevision, progress, reviewState } from "@voluma/contracts/review-state";
 import { hasTaskReview, type Input, type Run, runSchema } from "@voluma/contracts/run";
 import { failedThreads, openThreads } from "@voluma/contracts/threads";
@@ -129,7 +130,10 @@ const reviewFacts = (run: Row["run"]) => ({
   harness: run.harness ?? undefined,
 });
 
-function toRun({ run, input, position, calls }: Row, { summary, revisions }: Results): Run {
+function toRun({ run, input, position, calls }: Row, results: Results): Run {
+  const { summary, revisions } = results;
+  // An agent-loop run's final outputs in, while it goes and once main has listed them.
+  const finals = outputsIn(results.outputs);
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
   const state = ((): Run["state"] => {
@@ -169,6 +173,7 @@ function toRun({ run, input, position, calls }: Row, { summary, revisions }: Res
     providerCalls: calls,
     review: hasTaskReview(reviewFacts(run)) ? summary : null,
     tasks: run.state === "ended" ? null : progressOf(revisions.at(-1)),
+    ...(run.state !== "ended" && finals.total > 0 && { outputs: finals }),
   });
 }
 
