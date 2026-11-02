@@ -20,6 +20,7 @@ import { useStudy } from "./study-layout";
 import {
   digitsFor,
   farFromGroup,
+  hasBar,
   keyOutput,
   kneeWord,
   otherUnit,
@@ -294,7 +295,7 @@ function Cell({
   digits: number;
   far: boolean;
 }) {
-  if (!scan.runs[0] || Object.keys(scan.taskState).length === 0) return null;
+  if (!scan.runs[0] || !hasBar(scan)) return null;
   const state = segmentOf(scan, output);
   const value = scanValue(scan, output);
   const unit = otherUnit(scan, output);

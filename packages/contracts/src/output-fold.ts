@@ -286,6 +286,20 @@ export function outputsIn(fold: OutputsFold): { done: number; total: number } {
   return { done: final.filter((o) => o.latest).length, total: final.length };
 }
 
+/** Each final value's latest number and UCUM unit, by output id: what the run reported. */
+export function finalValues(fold: OutputsFold): Map<string, { number: number; unit: string }> {
+  return new Map(
+    fold.outputs.flatMap((o) => (o.final && o.latest?.value ? [[o.id, o.latest.value]] : [])),
+  );
+}
+
+/**
+ * The To check items open on the outputs' latest versions, each once: what needs a person on a
+ * run of the agent loop, and what "Looks right" accepts one by one.
+ */
+export const openToCheck = (fold: OutputsFold): number =>
+  fold.outputs.reduce((n, o) => n + (o.latest?.toCheck ?? []).filter((t) => !t.resolved).length, 0);
+
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>
   finalOutputs(events)

@@ -13,11 +13,12 @@
  * line overlay's ends, world mm). Grid shapes come from the converted levels.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import type { OutputCatalog } from "@voluma/contracts/output-catalog";
+import { type OutputCatalog, unitAsWritten } from "@voluma/contracts/output-catalog";
 import {
   type OutputState,
   type OutputsFold,
   type OutputVersion,
+  openToCheck,
   outputsIn,
 } from "@voluma/contracts/output-fold";
 import { outputsPrefix } from "@voluma/contracts/r2";
@@ -97,25 +98,8 @@ export function outputName(catalog: OutputCatalog, id: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-const SUPERSCRIPT: Record<string, string> = { "2": "²", "3": "³", "-1": "⁻¹", "-2": "⁻²" };
-
-/**
- * A UCUM unit as people write it: `mm3` → `mm³`, `[hnsf'U]` → `HU`, `um` → `µm`; annotations in
- * braces drop out, and a dimensionless `1` shows nothing.
- */
-export function unitText(ucum: string): string {
-  if (ucum === "1") return "";
-  return ucum
-    .replaceAll("[hnsf'U]", "HU")
-    .replace(/\{[^}]*\}/g, "")
-    .replace(/\bu(?=[mgLl])/g, "µ")
-    .replace(
-      /([A-Za-zµ])(-?\d)/g,
-      (_, unit: string, power: string) => unit + (SUPERSCRIPT[power] ?? power),
-    )
-    .replaceAll(".", "·")
-    .trim();
-}
+/** A UCUM unit as a value shows it (`unitAsWritten`); a dimensionless `1` shows nothing. */
+export const unitText = (ucum: string): string => (ucum === "1" ? "" : unitAsWritten(ucum));
 
 /** The To check items version `v` of output `id` raised; `key` is the URL's `item`. */
 export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
@@ -175,11 +159,6 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
   const onChain = new Set(
     [...rows.values()].flatMap((r) => r.chain.flatMap((step) => step.map((l) => l.id))),
   );
-  const open = new Set(
-    fold.outputs.flatMap((o) =>
-      (o.latest?.toCheck ?? []).flatMap((t, i) => (t.resolved ? [] : [`${o.id}/${i}`])),
-    ),
-  ).size;
   return {
     sections,
     undeclared: fold.outputs.filter((o) => !o.declared).flatMap((o) => rows.get(o.id) ?? []),
@@ -187,7 +166,7 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     others: [...rows.values()].filter(
       (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
     ),
-    open,
+    open: openToCheck(fold),
     progress: outputsIn(fold),
   };
 }

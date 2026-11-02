@@ -16,10 +16,11 @@
  * "reported in µm"; converting would guess what the agent meant.
  *
  * A sample's bar: one segment per measurement of the workflow (`outputs.json`, kind
- * `measurement`), in task order, each read from the sample's own data (`segmentOf`). Only a newest
- * run with a task plan has one: a run of the agent loop has no task states in the study read, so
- * its sample shows no bar rather than a made-up one.
+ * `measurement`), in task order, each read from the sample's own data (`segmentOf`): the task
+ * loop's task states, or the agent loop's final outputs' status (`outputStatus`). A newest run
+ * with neither (before its plan or its list) has no bar rather than a made-up one.
  */
+import type { OutputStatus } from "@voluma/contracts/output-fold";
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
@@ -138,8 +139,9 @@ function taskState(scan: StudyScanDetail, taskId: string): TaskState {
   return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
 }
 
-/** Whether the sample's newest run has task states, which its bar is read from. */
-export const hasBar = (scan: StudyScanDetail) => Object.keys(scan.taskState).length > 0;
+/** Whether the sample's newest run has task states or final outputs, which its bar is read from. */
+export const hasBar = (scan: StudyScanDetail) =>
+  Object.keys(scan.taskState).length > 0 || Object.keys(scan.outputStatus).length > 0;
 
 /**
  * One measurement of one sample, as its bar segment and Compare's cell show it:
@@ -164,7 +166,36 @@ export const SEGMENT_WORD: Record<Segment, string> = {
   stopped: "Stopped",
 };
 
+/**
+ * An agent-loop run's final output as a segment: what the run says of it, and a value it has not
+ * reported is being made while the run goes, missing once it completed, else stopped. An output
+ * not among the run's final outputs is outside its plan.
+ */
+function outputSegment(scan: StudyScanDetail, status: OutputStatus | undefined, reported: boolean) {
+  const state = scan.runs[0]?.state;
+  switch (status) {
+    case "to-check":
+      return "check";
+    case "reported":
+      return "reported";
+    case "missing":
+      return "missing";
+    case "out-of-date":
+      return "stale";
+    case "pending":
+      return state?.status !== "ended"
+        ? "making"
+        : state.outcome === "completed"
+          ? "missing"
+          : "stopped";
+    default:
+      return reported ? "stale" : "waiting";
+  }
+}
+
 export function segmentOf(scan: StudyScanDetail, output: OutputEntry): Segment {
+  if (Object.keys(scan.outputStatus).length > 0)
+    return outputSegment(scan, scan.outputStatus[output.id], scan.values[output.id] !== undefined);
   const status = shownStatus(taskState(scan, output.task), scan.needsYou[output.task] ?? 0);
   const reported = scan.values[output.id] !== undefined;
   switch (status) {
