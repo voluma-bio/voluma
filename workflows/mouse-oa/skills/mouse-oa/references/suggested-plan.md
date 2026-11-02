@@ -14,6 +14,11 @@ the method.
 - **Makes:** the outputs it reports, with the protocol steps (`oa-protocol.md`, "Steps, in order") that make them.
 - **Leaves:** what later steps read from it, and what a new version of an input would put out of date.
 
+A protocol script writes a cropped object for the viewer and, beside it, the full-grid files the next script runs on
+(ROI-1's `iioc-tissue.npy`, the cortex's `cortex.npy`, the plate runs, where the face was traced). No other worker can
+open your folder, so report every file the script's result record names with the output it belongs to, the output's
+own file first. A later step takes the output's files from `/run/outputs.yaml`.
+
 When a check-first fails, ask whether the fault could make any other output wrong. If it could, the worker tells
 main what it saw and where, and main decides whether the input gets a new version: patella voxels in the tibia label
 also make the patella volume wrong, even though the femur is fine. If the input is right and this step needs it finer
@@ -65,17 +70,13 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
   is lateral, keep the frame and name the medial and lateral fields of the annotations from what you saw.
 - **Makes:** `tibia-grid` (the aligned frame; protocol step 1), `growth-plate-proximal-face` (step 2),
   `articular-surface`, `roi-iioc`, the four rulers and #4–10 (steps 3 and 7). Report both height definitions with
-  the plane residual (protocol, "What the deck says"). Report the files later steps run their scripts on with the
-  output they belong to, since no other worker can open your folder, each after the output's own file (the first
-  file is the one compared when deciding what is out of date): `tibia-hu.npy`, then `tibia-mask.npy` and
-  `tibia-frame.json`, for `tibia-grid`; `growth-plate-proximal-face.npy`, then `growth-plate-proximal-valid.npy`;
-  `roi-iioc.npy`, then the two `*-plate-run.npy`.
+  the plane residual (protocol, "What the deck says").
 - **Leaves:** steps 4 to 7 work on `tibia-grid` and read `roi-iioc` and the faces. A new `tibia-grid` or proximal
   face puts steps 4 to 7 out of date.
 
 ## 4. Subchondral bone plate (`subchondral-plate`)
 
-- **Needs:** `tibia-grid`, `roi-iioc` (with the medial and lateral plate runs), `articular-surface`.
+- **Needs:** `tibia-grid`, `roi-iioc` (its plate runs), `articular-surface`.
 - **Check first:** each compartment's patch sits on the side step 3 recorded as medial or lateral, under the
   articular top surface.
 - **Makes:** `roi-subchondral-plate-medial` and `-lateral`, #11–12 (protocol step 8).
@@ -83,7 +84,7 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 
 ## 5. IIOC trabecular bone, ROI-2 (`trabecular-roi`)
 
-- **Needs:** `tibia-grid`, `roi-iioc`, the plate from step 4.
+- **Needs:** `tibia-grid`, `roi-iioc` (its `iioc-tissue.npy`), `growth-plate-proximal-face`, the plate from step 4.
 - **Check first:** the plate is visible as a band under the articular surface across ROI-1's whole front-to-back
   extent; where it is not, say how you placed the boundary there.
 - **Makes:** `under-plate-boundary` (annotation B), `roi-iioc-trabecular`, #13–15 (protocol steps 4, 5, 7).
@@ -91,8 +92,7 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 
 ## 6. Proximal tibial metaphysis, ROI-3 (`metaphyseal-roi`)
 
-- **Needs:** `tibia-grid`, `growth-plate-proximal-face` (with where it was traced, `growth-plate-proximal-valid.npy`),
-  the tibia below the growth plate.
+- **Needs:** `tibia-grid`, `growth-plate-proximal-face` (with where it was traced), the tibia below the growth plate.
 - **Check first:** below the growth plate, where ROI-3 and the cortex go, the tibia label holds no fibula voxels:
   the fibula joins the tibia toward the shaft, and a cortex mask that reaches it is wrong.
 - **Makes:** `growth-plate-distal-face` (annotation C, over at least the proximal face's range), `cortex`,
@@ -102,7 +102,7 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 
 ## 7. Tibial cortical thickness (`cortical`)
 
-- **Needs:** `cortex`, `growth-plate-distal-face`, `tibia-grid`.
+- **Needs:** `cortex` (its `cortex.npy`), `growth-plate-distal-face`, `tibia-grid`.
 - **Check first:** at both levels the cortex mask is the wall only, all round, with no marrow, trabeculae or fibula.
 - **Makes:** `roi-cortex-100um`, `roi-cortex-1000um`, #24–25 (protocol step 8).
 
