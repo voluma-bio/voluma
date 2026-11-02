@@ -74,6 +74,20 @@ export function offGrid(o: Orientation): number {
   return (Math.acos(Math.min(1, worst)) * 180) / Math.PI;
 }
 
+/** Below this the panes count as on the grid's axes. */
+const UNTILTED_DEGREES = 0.05;
+const degrees = (d: number) => `${d < 10 ? d.toFixed(1) : Math.round(d)}°`;
+
+/**
+ * How the panes lie, in words ("Tilted 18°", "Along the growth plate, 12° off the grid"), aligned
+ * to the target named `aligned`; undefined on the grid's axes.
+ */
+export function orientationWords(o: Orientation, aligned: string | undefined): string | undefined {
+  const off = offGrid(o);
+  if (off < UNTILTED_DEGREES) return undefined;
+  return aligned ? `Along ${aligned}, ${degrees(off)} off the grid` : `Tilted ${degrees(off)}`;
+}
+
 /**
  * Panes whose normals are `normals` (perpendicular unit vectors, by the axis each replaces):
  * each pane's rows and columns follow the other two normals, as on the grid.

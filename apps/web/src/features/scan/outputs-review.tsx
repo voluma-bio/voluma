@@ -51,6 +51,7 @@ import {
   type QuadLayout,
   type QuadState,
   readView,
+  storedWords,
   storeView,
 } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
@@ -645,7 +646,7 @@ function MainConversation({
                   <Bookmark aria-hidden className="mt-0.5 size-3.5 shrink-0" />
                   <span>
                     You saved {m.title.toLowerCase()} of {nameOf(m.output)}
-                    {m.words && `: ${m.words}`}.
+                    {m.words && `, ${m.words.charAt(0).toLowerCase()}${m.words.slice(1)}`}.
                   </span>
                 </li>
               ) : m.from === "person" ? (
@@ -700,7 +701,7 @@ function MainConversation({
   );
 }
 
-/** A view saved of an output: its title ("View 2"), when, and what it was in words. */
+/** A view saved of an output: its title ("View 2"), when, and how its planes lay in words. */
 type SavedView = {
   id: string;
   seq: number;
@@ -718,18 +719,6 @@ function savedViews(events: ReturnType<typeof useEvents>): SavedView[] {
     if (e.type !== "view.saved") return [];
     const n = (count.get(e.payload.output) ?? 0) + 1;
     count.set(e.payload.output, n);
-    const review = (
-      e.payload.view as {
-        review?: {
-          aligned?: { name?: string } | null;
-          layout?: { views?: string[]; count?: number };
-        };
-      }
-    ).review;
-    const panes = review?.layout?.views
-      ?.slice(0, review.layout.count ?? 4)
-      .map((v) => v.toUpperCase().replace("3D", "3D"));
-    const along = review?.aligned?.name;
     return [
       {
         id: e.id,
@@ -738,8 +727,7 @@ function savedViews(events: ReturnType<typeof useEvents>): SavedView[] {
         view: e.payload.view,
         title: `View ${n}`,
         time: new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        words:
-          [along && `along ${along}`, panes?.join(", ")].filter(Boolean).join("; ") || undefined,
+        words: storedWords(e.payload.view),
       },
     ];
   });

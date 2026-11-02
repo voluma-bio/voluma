@@ -38,7 +38,7 @@ import {
   GRID,
   nearestAxis,
   type Orientation,
-  offGrid,
+  orientationWords,
   tilt,
   type Vec3,
 } from "./frame";
@@ -155,8 +155,6 @@ const NEUTRAL = {
 /** The gap between panes, in px: the seams. */
 const GAP = 4;
 const clampSplit = (f: number) => Math.min(0.8, Math.max(0.2, f));
-/** Below this, the planes count as on the grid's axes. */
-const UNTILTED_DEGREES = 0.05;
 
 export function QuadViewer({
   scene,
@@ -266,11 +264,7 @@ export function QuadViewer({
     setOrientation(GRID);
     setAligned(null);
   };
-  const off = offGrid(orientation);
-  const orientationWords =
-    off < UNTILTED_DEGREES
-      ? undefined
-      : `${aligned ? `Along ${aligned.name}, ${degrees(off)} off the grid` : `Tilted ${degrees(off)}`}`;
+  const lie = orientationWords(orientation, aligned?.name);
 
   // A saved view: the planes, crosshair and window now, each pane's own view once they have turned.
   const [restoring, setRestoring] = useState<QuadState>();
@@ -580,9 +574,9 @@ export function QuadViewer({
       >
         {children}
         <span className="flex-1" />
-        {orientationWords && (
+        {lie && (
           <span className="truncate text-xs text-muted-foreground" role="status">
-            {orientationWords}
+            {lie}
           </span>
         )}
         {targets.length > 0 && (
@@ -610,12 +604,7 @@ export function QuadViewer({
             ))}
           </Menu>
         )}
-        <IconButton
-          label="Back to the grid's axes"
-          size="sm"
-          disabled={off < UNTILTED_DEGREES}
-          onClick={reset}
-        >
+        <IconButton label="Back to the grid's axes" size="sm" disabled={!lie} onClick={reset}>
           <RotateCcw />
         </IconButton>
         {contrast && (
@@ -674,9 +663,6 @@ export function QuadViewer({
     </section>
   );
 }
-
-/** Whole degrees, or tenths under ten. */
-const degrees = (d: number) => `${d < 10 ? d.toFixed(1) : Math.round(d)}°`;
 
 /** A pane's chip: what it shows, and the choice of another view. */
 function ViewChip({

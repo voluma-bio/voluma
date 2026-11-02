@@ -17,5 +17,9 @@
 - `GridViewer` and `QuadViewer` share their crosshair, contrast and readiness code by copy. When
   the task review goes, delete `GridViewer` (its snapshot moves to `QuadViewer` once messages
   carry marks on agent-loop runs).
-- `QuadViewer`'s GP view (the plane along the growth plate), tilting, Align and Save view come with
-  the plane tools (phase 6, second half); GP is listed and disabled until then.
+- The growth plate's fitted plane takes each face's whole height field. Fitting only inside the
+  tibia (as the mockup and iioc-worker did) needs the face to carry its valid region, or the
+  worker to publish the plane itself.
+- Tilted panes reslice from the 3D pane's level (at most 16 M voxels), so they blur at high zoom.
+  If that matters, reslice from the zarr chunks the plane crosses at the pane's level.
+- Notes, angles and outlines on a tilted plane have no contract `Mark`; sending them is phase 7.

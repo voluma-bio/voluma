@@ -19,7 +19,7 @@ export {
   type StructureDisplay,
   taskBlocks,
 } from "./review";
-export { readView, type StoredView, storeView } from "./saved-view";
+export { readView, type StoredView, storedWords, storeView } from "./saved-view";
 export type {
   AssetLevel,
   GridMark,

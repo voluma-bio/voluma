@@ -2,7 +2,7 @@
 
 One screen, `/scans/:runId` (the user's theme, dark image wells): one scan's run, live while it goes and for review once
 it ends. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
-Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i; Marks only while you have a mark). Study replaces the left panel
+Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i (c on agent-loop runs); Marks only while you have a mark). Study replaces the left panel
 without navigating; To check keeps its URL selection and panel scroll position when reopened.
 Each visit to a scan opens To check and The AI, including after Home or a reload. Panel choices
 last only for that visit; the shell saves widths and stacked splits, not open panels.
@@ -136,6 +136,11 @@ The panes' layout (`QuadLayout`) is page state and holds across grids. A full pa
 Full view plus that pane: leaving Full view by any means gives the panes back. Esc goes, one
 thing per press: a mark being drawn, the tool, Full view (the shell), the whole run or agents,
 an open trail item. W toggles the whole run. The panes stay mounted (hidden) under the whole run
-and the agents. The marking tools are on the docked bar, but marks go nowhere yet: the
-conversation is read-only on these runs. Final outputs and the trail panel are deliberately plain
+and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.tsx`): Navigate (V), Point
+with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I, so The AI panel's key is C here).
+Your marks are page state and wait in "With your next message:" above the composer; the
+conversation is read-only on these runs, so they go nowhere yet (sending them is phase 7, through
+`messageMark`, which drops what a contract `Mark` can't hold). Save view posts `view.saved`
+(`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
+"Saved views" menu reopens it on its grid. Final outputs and the trail panel are deliberately plain
 until the side panels' redesign; the trail's data is `@voluma/run-view` `outputs-trail.ts`.

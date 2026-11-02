@@ -171,7 +171,13 @@ export function SlicePane({
   const [error, setError] = useState<string>();
   const [traceError, setTraceError] = useState<string>();
   const [traces, setTraces] = useState<Map<string, BufferGeometry>>(new Map());
-  const [readout, setReadout] = useState<{ x: number; y: number; text: string } | null>(null);
+  // `x` from the pane's left, or (`left` false: the pointer is in its right half) its right.
+  const [readout, setReadout] = useState<{
+    x: number;
+    y: number;
+    left: boolean;
+    text: string;
+  } | null>(null);
   const probe = useRef<Probe | null>(null);
   const [hovering, setHovering] = useState(false);
 
@@ -999,7 +1005,9 @@ export function SlicePane({
       setReadout(
         read
           ? {
-              x: event.clientX - rect.left,
+              ...(event.clientX - rect.left < rect.width / 2
+                ? { x: event.clientX - rect.left, left: true }
+                : { x: rect.right - event.clientX, left: false }),
               y: event.clientY - rect.top,
               text: [
                 probeText(read),
@@ -1156,7 +1164,7 @@ export function SlicePane({
       {readout && (
         <span
           className={cx(CHIP, "whitespace-nowrap")}
-          style={{ left: readout.x + 14, top: readout.y + 14 }}
+          style={{ [readout.left ? "left" : "right"]: readout.x + 14, top: readout.y + 14 }}
         >
           {readout.text}
         </span>

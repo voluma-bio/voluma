@@ -8,7 +8,7 @@
  * always the scan's.
  */
 import { z } from "zod";
-import { type Basis, type Orientation, onGrid } from "./frame";
+import { type Basis, type Orientation, onGrid, orientationWords } from "./frame";
 import type { QuadState, QuadView } from "./QuadViewer";
 import type { Axis, Zyx } from "./scene";
 
@@ -61,16 +61,25 @@ export function storeView(state: QuadState, grid: string, shown: readonly string
   };
 }
 
+/** How a stored view's planes lie, in words (`orientationWords`); undefined on the grid's axes or when it isn't one this review saved. */
+export function storedWords(stored: unknown): string | undefined {
+  const parsed = storedSchema.safeParse(stored);
+  if (!parsed.success) return undefined;
+  return orientationWords(orientationOf(parsed.data.panes), parsed.data.review.aligned?.name);
+}
+
+const orientationOf = (panes: z.infer<typeof storedSchema>["panes"]) =>
+  panes.map(
+    (p): Basis => ({ normal: p.normal, right: p.right, down: [-p.up[0], -p.up[1], -p.up[2]] }),
+  ) as unknown as Orientation;
+
 /** A stored view of grid `grid` as the viewer restores it; undefined when it isn't one this review saved. */
 export function readView(stored: unknown, grid: string): QuadState | undefined {
   const parsed = storedSchema.safeParse(stored);
   if (!parsed.success || parsed.data.review.grid !== grid) return undefined;
   const v = parsed.data;
-  const orientation = v.panes.map(
-    (p): Basis => ({ normal: p.normal, right: p.right, down: [-p.up[0], -p.up[1], -p.up[2]] }),
-  ) as unknown as Orientation;
   return {
-    orientation,
+    orientation: orientationOf(v.panes),
     aligned: v.review.aligned,
     point: v.center_zyx as Zyx,
     contrast: v.window && { low: v.window[0], high: v.window[1] },
