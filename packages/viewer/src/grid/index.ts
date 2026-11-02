@@ -1,5 +1,13 @@
-/** The grid viewer, and the grid and scene a review task is shown with. */
+/** The grid viewers (the task review's, the outputs review's four panes), and the grid and scene a subject is shown with. */
 export { GridViewer, type GridViewerHandle, type PaneId, type ViewerState } from "./GridViewer";
+export {
+  type GridPlanes,
+  QUAD_START,
+  type QuadLayout,
+  type QuadView,
+  QuadViewer,
+  showIn,
+} from "./QuadViewer";
 export {
   type Blocks,
   labelsMiddle,

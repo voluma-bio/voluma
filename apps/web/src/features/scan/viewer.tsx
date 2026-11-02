@@ -15,11 +15,14 @@ import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
+  type GridPlanes,
   type GridScene,
   GridViewer,
   type GridViewerHandle,
   labelsMiddle,
   type MarkTool,
+  type QuadLayout,
+  QuadViewer,
   reviewGrid,
   type ShownMark,
   type StructureDisplay,
@@ -60,6 +63,7 @@ export function SceneViewer({
   onMark,
   onShown,
   viewer,
+  quad,
 }: {
   runId: string;
   revision: Blocks;
@@ -83,7 +87,16 @@ export function SceneViewer({
   onMark: (mark: GridMark, volumeId: string, gridKey: string) => void;
   /** The mounted subject and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
-  viewer: Ref<GridViewerHandle>;
+  viewer?: Ref<GridViewerHandle>;
+  /**
+   * The outputs review's four panes instead of the task review's grid viewer: the layout, which
+   * holds across grids, and each grid's planes by the image's id.
+   */
+  quad?: {
+    layout: QuadLayout;
+    onLayout(layout: QuadLayout): void;
+    planesOf(imageId: string): GridPlanes | undefined;
+  };
 }) {
   const [labels, setLabels] = useState(false);
   const grid = useMemo(
@@ -190,6 +203,27 @@ export function SceneViewer({
     [gridKey, subject.id, shownReady, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
+  // The marking tools and the Labels toggle, on the shown viewer's bar.
+  const tools = (on: boolean) =>
+    on && (
+      <>
+        {onTool && (
+          <SegmentedControl
+            label="Marking tool"
+            options={TOOLS.map((t) => ({
+              ...t,
+              reason: full && t.value !== "navigate" ? FULL : undefined,
+            }))}
+            value={tool ?? "navigate"}
+            onValueChange={(v) => onTool(v === "navigate" ? null : v)}
+          />
+        )}
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} />
+          Labels
+        </label>
+      </>
+    );
   // One tree shape whether or not this subject's grid is ready, so the kept viewers never remount.
   return (
     <>
@@ -210,41 +244,36 @@ export function SceneViewer({
         const on = k.key === live?.key;
         return (
           <div key={k.key} className="h-full" hidden={!on}>
-            <GridViewer
-              scene={k.scene}
-              title={k.title}
-              focus={k.focus}
-              notes={k.notes}
-              tool={on ? tool : null}
-              marks={shown.get(k.key) ?? NO_MARKS}
-              onMark={on ? (mark) => onMark(mark, k.imageId, k.key) : undefined}
-              onReady={report(k.key)}
-              ref={on ? viewer : undefined}
-            >
-              {on && (
-                <>
-                  {onTool && (
-                    <SegmentedControl
-                      label="Marking tool"
-                      options={TOOLS.map((t) => ({
-                        ...t,
-                        reason: full && t.value !== "navigate" ? FULL : undefined,
-                      }))}
-                      value={tool ?? "navigate"}
-                      onValueChange={(v) => onTool(v === "navigate" ? null : v)}
-                    />
-                  )}
-                  <label className="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={labels}
-                      onChange={(e) => setLabels(e.target.checked)}
-                    />
-                    Labels
-                  </label>
-                </>
-              )}
-            </GridViewer>
+            {quad ? (
+              <QuadViewer
+                scene={k.scene}
+                planes={quad.planesOf(k.imageId)}
+                layout={quad.layout}
+                onLayout={quad.onLayout}
+                focus={k.focus}
+                notes={k.notes}
+                tool={on ? tool : null}
+                marks={shown.get(k.key) ?? NO_MARKS}
+                onMark={on ? (mark) => onMark(mark, k.imageId, k.key) : undefined}
+                onReady={report(k.key)}
+              >
+                {tools(on)}
+              </QuadViewer>
+            ) : (
+              <GridViewer
+                scene={k.scene}
+                title={k.title}
+                focus={k.focus}
+                notes={k.notes}
+                tool={on ? tool : null}
+                marks={shown.get(k.key) ?? NO_MARKS}
+                onMark={on ? (mark) => onMark(mark, k.imageId, k.key) : undefined}
+                onReady={report(k.key)}
+                ref={on ? viewer : undefined}
+              >
+                {tools(on)}
+              </GridViewer>
+            )}
           </div>
         );
       })}

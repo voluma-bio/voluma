@@ -27,6 +27,18 @@ export {
   undrawn,
   unitText,
 } from "./outputs-model";
+export {
+  type GraphNode,
+  madeFromIt,
+  ROLE_WORD,
+  type RunGraph,
+  runGraph,
+  type TrailRow,
+  trailOf,
+  versionWords,
+  type Worker,
+  workersOf,
+} from "./outputs-trail";
 export { plainError, stoppedText } from "./run-error";
 export {
   type AgentNode,

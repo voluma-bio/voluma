@@ -55,10 +55,8 @@ import {
   gridKeyOf,
   gridMark,
   MarksPanel,
-  middleOf,
-  nextTag,
   type ShownGrid,
-  TOOLS,
+  useMarking,
   type YourMark,
 } from "./marks-panel";
 import { OutputsReview } from "./outputs-review";
@@ -578,106 +576,6 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
       </ThreadNavigationProvider>
     </DisclosureProvider>
   );
-}
-
-/**
- * Your marks and the tool that makes them. A tool's key (`TOOLS`) picks it and Esc puts it away,
- * as the shell's panel keys do: never while typing, never with a modifier. Listening on the
- * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
- * (leaving Full view), so one Esc does one thing.
- */
-function useMarking() {
-  const [tool, setTool] = useState<MarkTool | null>(null);
-  const [marks, setMarks] = useState<YourMark[]>([]);
-  const [selected, setSelected] = useState<string>();
-  const [jump, setJump] = useState<{ at: Zyx; gridKey: string; taskId: string }>();
-  const [shown, setShown] = useState<ShownGrid>();
-  const viewer = useRef<GridViewerHandle>(null);
-  const full = marks.length >= MAX_MARKS;
-  const latest = useRef({ tool, full });
-  latest.current = { tool, full };
-  // At the cap the tools are held off (`viewer.tsx` says why).
-  useEffect(() => {
-    if (full) setTool(null);
-  }, [full]);
-  useEffect(() => {
-    const keys = new Map(
-      TOOLS.map((t) => [t.shortcut.toLowerCase(), t.value === "navigate" ? null : t.value]),
-    );
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || event.isComposing) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement;
-      if (
-        target.isContentEditable ||
-        target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
-      )
-        return;
-      const next = keys.get(event.key.toLowerCase());
-      if (next === undefined) return;
-      // Esc with no tool out is the shell's; a tool's key at the cap does nothing.
-      if (next === null ? !latest.current.tool : latest.current.full) return;
-      event.preventDefault();
-      setTool(next);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
-  return {
-    tool,
-    setTool,
-    marks,
-    selected,
-    jump,
-    shown,
-    setShown,
-    viewer,
-    jumped: useCallback(() => setJump(undefined), []),
-    add: useCallback((mark: GridMark, volumeId: string, gridKey: string, taskId: string) => {
-      setMarks((had) =>
-        had.length >= MAX_MARKS
-          ? had
-          : [
-              ...had,
-              {
-                id: crypto.randomUUID(),
-                tag: nextTag(had, mark),
-                taskId,
-                gridKey,
-                mark: { volumeId, ...mark },
-              },
-            ],
-      );
-    }, []),
-    /** Selects a mark and aims the views at it; returns it. */
-    select: useCallback(
-      (id: string) => {
-        setSelected(id);
-        const mark = marks.find((m) => m.id === id);
-        const shape = mark && gridMark(mark.mark);
-        if (mark && shape)
-          setJump({ at: middleOf(shape), gridKey: mark.gridKey, taskId: mark.taskId });
-        return mark;
-      },
-      [marks],
-    ),
-    remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
-    /** Keeps only the marks on these grids. */
-    keep: useCallback((grids: ReadonlySet<string>) => {
-      setMarks((had) =>
-        had.every((m) => grids.has(m.gridKey)) ? had : had.filter((m) => grids.has(m.gridKey)),
-      );
-    }, []),
-    /** Drops the marks a message carried. */
-    drop: useCallback((ids: string[]) => {
-      if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));
-    }, []),
-    snapshot: useCallback(
-      // Undefined until the lazy viewer mounts: nothing to picture yet.
-      (maxBytes: number) => viewer.current?.snapshot(maxBytes) ?? Promise.resolve(undefined),
-      [],
-    ),
-  };
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

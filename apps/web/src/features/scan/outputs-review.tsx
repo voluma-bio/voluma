@@ -1,11 +1,16 @@
 /**
- * The scan review of a run of the agent loop: the conversation with the run's main AI on the left
- * (read-only until researchers can write to it on this kind of run), the run's final outputs on
- * the right (Outputs), and the output in view filling the main area in the 3D scene, on its base
- * with the overlays it is measured on and drawn with. Everything comes from the
- * run's stream as it arrives: the output fold (`outputsFold`), its converted assets and the
- * conversation, so statuses and values update live. The URL keeps `output` (the output in view)
- * and `item` (the To check item whose place the scene shows).
+ * The scan review of a run of the agent loop (Q24, mockup C): the conversation with the run's main
+ * AI on the left (read-only until researchers can write to it on this kind of run); in the centre
+ * the output in view on four panes (`QuadViewer`) with the tool bar docked under them, or a file
+ * output, the whole run's graph (W) or the run's agents in the panes' place; on the right the
+ * final outputs above the trail of the one picked ("How the AI got here"). Everything comes from
+ * the run's stream as it arrives: the output fold (`outputsFold`), its converted assets and the
+ * conversation, so statuses and values update live.
+ *
+ * The URL keeps `output` (the output picked in Final outputs, the trail's root), `trail` (an
+ * output of its trail whose report is open and which the panes show), `item` (the To check item
+ * whose place the panes show) and `centre` (`run` for the whole run, `agents`). The panes' layout
+ * is page state: it holds while another output, on another grid, is shown.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, acceptToCheck } from "@voluma/api-client";
@@ -18,6 +23,7 @@ import {
   isLive,
   Markdown,
   type OutputItem,
+  type OutputRow,
   outputBlocks,
   outputName,
   outputsReview,
@@ -26,20 +32,33 @@ import {
   undrawn,
   useEvents,
 } from "@voluma/run-view";
-import { EmptyState, LoadingState, ShellPanel } from "@voluma/ui";
-import type { GridViewerHandle } from "@voluma/viewer/grid";
+import { Button, EmptyState, LoadingState, ShellPanel, StatusMark, useFullView } from "@voluma/ui";
+import { type GridPlanes, QUAD_START, type QuadLayout } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
-import { ListTree, MessagesSquare } from "lucide-react";
-import { lazy, Suspense, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ListTree, MessagesSquare, Network, Workflow } from "lucide-react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useOutletContext, useSearchParams } from "react-router";
-import { type Accepting, OutputsPanel } from "./outputs-panel";
+import { FileOutput } from "./file-output";
+import { useMarking } from "./marks-panel";
+import { type Accepting, OUTPUT_STATUS, OutputsPanel } from "./outputs-panel";
+import { RunAgents } from "./run-agents";
+import { RunGraphView } from "./run-graph";
 import { RunAlert, ScanHeading } from "./scan-header";
+import { TrailPanel } from "./trail-panel";
 
 // three.js and the zarr reader load only once there is an output to show.
 const SceneViewer = lazy(() => import("./viewer").then((m) => ({ default: m.SceneViewer })));
 
-const NO_MARKS: never[] = [];
-const noop = () => {};
+type Centre = "run" | "agents";
 
 export function OutputsReview({
   run,
@@ -53,7 +72,7 @@ export function OutputsReview({
   reopen: () => void;
 }) {
   const me = useOutletContext<Me>();
-  // Under 1440 px, two panels leave the scene too narrow: the conversation waits for i.
+  // Under 1440 px, two panels leave the panes too narrow: the conversation waits for i.
   const [wide] = useState(() => globalThis.innerWidth >= 1440);
   const study = useQuery({
     ...studyQuery(run.studyId),
@@ -70,10 +89,22 @@ export function OutputsReview({
     [fold, catalog, run.id, assets],
   );
   const nameOf = useCallback((id: string) => outputName(catalog, id), [catalog]);
+  const planesOf = useCallback(
+    (imageId: string): GridPlanes | undefined => {
+      const entry = catalog.find((e) => e.id === imageId);
+      return entry?.kind === "base" ? entry.planes : undefined;
+    },
+    [catalog],
+  );
 
   const [params, setParams] = useSearchParams();
   const select = useCallback(
-    (patch: { output?: string; item?: string | null }) =>
+    (patch: {
+      output?: string;
+      item?: string | null;
+      trail?: string | null;
+      centre?: Centre | null;
+    }) =>
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -86,13 +117,19 @@ export function OutputsReview({
       ),
     [setParams],
   );
-  // The output in view: the URL's, else the first final output with an open item, else the first.
+  // The trail's root: the URL's, else the first final output with an open item, else the first.
   const finals = review.sections.flatMap((s) => s.rows);
   const selected =
     review.rows.get(params.get("output") ?? "") ??
     finals.find((r) => r.items.some((i) => !i.resolved)) ??
     finals[0] ??
     review.undeclared[0];
+  const opened = review.rows.get(params.get("trail") ?? "");
+  const trailOpen = opened && opened.id !== selected?.id ? opened : undefined;
+  const inView = trailOpen ?? selected;
+  const centreParam = params.get("centre");
+  const centre: Centre | undefined =
+    centreParam === "run" || centreParam === "agents" ? centreParam : undefined;
   const item = selected?.items.find((i) => i.key === params.get("item"));
   // Show moves the crosshair once per press: a new object each time.
   const [picked, setPicked] = useState(0);
@@ -101,50 +138,99 @@ export function OutputsReview({
 
   const accepting = useAcceptToCheck(run, reopen);
   const live = run.state.status !== "ended";
+  const marking = useMarking();
 
-  let main: React.ReactNode;
-  if (!selected)
-    main = (
+  // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
+  // leaving Full view (Esc, F, opening a panel) puts the panes back.
+  const [shellFull, setShellFull] = useFullView();
+  const [layout, setLayout] = useState<QuadLayout>(QUAD_START);
+  const keys = useRef({ layout, centre, trailOpen, shellFull });
+  keys.current = { layout, centre, trailOpen, shellFull };
+  const onLayout = useCallback(
+    (next: QuadLayout) => {
+      if (!!next.full !== !!keys.current.layout.full) setShellFull(!!next.full);
+      setLayout(next);
+    },
+    [setShellFull],
+  );
+  const wasFull = useRef(shellFull);
+  useEffect(() => {
+    if (wasFull.current && !shellFull)
+      setLayout((had) => (had.full ? { ...had, full: null } : had));
+    wasFull.current = shellFull;
+  }, [shellFull]);
+  // W: the whole run and back. Esc, once a mark and the tool are put away (`useMarking`, on the
+  // document, first) and Full view is left (the shell's): the whole run or the agents, then an
+  // open trail item.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement;
+      if (
+        target.isContentEditable ||
+        target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
+      )
+        return;
+      const k = keys.current;
+      if (event.key.toLowerCase() === "w") {
+        event.preventDefault();
+        select({ centre: k.centre === "run" ? null : "run" });
+      } else if (event.key === "Escape" && !k.shellFull) {
+        if (k.centre) select({ centre: null });
+        else if (k.trailOpen) select({ trail: null, item: null });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [select]);
+
+  let panes: React.ReactNode;
+  if (!inView)
+    panes = (
       <Centered>
         <EmptyState title="No outputs yet">
           {live ? "The outputs appear once the AI has set them up." : undefined}
         </EmptyState>
       </Centered>
     );
-  else if (!selected.state.latest)
-    main = (
+  else if (!inView.state.latest)
+    panes = (
       <Centered>
         <EmptyState
           title={
-            selected.state.status === "missing"
-              ? `${selected.name} is missing`
-              : `${selected.name} isn't reported yet`
+            inView.state.status === "missing"
+              ? `${inView.name} is missing`
+              : `${inView.name} isn't reported yet`
           }
         >
-          {selected.state.missingReason ??
+          {inView.state.missingReason ??
             (live ? "It shows here once the AI reports it." : "The run ended without it.")}
         </EmptyState>
       </Centered>
     );
-  else if (selected.state.kind === "file" || selected.state.kind === "collection")
-    main = (
+  else if (inView.state.kind === "file")
+    panes = <FileOutput runId={run.id} version={inView.state.latest} />;
+  else if (inView.state.kind === "collection")
+    panes = (
       <Centered>
-        <EmptyState title={`${selected.name} has no 3D view`}>
-          Files and lists open here in a later version.
+        <EmptyState title={`${inView.name} is a list`}>
+          Lists open here as a table in a later version.
         </EmptyState>
       </Centered>
     );
   else
-    main = (
+    panes = (
       <OutputScene
         runId={run.id}
         blocks={blocks}
         assets={assets}
-        subject={selected.id}
-        shown={shownOf(selected)}
-        title={sceneTitle(selected)}
+        subject={inView.id}
+        shown={shownOf(inView)}
         nameOf={nameOf}
-        focus={focus}
+        focus={trailOpen ? undefined : focus}
+        marking={marking}
+        quad={{ layout, onLayout, planesOf }}
       />
     );
 
@@ -169,60 +255,191 @@ export function OutputsReview({
       <ShellPanel
         id="scan-outputs"
         side="right"
-        label="Outputs"
+        label="Final outputs"
         icon={<ListTree />}
         count={review.open}
-        shortcut="o"
         defaultOpen
       >
         <OutputsPanel
           review={review}
           selected={selected}
-          onSelect={(id) => select({ output: id, item: null })}
-          nameOf={nameOf}
+          onSelect={(id) => select({ output: id, item: null, trail: null })}
           live={live}
-          item={item?.key}
-          onItem={(i) => {
-            select({ item: i.key });
-            setPicked((n) => n + 1);
-          }}
-          accepting={accepting}
         />
+      </ShellPanel>
+      <ShellPanel
+        id="scan-trail"
+        side="right"
+        label="How the AI got here"
+        icon={<Network />}
+        defaultOpen
+        tools={
+          <Button
+            size="sm"
+            variant={centre === "run" ? "secondary" : "ghost"}
+            aria-pressed={centre === "run"}
+            aria-keyshortcuts="w"
+            onClick={() => select({ centre: centre === "run" ? null : "run" })}
+          >
+            <Workflow aria-hidden />
+            Whole run
+          </Button>
+        }
+      >
+        {selected ? (
+          <TrailPanel
+            runId={run.id}
+            events={events}
+            fold={fold}
+            root={selected}
+            open={trailOpen?.id}
+            onOpen={(id) => select({ trail: id, item: null, centre: null })}
+            onReroot={(id) => select({ output: id, trail: null, item: null })}
+            nameOf={nameOf}
+            item={item?.key}
+            onItem={(i) => {
+              select({ item: i.key, trail: null, centre: null });
+              setPicked((n) => n + 1);
+            }}
+            accepting={accepting}
+          />
+        ) : (
+          <div className="p-4">
+            <EmptyState title="Nothing picked">
+              {live ? "The outputs appear once the AI has set them up." : undefined}
+            </EmptyState>
+          </div>
+        )}
       </ShellPanel>
       <div className="flex min-h-0 flex-1 flex-col bg-background">
         <RunAlert run={run} userId={me.userId} stale={stale} />
-        <div className="min-h-0 flex-1">{main}</div>
+        <SceneBar
+          centre={centre}
+          root={selected}
+          inView={inView}
+          trailOpen={!!trailOpen}
+          onBack={() => select({ trail: null, item: null })}
+          onCentre={(c) => select({ centre: c })}
+        />
+        <div className="min-h-0 flex-1">
+          {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
+          <div className="h-full [&[hidden]]:hidden" hidden={!!centre}>
+            {panes}
+          </div>
+          {centre === "run" && (
+            <RunGraphView
+              fold={fold}
+              selected={selected?.id}
+              rows={review.rows}
+              onPick={(id) => select({ output: id, trail: null, item: null })}
+            />
+          )}
+          {centre === "agents" && <RunAgents events={events} fold={fold} nameOf={nameOf} />}
+        </div>
       </div>
     </>
   );
 }
 
-/** The scene's heading: the output, and its value when it has one. */
-function sceneTitle(row: { name: string; value?: { text: string; unit: string } }) {
-  return row.value ? `${row.name} ${row.value.text} ${row.value.unit}`.trim() : row.name;
+/** Above the centre: what it shows, and the way to the whole run and the agents and back. */
+function SceneBar({
+  centre,
+  root,
+  inView,
+  trailOpen,
+  onBack,
+  onCentre,
+}: {
+  centre: Centre | undefined;
+  root: OutputRow | undefined;
+  inView: OutputRow | undefined;
+  trailOpen: boolean;
+  onBack: () => void;
+  onCentre: (centre: Centre | null) => void;
+}) {
+  const bar = "flex h-10 shrink-0 items-center gap-3 border-b border-border bg-card px-3 text-sm";
+  if (centre)
+    return (
+      <header className={bar}>
+        <h2 className="font-semibold">
+          {centre === "run" ? "How the AI got here: the whole run" : "Agents on this run"}
+        </h2>
+        <span className="flex-1" />
+        <Button size="sm" variant="ghost" onClick={() => onCentre(null)} aria-keyshortcuts="Escape">
+          <ChevronLeft aria-hidden />
+          Back to the views
+        </Button>
+      </header>
+    );
+  if (!inView || !root) return null;
+  const { status, word } = OUTPUT_STATUS[inView.state.status];
+  // A reported value can still rest on something to check.
+  const inherited =
+    !trailOpen &&
+    inView.state.status === "reported" &&
+    inView.items.some((i) => !i.resolved && i.output !== inView.id);
+  return (
+    <header className={bar}>
+      {trailOpen ? (
+        <button
+          type="button"
+          onClick={onBack}
+          aria-keyshortcuts="Escape"
+          className="shrink-0 cursor-pointer text-xs text-muted-foreground hover:text-foreground"
+        >
+          {root.name} ›
+        </button>
+      ) : (
+        inView.state.section && (
+          <span className="shrink-0 text-xs text-muted-foreground">{inView.state.section}</span>
+        )
+      )}
+      <h2 className="min-w-0 truncate font-semibold">{inView.name}</h2>
+      {inView.value && (
+        <span className="shrink-0 font-mono tabular-nums">
+          {inView.value.text}
+          <span className="text-muted-foreground"> {inView.value.unit}</span>
+        </span>
+      )}
+      <StatusMark
+        status={inherited ? "check" : status}
+        label={inherited ? "Rests on a To check" : word}
+        className="shrink-0"
+      />
+      <span className="flex-1" />
+      <Button size="sm" variant="ghost" onClick={() => onCentre("agents")}>
+        Agents
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => onCentre("run")} aria-keyshortcuts="w">
+        <Workflow aria-hidden />
+        Whole run
+      </Button>
+    </header>
+  );
 }
 
-/** The output in the 3D scene, with a note for what it names that can't be drawn yet. */
+/** The output on the panes, with a note for what it names that can't be drawn yet. */
 function OutputScene({
   runId,
   blocks,
   assets,
   subject,
   shown,
-  title,
   nameOf,
   focus,
+  marking,
+  quad,
 }: {
   runId: string;
   blocks: ReturnType<typeof outputBlocks>;
   assets: ReturnType<typeof reviewAssetsOf>;
   subject: string;
   shown: string[];
-  title: string;
   nameOf: (id: string) => string;
   focus: OutputItem["focus"];
+  marking: ReturnType<typeof useMarking>;
+  quad: NonNullable<React.ComponentProps<typeof SceneViewer>["quad"]>;
 }) {
-  const viewer = useRef<GridViewerHandle>(null);
   const missing = undrawn(blocks, shown);
   // A new array per render would rebuild the scene on every frame of the stream.
   const shownKey = shown.join();
@@ -246,17 +463,18 @@ function OutputScene({
             runId={runId}
             revision={blocks}
             subject={stable}
-            title={title}
             assets={assets}
             display={NO_DISPLAY}
             focus={focus}
-            tool={null}
-            marks={NO_MARKS}
-            selected={undefined}
-            onJumped={noop}
-            onMark={noop}
-            onShown={noop}
-            viewer={viewer}
+            tool={marking.tool}
+            onTool={marking.setTool}
+            marks={marking.marks}
+            selected={marking.selected}
+            jump={marking.jump}
+            onJumped={marking.jumped}
+            onMark={(mark, volumeId, gridKey) => marking.add(mark, volumeId, gridKey, subject)}
+            onShown={marking.setShown}
+            quad={quad}
           />
         </Suspense>
       </div>
@@ -337,7 +555,7 @@ function MainConversation({ live }: { live: boolean }) {
       </div>
       <p className="border-t border-border p-3 text-xs text-muted-foreground">
         You can't write to the AI on this run yet. Corrections through the AI come in a later
-        version; until then, accept To check items in Outputs.
+        version; until then, accept To check items in How the AI got here.
       </p>
     </div>
   );

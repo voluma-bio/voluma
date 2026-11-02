@@ -4,6 +4,8 @@
  *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
  *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
+ *   GET /runs/:runId/outputs/*      a file under its outputs (`outputsPrefix`): an output
+ *                                   version's files and evidence, the agent loop's runs
  *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
  *                                   a presigned GET, the browser fetches the bytes from storage
  *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
@@ -23,6 +25,7 @@ import {
 import {
   evidenceKey,
   messageSnapshotKey,
+  outputsPrefix,
   relativePathSchema,
   sha256Schema,
 } from "@voluma/contracts/r2";
@@ -219,6 +222,24 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
       c,
       await openFile(store, evidenceKey(runId, sha256), c.req.raw.signal),
       "private, max-age=86400, immutable",
+    );
+  });
+
+  app.get("/runs/:runId/outputs/*", async (c) => {
+    if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });
+    const { runId } = c.req.param();
+    const marker = `/runs/${runId}/outputs/`;
+    const at = c.req.path.indexOf(marker);
+    const tail = at < 0 ? "" : decodeTail(c.req.path.slice(at + marker.length));
+    if (!relativePathSchema.safeParse(tail).success) return c.json({ error: "not found" }, 404);
+    if (!(await runs.readable(readerOf(c.var.user), runId)))
+      return c.json({ error: "not found" }, 404);
+    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
+    // The sandbox mounts the outputs read-write, so a published file's key can be rewritten.
+    return serveFile(
+      c,
+      await openFile(store, `${outputsPrefix(runId)}${tail}`, c.req.raw.signal),
+      "private, no-cache",
     );
   });
 

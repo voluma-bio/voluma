@@ -72,6 +72,7 @@ export {
   ShellPanel,
   type ShellPanelProps,
   type ShellSide,
+  useFullView,
   useOpenPanel,
 } from "./shell/shell";
 export {

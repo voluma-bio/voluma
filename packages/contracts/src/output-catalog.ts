@@ -85,12 +85,21 @@ const memberSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("file"), mediaType: nonEmpty }),
 ]);
 
+/** The anatomical plane a grid's plane lies in; review colours each plane by it (DESIGN.md). */
+export const anatomySchema = z.enum(["axial", "coronal", "sagittal"]);
+export type Anatomy = z.infer<typeof anatomySchema>;
+
 export const outputEntrySchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...entryBase,
     kind: z.literal("base"),
     /** Another base this one is resampled from or registered to, so overlays on either draw in one scene. */
     from: segmentSchema.optional(),
+    /**
+     * Which anatomical plane each of the grid's planes is: XY holds z (the array's first axis)
+     * constant, XZ holds y, YZ holds x. Absent: review shows the planes uncoloured.
+     */
+    planes: z.strictObject({ XY: anatomySchema, XZ: anatomySchema, YZ: anatomySchema }).optional(),
   }),
   z.strictObject({
     ...entryBase,

@@ -363,6 +363,17 @@ export const reviewFileUrl = (runId: string, sha256: string) =>
   `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
 
 /**
+ * Where the browser reads a file under a run's outputs (the agent loop): `path` is relative to
+ * `/outputs/`, an output version's `path` and a file name. Images come back as images, anything
+ * else as an attachment. 404: unreadable run or no such file.
+ */
+export const outputFileUrl = (runId: string, path: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/outputs/${path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+
+/**
  * Where the browser reads a converted asset (zarr level or mesh file) of a run: `path` is
  * relative to the asset prefix, as `assets.ready` lists it (`reviewAssetKey`). 302 to a
  * presigned GET; 404: unreadable run or bad path.

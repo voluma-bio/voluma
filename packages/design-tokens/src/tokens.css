@@ -187,10 +187,11 @@
   --viewer-chip-fg: oklch(0.94 0.006 255);
   --scale-bar: oklch(0.86 0.008 255);
 
-  /* Slice planes: frames, crosshairs, 3D planes. Text in the chrome uses `--axis-*-text`. */
-  --axis-x: #ef6a5e; /* coronal plane (constant x) */
-  --axis-y: #5ccf7a; /* sagittal plane (constant y) */
-  --axis-z: #5aa6f2; /* axial plane (constant z) */
+  /* Slice planes by anatomy, on every grid: frames, chips, crosshairs. A grid's XZ plane is
+     coronal, YZ sagittal, XY axial. Text in the chrome uses `--axis-*-text`. */
+  --axis-x: #ef6a5e; /* coronal (XZ) */
+  --axis-y: #5ccf7a; /* sagittal (YZ) */
+  --axis-z: #5aa6f2; /* axial (XY) */
 
   --bone: oklch(0.86 0.02 82);
   --bone-alt: oklch(0.82 0.02 82); /* neighbouring bones, so adjacent surfaces separate */

@@ -14,6 +14,7 @@ import { type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useSt
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { autoContrast, type Contrast } from "./compose";
 import { Grid3D } from "./Grid3D";
+import { NumberField } from "./number-field";
 import { readLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
 import type {
@@ -406,44 +407,5 @@ export function GridViewer({
       </div>
       {footer}
     </section>
-  );
-}
-
-/**
- * A number typed freely (a lone "-", "0.") and applied on Enter or blur, so a half-typed value
- * never redraws every pane or snaps back.
- */
-function NumberField({
-  label,
-  value,
-  onCommit,
-}: {
-  label: string;
-  value: number;
-  onCommit(value: number): void;
-}) {
-  const shown = Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)));
-  const [draft, setDraft] = useState<string | null>(null);
-  const commit = () => {
-    const n = Number(draft);
-    if (draft !== null && draft.trim() !== "" && Number.isFinite(n) && n !== value) onCommit(n);
-    setDraft(null);
-  };
-  return (
-    <label className="flex items-center gap-1">
-      {label}
-      <input
-        className="h-7 w-20 rounded-md border border-border bg-card px-1 font-mono text-foreground"
-        type="text"
-        inputMode="decimal"
-        value={draft ?? shown}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setDraft(null);
-        }}
-      />
-    </label>
   );
 }

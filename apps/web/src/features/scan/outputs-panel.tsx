@@ -1,23 +1,16 @@
 /**
- * Outputs: a run of the agent loop's final outputs in their sections, each with its value and
- * status, then the outputs a worker reported that the workflow does not declare; under them, the
- * output in view: its status, value, what it is measured on, and the To check items on it and on
- * what it was made from, each accepted here (Looks right). Picking an output opens it in the
- * scene; Show moves the scene to an item's place.
+ * Final outputs: a run of the agent loop's final outputs in their sections, each with its value and
+ * status, then the outputs a worker reported that the workflow does not declare. A section opens
+ * when it holds the output in view or something to check. "Needs you" keeps only the outputs with
+ * an open To check item. Picking an output frames the panes on it and roots the trail on it.
+ *
+ * Plain on purpose: the side panels are being redesigned; the trail panel holds the detail.
  */
 import type { OutputStatus } from "@voluma/contracts/output-fold";
-import { ItemToCheck, type OutputItem, type OutputRow, type OutputsReview } from "@voluma/run-view";
-import {
-  Button,
-  EmptyState,
-  List,
-  Readout,
-  Row,
-  type Status,
-  StatusGlyph,
-  StatusMark,
-} from "@voluma/ui";
-import { Crosshair } from "lucide-react";
+import type { OutputItem, OutputRow, OutputsReview } from "@voluma/run-view";
+import { Button, EmptyState, List, Row, type Status, StatusGlyph } from "@voluma/ui";
+import { ChevronRight } from "lucide-react";
+import { useState } from "react";
 
 /** Each output status on the shared status marks, in the design's words. */
 export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
@@ -37,27 +30,21 @@ export type Accepting = {
   error?: { key: string; text: string };
 };
 
+const needsYou = (r: OutputRow) => r.items.some((i) => !i.resolved);
+
 export function OutputsPanel({
   review,
   selected,
   onSelect,
-  nameOf,
   live,
-  item,
-  onItem,
-  accepting,
 }: {
   review: OutputsReview;
-  /** The output in view. */
+  /** The output the trail is rooted on. */
   selected: OutputRow | undefined;
   onSelect: (id: string) => void;
-  nameOf: (id: string) => string;
   live: boolean;
-  /** The item whose place the scene shows. */
-  item: string | undefined;
-  onItem: (item: OutputItem) => void;
-  accepting: Accepting;
 }) {
+  const [onlyNeeds, setOnlyNeeds] = useState(false);
   const { sections, undeclared } = review;
   if (sections.length === 0 && undeclared.length === 0)
     return (
@@ -67,43 +54,98 @@ export function OutputsPanel({
         </EmptyState>
       </div>
     );
-  const list = (rows: OutputRow[], label: string) => (
-    <List label={label} columns="auto 16px" density="compact">
-      {rows.map((r) => (
-        <OutputListRow
-          key={r.id}
-          row={r}
-          selected={r.id === selected?.id}
-          onSelect={() => onSelect(r.id)}
-        />
-      ))}
-    </List>
-  );
+  const needing = new Set([...review.rows.values()].filter(needsYou).map((r) => r.id));
+  const groups = [
+    ...sections,
+    ...(undeclared.length > 0 ? [{ title: "Not in the workflow", rows: undeclared }] : []),
+  ]
+    .map((s) => ({ ...s, rows: onlyNeeds ? s.rows.filter((r) => needing.has(r.id)) : s.rows }))
+    .filter((s) => s.rows.length > 0);
   return (
-    // One track no wider than the panel, as the Report panel's.
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 p-4">
-      {sections.map((s) => (
-        <section key={s.title} aria-label={s.title} className="grid gap-1.5">
-          <h3 className="text-sm font-semibold">{s.title}</h3>
-          {list(s.rows, s.title)}
-        </section>
-      ))}
-      {undeclared.length > 0 && (
-        <section aria-label="Not in the workflow" className="grid gap-1.5">
-          <h3 className="text-sm font-semibold">Not in the workflow</h3>
-          {list(undeclared, "Not in the workflow")}
-        </section>
-      )}
-      {selected && (
-        <OutputDetail
-          row={selected}
-          nameOf={nameOf}
-          item={item}
-          onItem={onItem}
-          accepting={accepting}
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1 p-3">
+      <div className="flex justify-end pb-1">
+        <Button
+          size="sm"
+          variant={onlyNeeds ? "secondary" : "ghost"}
+          aria-pressed={onlyNeeds}
+          disabled={needing.size === 0 && !onlyNeeds}
+          onClick={() => setOnlyNeeds(!onlyNeeds)}
+        >
+          Needs you {needing.size}
+        </Button>
+      </div>
+      {groups.map((s) => (
+        <Section
+          key={s.title}
+          title={s.title}
+          rows={s.rows}
+          selected={selected?.id}
+          onSelect={onSelect}
+          open={onlyNeeds || s.rows.some((r) => r.id === selected?.id || needing.has(r.id))}
         />
+      ))}
+      {groups.length === 0 && (
+        <p className="p-2 text-sm text-muted-foreground">Nothing needs you.</p>
       )}
     </div>
+  );
+}
+
+function Section({
+  title,
+  rows,
+  selected,
+  onSelect,
+  open: opens,
+}: {
+  title: string;
+  rows: OutputRow[];
+  selected: string | undefined;
+  onSelect: (id: string) => void;
+  open: boolean;
+}) {
+  // Opens by itself when it comes to hold the selection or an item; a click overrides until then.
+  const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
+  const open = toggled && toggled.when === opens ? toggled.open : opens;
+  const toCheck = rows.filter(needsYou).length;
+  const first = rows.find((r) => r.value);
+  return (
+    <section aria-label={title} className="grid gap-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setToggled({ when: opens, open: !open })}
+        className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-sm px-1 text-left text-sm hover:bg-accent"
+      >
+        <ChevronRight
+          aria-hidden
+          className={
+            open ? "size-3.5 rotate-90 transition-transform" : "size-3.5 transition-transform"
+          }
+        />
+        <span className="font-semibold">{title}</span>
+        {!open && first?.value && (
+          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+            {first.name} {first.value.text} {first.value.unit}
+          </span>
+        )}
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+          {toCheck > 0 ? `${toCheck} to check` : `${rows.length}`}
+        </span>
+      </button>
+      {open && (
+        <List label={title} columns="auto 16px" density="compact">
+          {rows.map((r) => (
+            <OutputListRow
+              key={r.id}
+              row={r}
+              selected={r.id === selected}
+              onSelect={() => onSelect(r.id)}
+            />
+          ))}
+        </List>
+      )}
+    </section>
   );
 }
 
@@ -139,84 +181,5 @@ function OutputListRow({
         </span>,
       ]}
     />
-  );
-}
-
-function OutputDetail({
-  row,
-  nameOf,
-  item,
-  onItem,
-  accepting,
-}: {
-  row: OutputRow;
-  nameOf: (id: string) => string;
-  item: string | undefined;
-  onItem: (item: OutputItem) => void;
-  accepting: Accepting;
-}) {
-  const { state } = row;
-  const { status, word } = OUTPUT_STATUS[state.status];
-  const names = (ids: string[]) => ids.map(nameOf).join(", ");
-  const open = row.items.filter((i) => !i.resolved).length;
-  return (
-    <article aria-label={row.name} className="grid gap-4 border-t border-border pt-4">
-      <header className="grid gap-1.5">
-        <h3 className="min-w-0 text-base font-semibold">{row.name}</h3>
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <StatusMark status={status} label={word} />
-          {!state.declared && <span>Not in the workflow</span>}
-          {row.provisional && <span>Provisional: no reference comparison yet</span>}
-        </p>
-        {state.missingReason && <p className="text-sm">{state.missingReason}</p>}
-        {state.outOfDate && (
-          <p className="text-sm">
-            Something it was made from has changed since. The AI keeps it or redoes it.
-          </p>
-        )}
-        {row.description && <p className="text-sm leading-relaxed">{row.description}</p>}
-      </header>
-
-      {row.value && (
-        <Readout values={[{ label: row.name, value: row.value.text, unit: row.value.unit }]} />
-      )}
-      {(row.on.length > 0 || row.context.length > 0) && (
-        <p className="text-sm text-muted-foreground">
-          {row.on.length > 0 && `Measured on ${names(row.on)}.`}
-          {row.on.length > 0 && row.context.length > 0 && " "}
-          {row.context.length > 0 && `Shown with ${names(row.context)}.`}
-        </p>
-      )}
-
-      {row.items.length > 0 && (
-        <section aria-label="To check" className="grid gap-2">
-          <h4 className="text-xs text-muted-foreground">
-            {open > 0 ? `${open} to check` : "To check"}
-          </h4>
-          {row.items.map((i) => (
-            <ItemToCheck
-              key={i.key}
-              context={i.output === row.id ? row.name : nameOf(i.output)}
-              title={i.title}
-              text=""
-              state={i.resolved ? "accepted" : "open"}
-              onAccept={accepting.accept && (() => accepting.accept?.(i))}
-              accepting={accepting.pending === i.key}
-              readOnly={accepting.readOnly}
-              error={accepting.error?.key === i.key ? accepting.error.text : undefined}
-              className={i.key === item ? "inset-ring-select" : undefined}
-              actions={
-                i.focus && (
-                  <Button variant="ghost" size="sm" onClick={() => onItem(i)}>
-                    <Crosshair aria-hidden />
-                    Show
-                  </Button>
-                )
-              }
-            />
-          ))}
-        </section>
-      )}
-    </article>
   );
 }

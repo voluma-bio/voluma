@@ -116,6 +116,9 @@ type ShellState = {
   isOpen(id: string): boolean;
   toggle(reg: Registration, stack: boolean): void;
   open(id: string): void;
+  /** Full view: both sides folded, the panels' layout kept for when it ends. */
+  full: boolean;
+  setFull(full: boolean): void;
 };
 
 const ShellContext = createContext<ShellState | null>(null);
@@ -324,8 +327,10 @@ export function AppShell({
       isOpen: (id) => shown.left.includes(id) || shown.right.includes(id),
       toggle,
       open,
+      full,
+      setFull,
     }),
-    [register, unregister, slots, shown, toggle, open],
+    [register, unregister, slots, shown, toggle, open, full],
   );
 
   // One stable ref callback per panel: a new callback each render would detach and reattach the
@@ -652,6 +657,13 @@ export function useOpenPanel(): (id: string) => void {
   const shell = useContext(ShellContext);
   if (!shell) throw new Error("useOpenPanel must be used inside AppShell");
   return shell.open;
+}
+
+/** Whether Full view is on (F), and a way for the screen to turn it on or off. */
+export function useFullView(): [boolean, (full: boolean) => void] {
+  const shell = useContext(ShellContext);
+  if (!shell) throw new Error("useFullView must be used inside AppShell");
+  return [shell.full, shell.setFull];
 }
 
 /** What the header line says about this screen: where you are, and its one-line facts. */

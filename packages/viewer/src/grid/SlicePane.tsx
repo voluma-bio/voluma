@@ -46,8 +46,9 @@ import {
 } from "./scene";
 import { tokenColor } from "./token-color";
 
-export const axisColor = (axis: Axis) =>
-  tokenColor(axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x");
+/** The colour token of the plane holding `axis` constant, when the caller gives none. */
+export const axisToken = (axis: Axis) =>
+  axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x";
 
 /** Pixels per mm, the zoom that fits the grid in the pane, and the pane centre in mm. */
 type View = { zoom: number; fit: number; center: [number, number] };
@@ -70,6 +71,7 @@ export function SlicePane({
   tool,
   marks,
   onMark,
+  planeToken = axisToken,
 }: {
   axis: Axis;
   scene: GridScene;
@@ -83,6 +85,8 @@ export function SlicePane({
   /** Set while the pane is mounted, for screenshots. */
   handle: { current: PaneHandle | null };
   onStatus(status: PaneStatus): void;
+  /** Each plane's colour token, for the crosshair lines; stable, or the lines redraw each render. */
+  planeToken?: (axis: Axis) => string | undefined;
 }) {
   const [ra, ca] = planeAxes(axis);
   const sr = scene.spacingZyx[ra];
@@ -456,7 +460,7 @@ export function SlicePane({
     const w = scene.shapeZyx[ca] * sc;
     const h = scene.shapeZyx[ra] * sr;
     const colorOf = (a: Axis) => {
-      const c = axisColor(a);
+      const c = tokenColor(planeToken(a) ?? "--viewer-chip-fg");
       const n = Number.parseInt(c.slice(1), 16);
       return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
     };
@@ -475,7 +479,7 @@ export function SlicePane({
     );
     t.cross.geometry = g;
     t.render();
-  }, [point]);
+  }, [point, planeToken]);
 
   // Pointer and wheel.
   useEffect(() => {
