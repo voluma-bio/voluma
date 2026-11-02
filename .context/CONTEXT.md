@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one `QueryClient` in `SignedIn`; no top bar); features/study (Home, studies, Workflows) and features/scan (the scan review) own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame with its rail (one `QueryClient` in `SignedIn`); features/study (Home, studies, Workflows) and features/scan (the scan review) own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
@@ -291,9 +291,9 @@ atomically upserts just the supplied fields. The client exports
 `getUserSettings`, `updateUserSettings`, `userSettingsQuery(userId)` and
 `useUpdateUserSettings(userId)`; the id scopes the query cache, never the API
 request. The shell's identity-keyed QueryClient keeps accounts separate.
-Account → Settings (`features/settings`, `/settings`) offers an Appearance section
-with Light / Dark preview tiles, using small captures of the real Home UI. It shows loading, save and failure states; only a
-successful save changes the selected theme. The shell reads the same query and
+Settings at the foot of the rail (`shell/account.tsx`, a popover) holds the theme (Light /
+Dark) and who is signed in, with Sign in or Sign out; there is no settings page. It shows
+loading and failure; only a successful save changes the selected theme. The shell reads the same query and
 applies it to the document and frame on every route, defaulting to light while
 loading or when settings cannot be loaded. Settings failures never block the app.
 Tab focus refreshes the preference through the query's normal refetch behaviour.

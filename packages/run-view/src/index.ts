@@ -76,6 +76,7 @@ export {
   useRunStore,
   useThreads,
 } from "./run-store";
+export { sampleTree } from "./samples";
 export {
   groupNames,
   groupOf,

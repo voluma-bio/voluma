@@ -8,19 +8,13 @@ import { Button } from "@voluma/ui";
 import { createBrowserRouter, Link } from "react-router";
 import { RouterProvider } from "react-router/dom";
 import { scanRoutes } from "../features/scan";
-import { settingsRoutes } from "../features/settings";
 import { studyRoutes } from "../features/study";
 import { SignedIn } from "./signed-in";
 
 const router = createBrowserRouter([
   {
     element: <SignedIn />,
-    children: [
-      ...studyRoutes,
-      ...scanRoutes,
-      ...settingsRoutes,
-      { path: "*", element: <NotFound /> },
-    ],
+    children: [...studyRoutes, ...scanRoutes, { path: "*", element: <NotFound /> }],
   },
 ]);
 

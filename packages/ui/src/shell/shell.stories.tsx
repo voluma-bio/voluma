@@ -2,23 +2,24 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Bot, Box, Eye, FileText, LayoutDashboard, ListChecks, Ruler, Users } from "lucide-react";
 import { useState } from "react";
 import { AppShell, ShellHeading, ShellLink, ShellPanel } from "./shell";
+import { StoryRail } from "./story-rail";
 
 /**
- * **What:** the one frame every screen sits in: a header line, an icon strip at each edge, up to
- * two docked panels per side, the main area between. **Why:** moving between the study and a
- * scan keeps the frame still; only the content changes.
- * Panels push the main area, never cover it. **Where:** every signed-in screen (`SignedIn`).
+ * **What:** the one frame every screen sits in: a header line, the rail at the far left, the main
+ * area. **Why:** moving between the study and a scan keeps the frame still; only the content
+ * changes. **Where:** every signed-in screen (`SignedIn`). New screens lay out their own sides
+ * with `SidePanel` (Shell/SidePanel).
  *
- * Try: click a strip button to open its panel, again to close; Shift-click stacks a second panel;
- * drag a side's inner edge to resize, double-click it to fold; `\` and `]` fold a side; F for Full
- * view, Esc to leave. A screen declares panels with `<ShellPanel>` inside its own tree, and pages
- * with `<ShellLink>`.
+ * This story shows the older docked panels the task review and the study's sections still use:
+ * an icon strip at each edge, up to two panels per side. Try: click a strip button to open its
+ * panel, again to close; Shift-click stacks a second panel; drag a side's inner edge to resize,
+ * double-click it to fold; `\` and `]` fold a side; F for Full view, Esc to leave.
  */
 const meta = {
   title: "Shell/AppShell",
   component: AppShell,
   parameters: { layout: "fullscreen" },
-  args: { theme: "light", logo: <b>Voluma</b>, account: <span>Guest</span>, children: null },
+  args: { theme: "light", rail: null, children: null },
 } satisfies Meta<typeof AppShell>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -30,7 +31,7 @@ function Lorem({ what }: { what: string }) {
 function Frame({ theme }: { theme: "light" | "dark" }) {
   const [page, setPage] = useState("dashboard");
   return (
-    <AppShell theme={theme} logo={<b>Voluma</b>} account={<span className="text-sm">Guest</span>}>
+    <AppShell theme={theme} rail={<StoryRail />}>
       <ShellHeading>
         <span className="text-muted-foreground text-sm">OA7 DMM vs Sham</span>
         <span className="font-medium text-sm">OA7-2, left knee</span>
