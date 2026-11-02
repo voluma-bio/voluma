@@ -77,7 +77,7 @@ Muse uses its default; DeepSeek runs with thinking off. A role's explicit `think
 global `high`. With `RUNNER_MODEL` set (every role forced onto one model), the role files' levels
 are ignored and `RUNNER_THINKING` alone applies.
 
-Agents never start a run on staging, and never test on wonder (Jimmy). An agent's test run is a local runner with `RUNNER_MODEL=meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro` (Jimmy, 2 Nov).
+Agents never start a run on staging, and never test on wonder (Jimmy). An agent's test run is a local runner: plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low`, checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro` (Jimmy, 2 Nov).
 
 There is no fallback model. Pi is the only retry layer: it retries a 5xx, a 409, a network error or a 60 s wait for headers, up to 10 times. A worker or check whose call still fails ends `failed`, and main decides what to do. Main's own failure fails the run, except a reply cut off after its headers, which gets one resume of main (see `CONTEXT.md`). A run made with a model (`run.model`, chosen by the API: `apps/api/src/domains/run/run-models.ts`) uses it for every role, visitor runs included (Spark 1.3 or Wonder on their own key). `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) and the aliases serve only runs without one, made before the choice existed; a visitor run whose model is not a Standard-mode Meta model fails at its claim.
 
