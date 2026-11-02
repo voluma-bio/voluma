@@ -221,6 +221,7 @@ export function runnerConfig() {
     /** The run loop's limits (`LoopConfig`); the harness default is 2 fix rounds. */
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),
+      activityMinutes: positiveInt("RUNNER_ACTIVITY_MINUTES", 10),
     },
     /**
      * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),

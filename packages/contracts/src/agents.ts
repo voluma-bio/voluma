@@ -33,6 +33,8 @@ export interface AgentRecord extends ThreadBase {
   /** The turn's input came from main (the brief, or a message from main) and it said nothing since: `silent` if the turn ends so. */
   fromMain: boolean;
   spoke: boolean;
+  /** When it last said what it is doing (`activity`), or else when it last started: the clock of its silence. */
+  activityAt: number;
   /** Its latest report: output id, version and the log position. */
   lastReport: { outputId: string; version: number; at: number } | undefined;
 }
@@ -106,6 +108,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       endedTime: prev?.endedTime ?? "",
       fromMain: prev === undefined || (continues && prev.fromMain),
       spoke: continues ? prev.spoke : false,
+      activityAt: 0,
       lastReport: prev?.lastReport,
     };
   });
@@ -144,6 +147,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       case "thread.started": {
         if (!record) break;
         record.startedAt = at;
+        record.activityAt = Date.parse(e.createdAt);
         idByName.set(record.name, record.id);
         if (record.place === "main") {
           main = record;
@@ -217,6 +221,9 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         }
         break;
       }
+      case "activity":
+        if (record) record.activityAt = Date.parse(e.createdAt);
+        break;
       case "person.message":
         personAt = at;
         break;

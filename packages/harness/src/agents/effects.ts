@@ -22,6 +22,8 @@ export const closeWorkerId = (threadId: string, toolCallId: string) =>
 /** `close_worker {now}`: the worker's `cancelled` end, written before it is aborted. */
 export const closeWorkerEndId = (threadId: string, toolCallId: string) =>
   `${closeWorkerId(threadId, toolCallId)}:end`;
+export const activityId = (threadId: string, toolCallId: string) =>
+  `${threadId}:${toolCallId}:activity`;
 export const changeOutputsId = (threadId: string, toolCallId: string) =>
   `${threadId}:${toolCallId}:change_outputs`;
 export const startedId = (threadId: string) => `${threadId}:started`;

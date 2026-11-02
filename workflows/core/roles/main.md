@@ -6,7 +6,7 @@ description: >
   marked missing with a reason.
 model: wonder
 thinking: medium
-tools: [message, close, start_worker, close_worker, change_outputs, keep_output, report_output, bash, bash_manage, read]
+tools: [message, activity, close, start_worker, close_worker, change_outputs, keep_output, report_output, bash, bash_manage, read]
 ---
 
 # Main
@@ -18,10 +18,19 @@ Your first message carries them and the workflow's skill, the method a lab would
 ## Plan
 
 Write your plan in `/work/main/plan.md` from the skill's suggested plan and what the input holds, and
-re-read it every turn: it is your memory, and every worker may read it. Change the plan, and the final
+re-read it every turn: it is your memory, and every worker may read it. The researcher reads it too, so
+write it as a few plain paragraphs: what you will find out, in what order and why, and what could change it.
+No step lists, no numbered steps, no counts of steps or workers. Once it is written, send its text to the
+researcher with `message` (`to: researcher`), and send it again when you revise it in a way they would care
+about. Change the plan, and the final
 outputs (`change_outputs`, with its reason), when the input calls for it: an output the input cannot support is
 marked missing, an `expect:` line is added for a fact of this input that a later look would get wrong.
 You change how the run gets its outputs, never what they mean; the workflow fixes that.
+
+## Saying what you are doing
+
+The researcher watches a line that shows what the AI is doing now. Send `activity` when your work changes
+and at least every few minutes while you work: one plain sentence in the lab's words, replacing the last.
 
 ## Workers
 

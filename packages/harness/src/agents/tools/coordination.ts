@@ -26,6 +26,7 @@ import { threadIdOf } from "../../thread-id";
 import type { Tool, ToolContext, ToolResult } from "../../tools/tool";
 import { wrapUpText } from "../deliveries";
 import {
+  activityId,
   changeOutputsId,
   closeEventId,
   closeWorkerEndId,
@@ -133,6 +134,27 @@ const messageTool = (api: AgentsApi): Tool =>
           await api.recorder.append(ctx.threadId, "agent.message", { from, to, text: body }, id);
           api.changed();
           return text(`Sent to ${to}.`);
+        }),
+      ),
+  });
+
+const activityTool = (api: AgentsApi): Tool =>
+  define({
+    name: "activity",
+    description:
+      "Say in one plain sentence what you are doing now, for the researcher watching the run. It replaces your last line. Send one when your work changes and at least every few minutes while you work; no ids, file paths, counts or step numbers.",
+    input: z.object({ text: z.string().min(1).max(300) }),
+    execute: ({ text: line }, ctx) =>
+      run(() =>
+        api.section(async () => {
+          caller(api, ctx);
+          await api.recorder.append(
+            ctx.threadId,
+            "activity",
+            { text: line },
+            activityId(ctx.threadId, ctx.toolCallId),
+          );
+          return text("Noted.");
         }),
       ),
   });
@@ -347,6 +369,7 @@ const changeOutputsTool = (api: AgentsApi): Tool =>
 
 export const coordinationTools = (api: AgentsApi): Record<string, Tool> => ({
   message: messageTool(api),
+  activity: activityTool(api),
   close: closeTool(api),
   start_worker: startWorkerTool(api),
   close_worker: closeWorkerTool(api),

@@ -15,9 +15,12 @@ export interface LoopConfig {
   maxFixRounds: number;
   /** Deliveries with no notice in a row before code ends the run. */
   stuckLimit: number;
+  /** Minutes an agent may work without an `activity` line before it is reminded (agent loop). */
+  activityMinutes: number;
 }
 
 export const LOOP_DEFAULTS: LoopConfig = {
   maxFixRounds: 2,
   stuckLimit: 2,
+  activityMinutes: 10,
 };

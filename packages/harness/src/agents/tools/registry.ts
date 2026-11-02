@@ -23,6 +23,7 @@ export const AGENT_TOOL_NAMES = [
   "read",
   "segment_sam",
   "message",
+  "activity",
   "close",
   "start_worker",
   "close_worker",
