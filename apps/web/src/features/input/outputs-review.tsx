@@ -401,13 +401,7 @@ export function OutputsReview({
               {panes}
             </div>
             {centre === "run" && (
-              <RunGraphView
-                fold={fold}
-                catalog={catalog}
-                selected={inView?.id}
-                rows={review.rows}
-                onPick={show}
-              />
+              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
             )}
             {centre === "agents" && (
               <RunAgents events={events} fold={fold} live={live} nameOf={nameOf} />

@@ -15,7 +15,7 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { LinkRole } from "@voluma/contracts/output-catalog";
-import type { OutputStatus } from "@voluma/contracts/output-fold";
+import { hasVersion, type OutputStatus } from "@voluma/contracts/output-fold";
 import {
   type ChainLink,
   itemsOfVersion,
@@ -131,7 +131,7 @@ function Section({
   const open = toggled && toggled.when === opens ? toggled.open : opens;
   const toCheck = rows.filter((r) => needing.has(r.id)).length;
   // While the run goes, a tick only once every row has a version (the panel head counts them).
-  const notIn = props.live ? rows.filter((r) => !r.state.latest).length : 0;
+  const notIn = props.live ? rows.filter((r) => !hasVersion(r.state)).length : 0;
   const first = rows.find((r) => r.value);
   return (
     <section aria-label={title} className="grid">

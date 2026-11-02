@@ -143,47 +143,11 @@ export function applyOutputsChange(
 }
 
 /**
- * The label overlays that the values in `chosen` are `on` or have as `context`, and `listed` lacks:
- * the fold reads a label's map from the `outputs.changed` entry that lists it (`labels`), so a
- * writer that adds a value adds these with it.
- */
-export function labelOverlaysUnder(
-  catalog: readonly OutputEntry[],
-  chosen: readonly { id: string }[],
-  listed: ReadonlySet<string> = new Set(),
-): OutputEntry[] {
-  const have = new Set([...listed, ...chosen.map((e) => e.id)]);
-  const links = new Set(
-    chosen.flatMap((c) => {
-      const e = catalog.find((x) => x.id === c.id);
-      return e?.kind === "value" ? [...e.on, ...(e.context ?? [])] : [];
-    }),
-  );
-  return catalog.filter(
-    (e) => labelMapOf(catalog, e.id) !== e.id && links.has(e.id) && !have.has(e.id),
-  );
-}
-
-/**
- * `add` with the catalog's own label put on each entry the catalog lists as a label overlay and
- * the entry lacks: the fold reads a label's map from the entry, so a writer fills it in.
- */
-export function withCatalogLabels<E extends { id: string }>(
-  catalog: readonly OutputEntry[],
-  add: readonly E[],
-): E[] {
-  return add.map((e) => {
-    const own = catalog.find((x) => x.id === e.id);
-    const missing = !("label" in e) || (e as { label?: unknown }).label === undefined;
-    return own?.kind === "overlay" && own.label && missing ? { ...e, label: own.label } : e;
-  });
-}
-
-/**
  * Why `change` must not be written, or undefined. For the writer (the runner's opening change,
  * `change_outputs`), which has the run's catalog: an id the catalog declares keeps its kind, one
  * it does not is a worker's own (`<worker>/<id>`), and the links of an added entry (`base`, `on`,
- * `context`) name catalog outputs, a worker's own, or something listed.
+ * `context`) name catalog outputs, a worker's own, or something listed. A `label` (on an entry or
+ * in `labels`) is the catalog's own or is refused, so the log never disagrees with the catalog.
  */
 export function refuseOutputsChange(
   list: FinalOutputs | undefined,
@@ -196,6 +160,10 @@ export function refuseOutputsChange(
     if (!listed.has(id)) return `${id} is not a final output, so it cannot be dropped`;
   for (const id of change.drop ?? []) listed.delete(id);
 
+  for (const [overlay, map] of Object.entries(change.labels ?? {}))
+    if (labelMapOf(catalog, overlay) !== map || map === overlay)
+      return `${overlay} is not a label of ${map} in the catalog`;
+
   const added = new Set<string>();
   for (const entry of change.add ?? []) {
     if (listed.has(entry.id) || added.has(entry.id)) return `${entry.id} is already a final output`;
@@ -203,10 +171,13 @@ export function refuseOutputsChange(
     const own = declared.get(entry.id);
     if (own && own.kind !== entry.kind)
       return `${entry.id} is ${own.kind} in the catalog, not ${entry.kind}`;
-    if (own?.kind === "overlay" && own.label) {
-      const given = entry.label as { of?: unknown; value?: unknown } | undefined;
-      if (given && (given.of !== own.label.of || given.value !== own.label.value))
-        return `${entry.id} is label ${own.label.value} of ${own.label.of} in the catalog; leave label off or give that one`;
+    if (own && entry.label !== undefined) {
+      const ours = own.kind === "overlay" ? own.label : undefined;
+      const given = entry.label as { of?: unknown; value?: unknown } | null;
+      if (!ours || !given || given.of !== ours.of || given.value !== ours.value)
+        return ours
+          ? `${entry.id} is label ${ours.value} of ${ours.of} in the catalog; leave label off or give that one`
+          : `${entry.id} is not a label in the catalog; leave label off`;
     }
     if (!own && !entry.id.includes("/"))
       return `${entry.id} is not in the catalog; a worker's own output is <worker>/<id>`;

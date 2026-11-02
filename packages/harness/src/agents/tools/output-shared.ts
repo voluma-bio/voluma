@@ -4,7 +4,7 @@
  * version inside the run's section, so a version number is read and used with no other write in
  * between.
  */
-import { labelMapOf, type OutputCatalog } from "@voluma/contracts/output-catalog";
+import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
 import type { ThreadLayout } from "../../layout";
 import type { Publish } from "../../ports/publish";
@@ -76,10 +76,6 @@ export function answerOf(p: OutputEvent) {
   };
 }
 
-/**
- * The id a link resolves to: a label overlay is its map, in the order the fold resolves it
- * (`output-fold.ts`): the log's `outputs.changed` entries first, else the catalog.
- */
-export function resolvedId(deps: OutputToolDeps, id: string): string {
-  return foldOf(deps).labels.get(id) ?? labelMapOf(deps.catalog, id);
-}
+/** The id a link resolves to: a label overlay is its map, as the fold resolved it (`output-fold.ts`). */
+export const resolvedId = (deps: OutputToolDeps, id: string): string =>
+  foldOf(deps).labels.get(id) ?? id;
