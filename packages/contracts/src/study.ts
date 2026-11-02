@@ -31,7 +31,10 @@
  * `values` and `acceptable` come from each scan's **newest completed run** only (`resultRunId`):
  * accepting a check needs the latest completed result, so a live run's items would answer 409.
  * `values` is keyed by output id (the `outputs.json` id, not the fold's `taskId/outputId`)
- * and holds every measurement the run reported. `taskState` comes from the scan's **newest
+ * and holds every measurement the run reported; for a run of the agent loop, every final value's
+ * latest number, its UCUM unit written as `outputs.json` writes units (`unitAsWritten`).
+ * `acceptable` lists task-loop checks only. A run of the agent loop has no tasks: its newest
+ * run's `outputStatus` and `review` say where it is and what needs a person. `taskState` comes from the scan's **newest
  * run**, whatever its state, so the study shows where a live or stopped run is: the state the
  * scan review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
  * task missing from it is outside the run's plan. `needsYou` and `unacceptable` come from the
@@ -53,9 +56,11 @@ import {
   taskIdSchema,
   taskStateSchema,
 } from "./ids";
+import type { OutputStatus } from "./output-fold";
 import { measurementSchema, unacceptableSchema } from "./review";
 import {
   inputSchema,
+  runOutputsInSchema,
   runSchema,
   runStateSchema,
   runTasksSchema,
@@ -92,6 +97,29 @@ export const studySchema = z.object({
 });
 export type Study = z.infer<typeof studySchema>;
 
+/**
+ * A completed run's review in brief, of either loop: the task loop's `runSchema.review` (items to
+ * check), or for a run of the agent loop its final outputs that need a person (`needingYou`, what
+ * its sample page's Needs you counts), with no task-loop checks to accept (`acceptable` 0), never
+ * reviewed. Null for a run that has not completed.
+ */
+export const runReviewBriefSchema = z
+  .object({
+    acceptable: z.number().int().nonnegative(),
+    needsYou: z.number().int().nonnegative(),
+    reviewedAt: z.iso.datetime().nullable(),
+  })
+  .nullable();
+
+/** As `OutputStatus` (`output-fold.ts`): a final output's status in a run of the agent loop. */
+export const outputStatusSchema = z.enum([
+  "pending",
+  "reported",
+  "to-check",
+  "missing",
+  "out-of-date",
+]) satisfies z.ZodType<OutputStatus>;
+
 /** A scan's newest run in brief, whatever its state: what Home shows of a study. */
 export const studyRunSummarySchema = z.object({
   runId: runIdSchema,
@@ -101,14 +129,11 @@ export const studyRunSummarySchema = z.object({
   state: runStateSchema,
   /** As `runSchema.tasks`: a live run's finished tasks out of its plan's. */
   tasks: runTasksSchema,
-  /** As `runSchema.review`: the open checks and review time of a completed run; null otherwise. */
-  review: z
-    .object({
-      acceptable: z.number().int().nonnegative(),
-      needsYou: z.number().int().nonnegative(),
-      reviewedAt: z.iso.datetime().nullable(),
-    })
-    .nullable(),
+  /** As `runSchema.harness`: which loop, so a row says "needs you" (values) or "to check" (items). */
+  harness: harnessSchema.optional(),
+  /** As `runSchema.outputs`: a live agent-loop run's final outputs in, of all of them. */
+  outputs: runOutputsInSchema,
+  review: runReviewBriefSchema,
   example: z.boolean(),
 });
 export type StudyRunSummary = z.infer<typeof studyRunSummarySchema>;
@@ -154,9 +179,16 @@ export const studyScanDetailSchema = z.object({
   input: inputSchema,
   /** Newest first; empty: "not started". */
   runs: z.array(runSchema),
+  /** The newest run's review in brief, of either loop (`runReviewBriefSchema`). */
+  review: runReviewBriefSchema,
+  /**
+   * Final output id → its status in the newest run, for a run of the agent loop (whose outputs,
+   * not tasks, say where it is); empty for the task loop and before main lists its outputs.
+   */
+  outputStatus: z.record(segmentSchema, outputStatusSchema),
   /** The newest completed run, which `values` and `acceptable` read; null when none has completed. */
   resultRunId: runIdSchema.nullable(),
-  /** Output id → value, for every measurement that run reported. */
+  /** Output id → value, for every measurement (task loop) or final value (agent loop) that run reported. */
   values: z.record(segmentSchema, studyValueSchema),
   /** That run's open checks a person can accept ("Looks right"); not what a screen counts To check. */
   acceptable: z.array(toCheckItemSchema),

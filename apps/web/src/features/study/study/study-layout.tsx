@@ -11,7 +11,7 @@ import { ApiError } from "@voluma/api-client";
 import { studiesQuery, studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { isLive, sampleTree } from "@voluma/run-view";
+import { sampleTree } from "@voluma/run-view";
 import {
   Breadcrumb,
   Button,
@@ -37,11 +37,7 @@ export const useStudy = () => useOutletContext<StudyContext>();
 export function StudyLayout() {
   const me = useOutletContext<Me>();
   const { id = "" } = useParams();
-  const study = useQuery({
-    ...studyQuery(id),
-    refetchInterval: (query) =>
-      query.state.data?.scans.some((s) => isLive(s.runs[0])) ? 5000 : false,
-  });
+  const study = useQuery(studyQuery(id));
 
   if (study.isPending) return <PageState label="Loading the study" />;
   // A failed background refetch keeps its data (status "error"): the page stays, with a notice.
@@ -124,10 +120,7 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
 
 /** The left side: the scan tree, from the lab's study list. */
 function SamplesSide({ studyId }: { studyId: string }) {
-  const studies = useQuery({
-    ...studiesQuery(),
-    refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? 5000 : false),
-  });
+  const studies = useQuery(studiesQuery());
   return (
     <SidePanel side="left" title={INPUT_WORD.Many} icon={<ListTree />}>
       {studies.data ? (

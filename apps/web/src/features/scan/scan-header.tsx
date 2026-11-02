@@ -57,15 +57,15 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
     : workflowName(run.workflows[0]?.path);
 };
 
-/** How far a running run got: `done` of `total`, counted in `noun` ("tasks done" by default). */
-type Progress = { done: number; total: number; noun?: string };
+/** How far a running task-loop run got: `done` of `total` tasks. */
+type Progress = { done: number; total: number };
 
 /**
  * Where the run stands in a few words: "Finished", "Running, 4 of 9 tasks done", "Waiting, place
  * 2 in line" (also a run that lost its runner and waits for another); otherwise the word every
  * list uses (`runStatus`). How long it took is in Run details.
  */
-function where(run: Run, progress: Progress): { status?: Status; text: string } {
+function where(run: Run, progress: Progress | undefined): { status?: Status; text: string } {
   const { state } = run;
   if (state.status === "queued")
     return { status: "waiting", text: `Waiting, place ${state.position} in line` };
@@ -73,8 +73,8 @@ function where(run: Run, progress: Progress): { status?: Status; text: string } 
     return {
       status: "running",
       text:
-        progress.total > 0
-          ? `Running, ${progress.done} of ${progress.total} ${progress.noun ?? "tasks done"}`
+        progress && progress.total > 0
+          ? `Running, ${progress.done} of ${progress.total} tasks done`
           : "Running",
     };
   if (state.status === "ended" && state.outcome === "completed") return { text: "Finished" };
@@ -89,7 +89,8 @@ export function ScanHeading({
 }: {
   run: Run;
   study: StudyDetail | undefined;
-  progress: Progress;
+  /** A task-loop run's; an agent-loop run's count is in Final outputs. */
+  progress?: Progress;
 }) {
   const { title, group } = scanTitle(run, study);
   const now = where(run, progress);

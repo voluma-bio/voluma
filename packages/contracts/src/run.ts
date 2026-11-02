@@ -254,6 +254,15 @@ export const runTasksSchema = z
   .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
   .nullable();
 
+/**
+ * While a run of the agent loop is live and main has listed its final outputs: those with a
+ * version out of all of them ("1 of 2 in"). Absent otherwise. Optional because the runner's claim
+ * carries a `Run` too, and a runner and an API of different builds overlap during a deploy.
+ */
+export const runOutputsInSchema = z
+  .object({ done: z.number().int().nonnegative(), total: z.number().int().positive() })
+  .optional();
+
 export const runSchema = z
   .object({
     id: runIdSchema,
@@ -312,6 +321,7 @@ export const runSchema = z
      */
     review: reviewSummarySchema.nullable(),
     tasks: runTasksSchema,
+    outputs: runOutputsInSchema,
   })
   .refine((run) => (hasTaskReview(run) ? run.review !== null : run.review === null), {
     path: ["review"],
