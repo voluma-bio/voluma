@@ -7,7 +7,8 @@
  */
 import { runEventSchema } from "@voluma/contracts/events";
 import { fold, redoRefusal } from "@voluma/contracts/fold";
-import type { PersonMessage } from "@voluma/contracts/messages";
+import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
+import { outputsFold } from "@voluma/contracts/output-fold";
 import type { Run } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -15,6 +16,7 @@ import { HTTPException } from "hono/http-exception";
 import type { Reader } from "../../domain";
 import type { MessageSent } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
+import { freezeAttached } from "./agent-review";
 import { noLease } from "./lease";
 import { eventLock, insertEvent, lockRun } from "./pg-event-log";
 import {
@@ -36,7 +38,12 @@ async function appendPersonEvent(
   runId: string,
   event: {
     id: string;
-    type: "person.message" | "run.reopened" | "correction.ended";
+    type:
+      | "person.message"
+      | "run.reopened"
+      | "correction.ended"
+      | "approval.given"
+      | "approval.declined";
     payload: unknown;
   },
 ) {
@@ -55,14 +62,16 @@ async function appendPersonEvent(
 
 /**
  * Reopens a finished run for the person's message `messageEventId`: `run.reopened` (id keyed to
- * the message), then the run to `queued` with its end, claim history and lease cleared.
+ * the message), then the run to `queued` with its end, claim history and lease cleared. Returns
+ * false, changing nothing, when that `run.reopened` is already stored.
  */
-async function reopen(tx: Tx, runId: string, messageEventId: string, by: string) {
-  await appendPersonEvent(tx, runId, {
+export async function reopen(tx: Tx, runId: string, messageEventId: string, by: string) {
+  const [stored] = await appendPersonEvent(tx, runId, {
     id: `${messageEventId}:reopened`,
     type: "run.reopened",
     payload: { by },
   });
+  if (!stored) return false;
   await tx
     .update(runs)
     .set({
@@ -76,6 +85,7 @@ async function reopen(tx: Tx, runId: string, messageEventId: string, by: string)
       ...noLease,
     })
     .where(eq(runs.id, runId));
+  return true;
 }
 
 /**
@@ -149,9 +159,6 @@ export async function messageRefusal(
   run: MessageTarget,
 ): Promise<{ status: 403 | 409; message: string } | null> {
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
-  // A reopen enters the task loop's gate (`taskId`, go), which the agent loop does not have yet.
-  if (run.harness === "agents")
-    return { status: 409, message: "A run on the new agent model can't be reopened yet." };
   if (run.startedBy !== caller.userId)
     return { status: 403, message: "Only the person who started the run can write to it." };
   if (run.credentials === "visitor")
@@ -161,7 +168,9 @@ export async function messageRefusal(
     };
   // Only a run on Voluma's keys is left here, and a guest has none of their own to reopen it on.
   if (caller.guest) return { status: 403, message: GUEST_KEYS_MESSAGE };
-  if (run.state === "queued" || run.state === "running")
+  // An agent run takes the researcher's words while it goes: the claim pulls them in.
+  if (run.state === "queued" || run.state === "running") {
+    if (run.harness === "agents") return null;
     return {
       status: 409,
       message:
@@ -169,6 +178,7 @@ export async function messageRefusal(
           ? "The run is still answering your last message. Wait for its reply, or cancel it."
           : "The run has not finished yet.",
     };
+  }
   if (run.state !== "ended" || run.outcome !== "completed")
     return { status: 409, message: "Only a run that completed can be reopened; rerun this one." };
   const [study] = await tx
@@ -182,12 +192,22 @@ export async function messageRefusal(
   return null;
 }
 
+/** The request fields that belong to one loop only; the other loop's runs refuse them. */
+function wrongLoopFields(agent: boolean, msg: { payload: PersonMessage; markIds?: string[] }) {
+  const { taskId, itemId, go, marks, output, view, toCheck } = msg.payload;
+  const task = [taskId, itemId, go, marks].some((v) => v !== undefined);
+  const agentOnly = [msg.markIds, output, view, toCheck].some((v) => v !== undefined);
+  if (agent && task) return "taskId, itemId, go and marks belong to task runs.";
+  if (!agent && agentOnly) return "markIds, output, view and toCheck belong to agent runs.";
+  return null;
+}
+
 /**
  * A researcher's message to a run, judged in the order the contract lists the refusals. `write`
  * false judges only (nothing is stored, no lock is taken): the route calls that first, so a
  * refused message stores no snapshot, and again with `write` inside the queue's transaction. A run that
- * ended `completed` is reopened through admission. A run still queued or running takes no message
- * (one message, one claim). A run whose workflow files are not the study's current ones cannot
+ * ended `completed` is reopened through admission. A task run still queued or running takes no message
+ * (one message, one claim); an agent run takes it as it is (the claim pulls it in). A run whose workflow files are not the study's current ones cannot
  * be reopened: the runner could not load them.
  */
 export async function decideMessage(
@@ -196,7 +216,7 @@ export async function decideMessage(
   reader: Reader,
   caller: { userId: string; guest: boolean },
   runId: string,
-  msg: { id: string; payload: PersonMessage },
+  msg: { id: string; payload: PersonMessage; markIds?: string[] },
   write: boolean,
 ): Promise<MessageSent> {
   const { userId } = caller;
@@ -223,6 +243,9 @@ export async function decideMessage(
   if (again && refusal?.status !== 403)
     return { eventId, state: await stateNow(), duplicate: true };
   if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
+  const agent = run.harness === "agents";
+  const wrong = wrongLoopFields(agent, msg);
+  if (wrong) throw new HTTPException(400, { message: wrong });
   const { taskId, itemId } = msg.payload;
   // The runner resumes from the whole log and fails on a row it can't read, so a correction on
   // such a run could never finish. Both passes read it all, so a refused message never uploads
@@ -234,33 +257,117 @@ export async function decideMessage(
     throw new HTTPException(409, {
       message: "This run has an event that can't be read; rerun it.",
     });
-  const view = fold(log);
-  if (view.plan.tasks.length === 0)
-    throw new HTTPException(409, { message: "The run has no plan yet." });
-  if (taskId !== undefined) {
-    const cannot = redoRefusal(view, taskId);
-    if (cannot) throw new HTTPException(cannot.status, { message: cannot.message });
+  let payload = msg.payload;
+  if (agent) {
+    // The agent run has no task fold: main reads the log. Check what the message points at, and
+    // freeze its marks from the log so a later `mark.placed` cannot change a sent message.
+    const outputs = outputsFold(log).byId;
+    const { output, toCheck } = payload;
+    if ([output, toCheck?.output].some((id) => id !== undefined && !outputs.has(id)))
+      throw new HTTPException(404, { message: "Output not found." });
     if (
-      itemId !== undefined &&
-      !view.tasks.find((t) => t.id === taskId)?.checks.some((c) => c.id === itemId)
-    ) {
-      throw new HTTPException(400, { message: "That is not one of this task's To check items." });
+      toCheck &&
+      !outputs.get(toCheck.output)?.versions.find((v) => v.version === toCheck.version)?.toCheck[
+        toCheck.item
+      ]
+    )
+      throw new HTTPException(404, { message: "To check item not found." });
+    const attached = freezeAttached(log, userId, msg.markIds ?? []);
+    if (attached.length) payload = { ...payload, attached };
+    else if ((msg.markIds ?? []).length && !payload.text?.trim() && !payload.go)
+      throw new HTTPException(400, {
+        message: "Nothing new to send: those marks are as main last saw them.",
+      });
+  } else {
+    const view = fold(log);
+    if (view.plan.tasks.length === 0)
+      throw new HTTPException(409, { message: "The run has no plan yet." });
+    if (taskId !== undefined) {
+      const cannot = redoRefusal(view, taskId);
+      if (cannot) throw new HTTPException(cannot.status, { message: cannot.message });
+      if (
+        itemId !== undefined &&
+        !view.tasks.find((t) => t.id === taskId)?.checks.some((c) => c.id === itemId)
+      ) {
+        throw new HTTPException(400, {
+          message: "That is not one of this task's To check items.",
+        });
+      }
     }
   }
-  const refused = admit(
-    "reopen",
-    o.limits,
-    await usage(tx, reader.labId, { userId, credentials: run.credentials }),
-    run,
-  );
-  if (refused) throw new HTTPException(409, { message: refusalMessage[refused] });
+  // A run still going was admitted already; only a finished one is reopened through admission.
+  const reopening = run.state === "ended";
+  if (reopening) {
+    const refused = admit(
+      "reopen",
+      o.limits,
+      await usage(tx, reader.labId, { userId, credentials: run.credentials }),
+      run,
+    );
+    if (refused) throw new HTTPException(409, { message: refusalMessage[refused] });
+  }
   if (!write) return { eventId, state: await stateNow(), duplicate: false };
 
-  await reopen(tx, runId, eventId, userId);
-  await appendPersonEvent(tx, runId, {
-    id: eventId,
-    type: "person.message",
-    payload: msg.payload,
-  });
+  if (reopening) await reopen(tx, runId, eventId, userId);
+  await appendPersonEvent(tx, runId, { id: eventId, type: "person.message", payload });
   return { eventId, state: await stateNow(), duplicate: false };
+}
+
+/**
+ * The researcher's yes or no to a held call (`answerApprovalRequestSchema`). Judged like a
+ * message (the run-level refusals, in order, and the unreadable-event 409) but never through
+ * admission: an answer belongs to a run already admitted, so a researcher at their limit can
+ * still answer. 404 for a run that has no such request open. The same answer again stores
+ * nothing; the other answer is 409. An ended run is reopened in the same transaction.
+ */
+export async function answerApproval(
+  tx: Tx,
+  o: { pinsOf: (workflowId: string) => WorkflowPin[] | undefined },
+  reader: Reader,
+  caller: { userId: string; guest: boolean },
+  runId: string,
+  requestId: string,
+  body: AnswerApprovalRequest,
+): Promise<{ duplicate: boolean }> {
+  const run = await lockRun(tx, runId, readableRuns(reader));
+  if (!run || run.harness !== "agents") throw new HTTPException(404, { message: "not found" });
+  const refusal = await messageRefusal(tx, o.pinsOf, caller, {
+    ...run,
+    workflows: run.workflows as WorkflowPin[],
+  });
+  const type = body.answer === "yes" ? "approval.given" : "approval.declined";
+  const answerId = `${requestId}:answer`;
+  // An answer already stored is answered even though the run's state has moved on since.
+  const [stored] = await tx
+    .select({ type: events.type })
+    .from(events)
+    .where(and(eq(events.runId, runId), eq(events.id, answerId)));
+  if (stored && refusal?.status !== 403) {
+    if (stored.type === type) return { duplicate: true };
+    throw new HTTPException(409, { message: "That request was answered the other way." });
+  }
+  if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
+  const { events: log, skipped } = readEvents(
+    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
+  );
+  if (skipped.length)
+    throw new HTTPException(409, {
+      message: "This run has an event that can't be read; rerun it.",
+    });
+  const request = log.find((e) => e.type === "approval.requested" && e.id === requestId);
+  if (request?.type !== "approval.requested")
+    throw new HTTPException(404, { message: "That request is not open." });
+  if (log.some((e) => e.id === `${requestId}:settled`))
+    throw new HTTPException(404, { message: "That request is not open." });
+
+  if (run.state === "ended") await reopen(tx, runId, answerId, caller.userId);
+  await appendPersonEvent(tx, runId, {
+    id: answerId,
+    type,
+    payload: {
+      toolCallId: request.payload.toolCallId,
+      ...(body.text !== undefined && { text: body.text }),
+    },
+  });
+  return { duplicate: false };
 }

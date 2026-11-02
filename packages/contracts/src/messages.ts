@@ -19,6 +19,10 @@
  * folds that), and then writes `claim.started {resumed: true, reopened: true}` (`events.ts`; a
  * resumed claim has exactly one of `after` and `reopened`).
  *
+ * Agent-loop runs (`harness: agents`) differ: a message or an answer to a `queued` or `running` run is
+ * stored as it is (no reopen; the claim pulls it in, or reads it at its start), and `report()` reopens a run
+ * whose claim ended with one unread (`readSeq`). The rest of this page is the task loop.
+ *
  * A message to a run that is `queued` or `running` is refused (409): the run is still answering
  * the last one. The sender sees the refusal and keeps the text; the panel says a note sent
  * mid-fix waits. So a span (`corrections`, fold.ts) is a `run.reopened` followed by its one
