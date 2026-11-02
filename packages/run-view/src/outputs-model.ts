@@ -184,10 +184,6 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
   };
 }
 
-/** Whether a run's log is the agent loop's: it has final outputs or a published version. */
-export const isAgentsRun = (fold: OutputsFold) =>
-  fold.list !== undefined || fold.outputs.some((o) => o.latest);
-
 // ---------------------------------------------------------------------------------------------
 // The scene
 
