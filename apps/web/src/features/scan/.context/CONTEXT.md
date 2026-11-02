@@ -150,8 +150,8 @@ folds Final outputs while it is up and unfolds it after; unfolding the strip dur
 it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
 whole run and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.tsx`): Navigate
-(V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I). Your marks are page
-state and wait in "With your next message:" above the conversation's footer; the conversation is
+(V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
+`POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Yours wait in "With your next message:" above the conversation's footer; the conversation is
 read-only on these runs, so they go nowhere yet (sending them is phase 7, through `messageMark`,
 which drops what a contract `Mark` can't hold). Save view posts `view.saved`
 (`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's

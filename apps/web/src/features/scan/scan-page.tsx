@@ -449,6 +449,7 @@ function ScanReview({ run, stale, refetchRun, reopen }: ReviewProps) {
           jump={marking.jump}
           onJumped={marking.jumped}
           onMark={(mark, volumeId, gridKey) => marking.add(mark, volumeId, gridKey, reviewTask.id)}
+          full={marking.full}
           onShown={marking.setShown}
           viewer={marking.viewer}
         />

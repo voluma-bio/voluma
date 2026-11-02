@@ -500,3 +500,23 @@ function drawMarks(
     ctx.stroke();
   }
 }
+
+/**
+ * A mark's vertices in a fixed order: a point's one; a box's min, max; a line's a, b; an angle's
+ * a, vertex, b; an outline's own.
+ */
+export function markPoints(mark: GridMark): readonly Zyx[] {
+  if ("point" in mark) return [mark.point];
+  if ("box" in mark) return [mark.box.min, mark.box.max];
+  if ("line" in mark) return [mark.line.aZyx, mark.line.bZyx];
+  if ("angle" in mark) return [mark.angle.aZyx, mark.angle.vertexZyx, mark.angle.bZyx];
+  return mark.outline.zyx;
+}
+
+/** A voxel (z, y, x) in world mm (x, y, z) through a volume's 4x4 row-major affine. */
+export function worldOf(p: Zyx, affine: readonly (readonly number[])[]): [number, number, number] {
+  const [x, y, z] = [p[2], p[1], p[0]];
+  const row = (r: number) =>
+    affine[r]![0]! * x + affine[r]![1]! * y + affine[r]![2]! * z + affine[r]![3]!;
+  return [row(0), row(1), row(2)];
+}

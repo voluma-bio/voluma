@@ -13,13 +13,17 @@
  *                                   (`acceptToCheckRequestSchema`, the agent loop's runs)
  *   POST /runs/:runId/views         a view of an output the researcher saved
  *                                   (`saveViewRequestSchema`, the agent loop's runs)
+ *   POST /runs/:runId/marks         a mark the researcher placed or changed (`placeMarkRequestSchema`)
+ *   DELETE /runs/:runId/marks/:markId  a mark the researcher took away
  *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
  *                                   the snapshot is checked and stored here, the Run domain judges
  *                                   and stores the message
  */
 import {
   acceptToCheckRequestSchema,
+  MAX_MARK_BYTES,
   MAX_VIEW_BYTES,
+  placeMarkRequestSchema,
   saveViewRequestSchema,
 } from "@voluma/contracts/agent-events";
 import {
@@ -164,6 +168,33 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
       if (!record.results.outputs.byId.has(output))
         throw new HTTPException(404, { message: "Output not found." });
       return { type: "view.saved", payload: { output, view } };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json({});
+  });
+
+  app.post("/runs/:runId/marks", async (c) => {
+    const body = await parseJson(c, placeMarkRequestSchema);
+    if (JSON.stringify(body).length > MAX_MARK_BYTES)
+      return c.json({ error: "The mark is too large." }, 413);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      if (record.run.example)
+        throw new HTTPException(403, { message: "Example runs can't be changed." });
+      if (!record.results.outputs.byId.has(body.output))
+        throw new HTTPException(404, { message: "Output not found." });
+      return { type: "mark.placed", payload: { ...body, by: c.var.user.userId } };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json({});
+  });
+
+  app.delete("/runs/:runId/marks/:markId", async (c) => {
+    const id = z.uuid().safeParse(c.req.param("markId"));
+    if (!id.success) return c.json({ error: "not found" }, 404);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      if (record.run.example)
+        throw new HTTPException(403, { message: "Example runs can't be changed." });
+      return { type: "mark.deleted", payload: { id: id.data, by: c.var.user.userId } };
     });
     if (!record) return c.json({ error: "not found" }, 404);
     return c.json({});

@@ -9,7 +9,6 @@
  * belong to it.
  */
 import { reviewAssetUrl } from "@voluma/api-client";
-import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { Focus, ReviewAssets, ReviewTask } from "@voluma/contracts/review";
 import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
 import {
@@ -20,6 +19,7 @@ import {
   GridViewer,
   type GridViewerHandle,
   labelsMiddle,
+  type MarkPlane,
   type MarkTool,
   type PlaneFit,
   planeTargets,
@@ -64,6 +64,7 @@ export function SceneViewer({
   jump,
   onJumped,
   onMark,
+  full,
   onShown,
   viewer,
   quad,
@@ -90,7 +91,14 @@ export function SceneViewer({
   jump?: { at: Zyx; gridKey: string; taskId: string };
   onJumped: () => void;
   /** A new mark, on the image volume `volumeId`; returns its id. */
-  onMark: (mark: GridMark, volumeId: string, gridKey: string) => string | undefined;
+  onMark: (
+    mark: GridMark,
+    volumeId: string,
+    gridKey: string,
+    plane?: MarkPlane | null,
+  ) => string | undefined;
+  /** At the cap of marks a message carries, the tools are held off. */
+  full: boolean;
   /** The mounted subject and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
   viewer?: Ref<GridViewerHandle>;
@@ -177,7 +185,6 @@ export function SceneViewer({
     }
     return byGrid;
   }, [marks, selected]);
-  const full = marks.length >= MAX_MARKS;
   // What the shown grid's planes can be aligned to: the catalog's fitted planes, the other grids.
   const fits = quad?.fits;
   const targets = useMemo(
@@ -284,7 +291,7 @@ export function SceneViewer({
                 notes={k.notes}
                 tool={on ? tool : null}
                 marks={shown.get(k.key) ?? NO_MARKS}
-                onMark={on ? (mark) => onMark(mark, k.imageId, k.key) : undefined}
+                onMark={on ? (mark, plane) => onMark(mark, k.imageId, k.key, plane) : undefined}
                 onNote={quad.onNote}
                 onReady={report(k.key)}
                 targets={k.imageId === live?.imageId ? targets : undefined}

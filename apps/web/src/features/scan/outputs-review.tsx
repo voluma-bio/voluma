@@ -89,6 +89,7 @@ import { describe, QUAD_TOOLS, useMarking } from "./marks-panel";
 import { FinalOutputs, needingYou, OUTPUT_STATUS } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
+import { useRunMarks } from "./run-marks";
 import { RunAlert, ScanHeading } from "./scan-header";
 import type { Accepting } from "./version-report";
 
@@ -213,7 +214,14 @@ export function OutputsReview({
   const [leftTab, setLeftTab] = useState("conversation");
   const waiting = useMemo(() => waitingApprovals(events), [events]);
   const live = run.state.status !== "ended";
-  const marking = useMarking(QUAD_TOOLS);
+  const runMarks = useRunMarks({
+    run,
+    me: me.userId,
+    events,
+    volumes: blocks.volumes,
+    reopen,
+  });
+  const marking = useMarking(QUAD_TOOLS, run.example ? undefined : runMarks);
   const views = useSavedViews(run, reopen);
 
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
@@ -363,7 +371,14 @@ export function OutputsReview({
               icon: <MessageSquare />,
               badge: waiting || undefined,
               badgeLabel: "main is waiting on you",
-              content: <MainConversation live={live} nameOf={nameOf} marking={marking} />,
+              content: (
+                <MainConversation
+                  live={live}
+                  nameOf={nameOf}
+                  marking={marking}
+                  markError={runMarks.error}
+                />
+              ),
             },
             {
               id: "samples",
@@ -617,7 +632,10 @@ function OutputScene({
             selected={marking.selected}
             jump={marking.jump}
             onJumped={marking.jumped}
-            onMark={(mark, volumeId, gridKey) => marking.add(mark, volumeId, gridKey, subject)}
+            onMark={(mark, volumeId, gridKey, plane) =>
+              marking.add(mark, volumeId, gridKey, subject, plane)
+            }
+            full={marking.full}
             onShown={marking.setShown}
             quad={quad}
           />
@@ -657,18 +675,21 @@ function useAcceptToCheck(run: { id: string; example: boolean }, reopen: () => v
 /**
  * The conversation with the run's main AI, read-only: researchers write to it on runs of this kind
  * once corrections arrive. The views you saved show in it, where they fall. Under it, your marks
- * wait for the message that will carry them: a chip goes to its mark, × removes it.
+ * are kept in the run and wait for the message that will carry them: a chip goes to its mark, × removes it.
  */
 function MainConversation({
   live,
   nameOf,
   marking,
+  markError,
 }: {
   live: boolean;
   nameOf: (id: string) => string;
   marking: ReturnType<typeof useMarking>;
+  markError: string | undefined;
 }) {
   const events = useEvents();
+  const mine = marking.marks.filter((m) => !m.theirs);
   // A run of this kind has no corrections, so no correction outcomes: messages, and saved views.
   const items = useMemo(() => {
     const said = conversation(events)
@@ -716,10 +737,11 @@ function MainConversation({
         )}
       </div>
       <div className="grid gap-2 border-t border-border p-3 text-xs text-muted-foreground">
-        {marking.marks.length > 0 && (
+        {markError && <p role="alert">{markError}</p>}
+        {mine.length > 0 && (
           <div className="flex flex-wrap items-center gap-1">
             <span>With your next message:</span>
-            {marking.marks.map((m) => {
+            {mine.map((m) => {
               const { title, measure } = describe(m.mark, marking.tools);
               return (
                 <Chip key={m.id} className="gap-0.5 pr-0.5 text-mark-mine-text">

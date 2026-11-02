@@ -9,6 +9,10 @@ import {
   type AcceptToCheckRequest,
   acceptToCheckRequestSchema,
   acceptToCheckResponseSchema,
+  deleteMarkResponseSchema,
+  type PlaceMarkRequest,
+  placeMarkRequestSchema,
+  placeMarkResponseSchema,
   type SaveViewRequest,
   saveViewRequestSchema,
   saveViewResponseSchema,
@@ -99,7 +103,7 @@ async function request(
     method = "GET",
     body,
     signal,
-  }: { method?: "GET" | "POST"; body?: unknown; signal?: AbortSignal } = {},
+  }: { method?: "GET" | "POST" | "DELETE"; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const post = method !== "GET";
   const res = await fetch(`/api${path}`, {
@@ -327,6 +331,30 @@ export async function saveView(runId: string, body: SaveViewRequest): Promise<vo
     await request(`/review/runs/${encodeURIComponent(runId)}/views`, {
       method: "POST",
       body: saveViewRequestSchema.parse(body),
+    }),
+  );
+}
+
+/**
+ * Places or changes a mark of yours (a run of the agent loop); it comes back on the run's event
+ * stream as `mark.placed`.
+ */
+export async function placeMark(runId: string, body: PlaceMarkRequest): Promise<void> {
+  await read(
+    placeMarkResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/marks`, {
+      method: "POST",
+      body: placeMarkRequestSchema.parse(body),
+    }),
+  );
+}
+
+/** Takes a mark of yours away; it comes back on the stream as `mark.deleted`. */
+export async function deleteMark(runId: string, markId: string): Promise<void> {
+  await read(
+    deleteMarkResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/marks/${encodeURIComponent(markId)}`, {
+      method: "DELETE",
     }),
   );
 }

@@ -13,7 +13,9 @@ import { IconButton, List, Row } from "@voluma/ui";
 import {
   type GridMark,
   type GridViewerHandle,
+  type MarkPlane,
   type MarkTool,
+  markPoints,
   outlineAxis,
   probeText,
   type Zyx,
@@ -32,6 +34,20 @@ export type YourMark = {
   gridKey: string;
   volumeId: string;
   mark: GridMark;
+  /** The pane it was made in; null in 3D. */
+  plane: MarkPlane | null;
+  /** Another person's, on a run whose marks are kept: shown, not yours to delete. */
+  theirs?: boolean;
+};
+
+/**
+ * Where marks are kept when the run keeps them (the outputs review): the page's marks, and the two
+ * writes. `place` is a new mark or a changed one under the same id.
+ */
+export type MarkStore = {
+  marks: readonly YourMark[];
+  place(mark: YourMark): void;
+  erase(id: string): void;
 };
 
 /**
@@ -165,16 +181,7 @@ export function nextTag(
 
 /** Where to move the views for a mark: its voxel, or the middle of what it covers. */
 export function middleOf(mark: GridMark): Zyx {
-  const points: readonly (readonly number[])[] =
-    "point" in mark
-      ? [mark.point]
-      : "box" in mark
-        ? [mark.box.min, mark.box.max]
-        : "line" in mark
-          ? [mark.line.aZyx, mark.line.bZyx]
-          : "angle" in mark
-            ? [mark.angle.vertexZyx]
-            : mark.outline.zyx;
+  const points = markPoints(mark);
   const mid = (k: number) => Math.round(points.reduce((s, p) => s + p[k]!, 0) / points.length);
   return [mid(0), mid(1), mid(2)];
 }
@@ -220,14 +227,16 @@ export function MarksPanel({
                 <span key="measure" className="font-mono text-xs text-muted-foreground">
                   {measure}
                 </span>,
-                <IconButton
-                  key="delete"
-                  size="sm"
-                  label={`Delete ${m.tag}`}
-                  onClick={() => onDelete(m.id)}
-                >
-                  <Trash2 />
-                </IconButton>,
+                m.theirs ? null : (
+                  <IconButton
+                    key="delete"
+                    size="sm"
+                    label={`Delete ${m.tag}`}
+                    onClick={() => onDelete(m.id)}
+                  >
+                    <Trash2 />
+                  </IconButton>
+                ),
               ]}
             />
           );
@@ -244,16 +253,18 @@ export function MarksPanel({
  * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
  * (leaving Full view), so one Esc does one thing.
  */
-export function useMarking(tools: readonly Tool[] = TOOLS) {
+export function useMarking(tools: readonly Tool[] = TOOLS, store?: MarkStore) {
   const [tool, setTool] = useState<MarkTool | null>(null);
-  const [marks, setMarks] = useState<YourMark[]>([]);
+  const [held, setMarks] = useState<YourMark[]>([]);
+  const marks = store ? store.marks : held;
   const [selected, setSelected] = useState<string>();
   const [jump, setJump] = useState<{ at: Zyx; gridKey: string; taskId: string }>();
   const [shown, setShown] = useState<ShownGrid>();
   const viewer = useRef<GridViewerHandle>(null);
-  const full = marks.length >= MAX_MARKS;
-  const latest = useRef({ tool, full, tools });
-  latest.current = { tool, full, tools };
+  // A message carries up to MAX_MARKS; marks the run keeps have no cap.
+  const full = !store && marks.length >= MAX_MARKS;
+  const latest = useRef({ tool, full, tools, store, marks });
+  latest.current = { tool, full, tools, store, marks };
   // At the cap the tools are held off (`viewer.tsx` says why).
   useEffect(() => {
     if (full) setTool(null);
@@ -285,6 +296,7 @@ export function useMarking(tools: readonly Tool[] = TOOLS) {
     setTool,
     tools,
     marks,
+    full,
     selected,
     jump,
     shown,
@@ -293,9 +305,28 @@ export function useMarking(tools: readonly Tool[] = TOOLS) {
     jumped: useCallback(() => setJump(undefined), []),
     /** Adds a mark at the cap's mercy; returns its id, or undefined when full. */
     add: useCallback(
-      (mark: GridMark, volumeId: string, gridKey: string, taskId: string): string | undefined => {
-        if (latest.current.full) return undefined;
+      (
+        mark: GridMark,
+        volumeId: string,
+        gridKey: string,
+        taskId: string,
+        plane: MarkPlane | null = null,
+      ): string | undefined => {
+        const { full: capped, store: kept, marks: had, tools: made } = latest.current;
+        if (capped) return undefined;
         const id = crypto.randomUUID();
+        if (kept) {
+          kept.place({
+            id,
+            tag: nextTag(had, mark, made),
+            taskId,
+            gridKey,
+            volumeId,
+            mark,
+            plane,
+          });
+          return id;
+        }
         setMarks((had) =>
           had.length >= MAX_MARKS
             ? had
@@ -308,6 +339,7 @@ export function useMarking(tools: readonly Tool[] = TOOLS) {
                   gridKey,
                   volumeId,
                   mark,
+                  plane,
                 },
               ],
         );
@@ -317,11 +349,13 @@ export function useMarking(tools: readonly Tool[] = TOOLS) {
     ),
     /** Gives a point its note. */
     note: useCallback((id: string, note: string) => {
-      setMarks((had) =>
-        had.map((m) =>
-          m.id === id && "point" in m.mark ? { ...m, mark: { ...m.mark, note } } : m,
-        ),
-      );
+      const { store: kept, marks: had } = latest.current;
+      const noted = (m: YourMark): YourMark =>
+        m.id === id && "point" in m.mark ? { ...m, mark: { ...m.mark, note } } : m;
+      if (kept) {
+        const m = had.find((x) => x.id === id);
+        if (m) kept.place(noted(m));
+      } else setMarks((had) => had.map(noted));
     }, []),
     /** Selects a mark and aims the views at it; returns it. */
     select: useCallback(
@@ -333,7 +367,11 @@ export function useMarking(tools: readonly Tool[] = TOOLS) {
       },
       [marks],
     ),
-    remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
+    remove: useCallback((id: string) => {
+      const { store: kept } = latest.current;
+      if (kept) kept.erase(id);
+      else setMarks((had) => had.filter((m) => m.id !== id));
+    }, []),
     /** Keeps only the marks on these grids. */
     keep: useCallback((grids: ReadonlySet<string>) => {
       setMarks((had) =>

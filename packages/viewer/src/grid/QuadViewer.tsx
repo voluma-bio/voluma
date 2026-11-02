@@ -34,6 +34,7 @@ import { autoContrast, type Contrast } from "./compose";
 import {
   alongAxes,
   alongPlane,
+  type Basis,
   basisAlong,
   GRID,
   nearestAxis,
@@ -60,6 +61,9 @@ import type {
 
 /** What a pane can show: 3D, the three planes, or the plane fitted to an anatomical surface (GP). */
 export type QuadView = "3d" | "xy" | "xz" | "yz" | "gp";
+
+/** The pane a mark was made in: its view and its basis in the grid's mm, (z, y, x). */
+export type MarkPlane = Basis & { view: Exclude<QuadView, "3d"> };
 
 export type QuadLayout = {
   /** How many panes show: slots 0 to count − 1. Slot 0 is the one kept at 1. */
@@ -186,8 +190,8 @@ export function QuadViewer({
   children?: ReactNode;
   tool?: MarkTool | null;
   marks: readonly ShownMark[];
-  /** A new mark; returns its id, which a point's note is kept under. */
-  onMark?(mark: GridMark): string | undefined;
+  /** A new mark, with the frame of the pane it was made in (null in 3D); returns its id, which a point's note is kept under. */
+  onMark?(mark: GridMark, plane: MarkPlane | null): string | undefined;
   /** The note typed at a point just placed with Point. */
   onNote?(id: string, note: string): void;
   /** Whether every shown pane has a picture. */
@@ -220,8 +224,8 @@ export function QuadViewer({
   const handles = useRef(
     Object.fromEntries(VIEW_ORDER.map((v) => [v, { current: null as PaneHandle | null }])),
   ).current;
-  const latestMark = useRef({ onMark, tool, onNote });
-  latestMark.current = { onMark, tool, onNote };
+  const latestMark = useRef({ onMark, tool, onNote, orientation, plate });
+  latestMark.current = { onMark, tool, onNote, orientation, plate };
   const area = useRef<HTMLDivElement>(null);
 
   // The contrast spans the coarsest level's values, so the first picture already uses it.
@@ -404,8 +408,15 @@ export function QuadViewer({
   /** A mark made in `view`: a point from Point waits there for its note. */
   const markIn = useCallback(
     (view: QuadView) => (m: GridMark) => {
-      const { onMark: made, tool: by, onNote: noted } = latestMark.current;
-      const id = made?.(m);
+      const {
+        onMark: made,
+        tool: by,
+        onNote: noted,
+        orientation: o,
+        plate: gp,
+      } = latestMark.current;
+      const basis = view === "3d" ? null : view === "gp" ? basisAlong(gp!) : o[FRAME[view]];
+      const id = made?.(m, basis && { ...basis, view: view as MarkPlane["view"] });
       if (id && noted && by === "point" && "point" in m && view !== "3d")
         setNoting({ view, id, at: m.point });
     },
