@@ -26,7 +26,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 | `pnpm --filter @voluma/runner start` | The runner service: claims queued runs from the API and runs them (`RUNNER_MODEL` in `.env`, as the next line says; `pnpm dev` running locally, start a run in the browser); see [CONTEXT.md](.context/CONTEXT.md) |
 | `pnpm --filter @voluma/<pkg> <script>` | One package's script, e.g. `pnpm --filter @voluma/api db:migrate` |
 
-Agents never start a run on staging or on `wonder` (Jimmy): test runs are local: plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low`, checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`.
+Agents never start a run on staging or on `wonder` (Jimmy): test runs are local: plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`.
 
 An agent that starts sandboxes runs `pnpm --filter @voluma/runner sandboxes:clean --run <id>` for each of its runs before it finishes (without `--run` it ends every agent's sandboxes).
 
