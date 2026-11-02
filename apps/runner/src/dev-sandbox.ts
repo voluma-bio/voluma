@@ -37,7 +37,7 @@ import { claimSandboxes, terminateClaim } from "./modal-sandbox.ts";
 import { redactor } from "./redact.ts";
 import { inputPrefixOf } from "./run.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
-import { usageMeter } from "./usage.ts";
+import { noLimits, usageMeter } from "./usage.ts";
 
 const { values } = parseArgs({
   options: {
@@ -93,7 +93,7 @@ const client = runClient(
     onUnreachable: () => abort.abort(),
   },
 );
-const meter = usageMeter();
+const meter = usageMeter(noLimits);
 const beats = { count: 0, maxRoundTripMs: 0 };
 const lease = holdLease({
   client,

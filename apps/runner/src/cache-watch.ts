@@ -16,7 +16,12 @@
  */
 import { parseArgs } from "node:util";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
-import { type CacheState, cacheStep } from "@voluma/contracts/spend";
+import {
+  type CacheState,
+  cacheStep,
+  isToolsChangedNotice,
+  missKind,
+} from "@voluma/contracts/spend";
 
 const { values } = parseArgs({
   options: {
@@ -127,7 +132,7 @@ function ingest(e: RunEvent, out: string[]) {
     case "message": {
       const m = e.payload;
       const th = t();
-      if (m.role === "system" && m.text.startsWith("Tools changed")) {
+      if (isToolsChangedNotice(m)) {
         th.toolsChangedSince = at;
         markers.push({ at, what: `${e.threadId}: ${clip(m.text, 80)}` });
       }
@@ -135,20 +140,20 @@ function ingest(e: RunEvent, out: string[]) {
       const u = m.usage;
       const prompt = u.input + u.cacheRead + u.cacheWrite;
       // A compaction summary is a call that is not judged and resets the baseline, as in `spend`.
-      const step = m.compaction ? { next: undefined, miss: false } : cacheStep(th.cache, u);
+      const step = m.compaction ? { next: undefined, miss: undefined } : cacheStep(th.cache, u);
       th.cache = step.next;
       if (prompt === 0) break; // unreported, not a call
       const prev = m.compaction ? undefined : th.prev;
-      const expected = step.miss && th.toolsChangedSince !== undefined;
+      const kind = missKind(step.miss, th.toolsChangedSince !== undefined);
       th.calls++;
       calls++;
-      th.recent.push(step.miss && !expected);
+      th.recent.push(kind === "unexpected");
       if (th.recent.length > WINDOW) th.recent.shift();
       if (step.miss) {
         th.misses++;
         misses++;
       }
-      if (step.miss && !expected && prev) {
+      if (kind === "unexpected" && prev) {
         th.unexpected++;
         unexpected++;
         const between = markers.filter((x) => x.at > prev.at && x.at <= at).map((x) => x.what);

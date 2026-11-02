@@ -89,7 +89,11 @@ export const studySchema = z.object({
   id: studyIdSchema,
   name: label,
   workflowId: workflowIdSchema,
-  /** Shown, never enforced. */
+  /**
+   * Model dollars a run of the study may spend. The runner enforces it per run (earlier claims
+   * included) as min(budgetUsd, RUNNER_MAX_RUN_COST_USD), failing the run past it; null: the
+   * runner's ceiling alone (`claimSchema.budgetUsd`).
+   */
   budgetUsd: z.number().nonnegative().nullable(),
   /** The seeded, read-only example's study. */
   example: z.boolean(),
