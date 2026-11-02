@@ -58,7 +58,7 @@ export function ApprovalCard({
       aria-label={title}
       className="grid grid-cols-[minmax(0,1fr)] overflow-hidden rounded-lg bg-card text-sm inset-ring inset-ring-line-strong"
     >
-      <header className="flex items-baseline justify-between gap-2 border-b border-border px-3 py-2">
+      <header className="flex flex-wrap items-baseline justify-between gap-x-2 border-b border-border px-3 py-2">
         <h3 className="font-semibold">{title}</h3>
         {open ? (
           <span className="text-xs text-muted-foreground">waits for your answer</span>

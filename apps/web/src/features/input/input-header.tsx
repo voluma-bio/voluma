@@ -71,6 +71,12 @@ function where(
   waitingOnYou: boolean,
 ): { status?: Status; text: string } {
   const { state } = run;
+  // Main holds a call for your yes: until you answer, the run waits on you, going or ended.
+  if (
+    waitingOnYou &&
+    (state.status === "running" || (state.status === "ended" && state.outcome === "completed"))
+  )
+    return { status: "check", text: "Waiting on you" };
   if (state.status === "queued")
     return { status: "waiting", text: `Waiting, place ${state.position} in line` };
   if (state.status === "running")
@@ -81,8 +87,7 @@ function where(
           ? `Running, ${progress.done} of ${progress.total} tasks done`
           : "Running",
     };
-  if (state.status === "ended" && state.outcome === "completed")
-    return waitingOnYou ? { status: "check", text: "Waiting on you" } : { text: "Finished" };
+  if (state.status === "ended" && state.outcome === "completed") return { text: "Finished" };
   const { label, status } = runStatus(run);
   return { status, text: label };
 }
@@ -97,7 +102,7 @@ export function InputHeading({
   study: StudyDetail | undefined;
   /** A task-loop run's; an agent-loop run's count is in Final outputs. */
   progress?: Progress;
-  /** An agent-loop run's main holds a call for your yes: its ended run waits on you. */
+  /** An agent-loop run's main holds a call for your yes: the run waits on you. */
   waitingOnYou?: boolean;
 }) {
   const { title, group } = inputTitle(run, study);
