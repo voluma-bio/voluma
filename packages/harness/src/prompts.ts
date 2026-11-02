@@ -42,19 +42,27 @@ const readerOf = (role: AgentDefinition) =>
  * The role's skills, progressively disclosed: name, description and path here, the skill and its
  * references and resources read with the role's reading tool (`readerOf`) when needed. The workflow's own skill comes first and is read first.
  */
-function skillList(def: WorkflowDefinition, role: AgentDefinition): string {
+export function skillList(
+  def: Pick<WorkflowDefinition, "skills">,
+  role: AgentDefinition,
+  firstNote = " [read first]",
+): string {
   const reader = readerOf(role);
   const lines = def.skills
     .filter((s) => role.skills.includes(s.name))
     .map(
       (s) =>
-        `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? " [read first]" : ""}`,
+        `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? firstNote : ""}`,
     );
   return `Skills: read a skill's SKILL.md with ${reader} before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
 /** One line per script of the role's skills, from its docstring. */
-function toolIndex(def: WorkflowDefinition, role: AgentDefinition, shell: boolean): string {
+export function toolIndex(
+  def: Pick<WorkflowDefinition, "skills" | "toolIndex">,
+  role: AgentDefinition,
+  shell: boolean,
+): string {
   const lines = def.toolIndex
     .filter((t) => role.skills.includes(t.skill))
     .map((t) => `- ${t.skill}/${t.script}: ${t.summary}`);
