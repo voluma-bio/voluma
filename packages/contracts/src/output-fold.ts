@@ -5,11 +5,10 @@
  * what is here. Rules: the design's `outputs.md`; the tools that write the events are the
  * harness's `agents/tools/`.
  *
- * - **Final outputs.** `outputs.changed` events applied in order by `applyOutputsChange`, which
- *   the `change_outputs` tool calls too, so the tool refuses what the fold would reject. A change
- *   the rules refuse is skipped.
- * - **Versions.** An `output` event with a `version` (the task loop's carry none and are skipped).
- *   A repeated (output, version) keeps the first. `by` is the thread's name from `thread.started`.
+ * - **Final outputs.** `outputs.changed` events applied in order by `applyOutputsChange`
+ *   (`final-outputs.ts`), which takes any change: the writer checks it first and refuses.
+ * - **Versions.** `output.published` events (the task loop's `output` is ignored). A repeated
+ *   (output, version) keeps the first. `by` is the thread's name from `thread.started`.
  * - **Status**, one per output: `missing` (marked, nothing published), `pending` (nothing
  *   published), `out-of-date`, `to-check` (an item of the latest version is unresolved: an item of
  *   an older version is answered by the newer one), else `reported`.
@@ -18,130 +17,28 @@
  *   links an output that is itself out of date. Content is every file's sha256 keyed by file
  *   name (a value: its number and unit), so a redo that produces the same files changes nothing,
  *   a kept version (same files) clears everything below it, and a change to a support file counts.
- *   A link to the output's own earlier version is ignored.
+ *   A link to the output's own earlier version is ignored. A link to a label overlay (an entry
+ *   of an `outputs.changed` with `label: {of}`) is a link to its map.
  * - **Undecided**: out of date and in the trail of a final output (the output itself, or
  *   something its latest version was made from, through latest versions). Main's `close` is
  *   refused while one exists.
  */
 import type { z } from "zod";
-import type { OutputsChange, toCheckItemSchema } from "./agent-events";
+import type { toCheckItemSchema } from "./agent-events";
 import type { RunEvent } from "./events";
-import type { EvidenceRef } from "./output";
 import {
+  applyOutputsChange,
+  entriesOf,
+  type FinalEntry,
   type FinalOutputs,
-  finalOutputsSchema,
-  type LinkRole,
-  type OutputEntry,
-  type OutputKind,
-} from "./output-catalog";
+  sectionsOf,
+} from "./final-outputs";
+import type { LinkRole, OutputKind } from "./output-catalog";
 
 type Ev<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>;
 
 /** The sandbox path of a version's folder: a version's `path` is relative to `/outputs/`. */
 export const OUTPUTS_MOUNT = "/outputs";
-
-// ---------------------------------------------------------------------------------------------
-// Final outputs
-
-const OTHER = "Other";
-
-const sectionsOf = (list: FinalOutputs | undefined) => list?.sections ?? [];
-
-/** Every entry of the list, in section order. */
-export const entriesOf = (list: FinalOutputs | undefined): OutputEntry[] =>
-  sectionsOf(list).flatMap((s) => s.outputs);
-
-/**
- * The list after `change`, or the reason it cannot apply. `list` is undefined before the first
- * change. Order: `drop`, `add`, `missing`, `expect`, then `sections`, each checked against the
- * list as the steps before it left it. Outputs left out of `sections` (new ones, when it is
- * absent) go in a section titled "Other". The result is checked as `/run/final-outputs.yaml`
- * (`finalOutputsSchema`): a link to an output that is not listed, or an emptied list, is refused.
- */
-export function applyOutputsChange(
-  list: FinalOutputs | undefined,
-  change: OutputsChange,
-  at: string,
-): { list: FinalOutputs } | { refusal: string } {
-  const sections = sectionsOf(list).map((s) => ({ title: s.title, outputs: [...s.outputs] }));
-  const have = () => new Set(sections.flatMap((s) => s.outputs.map((o) => o.id)));
-  const ungrouped: OutputEntry[] = [];
-  let missing = [...(list?.missing ?? [])];
-
-  for (const id of change.drop ?? []) {
-    if (!have().has(id)) return { refusal: `${id} is not a final output, so it cannot be dropped` };
-    for (const s of sections) s.outputs = s.outputs.filter((o) => o.id !== id);
-    missing = missing.filter((m) => m.id !== id);
-  }
-  for (const entry of change.add ?? []) {
-    if (have().has(entry.id) || ungrouped.some((o) => o.id === entry.id))
-      return { refusal: `${entry.id} is already a final output` };
-    ungrouped.push(entry);
-  }
-  const listed = new Set([...have(), ...ungrouped.map((o) => o.id)]);
-  for (const m of change.missing ?? []) {
-    if (!listed.has(m.id))
-      return { refusal: `${m.id} is not a final output, so it cannot be missing` };
-    missing = [...missing.filter((x) => x.id !== m.id), m];
-  }
-  const entries = new Map<string, OutputEntry>();
-  for (const e of [...sections.flatMap((s) => s.outputs), ...ungrouped]) entries.set(e.id, e);
-  for (const x of change.expect ?? []) {
-    const e = entries.get(x.id);
-    if (!e) return { refusal: `${x.id} is not a final output, so it takes no expect lines` };
-    entries.set(x.id, { ...e, expect: [...(e.expect ?? []), ...x.lines] });
-  }
-
-  let grouped = sections.map((s) => ({ title: s.title, ids: s.outputs.map((o) => o.id) }));
-  if (change.sections) {
-    const seen = new Set<string>();
-    for (const s of change.sections)
-      for (const id of s.outputs) {
-        if (!entries.has(id))
-          return { refusal: `${id} is not a final output, so it has no section` };
-        if (seen.has(id)) return { refusal: `${id} is in two sections` };
-        seen.add(id);
-      }
-    grouped = change.sections.map((s) => ({ title: s.title, ids: s.outputs }));
-  }
-  const placed = new Set(grouped.flatMap((s) => s.ids));
-  const rest = [...entries.keys()].filter((id) => !placed.has(id));
-  if (rest.length > 0) {
-    const other = grouped.find((s) => s.title === OTHER);
-    if (other) other.ids = [...other.ids, ...rest];
-    else grouped.push({ title: OTHER, ids: rest });
-  }
-
-  const next: FinalOutputs = {
-    sections: grouped
-      .filter((s) => s.ids.length > 0)
-      .map((s) => ({
-        title: s.title,
-        outputs: s.ids.flatMap((id) => entries.get(id) ?? []),
-      })),
-    ...(missing.length > 0 && { missing }),
-    changes: [
-      ...(list?.changes ?? []),
-      {
-        at,
-        by: change.by,
-        reason: change.reason,
-        ...(change.add && { add: change.add.map((e) => e.id) }),
-        ...(change.drop && { drop: change.drop }),
-        ...(change.missing && { missing: change.missing.map((m) => m.id) }),
-      },
-    ],
-  };
-  const checked = finalOutputsSchema.safeParse(next);
-  if (!checked.success)
-    return {
-      refusal: checked.error.issues
-        .slice(0, 3)
-        .map((i) => i.message)
-        .join("; "),
-    };
-  return { list: next };
-}
 
 // ---------------------------------------------------------------------------------------------
 // Versions and status
@@ -160,11 +57,14 @@ export interface OutputVersion {
   /** The folder of its files, relative to `/outputs/`; the files are `/outputs/<path>/<file>`. */
   path: string;
   /** The first is the primary file, the output's own; the rest travel with it. Empty for a value. */
-  files: { path: string; sha256: string }[];
+  files: { name: string; sha256: string }[];
   /** A value's number and unit. */
   value?: { number: number; unit: string };
   madeFrom: { id: string; version: number; role: LinkRole }[];
-  evidence: EvidenceRef[];
+  /** Files that show why it is right, `evidence/...` under the version's folder. */
+  evidence: { name: string; sha256: string }[];
+  /** What the review converter needs per kind (`outputPublishedSchema`). */
+  detail?: Record<string, unknown>;
   toCheck: ToCheckState[];
   provisional: boolean;
   kept?: { reason: string };
@@ -185,7 +85,7 @@ export interface OutputState {
   final: boolean;
   section?: string;
   /** The final list's entry, for a final output. */
-  entry?: OutputEntry;
+  entry?: FinalEntry;
   status: OutputStatus;
   /** Why it is marked missing, for a final output marked so. */
   missingReason?: string;
@@ -203,20 +103,25 @@ export interface OutputsFold {
   /** Final outputs in section order, then the other published ones in order of first version. */
   outputs: OutputState[];
   byId: Map<string, OutputState>;
+  /** Each label overlay the log names, to the map whose version a link to it means. */
+  labels: Map<string, string>;
 }
+
+const isLabel = (e: FinalEntry): e is FinalEntry & { label: { of: string } } =>
+  typeof e.label === "object" &&
+  e.label !== null &&
+  typeof (e.label as { of?: unknown }).of === "string";
 
 const hashOf = (v: Pick<OutputVersion, "files" | "value">): string =>
   v.value
     ? `value\0${v.value.unit}\0${v.value.number}`
     : v.files
-        .map((f) => `${f.path}\0${f.sha256}`)
+        .map((f) => `${f.name}\0${f.sha256}`)
         .sort()
         .join("\n");
 
-function versionOf(e: Ev<"output">, names: Map<string, string>): OutputVersion | undefined {
+function versionOf(e: Ev<"output.published">, names: Map<string, string>): OutputVersion {
   const p = e.payload;
-  if (p.version === undefined || p.path === undefined) return undefined;
-  const nested = p.output;
   const v: Omit<OutputVersion, "hash"> = {
     version: p.version,
     eventId: e.id,
@@ -224,10 +129,10 @@ function versionOf(e: Ev<"output">, names: Map<string, string>): OutputVersion |
     at: e.createdAt,
     path: p.path,
     files: p.files ?? [],
-    ...(nested.kind === "measurement" &&
-      nested.value !== null && { value: { number: nested.value, unit: nested.unit } }),
-    madeFrom: p.madeFrom ?? [],
-    evidence: p.evidence,
+    ...(p.value && { value: p.value }),
+    madeFrom: p.madeFrom,
+    evidence: p.evidence ?? [],
+    ...(p.detail && { detail: p.detail }),
     toCheck: p.toCheck ?? [],
     provisional: p.provisional === true,
     ...(p.kept && { kept: p.kept }),
@@ -240,6 +145,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   const versions = new Map<string, OutputVersion[]>();
   const kinds = new Map<string, { kind?: OutputKind; base?: string }>();
   const resolved = new Map<string, NonNullable<ToCheckState["resolved"]>>();
+  /** A label overlay to the map that holds its voxels. */
+  const labels = new Map<string, string>();
   let list: FinalOutputs | undefined;
 
   for (const e of events) {
@@ -248,13 +155,13 @@ function compute(events: readonly RunEvent[]): OutputsFold {
         names.set(e.threadId, e.payload.name);
         break;
       case "outputs.changed": {
-        const applied = applyOutputsChange(list, e.payload, e.createdAt);
-        if ("list" in applied) list = applied.list;
+        list = applyOutputsChange(list, e.payload, e.createdAt);
+        for (const entry of e.payload.add ?? [])
+          if (isLabel(entry)) labels.set(entry.id, entry.label.of);
         break;
       }
-      case "output": {
+      case "output.published": {
         const v = versionOf(e, names);
-        if (!v) break;
         const id = e.payload.outputId;
         const held = versions.get(id) ?? [];
         if (held.some((x) => x.version === v.version)) break;
@@ -282,7 +189,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       });
 
   // Out of date, from the latest version of each output.
-  const latestOf = (id: string) => versions.get(id)?.at(-1);
+  const mapOf = (id: string) => labels.get(id) ?? id;
+  const latestOf = (id: string) => versions.get(mapOf(id))?.at(-1);
   const memo = new Map<string, boolean>();
   const visiting = new Set<string>();
   const outOfDate = (id: string): boolean => {
@@ -292,11 +200,12 @@ function compute(events: readonly RunEvent[]): OutputsFold {
     if (!latest || visiting.has(id)) return false;
     visiting.add(id);
     const stale = latest.madeFrom.some((link) => {
-      if (link.id === id) return false;
-      const target = latestOf(link.id);
+      const linked = mapOf(link.id);
+      if (linked === id) return false;
+      const target = latestOf(linked);
       if (!target) return false;
-      const used = versions.get(link.id)?.find((v) => v.version === link.version);
-      return !used || used.hash !== target.hash || outOfDate(link.id);
+      const used = versions.get(linked)?.find((v) => v.version === link.version);
+      return !used || used.hash !== target.hash || outOfDate(linked);
     });
     visiting.delete(id);
     memo.set(id, stale);
@@ -309,7 +218,7 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   const walk = (id: string) => {
     if (trail.has(id)) return;
     trail.add(id);
-    for (const link of latestOf(id)?.madeFrom ?? []) walk(link.id);
+    for (const link of latestOf(id)?.madeFrom ?? []) walk(mapOf(link.id));
   };
   for (const e of finalEntries) walk(e.id);
 
@@ -324,6 +233,7 @@ function compute(events: readonly RunEvent[]): OutputsFold {
     const entry = finalEntries.find((e) => e.id === id);
     const stale = outOfDate(id);
     const kind = kinds.get(id);
+    const baseOf = kind?.base ?? (typeof entry?.base === "string" ? entry.base : undefined);
     const status: OutputStatus = !latest
       ? missing.has(id)
         ? "missing"
@@ -338,9 +248,7 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       declared: !id.includes("/"),
       final: !!entry,
       ...((entry?.kind ?? kind?.kind) && { kind: entry?.kind ?? kind?.kind }),
-      ...((entry?.kind === "overlay" ? entry.base : kind?.base) && {
-        base: entry?.kind === "overlay" ? entry.base : kind?.base,
-      }),
+      ...(baseOf && { base: baseOf }),
       ...(sectionOf.has(id) && { section: sectionOf.get(id) }),
       ...(entry && { entry }),
       status,
@@ -351,7 +259,7 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       ...(latest && { latest }),
     } as OutputState;
   });
-  return { ...(list && { list }), outputs, byId: new Map(outputs.map((o) => [o.id, o])) };
+  return { ...(list && { list }), outputs, byId: new Map(outputs.map((o) => [o.id, o])), labels };
 }
 
 const memo = new WeakMap<object, { length: number; fold: OutputsFold }>();

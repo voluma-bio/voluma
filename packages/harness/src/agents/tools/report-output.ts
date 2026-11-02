@@ -1,8 +1,8 @@
 /**
  * `report_output` of the agent loop: publishes one version of an output. The named files are
  * copied from the agent's `/work/<name>/` to the version's folder, `outputs/<id>/<toolCallId>/`
- * (read-only to agents), and hashed on the way; then the `output` event records the version,
- * its folder, files, `madeFrom`, evidence and To check items (`events.ts`).
+ * (read-only to agents), and hashed on the way; then the `output.published` event records the version,
+ * its folder, files, `madeFrom`, evidence and To check items (`output.published`).
  *
  * Checked against the catalog before anything is copied: the kind, a value's unit, the links
  * (each names a published version; a value is `on` the overlays the catalog lists, an overlay has
@@ -20,11 +20,12 @@
  * never reached its event stay in the bucket, and no event names them.
  */
 
-import { madeFromSchema, outputRefSchema, toCheckItemSchema } from "@voluma/contracts/agent-events";
+import { madeFromSchema, toCheckItemSchema } from "@voluma/contracts/agent-events";
 import {
   type OutputEntry,
   type OutputKind,
   outputKindSchema,
+  outputRefSchema,
 } from "@voluma/contracts/output-catalog";
 import { relativePathSchema, versionPath, versionPrefix } from "@voluma/contracts/r2";
 import { z } from "zod";
@@ -40,8 +41,7 @@ import {
   nextVersion,
   type OutputEvent,
   type OutputToolDeps,
-  shellOf,
-  titleOf,
+  resolvedId,
 } from "./output-shared";
 import { Refusal, result } from "./refusal";
 
@@ -90,8 +90,21 @@ interface Plan {
   kind: OutputKind;
   base?: string;
   unit?: string;
-  mediaType?: string;
   provisional?: true;
+  /** How the review converter reads the file (`detail.as`), when the catalog says. */
+  detail?: Record<string, unknown>;
+}
+
+const SHAPE_AS = { labels: "labels", mask: "mask", surface: "surface" } as const;
+
+/** The converter's representation of a listed output, where the catalog fixes it. */
+function detailOf(entry: OutputEntry): Pick<Plan, "detail"> {
+  if (entry.kind === "base") return { detail: { as: "image" } };
+  const as =
+    entry.kind === "overlay" && entry.shape
+      ? SHAPE_AS[entry.shape as keyof typeof SHAPE_AS]
+      : undefined;
+  return as ? { detail: { as } } : {};
 }
 
 const KEYS: Record<OutputKind, string> = {
@@ -118,7 +131,7 @@ function planOf(deps: OutputToolDeps, caller: Caller, input: ReportOutputInput):
       ...(entry.kind === "overlay" && { base: entry.base }),
       ...(entry.kind === "value" && { unit: entry.unit }),
       ...(entry.kind === "value" && entry.provisional && { provisional: true as const }),
-      ...(entry.kind === "file" && { mediaType: entry.mediaType }),
+      ...detailOf(entry),
     };
   } else {
     const [owner, own, ...rest] = id.split("/");
@@ -154,7 +167,8 @@ function planOf(deps: OutputToolDeps, caller: Caller, input: ReportOutputInput):
   const kindOf = (other: string) =>
     deps.catalog.find((e) => e.id === other)?.kind ?? fold.byId.get(other)?.kind;
   for (const link of input.madeFrom) {
-    const target = fold.byId.get(link.id);
+    // A label overlay has no version of its own: the version named is its map's.
+    const target = fold.byId.get(resolvedId(deps, link.id));
     if (!target?.versions.some((v) => v.version === link.version))
       throw new Refusal(
         `madeFrom names ${link.id} version ${link.version}, which is not published. ${
@@ -214,7 +228,7 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
         const id = reportOutputId(ctx.threadId, ctx.toolCallId);
         const stored = (): OutputEvent | undefined => {
           const e = eventById(deps, id);
-          return e?.type === "output" ? e.payload : undefined;
+          return e?.type === "output.published" ? e.payload : undefined;
         };
         const done = stored();
         if (done) return answerOf(done);
@@ -240,7 +254,7 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
               if (error instanceof EvidenceRefused) throw new Refusal(error.message);
               throw error;
             });
-          return { path: `${folder}${rel}`, sha256 };
+          return { name: `${folder}${rel}`, sha256 };
         };
         const names = [...(input.files ?? []), ...input.evidence].map((n) => layout.resolve(n));
         if (new Set(names).size !== names.length) throw new Refusal("A file is named twice.");
@@ -263,32 +277,19 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           const value = input.value;
           const payload: OutputEvent = {
             outputId: input.id,
-            title: titleOf(deps, input.id),
-            evidence: evidence.map((f) => ({
-              root: "outputs",
-              path: `${path}/${f.path}`,
-              sha256: f.sha256,
-            })),
-            output: shellOf(
-              {
-                path,
-                files,
-                ...(value !== undefined &&
-                  plan.unit && { value: { number: value, unit: plan.unit } }),
-              },
-              input.id,
-              plan.mediaType,
-            ),
             version,
             path,
             ...(files.length > 0 && { files }),
-            madeFrom: input.madeFrom,
-            ...(input.toCheck && { toCheck: input.toCheck }),
-            ...((input.provisional || plan.provisional) && { provisional: true }),
+            ...(value !== undefined && plan.unit && { value: { number: value, unit: plan.unit } }),
             kind: plan.kind,
             ...(plan.base && { base: plan.base }),
+            madeFrom: input.madeFrom,
+            ...(evidence.length > 0 && { evidence }),
+            ...(input.toCheck && { toCheck: input.toCheck }),
+            ...((input.provisional || plan.provisional) && { provisional: true }),
+            ...(plan.detail && { detail: plan.detail }),
           };
-          await recorder.append(ctx.threadId, "output", payload, id);
+          await recorder.append(ctx.threadId, "output.published", payload, id);
           deps.changed();
           await deps.refreshRunFiles();
           return answerOf(payload);

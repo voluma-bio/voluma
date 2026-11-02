@@ -5,13 +5,13 @@
  * between.
  */
 import type { OutputCatalog } from "@voluma/contracts/output-catalog";
-import { OUTPUTS_MOUNT, type OutputVersion, outputsFold } from "@voluma/contracts/output-fold";
+import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
 import type { ThreadLayout } from "../../layout";
 import type { Publish } from "../../ports/publish";
 import type { PayloadOf, Recorder } from "../../recorder";
 import { Refusal } from "./refusal";
 
-export type OutputEvent = PayloadOf<"output">;
+export type OutputEvent = PayloadOf<"output.published">;
 
 export interface OutputToolDeps {
   runId: string;
@@ -67,32 +67,18 @@ export function answerOf(p: OutputEvent) {
     id: p.outputId,
     version: p.version,
     path: folder,
-    ...(p.files && { files: p.files.map((f) => `${folder}${f.path}`) }),
+    ...(p.files && { files: p.files.map((f) => `${folder}${f.name}`) }),
     ...(p.kept && { kept: p.kept.reason }),
     note: "Listed in /run/outputs.yaml.",
   };
 }
 
 /**
- * The nested `output` every version carries for parsers that read it (`events.ts`): a
- * `measurement` for a value, a `file` naming the primary file for anything else.
+ * The id a link resolves to: a label overlay is its map (`output-fold.ts`), found in the catalog
+ * or in the log's `outputs.changed` entries.
  */
-export function shellOf(
-  v: Pick<OutputVersion, "path" | "files" | "value">,
-  title: string,
-  mediaType = "application/octet-stream",
-): OutputEvent["output"] {
-  if (v.value)
-    return { kind: "measurement", value: v.value.number, unit: v.value.unit, confidence: null };
-  const primary = v.files[0];
-  if (!primary) throw new Error(`${title} has neither a value nor a file`);
-  return {
-    kind: "file",
-    file: { root: "outputs", path: `${v.path}/${primary.path}`, sha256: primary.sha256 },
-    mediaType,
-  };
+export function resolvedId(deps: OutputToolDeps, id: string): string {
+  const own = deps.catalog.find((e) => e.id === id);
+  if (own?.kind === "overlay" && own.label) return own.label.of;
+  return foldOf(deps).labels.get(id) ?? id;
 }
-
-/** The catalog's name for `id`, else the id. */
-export const titleOf = (deps: OutputToolDeps, id: string) =>
-  deps.catalog.find((e) => e.id === id)?.name ?? id;

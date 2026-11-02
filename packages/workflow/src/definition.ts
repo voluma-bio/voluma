@@ -62,7 +62,7 @@ export interface WorkflowDefinition {
   commit: string;
   /** Its `outputs.json` and `tasks.json`, validated together. */
   files: WorkflowFiles;
-  /** Its `outputs.yaml` (the agent model's catalog), validated; absent when the workflow has none. Nothing reads it at runtime yet. */
+  /** Its `outputs.yaml` (the agent model's catalog), validated; present only for a run of the agent loop (`harness: "agents"`) on a workflow that has one. Nothing reads it at runtime yet. */
   outputCatalog?: OutputCatalog;
   /** The workflow's own skills first, then those of `workflows/core/skills/`. */
   skills: Skill[];
