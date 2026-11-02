@@ -44,6 +44,7 @@ import {
   agentMessageSchema,
   approvalAnsweredSchema,
   approvalRequestedSchema,
+  approvalSettledSchema,
   bashBackgroundedSchema,
   bashEndedSchema,
   closeRequestedSchema,
@@ -470,6 +471,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const ping = event("ping", pingSchema);
   const activity = event("activity", activitySchema);
   const approvalRequested = event("approval.requested", approvalRequestedSchema);
+  const approvalSettled = event("approval.settled", approvalSettledSchema);
   const bashBackgrounded = event("bash.backgrounded", bashBackgroundedSchema);
   const bashEnded = event("bash.ended", bashEndedSchema);
   const skillLoaded = event("skill.loaded", skillLoadedSchema);
@@ -618,6 +620,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     ping,
     activity,
     approvalRequested,
+    approvalSettled,
     bashBackgrounded,
     bashEnded,
     skillLoaded,

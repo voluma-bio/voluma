@@ -2,7 +2,7 @@
 
 HU comes from the rescale tags (and Scanco's private calibration where present), never from a histogram peak.
 Refuses, and says which: a series with fewer than two .dcm slices, missing, duplicate or unevenly spaced slices, slices
-shifted in plane, mixed series, geometry or calibration, no valid positive-slope HU mapping, a DICOM mapping that
+shifted in plane, a slice whose pixel data cannot be read, mixed series, geometry or calibration, no valid positive-slope HU mapping, a DICOM mapping that
 contradicts Scanco's private calibration, or an `--out` that already holds hu.npy. Slices are found recursively under `--in`.
 
 Writes: <out>/hu.npy  float32 HU, axis order Z,Y,X, slices sorted along the series normal
@@ -96,8 +96,11 @@ def load_series(source, out):
     sources = []
     for z, idx in enumerate(order):
         p = paths[idx]
-        d = pydicom.dcmread(p)
-        volume[z] = d.pixel_array.astype(np.float32) * cal['slope'] + cal['intercept']
+        try:
+            pixels = pydicom.dcmread(p).pixel_array
+        except ValueError as e:  # pydicom's message for a slice whose pixel data is shorter than its header says
+            sidecar.fail(f'Slice {p.name} cannot be read ({e}): the file is damaged or cut short; get the series again from the scanner export')
+        volume[z] = pixels.astype(np.float32) * cal['slope'] + cal['intercept']
         sources.append({'path': str(p.resolve()), 'sha256': sidecar.sha256_file(p)})
     np.save(dest, volume)
     meta = {'shape_zyx': list(volume.shape), 'units': cal['units'], 'spacing_zyx_mm': spacing_xyz[::-1], 'spacing_xyz_mm': spacing_xyz,

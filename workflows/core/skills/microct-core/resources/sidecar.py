@@ -236,10 +236,9 @@ def value(v, unit, definition, kind='measurement', **provenance):
 
 
 def emit_values(out_json, values, meta=None, objects=None, **fields):
-    """Write the result record to `out_json` and print it, with `fields` (paths of what the script wrote) beside it.
-
-    `objects` ({id: entry} from `objects.py`) goes in the record and on stdout, so a caller passes the record, never retypes it."""
-    record = {'values': values, **(meta or {}), **({'objects': objects} if objects else {})}
+    """Write the result record to `out_json` and print it. `fields` (paths of what the script wrote) and `objects` ({id: entry}
+    from `objects.py`) go in both, so the record alone names every file a worker reports and a caller never retypes an entry."""
+    record = {'values': values, **fields, **(meta or {}), **({'objects': objects} if objects else {})}  # meta wins a shared key
     try:
         text = json.dumps(record, indent=1, default=float, allow_nan=False)
     except ValueError:

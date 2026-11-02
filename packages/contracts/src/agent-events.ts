@@ -170,6 +170,18 @@ export const approvalAnsweredSchema = z.object({
   text: z.string().optional(),
 });
 
+/**
+ * An approval is closed: the held call ran (`done`), was refused when it ran (a file changed
+ * since the request, say), or the run was closed or cancelled with it open (`withdrawn`). `text`
+ * is the tool's result or its refusal; the outcome cannot be re-derived after a crash. Written by
+ * the runner, id `<request id>:settled`.
+ */
+export const approvalSettledSchema = z.object({
+  toolCallId: nonEmpty,
+  outcome: z.enum(["done", "refused", "withdrawn"]),
+  text: z.string(),
+});
+
 /** A command that outlived its foreground wait and now runs in the background. */
 export const bashBackgroundedSchema = z.object({ bashId: nonEmpty, command: nonEmpty });
 
@@ -268,6 +280,39 @@ export const markPlacedSchema = z.looseObject({
     .nullable(),
   by: userIdSchema,
 });
+
+/**
+ * A mark as a `person.message` stores it (`messages.ts`): the latest placed state, frozen by the
+ * API at send time. Its own loose schema, not `markPlacedSchema`, so narrowing `mark.placed` later
+ * does not oblige a migration of stored messages; it carries only what the notice to main needs.
+ */
+export const attachedMarkSchema = z.looseObject({
+  output: outputRefSchema,
+  tag: nonEmpty,
+  volume: nonEmpty,
+  gridKey: nonEmpty,
+  mark: z.looseObject({}),
+  world: z.array(vec3),
+  plane: z.looseObject({ view: nonEmpty, normal: vec3, right: vec3, down: vec3 }).nullable(),
+});
+
+/** The mark's position in mm and the plane it was drawn in: what main is told about a mark's earlier state. */
+export const attachedWasSchema = attachedMarkSchema.pick({ world: true, plane: true });
+
+/**
+ * A mark attached to a researcher's message. `change`: `delete` (a `mark.deleted` follows its last
+ * `mark.placed`), `move` (an earlier `mark.placed` of this id exists) or `place`. `was` is the state
+ * main last saw, for a move of the researcher's own mark. `version` is the output's latest version
+ * when the message was sent.
+ */
+export const attachedSchema = z.object({
+  change: z.enum(["place", "move", "delete"]),
+  mark: attachedMarkSchema,
+  was: attachedWasSchema.optional(),
+  version: versionSchema,
+});
+export type Attached = z.infer<typeof attachedSchema>;
+
 export const markDeletedSchema = z.object({ id: z.uuid(), by: userIdSchema });
 
 /**

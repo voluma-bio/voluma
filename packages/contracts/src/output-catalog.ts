@@ -157,6 +157,12 @@ export const outputEntrySchema = z.discriminatedUnion("kind", [
 ]);
 export type OutputEntry = z.infer<typeof outputEntrySchema>;
 
+/** The map whose version holds `id`'s voxels when the catalog lists `id` as a label overlay, else `id`. */
+export const labelMapOf = (catalog: readonly OutputEntry[], id: string): string => {
+  const e = catalog.find((x) => x.id === id);
+  return e?.kind === "overlay" && e.label ? e.label.of : id;
+};
+
 /** The ids `entry` links to, for the cycle check. */
 function linksOf(entry: OutputEntry): string[] {
   switch (entry.kind) {

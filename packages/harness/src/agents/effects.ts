@@ -22,6 +22,8 @@ export const closeWorkerId = (threadId: string, toolCallId: string) =>
 /** `close_worker {now}`: the worker's `cancelled` end, written before it is aborted. */
 export const closeWorkerEndId = (threadId: string, toolCallId: string) =>
   `${closeWorkerId(threadId, toolCallId)}:end`;
+export const activityId = (threadId: string, toolCallId: string) =>
+  `${threadId}:${toolCallId}:activity`;
 export const changeOutputsId = (threadId: string, toolCallId: string) =>
   `${threadId}:${toolCallId}:change_outputs`;
 export const startedId = (threadId: string) => `${threadId}:started`;
@@ -29,3 +31,7 @@ export const startedId = (threadId: string) => `${threadId}:started`;
 export const closedEndId = (threadId: string) => `${threadId}:closed`;
 /** An unread message of an agent that closed, handed back to its sender. */
 export const returnedId = (messageId: string) => `${messageId}:returned`;
+/** The n-th ping of a thread, recorded before it is sent. */
+export const pingId = (threadId: string, n: number) => `${threadId}:ping:${n}`;
+/** The wrap-up request code makes for a worker two pings found idle. */
+export const pingCloseId = (threadId: string) => `${threadId}:ping-close`;
