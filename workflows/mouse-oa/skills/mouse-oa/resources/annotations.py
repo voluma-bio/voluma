@@ -217,7 +217,7 @@ def cleared_stretches(ann, stretches, key, spec_path, shape, vox, on_bone):
         hi = min(s for s in sections if s >= v)
         eroded[v] = marked.get(lo, False) & marked.get(hi, False) if lo != hi else marked.get(lo, False)
     eroded &= on_bone
-    eroded_runs = [{'v': v, 'u': [a, b], 'reason': r, 'width_fraction': (b - a + 1) / max(on_bone[v].sum(), 1)} for (v, a, b), r in sorted(reasons.items())]
+    eroded_runs = [{'v': v, 'u': [a, b], 'reason': r, 'width_fraction': on_bone[v, a : b + 1].sum() / max(on_bone[v].sum(), 1)} for (v, a, b), r in sorted(reasons.items())]
     rows = on_bone[sections[0] : sections[-1] + 1]
     record = {'eroded_stretches': eroded_runs, 'eroded_fraction': float(eroded[sections[0] : sections[-1] + 1].sum() / max(rows.sum(), 1))}
     return eroded, record
