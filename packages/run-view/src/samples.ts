@@ -2,8 +2,8 @@
  * The Samples tree's data (`SampleTree` in @voluma/ui) from Home's study list: each study's
  * samples are its scans' newest runs, grouped by what they ask of the researcher. Needs you is a
  * run with items to check, waiting for keys, or failed or stopped; Running is queued or live;
- * Done is completed with nothing open. The study page and the scan page both build the tree
- * here, so a sample sits in the same group on both.
+ * Done is completed with nothing open. Only the study pages show the tree today; the scan page's
+ * Samples tab is to build it here too, so a sample sits in the same group on both.
  */
 import type { StudySummary } from "@voluma/contracts/study";
 import type { SampleGroup, Status, TreeStudy } from "@voluma/ui";
