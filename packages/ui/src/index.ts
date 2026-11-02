@@ -61,19 +61,38 @@ export {
   type RowProps,
 } from "./row";
 export {
+  type SampleGroup,
+  SampleTree,
+  type SampleTreeProps,
+  type TreeLinkProps,
+  type TreeSample,
+  type TreeStudy,
+} from "./sample-tree";
+export {
   SegmentedControl,
   type SegmentedControlOption,
   type SegmentedControlProps,
 } from "./segmented-control";
 export {
+  Rail,
+  RailButton,
+  type RailButtonProps,
+  RailLink,
+  type RailLinkProps,
+  type RailLinkRenderProps,
+  type RailProps,
+} from "./shell/rail";
+export {
   AppShell,
   ShellHeading,
-  ShellLink,
   ShellPanel,
   type ShellPanelProps,
   type ShellSide,
+  useFullView,
   useOpenPanel,
+  useSideFold,
 } from "./shell/shell";
+export { SidePanel, type SidePanelProps, type SidePanelTab } from "./shell/side-panel";
 export {
   EmptyState,
   type EmptyStateProps,
@@ -97,3 +116,4 @@ export {
 } from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
 export { Tooltip, type TooltipProps } from "./tooltip";
+export { INPUT_WORD } from "./words";

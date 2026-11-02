@@ -1,6 +1,6 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
- * Home, the study page and the scan review so they read the same: Running, N to check, Checked,
+ * Studies, the study page and the scan review so they read the same: Running, N to check, Checked,
  * Failed, Stopped, Waiting (queued),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
@@ -95,57 +95,4 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
       if (state.outcome === "failed") return { label: "Failed", status: "stopped" };
       return { label: "Stopped", status: "stopped" };
   }
-}
-
-/**
- * A study's status from each scan's newest run (`newest`, one per scan that has run) and its
- * items that need the researcher (`StudySummary.needsYou`): what most needs them, else how far it
- * got. "Not started" counts only scans with no run. A study of one reads as its run, except that
- * its items outrank a rerun that hasn't failed: while a rerun is live, `needsYou` counts the
- * newest completed run's acceptable checks (`scanNeedsYou`).
- */
-export function studyStatus({
-  scans,
-  newest,
-  needsYou,
-}: {
-  scans: number;
-  newest: Pick<StudyRunSummary, "state" | "review">[];
-  needsYou: number;
-}): RunStatus {
-  const only = newest[0];
-  if (scans === 1 && only) {
-    const failed = only.state.status === "ended" && only.state.outcome === "failed";
-    return needsYou > 0 && !failed
-      ? { label: `${needsYou} to check`, status: "check" }
-      : runStatus(only);
-  }
-  // A live run by its status, an ended one by its outcome.
-  const count = (
-    kind: "queued" | "running" | "awaiting-keys" | "completed" | "failed" | "cancelled",
-  ) =>
-    newest.filter(({ state }) => (state.status === "ended" ? state.outcome : state.status) === kind)
-      .length;
-  const failed = count("failed");
-  if (failed > 0) return { label: `${failed} failed`, status: "stopped" };
-  if (needsYou > 0) return { label: `${needsYou} to check`, status: "check" };
-  if (count("running") > 0) return { label: "Running", status: "running" };
-  if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "paused" };
-  if (count("queued") > 0) return { label: "Waiting", status: "waiting" };
-  // What is left: completed, stopped, or never run.
-  const stopped = count("cancelled");
-  const notStarted = scans - newest.length;
-  if (notStarted === scans) return { label: "Not started", status: "waiting" };
-  if (stopped + notStarted === 0)
-    return newest.every((r) => r.review?.reviewedAt)
-      ? { label: "Reviewed", status: "done" }
-      : { label: "Checked", status: "done" };
-  const parts = [
-    stopped > 0 && `${stopped} stopped`,
-    notStarted > 0 && `${notStarted} not started`,
-  ];
-  return {
-    label: parts.filter(Boolean).join(", "),
-    status: stopped > 0 ? "stopped" : "waiting",
-  };
 }

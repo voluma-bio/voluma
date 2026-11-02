@@ -11,7 +11,7 @@ import { liveStatus, plural } from "./run-status";
 
 type ScanStatus = { label: string; status: Status; open: number };
 
-/** What needs a person on a scan (`scanNeedsYou`), as Home counts it too. */
+/** What needs a person on a scan (`scanNeedsYou`), as Studies counts it too. */
 export const needsYouOf = (scan: StudyScanDetail) =>
   scanNeedsYou(scan.runs[0]?.review ?? null, scan.acceptable.length);
 

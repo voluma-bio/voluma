@@ -117,7 +117,7 @@ function Scan({ runId }: { runId: string }) {
             ? "It may have been removed, or it belongs to another lab."
             : "Check your connection, then try again."}{" "}
           <Button asChild variant="link">
-            <Link to="/">Go to Home</Link>
+            <Link to="/">Go to Studies</Link>
           </Button>
         </ErrorState>
       </div>
