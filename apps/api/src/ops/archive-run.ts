@@ -58,11 +58,11 @@ if (
   dump.study.labId !== dump.run.labId ||
   dump.inputs.some((input) => input.labId !== dump.run.labId) ||
   !workflowById(dump.study.workflowId) ||
-  !dump.studyInputs.some((entry) => entry.inputId === dump.run.inputId) ||
-  dump.studyInputs.some((entry) => !dump.inputs.some((input) => input.id === entry.inputId))
+  !dump.studyMembers.some((member) => member.inputId === dump.run.inputId) ||
+  dump.studyMembers.some((member) => !dump.inputs.some((input) => input.id === member.inputId))
 ) {
   throw new Error(
-    `run ${runId} has missing inputs, study inputs or an unknown workflow; cannot restore`,
+    `run ${runId} has missing inputs, study members or an unknown workflow; cannot restore`,
   );
 }
 
@@ -138,9 +138,9 @@ const deleted = await db.transaction(async (tx) => {
     .limit(1);
   if (!sibling) {
     matches(
-      "study inputs",
+      "study members",
       await tx.delete(studyInputs).where(eq(studyInputs.studyId, dump.run.studyId)).returning(),
-      copy.studyInputs,
+      copy.studyMembers,
     );
     matches("study", await tx.delete(studies).where(eq(studies.id, dump.run.studyId)).returning(), [
       copy.study,

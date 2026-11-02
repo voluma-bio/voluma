@@ -76,3 +76,7 @@ None of these stops a review; each makes it slower.
 
 - No screenshot yet of values in while the run still goes: run 0b502d18 closed seconds after its
   one value. Take it on the next live run.
+- **The page swaps runs when a newer run appears.** Without `?run=` the page shows the input's
+  newest run from the study query, which polls while a run is live. When a "run again" action
+  exists, a new run remounts the page and drops the selection and unsent marks: resolve the newest
+  run once on mount and offer "A newer run started" instead.

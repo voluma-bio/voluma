@@ -5,7 +5,7 @@
  */
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import { groupNames, groupOf, kneeOf, plural, useNow, whenText } from "@voluma/run-view";
+import { groupNames, groupOf, inputHref, kneeOf, plural, useNow, whenText } from "@voluma/run-view";
 import { Button, cx, Facts, INPUT_WORD, type Status, StatusGlyph, StripPlot } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight } from "lucide-react";
@@ -21,6 +21,7 @@ import {
   kneeWord,
   openHref,
   rangeText,
+  resultRunQuery,
   unitOf,
   valuesOf,
 } from "./study-model";
@@ -143,8 +144,8 @@ export function MeasurePlot({
       digits={digits}
       onSelect={(point) => {
         const input = byId.get(point.id);
-        const href = input && openHref(detail.study.id, input);
-        if (href) navigate(href);
+        if (!input?.runs[0]) return;
+        navigate(inputHref(detail.study.id, input.member.inputId, resultRunQuery(input)));
       }}
       groups={groupNames(detail).map((group) => ({
         name: group,

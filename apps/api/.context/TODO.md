@@ -51,3 +51,8 @@
 - **Drop the `study_scans` view** once the deploy that renamed the table to `study_inputs`
   (migration `0023_study_inputs.sql`) is live: a migration `DROP VIEW "study_scans"`. The view only
   keeps the previous API deployment running during that deploy's overlap; nothing reads it now.
+- **Delete `readOldDump` in `src/ops/import-run.ts`** once no run dump written before the
+  `studyMembers` key remains (those have `studyScans` for the study rows and `studyInputs` for
+  the input rows, e.g. `r2:dev/runs/732a2eea…`).
+- **Delete the `scans` alias** in `createStudyRequestSchema` (`packages/contracts/src/study.ts`)
+  once the deploy that renamed it to `inputs` is live and old `/new` tabs are gone.

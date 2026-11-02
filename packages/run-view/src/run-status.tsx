@@ -8,7 +8,7 @@
  * is named, and how its cost, time and age ("12 min ago") read.
  */
 import type { Run } from "@voluma/contracts/run";
-import type { StudyInput, StudyRunSummary } from "@voluma/contracts/study";
+import type { StudyMember, StudyRunSummary } from "@voluma/contracts/study";
 import type { Status } from "@voluma/ui";
 
 /** "1 run", "3 runs"; `many` for an irregular plural. */
@@ -40,7 +40,7 @@ export function formatDuration(seconds: number): string {
 }
 
 /** An input as people name it: its subject and knee ("OA6-1, right knee"), the subject alone without one. */
-export function inputLabel(input: Pick<StudyInput, "subject" | "attributes">): string {
+export function inputLabel(input: Pick<StudyMember, "subject" | "attributes">): string {
   const knee = input.attributes.knee;
   return typeof knee === "string" && knee
     ? `${input.subject}, ${knee.toLowerCase()} knee`

@@ -73,7 +73,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run, and readable from every organization (`readableRuns`/`readableStudies` test `example` before the org); `import:run` restores
-  a dump's original study, study inputs and inputs, refusing conflicting shared rows. Only legacy dumps
+  a dump's original study, study members and inputs, refusing conflicting shared rows. Only legacy dumps
   without study metadata get a study of one.
 - **Rows are keyed by run.** `events` is `(run_id, id)` and `pi_messages` `(run_id, thread_id, idx)`:
   event ids and thread ids (opaque UUIDs for new threads, `<runId>.<name>` in older runs) are unique within a

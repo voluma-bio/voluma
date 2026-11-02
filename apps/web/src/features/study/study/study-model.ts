@@ -133,6 +133,12 @@ export const kneeWord = (knee: string) =>
 export const openHref = (studyId: string, input: StudyInputDetail) =>
   input.runs[0] ? inputHref(studyId, input.member.inputId) : null;
 
+/** `?run=` for a value's link when the value comes from a run that is not the newest. */
+export const resultRunQuery = (input: StudyInputDetail): { run?: string } =>
+  input.resultRunId !== null && input.resultRunId !== input.runs[0]?.id
+    ? { run: input.resultRunId }
+    : {};
+
 /** One task of one sample: where its newest run is; outside that run's plan, skipped. */
 function taskState(input: StudyInputDetail, taskId: string): TaskState {
   const states = input.taskState;

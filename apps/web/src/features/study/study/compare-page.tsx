@@ -28,6 +28,7 @@ import {
   PLACES,
   placeOf,
   placeParam,
+  resultRunQuery,
   SEGMENT_WORD,
   type Segment,
   sectionsOf,
@@ -255,11 +256,10 @@ function ValuesTable({
                           {/* The row's sample link is the keyboard way in; a cell is a mouse shortcut to its task, or the agent loop's value. */}
                           {run ? (
                             <Link
-                              to={inputHref(
-                                detail.study.id,
-                                input.member.inputId,
-                                run.harness === "agents" ? { output: o.id } : { task: o.task },
-                              )}
+                              to={inputHref(detail.study.id, input.member.inputId, {
+                                ...(run.harness === "agents" ? { output: o.id } : { task: o.task }),
+                                ...resultRunQuery(input),
+                              })}
                               tabIndex={-1}
                               className="block px-2 py-1.5"
                             >

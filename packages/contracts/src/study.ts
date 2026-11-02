@@ -77,13 +77,13 @@ const attributesSchema = z
   .refine((a) => Object.keys(a).length <= 50, "at most 50 attributes");
 
 /** One input of a study. `subject` is the specimen (a mouse id); the input's name when the caller gave none. */
-export const studyInputSchema = z.object({
+export const studyMemberSchema = z.object({
   inputId: inputIdSchema,
   subject: label,
   group: label.nullable(),
   attributes: attributesSchema,
 });
-export type StudyInput = z.infer<typeof studyInputSchema>;
+export type StudyMember = z.infer<typeof studyMemberSchema>;
 
 export const studySchema = z.object({
   id: studyIdSchema,
@@ -141,7 +141,7 @@ export type StudyRunSummary = z.infer<typeof studyRunSummarySchema>;
 /** A row of Home's study list. */
 export const studySummarySchema = studySchema.extend({
   inputCount: z.number().int().nonnegative(),
-  /** Scans with a completed run, whether or not it is the newest. */
+  /** Inputs with a completed run, whether or not it is the newest. */
   inputsCompleted: z.number().int().nonnegative(),
   /** What needs a person on each input (`inputNeedsYou`), summed. */
   needsYou: z.number().int().nonnegative(),
@@ -175,7 +175,7 @@ export const toCheckItemSchema = z.object({
 export type ToCheckItem = z.infer<typeof toCheckItemSchema>;
 
 export const studyInputDetailSchema = z.object({
-  member: studyInputSchema,
+  member: studyMemberSchema,
   input: inputSchema,
   /** Newest first; empty: "not started". */
   runs: z.array(runSchema),
@@ -217,45 +217,55 @@ export const studyDetailSchema = z.object({
 });
 export type StudyDetail = z.infer<typeof studyDetailSchema>;
 
-export const createStudyRequestSchema = z
-  .object({
-    name: label,
-    workflowId: workflowIdSchema,
-    /** Each input once; every one must be readable by the caller and complete. */
-    inputs: z
-      .array(
-        z.object({
-          inputId: inputIdSchema,
-          subject: label.optional(),
-          group: label.optional(),
-          attributes: attributesSchema.optional(),
-        }),
-      )
-      .min(1)
-      .max(200),
-    /** The inputs to run now, a subset of `inputs`; the rest wait. May be empty. */
-    start: z.array(inputIdSchema),
-    budgetUsd: z.number().nonnegative().optional(),
-    /** For every run started by this call, as in `startRunRequestSchema`. */
-    selectedOutputs: selectedOutputsSchema.min(1).optional(),
-    notes: z.string().max(4000).optional(),
-    /** Present: these runs use these (`credentials: "visitor"`). */
-    keys: visitorKeysSchema.optional(),
-    /** For every run started by this call, as in `startRunRequestSchema`. */
-    model: modelRefSchema.optional(),
-    /** For every run started by this call, as in `startRunRequestSchema`. */
-    harness: harnessSchema.optional(),
-  })
-  .refine((r) => new Set(r.inputs.map((s) => s.inputId)).size === r.inputs.length, {
-    path: ["inputs"],
-    message: "an input appears twice",
-  })
-  .refine((r) => new Set(r.start).size === r.start.length, {
-    path: ["start"],
-    message: "an input appears twice",
-  })
-  .refine((r) => r.start.every((id) => r.inputs.some((s) => s.inputId === id)), {
-    path: ["start"],
-    message: "start names an input the study lacks",
-  });
+// Delete the `scans` alias with its TODO (apps/api/.context/TODO.md): a /new tab opened before the
+// rename posts `scans`, and must not fail for the rest of the deploy overlap.
+const scansAsInputs = (body: unknown) =>
+  typeof body === "object" && body !== null && "scans" in body && !("inputs" in body)
+    ? { ...body, inputs: body.scans }
+    : body;
+
+export const createStudyRequestSchema = z.preprocess(
+  scansAsInputs,
+  z
+    .object({
+      name: label,
+      workflowId: workflowIdSchema,
+      /** Each input once; every one must be readable by the caller and complete. */
+      inputs: z
+        .array(
+          z.object({
+            inputId: inputIdSchema,
+            subject: label.optional(),
+            group: label.optional(),
+            attributes: attributesSchema.optional(),
+          }),
+        )
+        .min(1)
+        .max(200),
+      /** The inputs to run now, a subset of `inputs`; the rest wait. May be empty. */
+      start: z.array(inputIdSchema),
+      budgetUsd: z.number().nonnegative().optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      selectedOutputs: selectedOutputsSchema.min(1).optional(),
+      notes: z.string().max(4000).optional(),
+      /** Present: these runs use these (`credentials: "visitor"`). */
+      keys: visitorKeysSchema.optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      model: modelRefSchema.optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      harness: harnessSchema.optional(),
+    })
+    .refine((r) => new Set(r.inputs.map((s) => s.inputId)).size === r.inputs.length, {
+      path: ["inputs"],
+      message: "an input appears twice",
+    })
+    .refine((r) => new Set(r.start).size === r.start.length, {
+      path: ["start"],
+      message: "an input appears twice",
+    })
+    .refine((r) => r.start.every((id) => r.inputs.some((s) => s.inputId === id)), {
+      path: ["start"],
+      message: "start names an input the study lacks",
+    }),
+);
 export type CreateStudyRequest = z.infer<typeof createStudyRequestSchema>;

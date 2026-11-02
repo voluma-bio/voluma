@@ -12,8 +12,8 @@ import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
   StudyDetail,
-  StudyInput,
   StudyInputDetail,
+  StudyMember,
   StudyRunSummary,
   StudySummary,
 } from "@voluma/contracts/study";
@@ -214,7 +214,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                   subject: member.subject,
                   group: member.group,
                   attributes: member.attributes,
-                } satisfies StudyInput,
+                } satisfies StudyMember,
                 input: toInput(input),
                 runs: runsOf.get(member.inputId) ?? [],
                 review: newestRun ? reviewOf(newestRun) : null,

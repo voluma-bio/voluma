@@ -231,11 +231,11 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
 (with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, unsettled provider calls,
 or missing inputs/study metadata and unsupported workflows that prevent restoration. It reads one database snapshot
-(`run.json`: run, study, study inputs and the inputs, events, pi messages, review snapshots, provider calls),
+(`run.json`: run, study, study members and the inputs, events, pi messages, review snapshots, provider calls),
 writes `~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), syncs the file and directory entries
 to disk, and reads it back. Only then does it delete, holding the queue, event and run-row locks. Every deleted row,
 including the run and any deleted study and its inputs, must match the archive, not merely its count; any difference rolls back.
-Inputs stay (shared); the study and its study inputs go only when no other run is in it. A failed write, sync or validation
+Inputs stay (shared); the study and its study members go only when no other run is in it. A failed write, sync or validation
 never deletes rows; an existing `run.json` is never overwritten. A failure may leave an incomplete file: retain it for
 inspection and use a new output directory when retrying.
 

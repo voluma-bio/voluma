@@ -112,6 +112,8 @@ export function InputPage() {
   const { studyId = "", inputId = "" } = useParams();
   const [params] = useSearchParams();
   const study = useQuery(studyQuery(studyId));
+  // With `?run=` the run read needs nothing from the study: start it now (`Input` reads the same query).
+  useQuery({ ...runQuery(params.get("run") ?? ""), enabled: params.has("run") });
   const unavailable = <Unavailable query={study} />;
   const member = study.data?.inputs.find((i) => i.member.inputId === inputId);
   if (!study.data) return unavailable;
