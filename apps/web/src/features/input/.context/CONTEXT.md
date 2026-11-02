@@ -134,7 +134,7 @@ stopped.
 
 `outputs-review.tsx`, for a run whose log has final outputs (`isAgentsRun`). It lays out the
 shell's two `SidePanel`s around the centre. Left: Conversation (default; badged with the
-`approval.requested` main still holds) and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree`
+calls main still holds, `openApprovals`) and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree`
 over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds Needs you and
 Whole run. The value picked opens in place under its row: its version line and Report, its open
 To check items (with those of what it rests on), and Rests on (direct links, ordered measured
@@ -167,9 +167,44 @@ during it leaves it. Esc goes, one thing per press: a mark being drawn, the tool
 run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
 whole run and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.tsx`): Navigate
 (V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
-`POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Yours wait in "With your next message:" above the conversation's footer; the conversation is
-read-only on these runs, so they go nowhere yet (sending them is phase 7, through `messageMark`,
-which drops what a contract `Mark` can't hold). Save view posts `view.saved`
+`POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
 (`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
 "Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
 `outputs-trail.ts`.
+
+### Talking to main (`main-conversation.tsx`, `use-main-message.ts`)
+
+The conversation is the only place anything on the run changes (design review.md, "Corrections",
+"Approvals"). It shows main's messages to the researcher, yours with the marks they carried, the
+views you saved and the calls main holds for your yes (`ApprovalCard`, `@voluma/run-view`: what the
+call does in code's words, what it changes and what it makes out of date, by catalog name; Yes and No with optional words through
+`answerApproval`; then the answer, and only the outcome's word: `approval.settled`'s text is
+written for main). `conversation()` (contracts)
+gives the items. While the run is live and the last word was yours, "main is on it".
+
+**Editing a mark is a correction, and nothing reaches main until Send.** A new mark, a moved one
+(Navigate: drag an end of your point, line or angle in a slice; a click on an end picks the mark),
+a deleted one (Delete or Backspace on the picked mark) and a published ruler's end dragged (a new
+line mark of yours, tag R<n>, `output` the ruler's) are written to the log at once and wait as chips
+beside the box. Which marks wait is derived, never kept: `useRunMarks`'s `changes` judges each of your
+marks by the API's own rule (`toldMarks`, `changeOf` in `review-state.ts`): a mark no message of
+yours carried, one changed since, and one main was told of that you deleted. Someone who can't
+write to main sees no waiting chips.
+x on a chip undoes the change (a new mark goes; a moved or deleted one goes back to what main saw).
+Nothing is written into the box: main gets each attached mark with its change and positions, and
+the empty box shows what the marks say. Tags are never reused in a run (`MarkStore.tags`): a message
+may name a deleted one. A send waits for the writes of the marks it names (`settled`), since the API
+freezes them from the log; if one failed, nothing is sent.
+
+A message carries the words, the waiting marks by id (`markIds`; the API freezes them), the output
+in view (`output`), the panes' view as Save view keeps it (`view`, dropped over `MAX_VIEW_BYTES`), a
+PNG of the panes when "With <output>, as you see it" is on (`QuadViewerHandle.snapshot` through
+`SceneHandle`), and the To check item it answers (`toCheck`, set by "Tell main what's wrong" on an
+item). Both composers send through `message-send.ts` (`useIdempotentSend`): a retry keeps the id
+and the exact request; refusals show the API's words. A message or an
+answer to an ended run reopens it: the page reconnects the stream and reads the run again.
+
+A run with a call open that you can answer (`openApprovals`) reads "Waiting on you" in the heading
+(from the log, not the row); a No is final and ends the call. The Samples tree and the study rows can't say so yet: the
+study summaries carry no open-call count (`TODO.md`).
+

@@ -4,18 +4,31 @@
  * or right drag pans, and a press on a tilt handle turns the other planes. With a marking tool,
  * left click or drag marks: Point a voxel, Box a drag's rectangle, Line a drag's two ends (or two
  * clicks, with `clickLines`), Angle three clicks (the vertex second), Outline a freehand loop,
- * Probe reads the value under the pointer and keeps it as a point on click.
+ * Probe reads the value under the pointer and keeps it as a point on click. With no tool, a press
+ * on an end of an editable mark (`ShownMark.movable`: a point, a line, an angle) or of a published
+ * ruler drags that end (`onEdit`); a click on a mark's end without moving picks it (`onPick`).
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
-import { angleAbout, type Basis, unit, type Vec3 } from "./frame";
-import { angleDegrees, areaMm2, lengthMm, type MarkLayer, probeText, thin } from "./marks";
+import { angleAbout, type Basis, type Slab, unit, type Vec3 } from "./frame";
+import {
+  angleDegrees,
+  areaMm2,
+  lengthMm,
+  type MarkLayer,
+  markPoints,
+  probeText,
+  thin,
+} from "./marks";
 import {
   type Axis,
+  type GridAnnotation,
   type GridMark,
   type GridScene,
+  type MarkEdit,
   type MarkTool,
   type ProbeValue,
   planeAxes,
+  type ShownMark,
   type Zyx,
 } from "./scene";
 
@@ -36,6 +49,15 @@ export type GestureInputs = {
   fromPane(x: number, y: number, at: Zyx): Zyx;
   basis: Basis;
   whole: boolean;
+  /** What lies on the pane's slice: |slab| ≤ ½. */
+  slab: Slab;
+  marks: readonly ShownMark[];
+  /** The published annotations shown; a ruler's ends can be dragged. */
+  annotations: readonly GridAnnotation[];
+  /** An end dragged; absent, no end can be. */
+  onEdit?(edit: MarkEdit): void;
+  /** A mark's end clicked without moving. */
+  onPick?(id: string): void;
 };
 
 /** A drag shorter than this (CSS px) is a click. */
@@ -46,6 +68,35 @@ const OUTLINE_STEP_PX = 3;
 const OUTLINE_MAX = 500;
 /** How near a tilt handle a press must land (CSS px). */
 const HANDLE_HIT_PX = 9;
+/** How near a mark's end a press must land to drag it (CSS px). */
+const END_HIT_PX = 8;
+
+/** A mark or ruler end under the pointer: which vertex of which mark. */
+type End = { from: MarkEdit["from"]; id: string; mark: GridMark; index: number };
+
+/** `mark` with vertex `index` at `p`, its measure recomputed. */
+function withEnd(mark: GridMark, index: number, p: Zyx, spacingZyx: Zyx): GridMark {
+  if ("point" in mark) return { ...mark, point: p };
+  if ("line" in mark) {
+    const [a, b] = index === 0 ? [p, mark.line.bZyx] : [mark.line.aZyx, p];
+    return { line: { aZyx: a, bZyx: b, lengthMm: lengthMm(a, b, spacingZyx) } };
+  }
+  if ("angle" in mark) {
+    const ends = [mark.angle.aZyx, mark.angle.vertexZyx, mark.angle.bZyx];
+    ends[index] = p;
+    const [a, v, b] = ends as [Zyx, Zyx, Zyx];
+    return {
+      angle: { aZyx: a, vertexZyx: v, bZyx: b, degrees: angleDegrees(a, v, b, spacingZyx) },
+    };
+  }
+  return mark;
+}
+
+/** The ends a press can take: a point's voxel (not a probe's), a line's two, an angle's three. */
+function endsOf(mark: GridMark): readonly Zyx[] {
+  const probe = "point" in mark && mark.probe;
+  return probe || "box" in mark || "outline" in mark ? [] : markPoints(mark);
+}
 
 /**
  * Binds the gestures to `host` once, for the pane's life: the grid, `axis` and the callbacks are
@@ -120,9 +171,47 @@ export function useSliceGestures(args: {
     };
     // Clicks made so far toward a line (two) or an angle (three); the layer's draft shows them.
     let clicks: Zyx[] = [];
+    // The editable end nearest the pointer on this slice, within `END_HIT_PX`: your marks first,
+    // so a ruler you already moved drags as yours.
+    const endAt = (event: { clientX: number; clientY: number }): End | null => {
+      const { onEdit, marks, annotations, slab, toPane: tp } = latest.current;
+      const v = view.current;
+      if (!onEdit || !v) return null;
+      const rect = element.getBoundingClientRect();
+      const px = (p: Zyx) => {
+        const [x, y] = tp(p);
+        return [
+          (x - v.center[0]) * v.zoom + rect.width / 2,
+          (v.center[1] - y) * v.zoom + rect.height / 2,
+        ] as const;
+      };
+      const candidates: Omit<End, "index">[] = [
+        ...marks.filter((m) => m.movable).map((m) => ({ from: "mark" as const, ...m })),
+        ...annotations
+          .filter((a) => a.points.length === 2)
+          .map((a) => {
+            const [p, q] = a.points as [Zyx, Zyx];
+            return {
+              from: "annotation" as const,
+              id: a.id,
+              mark: { line: { aZyx: p, bZyx: q, lengthMm: lengthMm(p, q, scene.spacingZyx) } },
+            };
+          }),
+      ];
+      const pointer = [event.clientX - rect.left, event.clientY - rect.top] as const;
+      for (const c of candidates) {
+        const index = endsOf(c.mark).findIndex((p) => {
+          if (Math.abs(slab(p)) > 0.5) return false;
+          const [x, y] = px(p);
+          return Math.hypot(x - pointer[0], y - pointer[1]) <= END_HIT_PX;
+        });
+        if (index >= 0) return { from: c.from, id: c.id, mark: c.mark, index };
+      }
+      return null;
+    };
     // The gesture's pointer is the mark layer's; the rest of it is the pane's.
     let drag: {
-      mode: "cross" | "pan" | "tilt" | MarkTool;
+      mode: "cross" | "pan" | "tilt" | "end" | MarkTool;
       x: number;
       y: number;
       /** The crosshair at press: a drawn mark stays on its slice if the wheel steps mid-drag. */
@@ -134,6 +223,8 @@ export function useSliceGestures(args: {
       last: [number, number];
       /** A tilt's direction from the crosshair, in mm, at the last move. */
       toward?: Vec3;
+      /** The end being dragged. */
+      end?: End;
     } | null = null;
     const stopReset = layer.onCancel(() => {
       drag = null;
@@ -181,10 +272,11 @@ export function useSliceGestures(args: {
                 HANDLE_HIT_PX,
             )
           : undefined;
+      const end = !pan && !tool && !hit ? endAt(event) : null;
       layer.start(event);
       const from = toPosition(event);
       drag = {
-        mode: pan ? "pan" : hit ? "tilt" : (tool ?? "cross"),
+        mode: pan ? "pan" : hit ? "tilt" : end ? "end" : (tool ?? "cross"),
         x: event.clientX,
         y: event.clientY,
         at: latest.current.point,
@@ -193,12 +285,14 @@ export function useSliceGestures(args: {
         path: [from],
         last: [event.clientX, event.clientY],
         ...(hit && { toward: towardPointer(event) }),
+        ...(end && { end }),
       };
       if (drag.mode === "cross") latest.current.onPoint(toVoxel(event));
     };
     const move = (event: PointerEvent) => {
       const tool = latest.current.tool;
       if (!drag) {
+        if (!tool && latest.current.onEdit) element.style.cursor = endAt(event) ? "grab" : "";
         if (tool === "point" || tool === "line" || tool === "angle") {
           layer.hover = toVoxel(event);
           if (clicks.length) layer.draft = clickDraft(tool, toPosition(event));
@@ -220,7 +314,13 @@ export function useSliceGestures(args: {
         drag.moved = true;
         // On the slice the gesture began on, even if the wheel stepped since.
         const to = toPosition(event, drag.at);
-        if (drag.mode === "box") layer.draft = boxMark(round(drag.from), round(to));
+        if (drag.mode === "end") {
+          const { end } = drag;
+          // A point stays on a voxel, as Point makes it.
+          const p = end && "point" in end.mark ? round(toVoxel(event)) : to;
+          layer.draft = end ? withEnd(end.mark, end.index, p, scene.spacingZyx) : null;
+          element.style.cursor = "grabbing";
+        } else if (drag.mode === "box") layer.draft = boxMark(round(drag.from), round(to));
         else if (drag.mode === "line" && !clicks.length) {
           layer.hover = null;
           layer.draft = {
@@ -260,6 +360,16 @@ export function useSliceGestures(args: {
       if (!drag || !layer.owns(event)) return;
       move(event);
       const d = drag;
+      if (d.mode === "end") {
+        const made = layer.draft;
+        layer.cancel();
+        element.style.cursor = "";
+        const { end } = d;
+        if (!end) return;
+        if (d.moved && made) latest.current.onEdit?.({ from: end.from, id: end.id, mark: made });
+        else if (!d.moved && end.from === "mark") latest.current.onPick?.(end.id);
+        return;
+      }
       // A click toward a line or an angle: keep going until the mark has all its ends.
       if ((d.mode === "line" && clickLines && (!d.moved || clicks.length)) || d.mode === "angle") {
         clicks.push(toPosition(event));
@@ -295,7 +405,8 @@ export function useSliceGestures(args: {
     };
     // The mark a finished gesture makes, if any: a click marks only with Point and Probe.
     const finish = (d: NonNullable<typeof drag>, event: PointerEvent): GridMark | null => {
-      if (d.mode === "cross" || d.mode === "pan" || d.mode === "tilt") return null;
+      if (d.mode === "cross" || d.mode === "pan" || d.mode === "tilt" || d.mode === "end")
+        return null;
       if (d.mode === "point")
         return d.moved ? null : { point: [...round(d.from)] as unknown as Zyx };
       if (d.mode === "probe") {
