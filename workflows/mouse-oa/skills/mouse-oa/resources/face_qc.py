@@ -2,11 +2,14 @@
 
 Library, not a script. A face is drawn as the surface the script cut with, not as the proposal: solid between the points the
 worker traced, dotted where the surface is held constant past them, over the tibia's outline, on every traced section, so a line
-that runs over empty space or up a cortical wall shows. The crop takes in the tibia and the traced span of the section.
+that runs over empty space or up a cortical wall shows. The crop takes in the tibia 80 voxels (0.8 mm) beyond the faces' height range
+each way, so a face put in the wrong place does not crop away the plate it missed.
 """
 
 import numpy as np
 import viewlib as vl
+
+REACH = 80  # voxels of tibia shown beyond the faces' height range
 
 
 def delivered_faces(out, h, tib, faces, sections, panels, window, vox):
@@ -19,7 +22,9 @@ def delivered_faces(out, h, tib, faces, sections, panels, window, vox):
         for v in chunk:
             cols = np.flatnonzero(tib[:, v].any(0) | np.any([t[v] for *_, t in faces], axis=0))
             heights = [s[v, cols] for _, _, s, _ in faces]
-            lo, hi = np.nanmin(heights) - 30, np.nanmax(heights) + 30
+            bone = np.flatnonzero(tib[:, v].any(1))
+            lo = max(np.nanmin(heights) - REACH, bone[0] - 10)  # the face's range plus 0.8 mm of anatomy each way, within the tibia
+            hi = min(np.nanmax(heights) + REACH, bone[-1] + 11)
             crops.append((max(int(lo), 0), max(cols[0] - 10, 0), min(int(hi), h.shape[0]), min(cols[-1] + 11, h.shape[2])))
             curve_sets.append([c for _, colour, s, t in faces for c in
                                ((x, np.where(t[v], s[v], np.nan), colour), (x, np.where(t[v], np.nan, s[v]), colour, ':'))])

@@ -11,18 +11,21 @@ follows that surface, so on a cortical wall it runs down the wall, not along a p
 Where it finds the plate. On each section, a run of trusted columns at least `min_run_um` wide counts; runs join a chain across a gap
 of at most `bridge_um`, and the longest chain gives the section's span, first to last column. A section with no run has no span and
 gets nothing. Inside a span every column that is not trusted is flagged: the proposal has no points there and you trace it. Outside a span the
-proposal says nothing, flags nothing and asks nothing of you: the plate may be there, the search did not find it, and you extend past
-the span only by tracing (zoomed coronal views, points on the plate). The spans, the V range and what ended each span are in
-`plate-faces.json` (`covered`) and printed: say in your report where the proposal covered and where you traced beyond it. Flagged columns have no
-proposed points, so a curve with a flagged stretch in it has a gap until you fill it (see the rule below).
+proposal says nothing and flags nothing, but the plate is still there to be traced: a span is where you can start, not where you stop. The faces
+must cover the plate over the whole tibia at plate level (see the rule below), so you read the plate off zoomed coronal views past each span
+end and on the sections with no span. The spans, the V range and what ended each span are in
+`plate-faces.json` (`covered`) and printed: say in your report where the proposal covered and where you traced beyond it.
 
 `plate-annotations.json` is JSON in the annotations schema: "grid_id", `growth_plate_curves` (annotation A, for iioc.py) and
 `growth_plate_distal_curves` (annotation C, for metaphysis_roi.py), one curve per proposed section, many points each, none in a
 flagged stretch. Copy both keys into your annotations.json. The flagged stretches are in `plate-faces.json` (`stretches`:
 {"<V>": [{"u": [first U, last U], "why": [tests that fired]}]}): where to look hardest and to retrace, by adding your points to the
-section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold every curve you hand them to one rule, flagged or not: points at
-most `max_gap_um` apart along its whole length (a curve is linear between its points, so a gap is a straight bridge, wrong geometry
-however the plate looks there), and none more than `off_tibia_margin_um` off the tibia mask. Your points and the proposed ones count alike.
+section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold the faces to one rule, flagged or not: no stretch of the plate at the tibia (the tibia between the
+section's lowest and highest curve points, widened by `max_gap_um`) left untraced over more than `max_gap_um`, whether between two points
+of a curve, between a curve's end and the tibia's edge, or between traced sections in V or past the first and last (a surface is linear
+between points and held constant past them, so an untraced stretch is a straight bridge, wrong geometry however the plate looks there),
+and no point more than `off_tibia_margin_um` off the tibia mask. A flagged stretch needs your points only where it opens a gap wider than
+`max_gap_um`; that the points lie on the plate is for you to see, not for the rule. Your points and the proposed ones count alike.
 Where the plate is destroyed, mark the U range where it is gone, on every traced section it reaches, in your annotations as `plate_eroded`:
 {"<V>": [{"u": [first U, last U], "eroded": "<why>"}]}, integer U. Trace the remaining bone there with both faces: the section's curve
 must reach both ends of a marked range, and the mark never replaces points. `metaphysis_roi.py` then accepts the distal face at or

@@ -66,19 +66,28 @@ schema is `regions-and-landmarks`'):
 
 - **A, for `iioc.py`.** The growth plate's proximal face across the whole width, on at least two coronal sections.
   `plate_faces.py` proposes it (and annotation C) from the densities: dense curves on every tenth section where the search finds the plate, and
-  no points where it is flagged. It covers only part of the tibia (the V range and each section's U span are in `plate-faces.json`
-  and the script's output): past the spans it proposes nothing, flags nothing, and you extend the face only by tracing it on zoomed views, never by
-  interpolating or filling from a script. Say where it covered and where you traced beyond it. Copy its two curve keys (`growth_plate_curves`, `growth_plate_distal_curves`) into your
-  `annotations.json`; its flagged stretches are in `plate-faces.json`. The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in
-  two known ways, jumping up into dark marrow spaces of the epiphysis and drawing a convincing sheet on the wrong structure where
-  the plate is eroded. Look at every proposed section's render. Keep the stretches that sit on the plate. `iioc.py` refuses a curve point more than the spec's `off_tibia_margin_um` off the tibia mask, and a face traced up a cortical wall is wrong: the plate lies across the epiphysis, not along its cortex. `iioc.py` and `metaphysis_roi.py` stop on any
-  curve with two neighbouring points more than the spec's `max_gap_um` apart (a curve is linear between its points, so a gap is a straight bridge),
-  flagged or not, naming the section and U range: fill a flagged stretch densely on zoomed views, adding your points to that section's
-  curve (in both curve keys) along the plate. Where the plate is destroyed, mark the U range where it is gone in
+  no points where it is flagged. The proposal covers only part of the tibia (the V range and each section's U span are in `plate-faces.json`
+  and the script's output) and is where you start, not where you stop: you trace the plate over the whole tibia at plate level, on zoomed
+  views, past every span end, on the sections with no span, and out to the V ends. `iioc.py` and `metaphysis_roi.py` stop on a face whose
+  curves leave more than the spec's `max_gap_um` of the plate untraced (between neighbouring points, between a curve's end and the tibia's
+  edge, between sections in V, and past the first and last section), and name the sections and sides; they also stop on a point more than
+  `off_tibia_margin_um` off the tibia mask. Say where the proposal covered and where you traced. Copy its two curve keys
+  (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
+  The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in two known ways, jumping up into
+  dark marrow spaces of the epiphysis and drawing a convincing sheet on the wrong structure where the plate is eroded.
+  One instruction covers a flagged stretch, a stretch that is wrong but not flagged, and every extension: you read each point's position
+  from a zoomed image by looking, on the plate band, and put the points no farther apart than `max_gap_um` (closer where it turns). Code may
+  write down the positions you read; a detector, an interpolation or a fill choosing the positions is not tracing, and a face that passes
+  the spacing and mask checks is not thereby on the plate. Correct means the same visible plate band, end to end: it can wrap down the
+  condyles at the sides (OA6-2RK V=220 and 225, where the plate turns steeply down the arch), and you follow it there; what is wrong is a
+  switch onto cortex or marrow. Where one height per (V, U) cannot represent what you see (OA6-2RK V=185, where the notch runs nearly in
+  the section's plane), read the neighbouring sections and a view across them, trace the nearest single-valued face, and raise it as a To
+  check item; do not flatten it and do not call it eroded. Look at every proposed section's render, and every `qc-faces-<n>.jpg` sheet (the
+  faces as delivered, solid where your points define them, dotted where the surface is held past them, over the whole tibia's outline). Where
+  the plate is destroyed, mark the U range where it is gone in
   `plate_eroded` (`{"<V>": [{"u": [first, last], "eroded": "<why>"}]}`, integer U) on every traced section it reaches, flagged or not
   (add a section beside the span if it spills over), and trace the remaining bone there with both faces, the section's curve reaching both ends of the range: the mark
-  never replaces the points. Retrace a stretch that is wrong but not flagged
-  the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
+  never replaces the points. Retrace a stretch that is wrong but not flagged the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
   eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. Where part of the tibia label is really femur or fibula
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
   only what lies below. The U index of each plateau compartment's middle (a height point outside ROI-1's footprint

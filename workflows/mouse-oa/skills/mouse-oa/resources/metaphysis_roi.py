@@ -3,7 +3,7 @@
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
 it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `start_um` below it, and
 there is no thickness fallback. A curve point more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused,
-naming the section, and so are two neighbouring points of a curve more than `max_gap_um` of the spec apart. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
+naming the section, and so is a face that leaves more than `max_gap_um` of the spec of the tibia at plate level untraced (between points, between a curve's end and the tibia's edge, between sections in V, past the first and last section). The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
 ROI-3 is the slab between `start_um` and `start_um + length_um` below that face (measured along W), inside the filled tibial
 cross-section, at least `cortex + cortex_clearance_um` from its outer edge. Those, and `cortex_search_factor`, come from the spec
@@ -169,7 +169,7 @@ def main():
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
     dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
     refuse_off_tibia(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
-    refuse_gaps(ann, 'growth_plate_distal_curves', a.spec, vox)
+    refuse_gaps(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
     eroded, plate = eroded_marks(ann, 'growth_plate_distal_curves', h.shape, footprint(tib))
     check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox, eroded)
     w = np.arange(h.shape[0])[:, None, None]

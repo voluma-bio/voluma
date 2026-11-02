@@ -13,7 +13,9 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections; a point more than
                           `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused, naming the section, and so
-                          are two neighbouring points of a curve more than `max_gap_um` of the spec (entry plate-faces) apart
+                          is a face that leaves more than `max_gap_um` of the spec (entry plate-faces) of the tibia at plate level
+                          untraced: between neighbouring points, between a curve's end and the tibia's edge, between sections in V,
+                          past the first and last section
   plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
                           of the curve, any U range (integers, first <= last). It never replaces points: the section's curve must
                           reach both ends of every marked range, or the script stops naming the section and U range; inside
@@ -172,7 +174,7 @@ def main():
     v_traced = sorted(int(k) for k in gp_spec['slices'])
     gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
     refuse_off_tibia(ann, 'growth_plate_curves', tib, a.spec, vox)
-    refuse_gaps(ann, 'growth_plate_curves', a.spec, vox)
+    refuse_gaps(ann, 'growth_plate_curves', tib, a.spec, vox)
     _, plate = eroded_marks(ann, 'growth_plate_curves', h.shape, footprint(tib))
     env = envelope(tib, gp, vox)
     w = np.arange(h.shape[0])[:, None, None]
