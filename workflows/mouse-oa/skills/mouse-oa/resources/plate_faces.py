@@ -1,10 +1,9 @@
 """Propose the tibial growth plate's two faces in 3D from the densities, only where the search finds the plate.
 
 The plate is a thin sheet of lower density between denser bone, found as a valley of the smoothed HU along W (the
-second derivative along W after a Gaussian) and followed by a dynamic-programming search over the whole aligned grid, once
-along U and once along V. Each face is the half-depth edge of that valley. This is a proposal, never a trace: you look at it
+second derivative along W after a Gaussian) and followed along U by a dynamic-programming search, every coronal section at once. Each face is the half-depth edge of that valley. This is a proposal, never a trace: you look at it
 section by section, keep what sits on the plate and retrace the rest. It jumps up into dark epiphyseal marrow spaces, and where the plate
-is eroded it still draws a convincing sheet on the wrong structure. A column is untrusted when the two searches disagree, the centre
+is eroded it still draws a convincing sheet on the wrong structure. A column is untrusted when the centre
 changes height faster than a plate can along U or V, the centre is more than `flag_min_dip_hu` brighter than its shallower shoulder (a plate is darker than the bone beside it), a face
 lies farther than `face_reach_um` from the centre, or the bone surface above it is steeper than `max_surface_slope` (the search band
 follows that surface, so on a cortical wall it runs down the wall, not along a plate). Every threshold is in the spec, entry `plate-faces`.
@@ -14,25 +13,21 @@ of at most `bridge_um`, and the longest chain gives the section's span, first to
 gets nothing. Inside a span every column that is not trusted is flagged: the proposal has no points there and you trace it. Outside a span the
 proposal says nothing, flags nothing and asks nothing of you: the plate may be there, the search did not find it, and you extend past
 the span only by tracing (zoomed coronal views, points on the plate). The spans, the V range and what ended each span are in
-`plate-faces.json` (`covered`) and printed: say in your report where the proposal covered and where you traced beyond it. `iioc.py` and
-`metaphysis_roi.py` refuse a flagged stretch you leave untraced: your points inside it, from its first to its last column, at most
-`max_gap_um` apart. Where the plate is eroded the trace follows the remaining bone and you also mark the U range where the plate is gone as eroded, with a reason.
+`plate-faces.json` (`covered`) and printed: say in your report where the proposal covered and where you traced beyond it. Flagged columns have no
+proposed points, so a curve with a flagged stretch in it has a gap until you fill it (see the rule below).
 
 `plate-annotations.json` is JSON in the annotations schema: "grid_id", `growth_plate_curves` (annotation A, for iioc.py) and
 `growth_plate_distal_curves` (annotation C, for metaphysis_roi.py), one curve per proposed section, many points each, none in a
 flagged stretch. Copy both keys into your annotations.json. The flagged stretches are in `plate-faces.json` (`stretches`:
-{"<V>": [{"u": [first U, last U], "why": [tests that fired]}]}); `iioc.py` and `metaphysis_roi.py` read them from there
-(`--plate-faces <out>`), never from your annotations, and stop naming the section and U range of any you leave untraced; they also
-refuse curve points more than `off_tibia_margin_um` off the tibia mask:
-  - trace every flagged stretch: add your points to the section's curve in both curve keys, from the stretch's first to its last
-    column, at most `max_gap_um` apart (a stretch inside a curve is bridged by a straight line between its neighbouring points,
-    so a gap is wrong geometry, not a hole);
-  - where the plate is destroyed, mark the U range where it is gone, on every traced section it reaches, flagged or not
-    (a section you add beside the eroded span too), in your annotations as `plate_eroded`:
-    {"<V>": [{"u": [first U, last U], "eroded": "<why>"}]}, integer U. Trace the remaining bone there with both faces, densely
-    like a flagged stretch: a marked range needs your points from its first to its last column, at most `max_gap_um` apart.
-    The mark never replaces points. `metaphysis_roi.py` then accepts the distal face at or above the proximal one in the marked
-    range (on the rows between two sections that both mark it), and both scripts report the marked ranges and their share of the plate.
+{"<V>": [{"u": [first U, last U], "why": [tests that fired]}]}): where to look hardest and to retrace, by adding your points to the
+section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold every curve you hand them to one rule, flagged or not: points at
+most `max_gap_um` apart along its whole length (a curve is linear between its points, so a gap is a straight bridge, wrong geometry
+however the plate looks there), and none more than `off_tibia_margin_um` off the tibia mask. Your points and the proposed ones count alike.
+Where the plate is destroyed, mark the U range where it is gone, on every traced section it reaches, in your annotations as `plate_eroded`:
+{"<V>": [{"u": [first U, last U], "eroded": "<why>"}]}, integer U. Trace the remaining bone there with both faces: the section's curve
+must reach both ends of a marked range, and the mark never replaces points. `metaphysis_roi.py` then accepts the distal face at or
+above the proximal one in the marked range (on the rows between two sections that both mark it), and both scripts report the marked
+ranges and their share of the plate.
 Retrace any stretch that sits off the plate even if it is not flagged. Edit the curves, not the surface, so what the later
 scripts cut is what you traced. Both scripts write `qc-faces-<n>.jpg`: the faces as you delivered them, on every traced section.
 
@@ -61,17 +56,17 @@ from scipy import ndimage as ndi
 SPEC_ID = 'plate-faces'  # the spec entry this script reads
 SPEC_KEYS = (
     'smooth_sigma_um', 'valley_hu', 'search_start_um', 'search_end_um', 'dp_max_slope', 'dp_step_penalty_per_um', 'face_reach_um',
-    'dip_smooth_um', 'median_um', 'flag_disagree_um', 'flag_slope', 'flag_min_dip_hu', 'flag_pad_um', 'flag_min_area_um2',
+    'dip_smooth_um', 'median_um', 'flag_slope', 'flag_min_dip_hu', 'flag_pad_um', 'flag_min_area_um2',
     'max_surface_slope', 'min_run_um', 'bridge_um',
     'section_step_um', 'point_step_um', 'qc_panels',
 )
 OUTSIDE = 1e4  # DP cost outside the search band: larger than any path through it
 
 
-def dp_height_field(cost, axis, max_step, penalty):
-    """Min-cost W per (V, U): a path through cost (W,V,U) along `axis` (1 = V, 2 = U) that moves at most max_step in W per column,
-    each unit of move costing `penalty`; every other column is searched at once."""
-    c = np.moveaxis(cost, axis, 1)  # (W, N, other)
+def dp_height_field(cost, max_step, penalty):
+    """Min-cost W per (V, U): a path along U through cost (W,V,U) that moves at most max_step in W per column,
+    each unit of move costing `penalty`; every V is searched at once."""
+    c = np.moveaxis(cost, 2, 1)  # (W, U, V)
     n_w, n, n_other = c.shape
     acc = c[:, 0, :].copy()
     back = np.zeros((n, n_w, n_other), np.int8)
@@ -95,11 +90,11 @@ def dp_height_field(cost, axis, max_step, penalty):
     for i in range(n - 1, 0, -1):
         w = w + back[i][w, cols]
         path[i - 1] = w
-    return path.T.astype(np.float32) if axis == 2 else path.astype(np.float32)
+    return path.T.astype(np.float32)
 
 
-def centre_passes(h, tib, first, sp, vox):
-    """The centre by the two searches (along U, along V) and where the tibia has a search band: the valley is the voxels
+def centre_pass(h, tib, first, sp, vox):
+    """The centre by the search along U and where the tibia has a search band: the valley is the voxels
     where the smoothed second derivative along W is positive and the smoothed HU inside the plate window. The cost is that
     second derivative in HU/um^2, the step penalty is per um of height change."""
     vox_um = vox * 1000
@@ -111,8 +106,7 @@ def centre_passes(h, tib, first, sp, vox):
     band = tib & (first[None] >= 0) & (w >= start[None]) & (w <= end[None])
     valley = band & (d2 > 0) & (smooth > sp['valley_hu'][0]) & (smooth < sp['valley_hu'][1])
     cost = np.where(valley, -d2, np.where(band, 0, OUTSIDE)).astype(np.float32)
-    passes = [dp_height_field(cost, axis, round(sp['dp_max_slope']), sp['dp_step_penalty_per_um'] * vox_um) for axis in (2, 1)]
-    return passes, band.any(0)
+    return dp_height_field(cost, round(sp['dp_max_slope']), sp['dp_step_penalty_per_um'] * vox_um), band.any(0)
 
 
 def faces_dip_far(s, path, reach):
@@ -136,12 +130,11 @@ def slope(a, k):
     return np.maximum(*(np.abs(np.roll(a, -k, ax) - np.roll(a, k, ax)) / (2 * k) for ax in (0, 1)))
 
 
-def flag_columns(cu, cv, centre, dip, far, wall, ok, sp, vox, med):
-    """Per (V, U): where the proposal is not to be trusted, and which tests fired. Flags: the passes disagree, the centre is
+def flag_columns(centre, dip, far, wall, ok, sp, vox, med):
+    """Per (V, U): where the proposal is not to be trusted, and which tests fired. Flags: the centre is
     steeper than a plate along U or V, it is denser than its shallower shoulder (dip below `flag_min_dip_hu`), a face is far from it,
     or the tibia's surface above is on a cortical wall. Blobs of flags are joined by a closing of `flag_pad_um`, specks dropped."""
     why = {
-        'passes disagree': ndi.median_filter(np.abs(cu - cv), size=med, mode='nearest') > sp['flag_disagree_um'] / 1000 / vox,
         'steeper than a plate': slope(centre, med // 2 + 1) > sp['flag_slope'],
         'centre denser than its shoulder': dip < sp['flag_min_dip_hu'],
         'face far from the centre': far,
@@ -159,14 +152,14 @@ def flag_columns(cu, cv, centre, dip, far, wall, ok, sp, vox, med):
 def propose(h, tib, sp, vox):
     """Centre, faces and flags per (V, U), and the tests that fired."""
     first = np.where(tib.any(0), tib.argmax(0), -1)  # the articular surface: first tibia voxel along W
-    (cu, cv), ok = centre_passes(h, tib, first, sp, vox)
+    path, ok = centre_pass(h, tib, first, sp, vox)
     med = round(sp['median_um'] / 1000 / vox) | 1
     # the search band follows the surface, so on a cortical wall it runs down the wall: a surface that steep is not a plate's roof
     wall = slope(ndi.median_filter(first.astype(np.float32), size=med, mode='nearest'), med // 2 + 1) > sp['max_surface_slope']
-    centre = ndi.median_filter(((cu + cv) / 2).astype(np.float32), size=med, mode='nearest')  # the two searches averaged; the median drops their wiggles
+    centre = ndi.median_filter(path.astype(np.float32), size=med, mode='nearest')  # the median drops the search's wiggles
     s = ndi.gaussian_filter(h, [x / 1000 / vox for x in sp['dip_smooth_um']], mode='nearest')
     upper, lower, dip, far = faces_dip_far(s, centre, round(sp['face_reach_um'] / 1000 / vox))
-    flagged, why = flag_columns(cu, cv, centre, dip, far, wall, ok, sp, vox, med)
+    flagged, why = flag_columns(centre, dip, far, wall, ok, sp, vox, med)
     # the faces are median-smoothed and kept a voxel either side of the centre
     upper, lower = (ndi.median_filter(f.astype(np.float32), size=med, mode='nearest') for f in (upper, lower))
     return centre, np.minimum(upper, centre - 1), np.maximum(lower, centre + 1), flagged, ok, why

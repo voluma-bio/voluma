@@ -167,17 +167,6 @@ def traced_surface(spec, key, shape):
     return H, valid
 
 
-def load_plate_stretches(plate_dir, grid):
-    """The flagged stretches plate_faces.py wrote in `plate_dir`: {"<V>": [{"u": [first, last], "why": [...]}]}, for the grid `grid` (a dict with `grid_id`)."""
-    path = Path(plate_dir) / 'plate-faces.json'
-    if not path.exists():
-        sidecar.fail(f'{path} is missing: pass the directory plate_faces.py wrote (--plate-faces)')
-    record = json.loads(path.read_text())
-    if record['grid_id'] != grid['grid_id']:
-        sidecar.fail(f'{path} was made on another aligned grid (grid_id differs): rerun plate_faces.py on this scan')
-    return record['stretches']
-
-
 def refuse_off_tibia(ann, key, tib, spec_path, vox):
     """Refuse curve points that lie off the tibia: on the section's coronal cut of the tibia mask (axes W, U), farther than the spec's
     `off_tibia_margin_um` (entry plate-faces) from any tibia voxel. A line run across empty space or up a cortical wall's far side is
@@ -194,39 +183,42 @@ def refuse_off_tibia(ann, key, tib, spec_path, vox):
         sidecar.fail(f'"{key}" has points more than {margin * vox * 1000:.0f} um off the tibia: {shown}. Trace the face on the bone only')
 
 
-def cleared_stretches(ann, stretches, key, spec_path, shape, vox, on_bone):
-    """Refuse a U range the curves `key` do not trace, and report the eroded ones.
-
-    The ranges to trace are the flagged stretches (`stretches`, from plate_faces.py) and the worker's `ann["plate_eroded"]`
-    ranges, on any section. A range is cleared when its section has a curve with points inside it, the first and last within
-    `max_gap_um` of its ends and none farther apart than that (points outside count for nothing: a line from one to another is
-    an invented face). A mark never replaces points; inside a marked range they follow the remaining bone. Returns
-    (eroded, record): `eroded`, bool (V, U): the marked ranges, on the rows between two traced sections where both
-    mark (a face is linear in V between traced sections), and `record`, the dict the script reports: the marked ranges with
-    their share of the tibia's width on their section, and the eroded share of the footprint `on_bone` over the traced V range.
-    """
+def refuse_gaps(ann, key, spec_path, vox):
+    """Refuse a curve with two neighbouring points (by U) farther apart than the spec's `max_gap_um` (entry plate-faces), on any
+    section: a surface is linear between a curve's points, so a gap is a straight bridge over whatever the plate does there, however
+    the plate looks. The stop names the section and the U range of each gap."""
     gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
+    refused = []
+    for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
+        us = sorted(p[1] for p in pts)
+        wide = [(p, q) for p, q in itertools.pairwise(us) if q - p > gap]
+        if wide:
+            refused.append(f'V={k}: ' + ', '.join(f'U={p:g}..{q:g} ({(q - p) * vox * 1000:.0f} um)' for p, q in wide[:3]) + (f' and {len(wide) - 3} more' if len(wide) > 3 else ''))
+    if refused:
+        shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more sections' if len(refused) > 6 else '')
+        sidecar.fail(f'"{key}" has points more than {gap * vox * 1000:.0f} um apart along a curve: {shown}. Add points along the plate in between')
+
+
+def eroded_marks(ann, key, shape, on_bone):
+    """The worker's `ann["plate_eroded"]` ranges for the curves `key`, which must lie on a section with a curve whose points reach both
+    ends of the range (a mark never replaces points; the curve follows the remaining bone through it). Returns (eroded, record):
+    `eroded`, bool (V, U): the marked ranges, on the rows between two traced sections where both mark (a face is linear in V between
+    traced sections), and `record`, the dict the script reports: the marked ranges with their share of the tibia's width on their
+    section, and the eroded share of the footprint `on_bone` over the traced V range."""
     slices = ann[key]['slices']
     reasons = {(int(k), *run['u']): run['eroded'] for k, runs in ann.get('plate_eroded', {}).items() for run in runs}
-    listed = {(int(k), *run['u']) for k, runs in stretches.items() for run in runs}
     refused = []
     marked = {}  # V -> bool U array of the marked ranges on that section
-    for v, a, b in sorted(listed | reasons.keys()):
-        pts = sorted(p[1] for p in slices.get(str(v), []) if a <= p[1] <= b)
-        if str(v) not in slices:
+    for v, a, b in sorted(reasons):
+        us = [p[1] for p in slices.get(str(v), [])]
+        if not us:
             refused.append(f'V={v}, U={a}..{b}: the section has no curve')
-        elif not pts:
-            refused.append(f'V={v}, U={a}..{b}: no points inside')
-        else:
-            widest = max(q - p for p, q in itertools.pairwise([a, *pts, b]))
-            if widest > gap:
-                refused.append(f'V={v}, U={a}..{b}: points up to {widest * vox * 1000:.0f} um apart, ends included')
-        if (v, a, b) in reasons:
-            marked.setdefault(v, np.zeros(shape[2], bool))[a : b + 1] = True
+        elif min(us) > a or max(us) < b:
+            refused.append(f'V={v}, U={a}..{b}: the curve spans only U={min(us):g}..{max(us):g}')
+        marked.setdefault(v, np.zeros(shape[2], bool))[a : b + 1] = True
     if refused:
         shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more' if len(refused) > 6 else '')
-        sidecar.fail(f'"{key}" leaves {len(refused)} flagged or marked range(s) untraced: {shown}. Trace the bone in each densely '
-                     'from its first to its last column (points at most the spec\'s max_gap_um apart)')
+        sidecar.fail(f'"plate_eroded" marks {len(refused)} range(s) the curves "{key}" do not trace: {shown}. Trace the remaining bone through each marked range')
     sections = sorted(int(k) for k in slices)
     eroded = np.zeros(shape[1:], bool)
     for v in range(sections[0], sections[-1] + 1):

@@ -33,8 +33,8 @@ middle of the medial and the lateral compartment of the plateau.
 range and each section's U span are in `plate-faces.json`), and the metaphyseal task checks them again. A worker
 checks the proposal against these: each proposed face lies on the plate's two edges, a few voxels apart, on every section; every
 flagged stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has your own dense points from its first to its last
-column, traced on a zoomed view; no straight line crosses a flagged stretch. `iioc.py` and `metaphysis_roi.py` stop on a stretch left
-sparse; a To check item never replaces the retrace. Past the proposal's spans the worker's faces are traced by hand on zoomed views, not filled
+column, traced on a zoomed view; no straight line crosses a flagged stretch, or any other part of a curve. `iioc.py` and `metaphysis_roi.py` stop on a curve
+with a gap between points over `max_gap_um`; a To check item never replaces the retrace. Past the proposal's spans the worker's faces are traced by hand on zoomed views, not filled
 by a script or run across empty space or up the cortex. The plate is a thin sheet of lower density between denser bone, and it is not
 always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong.
 The check opens every `qc-faces-<n>.jpg` of the task, sheet by sheet: `iioc.py` writes them, one panel per traced section, the proximal face as the
@@ -43,7 +43,7 @@ the plate, stays on the bone from end to end, and does not climb a cortical wall
 
 **Eroded plate.** `iioc/eroded-plate-oa6-1rk-v231.jpg`: OA6-1RK, coronal section V=231, the lab's reading of the plate, traced by Jimmy.
 Left of U~296 two thin lines run along the plate, some 20 to 90 µm apart; to the right the plate has been destroyed, the two lines meet
-and the face follows the remaining bone. Trace what remains with both faces, densely like any flagged stretch, mark the U range where the plate is gone in `plate_eroded` (every traced section it reaches, flagged or not) with a reason (the mark
+and the face follows the remaining bone. Trace what remains with both faces, densely, mark the U range where the plate is gone in `plate_eroded` (every traced section it reaches, flagged or not) with a reason (the mark
 never replaces the points), and raise a To check item naming it ("V=231, U 296 to 338: plate eroded, faces traced on the remaining bone"); a search for a plate there finds another structure. OA6-1RK is eroded
 (bone destruction, possibly age-related) and is not representative: OA6-2RK's plate is the typical one, and a thickness measured
 on OA6-1RK is not a thickness of the plate.
