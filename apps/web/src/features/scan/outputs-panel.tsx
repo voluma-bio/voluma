@@ -13,7 +13,7 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
 /** Each output status on the shared status marks, in the design's words. */
-const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
+export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
   pending: { status: "waiting", word: "Pending" },
   reported: { status: "done", word: "Reported" },
   "to-check": { status: "check", word: "To check" },

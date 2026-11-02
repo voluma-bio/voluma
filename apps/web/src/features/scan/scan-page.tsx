@@ -12,7 +12,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
-import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { ReviewRun, Revision } from "@voluma/contracts/review";
 import type { RunRead } from "@voluma/contracts/run";
 import {
@@ -28,13 +27,7 @@ import {
   useRunStore,
 } from "@voluma/run-view";
 import { Button, EmptyState, ErrorState, LoadingState, ShellPanel, useOpenPanel } from "@voluma/ui";
-import type {
-  GridMark,
-  GridViewerHandle,
-  MarkTool,
-  StructureDisplay,
-  Zyx,
-} from "@voluma/viewer/grid";
+import type { StructureDisplay } from "@voluma/viewer/grid";
 import { CircleAlert, Layers, ListChecks, MessagesSquare, Network, Users } from "lucide-react";
 import {
   lazy,
@@ -49,14 +42,7 @@ import {
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel, useMessage } from "./ai-panel";
-import {
-  gridKeyOf,
-  gridMark,
-  MarksPanel,
-  type ShownGrid,
-  useMarking,
-  type YourMark,
-} from "./marks-panel";
+import { gridKeyOf, MarksPanel, useMarking, type YourMark } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { StudyDock } from "./study-dock";

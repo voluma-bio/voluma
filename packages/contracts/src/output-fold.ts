@@ -26,7 +26,13 @@
 import type { z } from "zod";
 import type { toCheckItemSchema } from "./agent-events";
 import type { RunEvent } from "./events";
-import { applyOutputsChange, entriesOf, type FinalEntry, type FinalOutputs } from "./final-outputs";
+import {
+  applyOutputsChange,
+  entriesOf,
+  type FinalEntry,
+  type FinalOutputs,
+  sectionsOf,
+} from "./final-outputs";
 import type { LinkRole, OutputKind } from "./output-catalog";
 
 type Ev<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>;
@@ -44,6 +50,7 @@ type ToCheckState = z.infer<typeof toCheckItemSchema> & {
 
 export interface OutputVersion {
   version: number;
+  eventId: string;
   /** The name of the thread that reported it (`thread.started`), else the thread id. */
   by: string;
   at: string;
@@ -76,6 +83,7 @@ export interface OutputState {
   declared: boolean;
   /** In the run's final outputs now. */
   final: boolean;
+  section?: string;
   /** The final list's entry, for a final output. */
   entry?: FinalEntry;
   status: OutputStatus;
@@ -116,6 +124,7 @@ function versionOf(e: Ev<"output.published">, names: Map<string, string>): Outpu
   const p = e.payload;
   const v: Omit<OutputVersion, "hash"> = {
     version: p.version,
+    eventId: e.id,
     by: names.get(e.threadId) ?? e.threadId,
     at: e.createdAt,
     path: p.path,
@@ -213,6 +222,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   };
   for (const e of finalEntries) walk(e.id);
 
+  const sectionOf = new Map<string, string>();
+  for (const s of sectionsOf(list)) for (const o of s.outputs) sectionOf.set(o.id, s.title);
   const missing = new Map((list?.missing ?? []).map((m) => [m.id, m.reason]));
   const ids = [...new Set([...finalEntries.map((e) => e.id), ...versions.keys()])];
 
@@ -238,6 +249,7 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       final: !!entry,
       ...((entry?.kind ?? kind?.kind) && { kind: entry?.kind ?? kind?.kind }),
       ...(baseOf && { base: baseOf }),
+      ...(sectionOf.has(id) && { section: sectionOf.get(id) }),
       ...(entry && { entry }),
       status,
       ...(missing.has(id) && !latest && { missingReason: missing.get(id) }),
@@ -267,6 +279,10 @@ export function outputsFold(events: readonly RunEvent[]): OutputsFold {
 /** The run's final outputs with their status, in section order. */
 export const finalOutputs = (events: readonly RunEvent[]): OutputState[] =>
   outputsFold(events).outputs.filter((o) => o.final);
+
+/** An output's latest version, with its hash; undefined while nothing is published. */
+export const latest = (events: readonly RunEvent[], id: string): OutputVersion | undefined =>
+  outputsFold(events).byId.get(id)?.latest;
 
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>
