@@ -15,7 +15,7 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { LinkRole } from "@voluma/contracts/output-catalog";
-import type { OutputStatus, OutputsFold } from "@voluma/contracts/output-fold";
+import type { OutputStatus } from "@voluma/contracts/output-fold";
 import {
   type ChainLink,
   itemsOfVersion,
@@ -27,7 +27,7 @@ import {
 } from "@voluma/run-view";
 import { cx, EmptyState, type Status, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { type Accepting, clockOf, Items, Report, VersionLine } from "./version-report";
 
 /** Each output status on the shared status marks, in the design's words. */
@@ -65,7 +65,6 @@ export type FinalOutputsProps = {
   live: boolean;
   runId: string;
   events: readonly RunEvent[];
-  fold: OutputsFold;
   nameOf: (id: string) => string;
   item: string | undefined;
   onItem: (item: OutputItem) => void;
@@ -262,7 +261,7 @@ const ROLE_ORDER: LinkRole[] = ["on", "context", "input", "base"];
 
 /** The value open in place: what it is, its version, report and items, and what it rests on. */
 function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
-  const { fold, open, nameOf } = props;
+  const { open, nameOf } = props;
   const [report, setReport] = useState(false);
   const trail = row.trail;
   const latest = row.state.latest;

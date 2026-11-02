@@ -6,6 +6,7 @@
  * run is variant B plus an activity line".
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { RunState } from "@voluma/contracts/run";
 import { useNow, whenText } from "@voluma/run-view";
 import { StatusMark } from "@voluma/ui";
 import { useMemo } from "react";
@@ -19,14 +20,9 @@ function activityOf(events: readonly RunEvent[]): string | undefined {
   return undefined;
 }
 
-export function RunNews({
-  events,
-  waiting,
-}: {
-  events: readonly RunEvent[];
-  /** Queued or held for keys: not running yet. */
-  waiting: boolean;
-}) {
+export function RunNews({ events, state }: { events: readonly RunEvent[]; state: RunState }) {
+  // Queued or held for keys: not running yet.
+  const waiting = state.status === "queued" || state.status === "awaiting-keys";
   const last = events.at(-1)?.createdAt;
   const activity = useMemo(() => activityOf(events), [events]);
   return (

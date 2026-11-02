@@ -192,6 +192,28 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
   };
 }
 
+/**
+ * What the centre shows besides the selected value: `opened`, an output open on its trail (one
+ * opened from Other outputs closes once the run ends and that list goes), else while the run goes
+ * `standIn`, the nearest published link of the value's chain when the value is pending.
+ */
+export function inViewOf(
+  review: OutputsReview,
+  selected: OutputRow | undefined,
+  opened: OutputRow | undefined,
+  live: boolean,
+): { trailOpen?: OutputRow; standIn?: OutputRow } {
+  const onTrail = !!opened && !!selected?.trail.some((t) => t.id === opened.id);
+  if (opened && opened.id !== selected?.id && (live || onTrail || !review.others.includes(opened)))
+    return { trailOpen: opened };
+  if (!live || selected?.state.status !== "pending") return {};
+  const standIn = selected.chain
+    .flat()
+    .map((l) => review.rows.get(l.id))
+    .find((r) => r?.state.latest);
+  return standIn ? { standIn } : {};
+}
+
 // ---------------------------------------------------------------------------------------------
 // The scene
 

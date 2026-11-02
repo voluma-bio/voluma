@@ -23,6 +23,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import { outputsFold } from "@voluma/contracts/output-fold";
 import type { RunRead } from "@voluma/contracts/run";
 import {
+  inViewOf,
   isLive,
   Markdown,
   type OutputItem,
@@ -186,13 +187,7 @@ export function OutputsReview({
     review.undeclared[0];
   const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
   const live = run.state.status !== "ended";
-  // One opened from Other outputs, off the value's trail, closes when the run ends and the list goes.
-  const offList =
-    !live &&
-    !!opened &&
-    review.others.includes(opened) &&
-    !selected?.trail.some((t) => t.id === opened.id);
-  const trailOpen = opened && opened.id !== selected?.id && !offList ? opened : undefined;
+  const { trailOpen, standIn } = inViewOf(review, selected, opened, live);
   // Picking any output: a listed value opens in place; anything else under the value resting on it.
   const show = useCallback(
     (id: string) => {
@@ -204,14 +199,6 @@ export function OutputsReview({
     },
     [listed, restingOn, select],
   );
-  // While the run goes, a value not in yet (nor missing) shows the nearest link of its chain that is.
-  const standIn =
-    live && !trailOpen && selected?.state.status === "pending"
-      ? selected.chain
-          .flat()
-          .map((l) => review.rows.get(l.id))
-          .find((r) => r?.state.latest)
-      : undefined;
   const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
   const centre: Centre | undefined =
@@ -440,7 +427,6 @@ export function OutputsReview({
           badgeLabel={`${needing} need you`}
           tools={
             <>
-              {/* While the run goes, only once something needs you: the head also counts what is in. */}
               {(!live || needing > 0 || onlyNeeds) && (
                 <Button
                   size="sm"
@@ -458,19 +444,16 @@ export function OutputsReview({
                 aria-pressed={centre === "run"}
                 aria-keyshortcuts="w"
                 onClick={toggleRun}
+                title={live ? "Whole run (W)" : undefined}
               >
                 <Workflow aria-hidden />
-                Whole run
+                {/* Its icon alone while the run goes: the head also counts what is in. */}
+                <span className={live ? "sr-only" : undefined}>Whole run</span>
               </Button>
             </>
           }
         >
-          {live && (
-            <RunNews
-              events={events}
-              waiting={run.state.status === "queued" || run.state.status === "awaiting-keys"}
-            />
-          )}
+          {live && <RunNews events={events} state={run.state} />}
           <FinalOutputs
             review={review}
             selected={selected}
@@ -481,7 +464,6 @@ export function OutputsReview({
             live={live}
             runId={run.id}
             events={events}
-            fold={fold}
             nameOf={nameOf}
             item={item?.key}
             onItem={(i) => {
