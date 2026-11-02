@@ -1,22 +1,25 @@
 /**
- * The scan review of a run of the agent loop (Q24, mockup C): the conversation with the run's main
- * AI on the left (read-only until researchers can write to it on this kind of run); in the centre
- * the output in view on four panes (`QuadViewer`) with the tool bar docked under them, or a file
- * output, the whole run's graph (W) or the run's agents in the panes' place; on the right the
- * final outputs above the trail of the one picked ("How the AI got here"). Everything comes from
- * the run's stream as it arrives: the output fold (`outputsFold`), its converted assets and the
- * conversation, so statuses and values update live.
+ * The scan review of a run of the agent loop (Q24, mockup C), in the shell's two side panels. The
+ * left side's tabs: the conversation with the run's main AI (the default; read-only until
+ * researchers can write to it on this kind of run, badged while main waits on an approval) and
+ * Samples (the shared tree). In the centre the output in view on four panes (`QuadViewer`) with
+ * the tool bar docked under them, or a file output, the whole run's graph (W) or the run's agents
+ * in the panes' place. On the right, Final outputs: the picked value opens in place with what it
+ * rests on. Everything comes from the run's stream as it arrives: the output fold
+ * (`outputsFold`), its converted assets and the conversation, so statuses and values update live.
  *
- * The URL keeps `output` (the output picked in Final outputs, the trail's root), `trail` (an
- * output of its trail whose report is open and which the panes show), `item` (the To check item
- * whose place the panes show) and `centre` (`run` for the whole run, `agents`). The panes' layout
+ * The URL keeps `output` (the value picked in Final outputs), `trail` (an output it rests on,
+ * near or further back, whose report is open and which the panes show), `item` (the To check
+ * item whose place the panes show) and `centre` (`run` for the whole run, `agents`). An `output`
+ * that is not a final value opens under the first final value resting on it. The panes' layout
  * is page state: it holds while another output, on another grid, is shown.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, acceptToCheck, saveView } from "@voluma/api-client";
-import { studyQuery } from "@voluma/api-client/query";
+import { studiesQuery, studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
+import type { RunEvent } from "@voluma/contracts/events";
 import { outputsFold } from "@voluma/contracts/output-fold";
 import type { RunRead } from "@voluma/contracts/run";
 import {
@@ -28,7 +31,9 @@ import {
   outputName,
   outputsReview,
   reviewAssetsOf,
+  sampleTree,
   shownOf,
+  trailOf,
   undrawn,
   useEvents,
 } from "@voluma/run-view";
@@ -36,11 +41,13 @@ import {
   Button,
   Chip,
   EmptyState,
+  ErrorState,
   IconButton,
   LoadingState,
   Menu,
   MenuItem,
-  ShellPanel,
+  SampleTree,
+  SidePanel,
   StatusMark,
   useFullView,
 } from "@voluma/ui";
@@ -60,8 +67,8 @@ import {
   ChevronDown,
   ChevronLeft,
   ListTree,
-  MessagesSquare,
-  Network,
+  MessageSquare,
+  Sigma,
   Workflow,
   X,
 } from "lucide-react";
@@ -75,14 +82,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { useOutletContext, useSearchParams } from "react-router";
+import { Link, useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { describe, QUAD_TOOLS, useMarking } from "./marks-panel";
-import { type Accepting, OUTPUT_STATUS, OutputsPanel } from "./outputs-panel";
+import { FinalOutputs, needingYou, OUTPUT_STATUS } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { RunAlert, ScanHeading } from "./scan-header";
-import { TrailPanel } from "./trail-panel";
+import type { Accepting } from "./version-report";
 
 // three.js and the zarr reader load only once there is an output to show.
 const SceneViewer = lazy(() => import("./viewer").then((m) => ({ default: m.SceneViewer })));
@@ -101,8 +108,6 @@ export function OutputsReview({
   reopen: () => void;
 }) {
   const me = useOutletContext<Me>();
-  // Under 1440 px, two panels leave the panes too narrow: the conversation waits for C (I is Probe).
-  const [wide] = useState(() => globalThis.innerWidth >= 1440);
   const study = useQuery({
     ...studyQuery(run.studyId),
     refetchInterval: (query) =>
@@ -161,15 +166,36 @@ export function OutputsReview({
       ),
     [setParams],
   );
-  // The trail's root: the URL's, else the first final output with an open item, else the first.
+  // The value open in place: the URL's, else the first final output with an open item, else the
+  // first. An output that is not in the list opens under the first value resting on it.
   const finals = review.sections.flatMap((s) => s.rows);
+  const listed = [...finals, ...review.undeclared];
+  const restingOn = useCallback(
+    (id: string) => listed.find((r) => trailOf(fold, r.id).some((t) => t.id === id)),
+    [listed, fold],
+  );
+  const asked = params.get("output") ?? "";
+  const askedRow = listed.find((r) => r.id === asked);
+  const under = !askedRow && asked ? restingOn(asked) : undefined;
   const selected =
-    review.rows.get(params.get("output") ?? "") ??
+    askedRow ??
+    under ??
     finals.find((r) => r.items.some((i) => !i.resolved)) ??
     finals[0] ??
     review.undeclared[0];
-  const opened = review.rows.get(params.get("trail") ?? "");
+  const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
   const trailOpen = opened && opened.id !== selected?.id ? opened : undefined;
+  // Picking any output: a listed value opens in place; anything else under the value resting on it.
+  const show = useCallback(
+    (id: string) => {
+      if (listed.some((r) => r.id === id)) select({ output: id, trail: null, item: null });
+      else {
+        const value = restingOn(id);
+        select({ output: value?.id ?? id, trail: id, item: null });
+      }
+    },
+    [listed, restingOn, select],
+  );
   const inView = trailOpen ?? selected;
   const centreParam = params.get("centre");
   const centre: Centre | undefined =
@@ -181,6 +207,10 @@ export function OutputsReview({
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
   const accepting = useAcceptToCheck(run, reopen);
+  const [onlyNeeds, setOnlyNeeds] = useState(false);
+  const needing = needingYou(review).size;
+  const [leftTab, setLeftTab] = useState("conversation");
+  const waiting = useMemo(() => waitingApprovals(events), [events]);
   const live = run.state.status !== "ended";
   const marking = useMarking(QUAD_TOOLS);
   const views = useSavedViews(run, reopen);
@@ -294,60 +324,94 @@ export function OutputsReview({
         study={study.data}
         progress={{ ...review.progress, noun: "outputs reported" }}
       />
-      <ShellPanel
-        id="scan-ai"
-        side="left"
-        group="scan"
-        label="The AI"
-        icon={<MessagesSquare />}
-        shortcut="c"
-        defaultOpen={wide}
-      >
-        <MainConversation live={live} nameOf={nameOf} marking={marking} />
-      </ShellPanel>
-      <ShellPanel
-        id="scan-outputs"
-        side="right"
-        label="Final outputs"
-        icon={<ListTree />}
-        count={review.open}
-        defaultOpen
-      >
-        <OutputsPanel
-          review={review}
-          selected={selected}
-          onSelect={(id) => select({ output: id, item: null, trail: null })}
-          live={live}
+      <div className="flex min-h-0 flex-1">
+        <SidePanel
+          side="left"
+          tab={leftTab}
+          onTabChange={setLeftTab}
+          tabs={[
+            {
+              id: "conversation",
+              label: "Conversation",
+              icon: <MessageSquare />,
+              badge: waiting || undefined,
+              badgeLabel: "main is waiting on you",
+              content: <MainConversation live={live} nameOf={nameOf} marking={marking} />,
+            },
+            {
+              id: "samples",
+              label: "Samples",
+              icon: <ListTree />,
+              content: <Samples studyId={run.studyId} runId={run.id} />,
+            },
+          ]}
         />
-      </ShellPanel>
-      <ShellPanel
-        id="scan-trail"
-        side="right"
-        label="How the AI got here"
-        icon={<Network />}
-        defaultOpen
-        tools={
-          <Button
-            size="sm"
-            variant={centre === "run" ? "secondary" : "ghost"}
-            aria-pressed={centre === "run"}
-            aria-keyshortcuts="w"
-            onClick={() => select({ centre: centre === "run" ? null : "run" })}
-          >
-            <Workflow aria-hidden />
-            Whole run
-          </Button>
-        }
-      >
-        {selected ? (
-          <TrailPanel
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+          <RunAlert run={run} userId={me.userId} stale={stale} />
+          <SceneBar
+            centre={centre}
+            root={selected}
+            inView={inView}
+            trailOpen={!!trailOpen}
+            onBack={() => select({ trail: null, item: null })}
+            onCentre={(c) => select({ centre: c })}
+            views={inView ? views.of(inView.id) : []}
+            viewShown={views.shown}
+            viewError={views.error}
+            onView={views.open}
+          />
+          <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
+            {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
+            <div className="h-full [&[hidden]]:hidden" hidden={!!centre}>
+              {panes}
+            </div>
+            {centre === "run" && (
+              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
+            )}
+            {centre === "agents" && <RunAgents events={events} fold={fold} nameOf={nameOf} />}
+          </div>
+        </div>
+        <SidePanel
+          side="right"
+          title="Final outputs"
+          icon={<Sigma />}
+          badge={needing || undefined}
+          badgeLabel={`${needing} need you`}
+          tools={
+            <>
+              <Button
+                size="sm"
+                variant={onlyNeeds ? "secondary" : "ghost"}
+                aria-pressed={onlyNeeds}
+                disabled={needing === 0 && !onlyNeeds}
+                onClick={() => setOnlyNeeds(!onlyNeeds)}
+              >
+                Needs you <span className="font-semibold">{needing}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant={centre === "run" ? "secondary" : "ghost"}
+                aria-pressed={centre === "run"}
+                aria-keyshortcuts="w"
+                onClick={() => select({ centre: centre === "run" ? null : "run" })}
+              >
+                <Workflow aria-hidden />
+                Whole run
+              </Button>
+            </>
+          }
+        >
+          <FinalOutputs
+            review={review}
+            selected={selected}
+            onSelect={(id) => select({ output: id, item: null, trail: null })}
+            open={trailOpen?.id}
+            onOpen={(id) => select({ trail: id, item: null, centre: null })}
+            onlyNeeds={onlyNeeds}
+            live={live}
             runId={run.id}
             events={events}
             fold={fold}
-            root={selected}
-            open={trailOpen?.id}
-            onOpen={(id) => select({ trail: id, item: null, centre: null })}
-            onReroot={(id) => select({ output: id, trail: null, item: null })}
             nameOf={nameOf}
             item={item?.key}
             onItem={(i) => {
@@ -356,43 +420,7 @@ export function OutputsReview({
             }}
             accepting={accepting}
           />
-        ) : (
-          <div className="p-4">
-            <EmptyState title="Nothing picked">
-              {live ? "The outputs appear once the AI has set them up." : undefined}
-            </EmptyState>
-          </div>
-        )}
-      </ShellPanel>
-      <div className="flex min-h-0 flex-1 flex-col bg-background">
-        <RunAlert run={run} userId={me.userId} stale={stale} />
-        <SceneBar
-          centre={centre}
-          root={selected}
-          inView={inView}
-          trailOpen={!!trailOpen}
-          onBack={() => select({ trail: null, item: null })}
-          onCentre={(c) => select({ centre: c })}
-          views={inView ? views.of(inView.id) : []}
-          viewShown={views.shown}
-          viewError={views.error}
-          onView={views.open}
-        />
-        <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
-          {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
-          <div className="h-full [&[hidden]]:hidden" hidden={!!centre}>
-            {panes}
-          </div>
-          {centre === "run" && (
-            <RunGraphView
-              fold={fold}
-              selected={selected?.id}
-              rows={review.rows}
-              onPick={(id) => select({ output: id, trail: null, item: null })}
-            />
-          )}
-          {centre === "agents" && <RunAgents events={events} fold={fold} nameOf={nameOf} />}
-        </div>
+        </SidePanel>
       </div>
     </>
   );
@@ -429,7 +457,7 @@ function SceneBar({
     return (
       <header className={bar}>
         <h2 className="font-semibold">
-          {centre === "run" ? "How the AI got here: the whole run" : "Agents on this run"}
+          {centre === "run" ? "The whole run" : "Agents on this run"}
         </h2>
         <span className="flex-1" />
         <Button size="sm" variant="ghost" onClick={() => onCentre(null)} aria-keyshortcuts="Escape">
@@ -502,10 +530,6 @@ function SceneBar({
       )}
       <Button size="sm" variant="ghost" onClick={() => onCentre("agents")}>
         Agents
-      </Button>
-      <Button size="sm" variant="ghost" onClick={() => onCentre("run")} aria-keyshortcuts="w">
-        <Workflow aria-hidden />
-        Whole run
       </Button>
     </header>
   );
@@ -694,7 +718,7 @@ function MainConversation({
         )}
         <p>
           You can't write to the AI on this run yet. Corrections through the AI come in a later
-          version; until then, accept To check items in How the AI got here.
+          version; until then, accept To check items in Final outputs.
         </p>
       </div>
     </div>
@@ -785,6 +809,41 @@ function useSavedViews(run: { id: string; example: boolean }, reopen: () => void
       setRestore({ grid, state });
     },
   };
+}
+
+/** Gated calls main is holding for the researcher: requested, not yet given or declined. */
+function waitingApprovals(events: readonly RunEvent[]): number {
+  const open = new Set<string>();
+  for (const e of events)
+    if (e.type === "approval.requested") open.add(e.payload.toolCallId);
+    else if (e.type === "approval.given" || e.type === "approval.declined")
+      open.delete(e.payload.toolCallId);
+  return open.size;
+}
+
+/** The Samples tab: every study's samples, this run's study open and this sample highlighted. */
+function Samples({ studyId, runId }: { studyId: string; runId: string }) {
+  const studies = useQuery(studiesQuery());
+  const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);
+  if (studies.isError)
+    return (
+      <ErrorState
+        className="m-3"
+        title="Couldn't load the samples"
+        onRetry={() => void studies.refetch()}
+      >
+        Check your connection, then try again.
+      </ErrorState>
+    );
+  if (!studies.data) return <LoadingState label="Loading the samples" rows={4} className="m-3" />;
+  return (
+    <SampleTree
+      studies={tree}
+      studyId={studyId}
+      sampleId={runId}
+      renderLink={(href, props) => <Link to={href} {...props} />}
+    />
+  );
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

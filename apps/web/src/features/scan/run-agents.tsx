@@ -7,7 +7,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { OutputsFold } from "@voluma/contracts/output-fold";
 import { workersOf } from "@voluma/run-view";
 import { useMemo } from "react";
-import { clockOf } from "./trail-panel";
+import { clockOf } from "./version-report";
 
 const NOW: Record<string, string> = {
   running: "Working",
