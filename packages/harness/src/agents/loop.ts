@@ -108,6 +108,8 @@ export interface AgentLoopOptions {
   bash: BashRuntime;
   /** Releases an agent's commands and sandbox once it has really ended. */
   release(threadId: string): Promise<void>;
+  /** Keeps what an agent leaves in its `/work` folder past the folder's expiry (`keep-notes.ts`). */
+  keepNotes(agent: { name: string; role: string }): Promise<void>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
   config?: Partial<AgentLoopConfig>;
@@ -357,6 +359,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         closedEndId(r.id),
       );
       await o.release(r.id);
+      await o.keepNotes({ name: r.name, role: r.place });
       return true;
     }
     return false;
@@ -537,7 +540,11 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   async function step(): Promise<Step> {
     await recorder.flush(); // a thread's end is stored before it is read
     const d = derive();
-    if (d.rootEnded) return "done";
+    if (d.rootEnded) {
+      // The run is over: main's plan, and the notes of workers it ended without their own close.
+      for (const r of d.records.values()) await o.keepNotes({ name: r.name, role: r.place });
+      return "done";
+    }
     checkFatal(d);
     if (!d.main) {
       await startMain(d);

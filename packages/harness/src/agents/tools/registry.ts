@@ -32,7 +32,7 @@ export const AGENT_TOOL_NAMES = [
 ] as const;
 
 const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) => Tool> = {
-  bash: ({ layout, bash }) => bashTool(layout, true, bash),
+  bash: ({ layout, bash }) => bashTool(layout, true, bash, false),
   bash_manage: ({ bash }) => bashManageTool(bash),
   segment_sam: ({ layout }) => segmentSamTool(layout),
   read: ({ layout, files }, names) =>

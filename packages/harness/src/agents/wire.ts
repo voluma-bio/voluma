@@ -16,6 +16,7 @@ import type { Recorder } from "../recorder";
 import type { ModelSetup, ProviderError } from "../run-loop";
 import type { SandboxSession } from "../sandbox-session";
 import type { Threads } from "../threads";
+import { keepNotes } from "./keep-notes";
 import { type AgentLoopConfig, agentLoop, interruptedResult } from "./loop";
 import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
@@ -126,6 +127,7 @@ async function runAgents(
     runFiles: files,
     bash: o.bash,
     release: o.release,
+    keepNotes: (agent) => keepNotes(o.publish, o.runId, agent, o.signal),
     providerError: o.providerError,
     config: o.config,
     signal: o.signal,
