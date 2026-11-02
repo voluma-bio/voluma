@@ -7,15 +7,16 @@
  *
  * Both directories hold skills, `skills/<name>/SKILL.md` with optional `references/` and
  * `resources/`. `core/` also holds the role files, `agents/<role>.md`, the same for every
- * workflow; the workflow's directory adds `outputs.json` and `tasks.json`. `core/convert/`
+ * workflow; the workflow's directory adds `outputs.json` and `tasks.json`, and `outputs.yaml` when it has one. `core/convert/`
  * (the review converter, run by the runner's convert sandbox) is snapshotted too; nothing else
  * in either directory is.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
-import { parse as parseYaml } from "yaml";
+import { isScalar, parseDocument, parse as parseYaml, visit } from "yaml";
 import { z } from "zod";
 import {
   type AgentDefinition,
@@ -38,7 +39,11 @@ export interface LoadOptions {
   commit: string;
   /** The tool names a role may list (the harness's tool registry). */
   knownTools: readonly string[];
+  /** The loop the run is pinned to; only `agents` parses `outputs.yaml`. Default `tasks`. */
+  harness?: Harness;
 }
+
+export type Harness = "tasks" | "agents";
 
 /** Every run's shared directory: the role files and the generic skills. */
 const CORE = "workflows/core";
@@ -74,7 +79,7 @@ const agentSchema = z.strictObject({
 
 /** Written last, so a snapshot cut short is redone, not trusted; its body is the commit. */
 const DONE = ".snapshot-done";
-const FILES = ["outputs.json", "tasks.json"];
+const FILES = ["outputs.json", "outputs.yaml", "tasks.json"];
 
 /** Parses the `---` block against `schema`; `body` is what follows it, trimmed. */
 function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
@@ -208,7 +213,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   for (const { key } of (await store.list(prefix)).objects) {
     const path = key.slice(prefix.length);
     if (
-      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|^workflows\/core\/agents\/[^/]+\.md$/.test(
+      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|(^|\/)outputs\.yaml$|^workflows\/core\/agents\/[^/]+\.md$/.test(
         path,
       ) ||
       scriptOf(path)
@@ -280,6 +285,32 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     );
   }
 
+  // Only the agent loop reads the catalog, so a later change to its schema never stops a task-loop run resuming.
+  const yaml = options.harness === "agents" ? texts.get(`${dir}/outputs.yaml`) : undefined;
+  let outputCatalog: OutputCatalog | undefined;
+  if (yaml !== undefined) {
+    const file = `${dir}/outputs.yaml`;
+    const doc = parseDocument(yaml);
+    if (doc.errors[0]) throw new WorkflowParseError(file, `invalid YAML: ${doc.errors[0].message}`);
+    // PyYAML (YAML 1.1) reads a bare `on` key as `True`; the file and its copies are read from Python.
+    visit(doc, {
+      Pair(_, pair) {
+        if (isScalar(pair.key) && pair.key.type === "PLAIN" && pair.key.value === "on")
+          throw new WorkflowParseError(file, 'write the key as "on": quoted');
+      },
+    });
+    const data: unknown = doc.toJS();
+    const catalog = outputCatalogSchema.safeParse(data);
+    if (!catalog.success) {
+      const issue = catalog.error.issues[0];
+      throw new WorkflowParseError(
+        `${dir}/outputs.yaml`,
+        `${issue?.path.join(".")}: ${issue?.message}`,
+      );
+    }
+    outputCatalog = catalog.data;
+  }
+
   const toolIndex: ToolIndexEntry[] = [];
   for (const skill of skills) {
     const scripts = [...texts.keys()].filter((p) =>
@@ -329,6 +360,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     dir,
     commit: await getText(store, `${prefix}${DONE}`),
     files: files.data,
+    ...(outputCatalog && { outputCatalog }),
     skills,
     toolIndex,
     agents: { ...agents, main },
