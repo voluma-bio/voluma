@@ -349,6 +349,9 @@ export function pgRunQueue(
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
     const harness = starts.harness ?? defaultHarness;
+    // Internal until the agent loop ships.
+    if (harness === "agents" && (caller.guest || starts.keys))
+      throw new HTTPException(403, { message: "The agent loop is not open to guests." });
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limitsOf(reader.labId), used, { credentials });
@@ -541,11 +544,12 @@ export function pgRunQueue(
      * One transaction: sweep expired leases, send the queued visitor runs whose keys this
      * process doesn't hold (another process took the start, or it restarted) to
      * `awaiting-keys`, then take the oldest queued run of the org served longest ago
-     * that the limits allow, with its keys if it is a visitor run. The held ids are read
+     * that the limits allow and whose loop the runner lists (a run's `harness`, null: `tasks`),
+     * with its keys if it is a visitor run. The held ids are read
      * under the lock: a start that holds its keys before it commits is either in them or
      * not yet queued.
      */
-    claim: (runnerId: string) =>
+    claim: (runnerId: string, harnesses: readonly Harness[]) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
         await tx
@@ -563,7 +567,12 @@ export function pgRunQueue(
         const queued = await tx
           .select()
           .from(runs)
-          .where(eq(runs.state, "queued"))
+          .where(
+            and(
+              eq(runs.state, "queued"),
+              inArray(sql`coalesce(${runs.harness}, 'tasks')`, [...harnesses]),
+            ),
+          )
           .orderBy(
             sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
             asc(runs.createdAt),

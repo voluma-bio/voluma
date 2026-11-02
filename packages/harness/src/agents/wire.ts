@@ -9,13 +9,8 @@ import type { AgentsDefinition } from "@voluma/workflow/definition";
 import type { BashRuntime } from "../bash-runtime";
 import type { ThreadLayout } from "../layout";
 import { runLayout } from "../layout";
-import type { Section } from "../loop-shell";
-import type { Files } from "../ports/files";
-import type { Publish } from "../ports/publish";
+import type { Shared, Wire } from "../loop-shell";
 import type { Recorder } from "../recorder";
-import type { ModelSetup, ProviderError } from "../run-loop";
-import type { SandboxSession } from "../sandbox-session";
-import type { Threads } from "../threads";
 import { keepNotes } from "./keep-notes";
 import { type AgentLoopConfig, agentLoop, interruptedResult } from "./loop";
 import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
@@ -33,7 +28,7 @@ export interface AgentsWireOptions {
   gateway: boolean;
 }
 
-export function agentsWire(o: AgentsWireOptions) {
+export function agentsWire(o: AgentsWireOptions): Wire {
   const { recorder, definition } = o;
   const roles = Object.fromEntries(
     Object.values(definition.agents).map(
@@ -70,7 +65,6 @@ export function agentsWire(o: AgentsWireOptions) {
       peers: [...agentLog(recorder.events()).records.values()].map((r) => r.name),
     });
   return {
-    convert: layout.convert,
     sandboxOf: (threadId: string): ThreadLayout => {
       const r = recordOf(threadId);
       return forAgent(r.name, r.place);
@@ -81,38 +75,18 @@ export function agentsWire(o: AgentsWireOptions) {
       const end = agentLog(recorder.events()).records.get(threadId)?.end?.status;
       return end !== "closed" && end !== "cancelled";
     },
-    run: (r: AgentsRun) => runAgents({ ...r, definition }, forAgent),
+    run: (shared) => runAgents(shared, definition, forAgent),
   };
 }
 
 export type AgentsWire = ReturnType<typeof agentsWire>;
 
-/** What the shell hands the agent loop, and the host's settings it passes through. */
-export interface AgentsRun {
-  runId: string;
-  rootThreadId: string;
-  recorder: Recorder;
-  selectedOutputs: readonly string[] | undefined;
-  notes: string | undefined;
-  model(role: string, recorded: string | undefined): ModelSetup;
-  config?: Partial<AgentLoopConfig>;
-  providerError?(error: string): ProviderError | undefined;
-  files: Files;
-  publish: Publish;
-  session: SandboxSession;
-  bash: BashRuntime;
-  /** Releases a thread's commands and sandbox. */
-  release(threadId: string): Promise<void>;
-  pool: Threads;
-  section: Section;
-  signal: AbortSignal;
-}
-
 async function runAgents(
-  o: AgentsRun & { definition: AgentsDefinition },
+  o: Shared,
+  definition: AgentsDefinition,
   forAgent: (name: string, role: "main" | "worker") => ThreadLayout,
 ): Promise<void> {
-  const { definition, recorder } = o;
+  const { recorder } = o;
   const catalog = definition.outputCatalog;
   const files = runFiles({ runId: o.runId, recorder, files: o.files, signal: o.signal });
   await agentLoop({

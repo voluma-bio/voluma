@@ -5,19 +5,13 @@
  * by every loop (`supervise-run.ts`).
  */
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
-import type { BashRuntime } from "./bash-runtime";
-import { type RunLayout, type RunLayoutOptions, runLayout, type ThreadLayout } from "./layout";
-import type { Section } from "./loop-shell";
+import { type RunLayout, type RunLayoutOptions, runLayout } from "./layout";
+import type { Shared, Wire } from "./loop-shell";
 import { keepOutputs } from "./outputs-backup";
-import type { Evidence } from "./ports/evidence";
-import type { Files } from "./ports/files";
-import type { Outputs } from "./ports/outputs";
 import type { Recorder } from "./recorder";
-import { type LoopConfig, type ModelSetup, type ProviderError, runLoop } from "./run-loop";
-import type { SandboxSession } from "./sandbox-session";
+import { runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { threadLog } from "./thread-log";
-import type { Threads } from "./threads";
 import { buildTools } from "./tools/registry";
 
 /**
@@ -42,15 +36,17 @@ export interface TasksWireOptions {
   inputPrefix: string;
   recorder: Recorder;
   definition: WorkflowDefinition;
+  /** The plan computed from the user's selection; the run starts with it (the main agent may change it). */
+  plan: readonly PlanTask[];
   /** Whether a gateway is configured (`segment_sam` is held only where it can be used). */
   gateway: boolean;
 }
 
 /**
  * The task loop's half of the run: its layout (sandbox of each thread, from the thread's record)
- * and `run`, which assembles the task runtime and the loop on the shared shell's pool and lock.
+ * and `run`, which assembles the task runtime and the loop on the shell's pool and lock.
  */
-export function tasksWire(o: TasksWireOptions) {
+export function tasksWire(o: TasksWireOptions): Wire {
   const { recorder, definition } = o;
   const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
   const layout = runLayout({
@@ -68,45 +64,21 @@ export function tasksWire(o: TasksWireOptions) {
     return record;
   };
   return {
-    /** The review-asset converter's sandbox. */
-    convert: layout.convert,
-    /** A thread's sandbox; its `thread.started` is stored before its first sandbox call. */
-    sandboxOf: (threadId: string): ThreadLayout => layout.forThread(recordOf(threadId)),
-    nameOf: (threadId: string) => recordOf(threadId).name,
-    /** A task thread releases its sandbox at each end. */
+    sandboxOf: (threadId) => layout.forThread(recordOf(threadId)),
+    nameOf: (threadId) => recordOf(threadId).name,
+    // A task thread releases its sandbox at each end.
     keepsSandbox: () => false,
-    run: (r: TasksRun) => runTasks({ ...r, definition }, layout),
+    run: (shared) => runTasks(shared, definition, o.plan, layout),
   };
 }
 
-export type TasksWire = ReturnType<typeof tasksWire>;
-
-/** What the shell hands the task loop, and the host's settings it passes through. */
-export interface TasksRun {
-  runId: string;
-  rootThreadId: string;
-  recorder: Recorder;
-  plan: readonly PlanTask[];
-  selectedOutputs: readonly string[] | undefined;
-  notes: string | undefined;
-  model(role: string, recorded: string | undefined): ModelSetup;
-  config?: Partial<LoopConfig>;
-  providerError?(error: string): ProviderError | undefined;
-  files: Files;
-  evidence: Evidence;
-  outputs: Outputs;
-  session: SandboxSession;
-  bash: BashRuntime;
-  pool: Threads;
-  section: Section;
-  signal: AbortSignal;
-}
-
 async function runTasks(
-  o: TasksRun & { definition: WorkflowDefinition },
+  o: Shared,
+  definition: WorkflowDefinition,
+  plan: readonly PlanTask[],
   layout: RunLayout,
 ): Promise<void> {
-  const { runId, rootThreadId, recorder, definition, session, pool, signal } = o;
+  const { runId, rootThreadId, recorder, session, pool, bash, signal } = o;
   const main = definition.agents.main;
   // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
   await keepOutputs({
@@ -125,7 +97,7 @@ async function runTasks(
     layoutOf: layout.forThread,
     sandbox: (id, opts) => session.get(id, opts),
     rootThreadId,
-    plan: o.plan,
+    plan,
     abortThread: (id) => {
       if (pool.started(id)) pool.abort(id);
     },
@@ -146,7 +118,7 @@ async function runTasks(
     tools: (thread, agents) =>
       buildTools(thread.tools, {
         layout: thread,
-        bash: o.bash,
+        bash,
         files: o.files,
         runtime,
         main: {
