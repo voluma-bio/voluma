@@ -13,7 +13,6 @@ export { ThreadNavigationProvider } from "./chat/thread-navigation";
 export { TaskInfo } from "./info";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
-export { type ChainLink, restsOnChain } from "./outputs-chain";
 export {
   itemsOfVersion,
   type OutputItem,
@@ -27,10 +26,12 @@ export {
   undrawn,
 } from "./outputs-model";
 export {
+  type ChainLink,
   type GraphNode,
   madeFromIt,
   ROLE_WORD,
   type RunGraph,
+  resolveLink,
   runGraph,
   type TrailRow,
   trailOf,

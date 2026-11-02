@@ -30,10 +30,8 @@ import {
   outputBlocks,
   outputName,
   outputsReview,
-  restsOnChain,
   reviewAssetsOf,
   shownOf,
-  trailOf,
   undrawn,
   useEvents,
 } from "@voluma/run-view";
@@ -89,6 +87,7 @@ import { FinalOutputs, needingYou, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
+import { RunNews } from "./run-news";
 import { Samples } from "./samples-tab";
 import { RunAlert, ScanHeading } from "./scan-header";
 import type { Accepting } from "./version-report";
@@ -173,8 +172,8 @@ export function OutputsReview({
   const finals = review.sections.flatMap((s) => s.rows);
   const listed = [...finals, ...review.undeclared];
   const restingOn = useCallback(
-    (id: string) => listed.find((r) => trailOf(fold, r.id).some((t) => t.id === id)),
-    [listed, fold],
+    (id: string) => listed.find((r) => r.trail.some((t) => t.id === id)),
+    [listed],
   );
   const asked = params.get("output") ?? "";
   const askedRow = listed.find((r) => r.id === asked);
@@ -186,7 +185,14 @@ export function OutputsReview({
     finals[0] ??
     review.undeclared[0];
   const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
-  const trailOpen = opened && opened.id !== selected?.id ? opened : undefined;
+  const live = run.state.status !== "ended";
+  // One opened from Other outputs, off the value's trail, closes when the run ends and the list goes.
+  const offList =
+    !live &&
+    !!opened &&
+    review.others.includes(opened) &&
+    !selected?.trail.some((t) => t.id === opened.id);
+  const trailOpen = opened && opened.id !== selected?.id && !offList ? opened : undefined;
   // Picking any output: a listed value opens in place; anything else under the value resting on it.
   const show = useCallback(
     (id: string) => {
@@ -198,11 +204,10 @@ export function OutputsReview({
     },
     [listed, restingOn, select],
   );
-  const live = run.state.status !== "ended";
-  // While the run goes, a value not in yet shows the nearest link of its chain that is.
+  // While the run goes, a value not in yet (nor missing) shows the nearest link of its chain that is.
   const standIn =
-    live && !trailOpen && selected && !selected.state.latest
-      ? restsOnChain(catalog, fold, selected.id)
+    live && !trailOpen && selected?.state.status === "pending"
+      ? selected.chain
           .flat()
           .map((l) => review.rows.get(l.id))
           .find((r) => r?.state.latest)
@@ -294,7 +299,7 @@ export function OutputsReview({
   }, [select, toggleRun]);
 
   let panes: React.ReactNode;
-  if (live && !inView?.state.latest)
+  if (live && inView?.state.status !== "missing" && !inView?.state.latest)
     panes = (
       <Centered>
         <EmptyState title="The run is going">
@@ -305,7 +310,7 @@ export function OutputsReview({
   else if (!inView)
     panes = (
       <Centered>
-        <EmptyState title="No outputs were recorded" />
+        <EmptyState title="No outputs yet" />
       </Centered>
     );
   else if (!inView.state.latest)
@@ -393,6 +398,7 @@ export function OutputsReview({
             centre={centre}
             live={live}
             root={selected}
+            standIn={!!standIn}
             inView={inView}
             trailOpen={!!trailOpen}
             onBack={() => select({ trail: null, item: null })}
@@ -408,7 +414,13 @@ export function OutputsReview({
               {panes}
             </div>
             {centre === "run" && (
-              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
+              <RunGraphView
+                fold={fold}
+                catalog={catalog}
+                selected={inView?.id}
+                rows={review.rows}
+                onPick={show}
+              />
             )}
             {centre === "agents" && (
               <RunAgents events={events} fold={fold} live={live} nameOf={nameOf} />
@@ -453,6 +465,12 @@ export function OutputsReview({
             </>
           }
         >
+          {live && (
+            <RunNews
+              events={events}
+              waiting={run.state.status === "queued" || run.state.status === "awaiting-keys"}
+            />
+          )}
           <FinalOutputs
             review={review}
             selected={selected}
@@ -461,8 +479,6 @@ export function OutputsReview({
             onOpen={(id) => select({ trail: id, item: null, centre: null })}
             onlyNeeds={onlyNeeds}
             live={live}
-            waiting={run.state.status === "queued" || run.state.status === "awaiting-keys"}
-            catalog={catalog}
             runId={run.id}
             events={events}
             fold={fold}
@@ -485,6 +501,7 @@ function SceneBar({
   centre,
   live,
   root,
+  standIn,
   inView,
   trailOpen,
   onBack,
@@ -497,6 +514,8 @@ function SceneBar({
   centre: Centre | undefined;
   live: boolean;
   root: OutputRow | undefined;
+  /** `inView` is what `root`, not in yet, rests on. */
+  standIn: boolean;
   inView: OutputRow | undefined;
   trailOpen: boolean;
   onBack: () => void;
@@ -540,6 +559,8 @@ function SceneBar({
         >
           {root.name} ›
         </button>
+      ) : standIn ? (
+        <span className="shrink-0 text-xs text-muted-foreground">{root.name} rests on</span>
       ) : (
         inView.state.section && (
           <span className="shrink-0 text-xs text-muted-foreground">{inView.state.section}</span>

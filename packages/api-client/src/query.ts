@@ -2,7 +2,8 @@
  * The react-query side of the client: one definition per query key (with its fetcher) and the
  * mutations that touch several of them, so every feature that reads or changes a run, a study or
  * a review shares the same cache entries. `@tanstack/react-query` is a peer: the app owns the
- * QueryClient. Call sites add their own options (`refetchInterval`, `enabled`) around these.
+ * QueryClient. Call sites add their own options (`refetchInterval`, `enabled`) around these, except
+ * where the rule is the key's own (`studiesQuery`).
  */
 import {
   type QueryClient,
@@ -31,7 +32,16 @@ export const runQuery = (id: string) =>
   queryOptions({ queryKey: ["run", id], queryFn: () => getRun(id) });
 export const reviewRunQuery = (id: string) =>
   queryOptions({ queryKey: ["review-run", id], queryFn: () => getReviewRun(id) });
-export const studiesQuery = () => queryOptions({ queryKey: ["studies"], queryFn: listStudies });
+/** The lab's studies, refetched every 5 s while any study's newest run is still going. */
+export const studiesQuery = () =>
+  queryOptions({
+    queryKey: ["studies"],
+    queryFn: listStudies,
+    refetchInterval: (q) =>
+      q.state.data?.some((s) => s.newestRuns.some((r) => r.state.status !== "ended"))
+        ? 5000
+        : false,
+  });
 export const studyQuery = (id: string) =>
   queryOptions({ queryKey: ["study", id], queryFn: () => getStudy(id) });
 export const runsQuery = () => queryOptions({ queryKey: ["runs"], queryFn: listRuns });

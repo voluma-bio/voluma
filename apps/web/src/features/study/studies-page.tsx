@@ -86,10 +86,7 @@ const COUNT_MARK: Record<Place, Status> = {
 
 export function StudiesPage() {
   const navigate = useNavigate();
-  const studies = useQuery({
-    ...studiesQuery(),
-    refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? LIVE : false),
-  });
+  const studies = useQuery(studiesQuery());
   const [picked, setPicked] = useState<string | null>(null);
   const list = studies.data ?? [];
   const selected = list.find((s) => s.id === picked) ?? list[0];

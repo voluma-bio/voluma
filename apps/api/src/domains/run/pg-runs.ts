@@ -6,7 +6,7 @@
 
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
-import { finalOutputs } from "@voluma/contracts/output-fold";
+import { outputsIn } from "@voluma/contracts/output-fold";
 import { openCorrectionRevision, progress, reviewState } from "@voluma/contracts/review-state";
 import { hasTaskReview, type Input, type Run, runSchema } from "@voluma/contracts/run";
 import { failedThreads, openThreads } from "@voluma/contracts/threads";
@@ -130,10 +130,10 @@ const reviewFacts = (run: Row["run"]) => ({
   harness: run.harness ?? undefined,
 });
 
-function toRun(
-  { run, input, position, calls }: Row,
-  { results: { summary, revisions }, outputsIn }: RunFold,
-): Run {
+function toRun({ run, input, position, calls }: Row, results: Results): Run {
+  const { summary, revisions } = results;
+  // An agent-loop run's final outputs in, while it goes and once main has listed them.
+  const finals = outputsIn(results.outputs);
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
   const state = ((): Run["state"] => {
@@ -173,7 +173,7 @@ function toRun(
     providerCalls: calls,
     review: hasTaskReview(reviewFacts(run)) ? summary : null,
     tasks: run.state === "ended" ? null : progressOf(revisions.at(-1)),
-    ...(run.state !== "ended" && outputsIn && { outputs: outputsIn }),
+    ...(run.state !== "ended" && finals.total > 0 && { outputs: finals }),
   });
 }
 
@@ -259,16 +259,7 @@ export type RunFold = {
   failed: ReadonlySet<string>;
   /** The stored fold events that did not parse and are missing from `results`. */
   skipped: number;
-  /** An agent-loop run's final outputs with a version, of all of them; none before main lists them. */
-  outputsIn: Run["outputs"];
 };
-
-function outputsInOf(log: RunEvent[]): Run["outputs"] {
-  const finals = finalOutputs(log);
-  return finals.length > 0
-    ? { done: finals.filter((o) => o.latest).length, total: finals.length }
-    : undefined;
-}
 
 const foldRun = (log: RunEvent[], skipped = 0): RunFold => ({
   skipped,
@@ -276,7 +267,6 @@ const foldRun = (log: RunEvent[], skipped = 0): RunFold => ({
   correcting: openCorrectionRevision(log),
   open: openThreads(log),
   failed: failedThreads(log),
-  outputsIn: outputsInOf(log),
 });
 
 const NOTHING = foldRun([]);
@@ -408,7 +398,7 @@ async function loadResults(
         throw new HTTPException(409, {
           message: "This run's review can't be read: its events don't parse.",
         });
-      return { run: toRun(row, fold), generation: row.run.generation, ...fold };
+      return { run: toRun(row, fold.results), generation: row.run.generation, ...fold };
     });
 }
 

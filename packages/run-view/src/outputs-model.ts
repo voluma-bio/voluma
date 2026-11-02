@@ -14,7 +14,12 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { OutputCatalog } from "@voluma/contracts/output-catalog";
-import type { OutputState, OutputsFold, OutputVersion } from "@voluma/contracts/output-fold";
+import {
+  type OutputState,
+  type OutputsFold,
+  type OutputVersion,
+  outputsIn,
+} from "@voluma/contracts/output-fold";
 import { outputsPrefix } from "@voluma/contracts/r2";
 import type {
   Annotation,
@@ -24,7 +29,7 @@ import type {
   Surface,
   Volume,
 } from "@voluma/contracts/review";
-import { trailOf } from "./outputs-trail";
+import { type ChainLink, chainOf, type TrailRow, trailOf } from "./outputs-trail";
 import { formatNumber } from "./run-model";
 
 /** One To check item, on the version it was raised on. */
@@ -51,6 +56,10 @@ export type OutputRow = {
   /** The overlays a value is measured on and drawn with, by id. */
   on: string[];
   context: string[];
+  /** What its latest version was made from, recursively (`trailOf`); the root alone before one. */
+  trail: TrailRow[];
+  /** A final output's chain, nearest first (`chainOf`); empty for any other. */
+  chain: ChainLink[][];
   /** The open and resolved items of its latest version and of what that was made from. */
   items: OutputItem[];
 };
@@ -60,6 +69,11 @@ export type OutputsReview = {
   /** Published outputs the workflow does not declare (a worker's own mask). */
   undeclared: OutputRow[];
   rows: Map<string, OutputRow>;
+  /**
+   * Published outputs that are neither final nor on a final output's chain (each shows there), nor
+   * undeclared: what "Other outputs so far" lists while the run goes.
+   */
+  others: OutputRow[];
   /** Unresolved items across every output's latest version. */
   open: number;
   /** Final outputs with a version, of all final outputs. */
@@ -103,12 +117,6 @@ export function unitText(ucum: string): string {
     .trim();
 }
 
-function itemsOf(fold: OutputsFold, id: string): OutputItem[] {
-  return trailOf(fold, id).flatMap(({ id: output, state }) =>
-    state?.latest ? itemsOfVersion(output, state.latest) : [],
-  );
-}
-
 /** The To check items version `v` of output `id` raised; `key` is the URL's `item`. */
 export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
   return v.toCheck.map((t, item) => ({
@@ -136,6 +144,8 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
   const latest = state.latest;
   const links = (role: string) =>
     latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
+  const on = [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])];
+  const trail = trailOf(fold, catalog, state.id);
   return {
     id: state.id,
     name: outputName(catalog, state.id),
@@ -146,9 +156,13 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
     }),
     provisional:
       latest?.provisional === true || (value?.provisional ?? loose?.provisional === true),
-    on: [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])],
+    on,
     context: [...new Set([...(value?.context ?? strings(loose?.context)), ...links("context")])],
-    items: itemsOf(fold, state.id),
+    trail,
+    chain: state.final ? chainOf(fold, catalog, state.id, on) : [],
+    items: trail.flatMap(({ id: output, state }) =>
+      state?.latest ? itemsOfVersion(output, state.latest) : [],
+    ),
   };
 }
 
@@ -158,7 +172,9 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     title: s.title,
     rows: s.outputs.flatMap((o) => rows.get(o.id) ?? []),
   }));
-  const final = fold.outputs.filter((o) => o.final);
+  const onChain = new Set(
+    [...rows.values()].flatMap((r) => r.chain.flatMap((step) => step.map((l) => l.id))),
+  );
   const open = new Set(
     fold.outputs.flatMap((o) =>
       (o.latest?.toCheck ?? []).flatMap((t, i) => (t.resolved ? [] : [`${o.id}/${i}`])),
@@ -168,8 +184,11 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     sections,
     undeclared: fold.outputs.filter((o) => !o.declared).flatMap((o) => rows.get(o.id) ?? []),
     rows,
+    others: [...rows.values()].filter(
+      (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
+    ),
     open,
-    progress: { done: final.filter((o) => o.latest).length, total: final.length },
+    progress: outputsIn(fold),
   };
 }
 

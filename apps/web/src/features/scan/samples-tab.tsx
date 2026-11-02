@@ -1,20 +1,17 @@
 /**
  * The scan page's Samples tab (`INPUT_WORD`): every study's samples in the shared tree, this run's
- * study open and its sample highlighted. Refetched while any run in it is live, so a running
+ * study open and its sample highlighted. `studiesQuery` refetches while a run is live, so a running
  * sample's row ("Running · 1 of 2 in") keeps up.
  */
 import { useQuery } from "@tanstack/react-query";
 import { studiesQuery } from "@voluma/api-client/query";
-import { isLive, sampleTree } from "@voluma/run-view";
+import { sampleTree } from "@voluma/run-view";
 import { ErrorState, INPUT_WORD, LoadingState, SampleTree } from "@voluma/ui";
 import { useMemo } from "react";
 import { Link } from "react-router";
 
 export function Samples({ studyId, runId }: { studyId: string; runId: string }) {
-  const studies = useQuery({
-    ...studiesQuery(),
-    refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? 5000 : false),
-  });
+  const studies = useQuery(studiesQuery());
   const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);
   if (studies.isError)
     return (

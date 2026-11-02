@@ -124,10 +124,7 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
 
 /** The left side: the scan tree, from the lab's study list. */
 function SamplesSide({ studyId }: { studyId: string }) {
-  const studies = useQuery({
-    ...studiesQuery(),
-    refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? 5000 : false),
-  });
+  const studies = useQuery(studiesQuery());
   return (
     <SidePanel side="left" title={INPUT_WORD.Many} icon={<ListTree />}>
       {studies.data ? (

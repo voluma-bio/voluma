@@ -70,11 +70,16 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   The trail (`outputs-trail.ts`) is the data behind Final outputs' Rests on and Further back: `trailOf` (one output's
   upstream, breadth first, with roles and the version used), `madeFromIt` (what rests on it),
   `runGraph` (the whole run by column), `versionWords` (a worker's message after its version) and
-  `workersOf` (the agents from `agentLog`, with what each reported). Label links resolve to their map. No drawing lives there.
-  The chain (`outputs-chain.ts`, `restsOnChain`) is what a final value is computed on, nearest first
-  (value `on` overlay, label to its map, overlay to its base, base to its `from`), shown while the run
-  goes: each step follows the published version's `on`/`base` links where it names some, else the
-  catalog's, so it exists before anything is published and can't disagree with what was.
+  `workersOf` (the agents from `agentLog`, with what each reported). No drawing lives there.
+  One link rule (`resolveLink`): a link to an output with a version of its own is a link to it; a
+  link to a label overlay with none goes to its map (`labelMapOf`: the catalog's `label.of`, else
+  the run's list). The chain (`chainOf`) is the same breadth-first walk as `trailOf` along the
+  spine a final value is computed on, nearest first (value `on` overlay, label to its map, overlay
+  to its base, base to its `from`): each step follows the published version's `on`/`base` links
+  where it names some, else the catalog's, so it exists before anything is published, and each
+  link is ticked by its own published version and status. `outputsReview` carries each row's
+  `trail` and `chain` and the run's `others` (published, not final, not on a chain), so components
+  only read them.
 - **Run-level data** is one `runView(events, state, providerCalls, halt)` (`run-model.ts`):
   threads, progress, and per plan task its state, threads, line, check, To check items, QC image,
   values and spend, memoized on the events. `withLiveCalls` overlays the tool calls being written
