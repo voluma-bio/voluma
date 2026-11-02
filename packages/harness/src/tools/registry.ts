@@ -51,8 +51,11 @@ export const TOOL_NAMES = [
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 
-/** The tools that need only the thread's own layout and the run's files. */
-const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => Tool> = {
+/** The tools that need only the thread's own layout and the run's files; both loops hold them. */
+export const sharedFactories: Record<
+  string,
+  (deps: Pick<ToolDeps, "layout" | "files">, names: readonly string[]) => Tool
+> = {
   bash: ({ layout }, names) => bashTool(layout, names.includes("read")),
   view_image: ({ layout, files }, names) =>
     viewImageTool({ layout, files, hasSandbox: names.includes("bash") }),
@@ -72,8 +75,8 @@ export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
   return names.map((name) => {
     const tool = Object.hasOwn(coordination, name)
       ? coordination[name]
-      : Object.hasOwn(factories, name)
-        ? factories[name]?.(deps, names)
+      : Object.hasOwn(sharedFactories, name)
+        ? sharedFactories[name]?.(deps, names)
         : undefined;
     if (!tool) throw new Error(`tool "${name}" is not registered`);
     return tool;

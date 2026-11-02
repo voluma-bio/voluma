@@ -11,6 +11,7 @@
  */
 import type { RunEvent } from "./events";
 import type { Harness } from "./ids";
+import type { ClaimEndReason } from "./runner";
 import { type ThreadBase, type ThreadRecords, threadRecords } from "./thread-records";
 
 type Payload<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>["payload"];
@@ -32,8 +33,12 @@ export interface AgentRecord extends ThreadBase {
   /** Position and author of the latest `close.requested` for it; undefined when none. */
   closeAt: number | undefined;
   closeBy: Payload<"close.requested">["by"] | undefined;
+  /** The thread that started it and the tool call that did (a worker's brief and skills are read back from that call). */
+  parentThreadId: string | null;
+  spawnedBy: string | undefined;
   /** When its latest invocation began (the start event's `createdAt`). */
   startedTime: string;
+  endedTime: string;
   /** The turn's input came from main (the brief, or a message from main) and it said nothing since: `silent` if the turn ends so. */
   fromMain: boolean;
   spoke: boolean;
@@ -54,6 +59,8 @@ export type Notice = { eventId: string; at: number; agent: string } & (
   | { kind: "closed"; note: string | undefined }
   /** A worker's turn ended with no report, message or close, after main's brief or message. */
   | { kind: "silent"; reply: string }
+  /** The loop stopped a worker (it could not be resumed); `reason` says why. */
+  | { kind: "stopped"; reason: string }
 );
 
 export interface AgentLog {
@@ -75,6 +82,10 @@ export interface AgentLog {
   written: Map<string, number>;
   /** The root's `completed` end is stored. */
   rootEnded: boolean;
+  /** The root ended since its latest start (this claim's). */
+  rootEndedThisClaim: boolean;
+  /** Why the previous claim ended, from the latest `claim.started`. */
+  after: ClaimEndReason | undefined;
   /** `tool.call`s by thread and call id (`callKey`), for rebuilding a cut-off tool's result. */
   calls: ThreadRecords<AgentRecord>["calls"];
   /** Who spoke last to the researcher: a person's message is unanswered while it follows main's last message to `researcher`. */
@@ -93,11 +104,14 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     return {
       ...base,
       place: base.place === "main" ? "main" : "worker",
+      parentThreadId: started.parentThreadId,
+      spawnedBy: prev?.spawnedBy ?? started.spawnedBy,
       startedAt: -1,
       endedAt: prev?.endedAt ?? -1,
       closeAt: prev?.closeAt,
       closeBy: prev?.closeBy,
       startedTime: "",
+      endedTime: prev?.endedTime ?? "",
       fromMain: prev === undefined || (continues && prev.fromMain),
       spoke: continues ? prev.spoke : false,
       lastReport: prev?.lastReport,
@@ -112,16 +126,24 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   let cursor: string | undefined;
   let rootId: string | undefined;
   let rootEnded = false;
+  let rootStartAt = -1;
+  let rootEndAt = -1;
+  let after: ClaimEndReason | undefined;
   let main: AgentRecord | undefined;
   let personAt = -1;
   let answeredAt = -1;
 
   for (const [at, e] of events.entries()) {
     written.set(e.id, at);
-    if (e.type === "thread.started" && e.payload.parentThreadId === null) rootId = e.threadId;
-    if (e.type === "thread.ended" && e.threadId === rootId && e.payload.status === "completed") {
-      rootEnded = true;
+    if (e.type === "thread.started" && e.payload.parentThreadId === null) {
+      rootId = e.threadId;
+      rootStartAt = at;
     }
+    if (e.type === "thread.ended" && e.threadId === rootId) {
+      rootEndAt = at;
+      if (e.payload.status === "completed") rootEnded = true;
+    }
+    if (e.type === "claim.started") after = e.payload.after;
     if (e.type === "run.reopened") rootEnded = false;
     const before = fold.threads.get(e.threadId);
     const { record, firstEnd } = fold.apply(e);
@@ -132,7 +154,10 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         record.startedAt = at;
         record.startedTime = e.createdAt;
         idByName.set(record.name, record.id);
-        if (record.place === "main") main = record;
+        if (record.place === "main") {
+          main = record;
+          idByName.set("main", record.id);
+        }
         // The input of a stored start is handed to the thread: the resume carries it.
         const sender = e.payload.input?.sender;
         // A new turn was begun by main when it is the brief or main's message; a cut-off resume continues the turn.
@@ -147,9 +172,12 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       case "thread.ended":
         if (!record) break;
         record.endedAt = at;
+        record.endedTime = e.createdAt;
         if (record.place === "worker") {
-          const { status, error, note } = e.payload;
-          if (status === "closed") {
+          const { status, error, note, summary } = e.payload;
+          if (status === "cancelled" && summary) {
+            notices.push({ kind: "stopped", eventId: e.id, at, agent: name, reason: summary });
+          } else if (status === "closed") {
             notices.push({ kind: "closed", eventId: e.id, at, agent: name, note });
           } else if (firstEnd && record.closeAt === undefined) {
             if (status === "failed") {
@@ -247,7 +275,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   for (const { to, ...item } of items) {
     if (delivered.has(item.id)) continue;
     const target = fold.threads.get(idOf(idByName, to));
-    if (target) add(target.id, item);
+    // Main hears through deliveries (notices), not an inbox.
+    if (target && target.place !== "main") add(target.id, item);
   }
 
   const cut = cursor === undefined ? -1 : (written.get(cursor) ?? -1);
@@ -271,6 +300,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     emptyDeliveries: empty,
     written,
     rootEnded,
+    rootEndedThisClaim: rootEndAt > rootStartAt,
+    after,
     calls: fold.calls,
     hasUnansweredPerson: personAt > answeredAt,
   };

@@ -39,6 +39,7 @@ import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
+import { AGENT_TOOL_NAMES } from "@voluma/harness/agents/tools/registry";
 import { errorText } from "@voluma/harness/error-text";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import {
@@ -75,6 +76,7 @@ import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
 import { storeEvidence } from "./store-evidence.ts";
 import { storeFiles } from "./store-files.ts";
+import { storePublish } from "./store-publish.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
@@ -262,13 +264,6 @@ async function claimBody(
     log(
       `sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"}); loop: ${harness}`,
     );
-    // This runner has no agent loop yet: give the claim back rather than end or half-run the run,
-    // so a runner that has one can take it.
-    if (harness === "agents") {
-      log("the run is pinned to the agent loop, which this runner does not have; releasing it");
-      stop("shutdown");
-      return;
-    }
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {
@@ -356,7 +351,7 @@ async function claimBody(
           prefix: workflowSnapshotPrefix(runId),
           root: REPO_ROOT,
           commit: config.commit,
-          knownTools: TOOL_NAMES,
+          knownTools: harness === "agents" ? AGENT_TOOL_NAMES : TOOL_NAMES,
           harness,
         }),
       );
@@ -434,7 +429,7 @@ async function claimBody(
       };
       return {
         definition,
-        plan: computePlan(definition.files, run.selectedOutputs).tasks,
+        plan: harness === "agents" ? [] : computePlan(definition.files, run.selectedOutputs).tasks,
         model: (role, recorded) => ({
           model: threadModel(setupOf(role).model, recorded),
           thinkingLevel: setupOf(role).thinkingLevel,
@@ -461,6 +456,7 @@ async function claimBody(
       history: client,
       evidence: storeEvidence(objects),
       files: storeFiles(objects),
+      publish: storePublish(objects),
       outputs: r2Outputs(config.r2),
       createSandbox,
       // The image is recorded on the root's first event, so `sandboxImage` is the run's own.

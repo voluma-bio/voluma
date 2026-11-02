@@ -421,6 +421,11 @@ export function world(o: WorldOptions) {
         write: async () => {},
         list: async () => [],
       },
+      publish: {
+        copy: async () => {
+          throw new Error("these runs publish no output versions");
+        },
+      },
       outputs: {
         backup: async () => {},
         restore: async () => {},

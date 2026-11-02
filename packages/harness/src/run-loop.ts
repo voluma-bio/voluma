@@ -33,6 +33,7 @@ import {
 } from "@voluma/contracts/fold";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { UserSender } from "./adapters/pi/start-thread";
+import { failureKind, mainFailureAction, type ProviderError } from "./failure-policy";
 import type { RunLayout, ThreadLayout } from "./layout";
 import { loopShell, type Section, type Step } from "./loop-shell";
 import {
@@ -110,8 +111,7 @@ export const LOOP_DEFAULTS: LoopConfig = {
   stuckLimit: 2,
 };
 
-/** The host's reading of a provider error's text (`RunLoopOptions.providerError`). */
-export type ProviderError = "fatal" | "transient";
+export type { ProviderError };
 
 export interface RunLoopOptions {
   runId: string;
@@ -584,11 +584,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
   }
 
   /** How a failed thread's error reads: the host's reading of its text, and `interrupted` from the thread's own end. */
-  function failureOf(r: ThreadRecord): ProviderError | "interrupted" | undefined {
-    if (r.end?.status !== "failed") return;
-    const kind = o.providerError?.(r.end.error ?? "");
-    return kind === "fatal" || !r.end.interrupted ? kind : "interrupted";
-  }
+  const failureOf = (r: ThreadRecord) => failureKind(r.end, o.providerError);
 
   /**
    * Fails the run for a fatal provider error on a thread this process ran: a failure an earlier
@@ -604,27 +600,21 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
   }
 
   /**
-   * A failed main agent, idle. The rules for the failure's kind:
-   * - a transient provider error (Pi's retries ran out before any reply) fails the run;
-   * - an interrupted reply resumes the same main, history as it was, unless its previous end was
-   *   an interrupted failure too and it has made no reply since its latest start: then the run fails;
-   * - anything else (a context overflow, a length stop, a refusal) keeps the history that failed,
-   *   so a fresh main takes over, once; if that one fails too, so does the run.
+   * A failed main agent, idle: `mainFailureAction` (`failure-policy.ts`) says whether the run
+   * fails, the same main resumes, or a new one takes over.
    */
   async function mainFailed(d: ThreadLog, m: ThreadRecord) {
-    const fail = () => {
-      throw new Error(fatalText(m, m.end?.error ?? "", taskName));
-    };
-    const kind = failureOf(m);
-    if (kind === "transient" && threads.started(m.id)) fail();
-    if (kind === "interrupted") {
-      if (!m.replied && m.endBefore?.status === "failed" && m.endBefore.interrupted) fail();
-      await resume(m, PROVIDER_FAILED_RESUME, RUNTIME);
-      return;
-    }
     const mains = [...d.threads.values()].filter((r) => r.place === "main");
-    if (mains.at(-2)?.end?.status === "failed") fail();
-    await startMain(d);
+    const action = mainFailureAction({
+      kind: failureOf(m),
+      startedHere: threads.started(m.id),
+      replied: m.replied,
+      endBefore: m.endBefore,
+      previousFailed: mains.at(-2)?.end?.status === "failed",
+    });
+    if (action === "fail") throw new Error(fatalText(m, m.end?.error ?? "", taskName));
+    if (action === "resume") await resume(m, PROVIDER_FAILED_RESUME, RUNTIME);
+    else await startMain(d);
   }
 
   /** The delivery message and the last event it covers. */

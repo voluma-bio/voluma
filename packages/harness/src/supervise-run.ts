@@ -20,6 +20,7 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
+import { agentsWire } from "./agents/wire";
 import { errorText } from "./error-text";
 import type { SandboxLayout } from "./layout";
 import { runLock } from "./loop-shell";
@@ -27,6 +28,7 @@ import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
+import type { Publish } from "./ports/publish";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { failUnfinishedAssets, type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
@@ -48,7 +50,7 @@ const WIND_DOWN_MS = 5_000;
 export interface Prepared {
   /** The role files, skills and task files of the run's workflow snapshot. */
   definition: WorkflowDefinition;
-  /** The plan computed from the user's selection; the run starts with it (the main agent may change it). */
+  /** The task loop's plan computed from the user's selection (the main agent may change it); empty for the agent loop. */
   plan: readonly PlanTask[];
   /**
    * The model, thinking level and call function of a thread of `role`. `recorded` is the model
@@ -89,6 +91,8 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
+  /** How an agent's named file becomes a published output version (the agent loop's `report_output`). */
+  publish: Publish;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
   createSandbox: CreateSandbox;
   /** Size and lifetime of every sandbox. */
@@ -167,14 +171,18 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   let worker: ReviewAssetsWorker | undefined; // set once `prepare` has resolved
   const world = options.prepare(loopSignal).then((prepared) => {
     const { definition } = prepared;
-    const wire = tasksWire({
+    const wireOptions = {
       runId,
       inputId: options.inputId,
       inputPrefix: options.inputPrefix,
       recorder,
       definition,
       gateway: options.gateway !== undefined,
-    });
+    };
+    const wire =
+      options.harness === "agents"
+        ? ({ harness: "agents", ...agentsWire(wireOptions) } as const)
+        : ({ harness: "tasks", ...tasksWire(wireOptions) } as const);
     // The sandboxes of the run: one per thread, and the review-asset converter's.
     const sandboxLayout = (id: string): SandboxLayout =>
       id === CONVERT ? wire.convert : wire.sandboxOf(id);
@@ -246,17 +254,18 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       },
       loopSignal,
     );
-    await wire.run({
+    const shared = {
       ...options,
       rootThreadId,
       definition,
-      plan: prepared.plan,
       model: prepared.model,
       session,
       pool,
       section: runLock(),
       signal: loopSignal,
-    });
+    };
+    if (wire.harness === "agents") await wire.run(shared);
+    else await wire.run({ ...shared, plan: prepared.plan });
   };
 
   const result = (async (): Promise<Outcome> => {
