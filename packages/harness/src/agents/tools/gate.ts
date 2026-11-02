@@ -8,7 +8,7 @@
  */
 
 import type { Tool } from "../../tools/tool";
-import { summaryOf } from "../approvals";
+import { madeStale, outputsNamed, summaryOf } from "../approvals";
 import { approvalRequestId } from "../effects";
 import type { AgentsApi } from "./coordination";
 import { Refusal } from "./refusal";
@@ -51,6 +51,9 @@ export function gate(tool: Tool, { api, hashIn }: GateDeps): Tool {
                 args: input,
                 fileHashes,
                 summary: summaryOf(api.recorder.events(), tool.name, input),
+                ...(tool.name !== "keep_output" && {
+                  outOfDate: madeStale(api.recorder.events(), outputsNamed(tool.name, input)),
+                }),
               },
               requestId,
             );
