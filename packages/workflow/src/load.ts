@@ -13,11 +13,10 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Harness } from "@voluma/contracts/ids";
 import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
-import { parse as parseYaml } from "yaml";
+import { isScalar, parseDocument, parse as parseYaml, visit } from "yaml";
 import { z } from "zod";
 import {
   type AgentDefinition,
@@ -40,9 +39,11 @@ export interface LoadOptions {
   commit: string;
   /** The tool names a role may list (the harness's tool registry). */
   knownTools: readonly string[];
-  /** The loop the run is pinned to; it reads its role files from `rolesDirOf`. Default `tasks`. */
+  /** The loop the run is pinned to; only `agents` parses `outputs.yaml`. Default `tasks`. */
   harness?: Harness;
 }
+
+export type Harness = "tasks" | "agents";
 
 /** Every run's shared directory: the role files and the generic skills. */
 const CORE = "workflows/core";
@@ -62,10 +63,7 @@ const frontmatterSchema = z.strictObject({
 });
 
 /** Where the role files live in the checkout and the snapshot; `AGENTS.md` there is for people. */
-/** Both loops' role folders are snapshotted; the pin picks one when the snapshot is read. */
-const ROLE_DIRS = [`${CORE}/agents`, `${CORE}/roles`];
-const rolesDirOf = (harness: Harness = "tasks") =>
-  ROLE_DIRS[harness === "agents" ? 1 : 0] as string;
+const AGENTS_DIR = `${CORE}/agents`;
 const agentSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -197,15 +195,10 @@ async function snapshot(dir: string, { store, prefix, root, commit }: LoadOption
     if (d === CORE && names.includes("convert"))
       for await (const p of walk(root, `${d}/convert`)) await put(p);
   }
-  // `roles/` exists once the agent loop does; a checkout without it snapshots `agents/` alone.
-  for (const rolesDir of ROLE_DIRS) {
-    const names = await readdir(join(root, rolesDir)).catch(() => {
-      if (rolesDir === ROLE_DIRS[0]) throw new WorkflowParseError(rolesDir, "directory not found");
-      return [];
-    });
-    for (const name of names) {
-      if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${rolesDir}/${name}`);
-    }
+  for (const name of await readdir(join(root, AGENTS_DIR)).catch(() => {
+    throw new WorkflowParseError(AGENTS_DIR, "directory not found");
+  })) {
+    if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${AGENTS_DIR}/${name}`);
   }
   await store.put(`${prefix}${DONE}`, new TextEncoder().encode(commit));
   return false;
@@ -216,13 +209,13 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   workflowDirSchema.parse(dir);
   const existing = await snapshot(dir, options);
   const { store, prefix } = options;
-  const rolesDir = rolesDirOf(options.harness);
   const texts = new Map<string, string>();
   for (const { key } of (await store.list(prefix)).objects) {
     const path = key.slice(prefix.length);
     if (
-      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|(^|\/)outputs\.yaml$/.test(path) ||
-      (path.startsWith(`${rolesDir}/`) && /^[^/]+\.md$/.test(path.slice(rolesDir.length + 1))) ||
+      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|(^|\/)outputs\.yaml$|^workflows\/core\/agents\/[^/]+\.md$/.test(
+        path,
+      ) ||
       scriptOf(path)
     )
       texts.set(path, await getText(store, key));
@@ -231,7 +224,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   // A snapshot cut before `checker.md` became `check.md` (R2 snapshots are write-once) is refused
   // before its role files parse, since an old one may not match the current format. One whose role
   // files name a dropped tool is refused in `parseAgent`.
-  if (texts.has(`${rolesDir}/checker.md`) && !texts.has(`${rolesDir}/check.md`))
+  if (texts.has(`${AGENTS_DIR}/checker.md`) && !texts.has(`${AGENTS_DIR}/check.md`))
     throw new Error(OLDER_VERSION_MESSAGE);
 
   // The workflow's own skill (named for its directory) first, then its others, then core's, each
@@ -292,15 +285,21 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     );
   }
 
-  const yaml = texts.get(`${dir}/outputs.yaml`);
+  // Only the agent loop reads the catalog, so a later change to its schema never stops a task-loop run resuming.
+  const yaml = options.harness === "agents" ? texts.get(`${dir}/outputs.yaml`) : undefined;
   let outputCatalog: OutputCatalog | undefined;
   if (yaml !== undefined) {
-    let data: unknown;
-    try {
-      data = parseYaml(yaml);
-    } catch (e) {
-      throw new WorkflowParseError(`${dir}/outputs.yaml`, `invalid YAML: ${(e as Error).message}`);
-    }
+    const file = `${dir}/outputs.yaml`;
+    const doc = parseDocument(yaml);
+    if (doc.errors[0]) throw new WorkflowParseError(file, `invalid YAML: ${doc.errors[0].message}`);
+    // PyYAML (YAML 1.1) reads a bare `on` key as `True`; the file and its copies are read from Python.
+    visit(doc, {
+      Pair(_, pair) {
+        if (isScalar(pair.key) && pair.key.type === "PLAIN" && pair.key.value === "on")
+          throw new WorkflowParseError(file, 'write the key as "on": quoted');
+      },
+    });
+    const data: unknown = doc.toJS();
     const catalog = outputCatalogSchema.safeParse(data);
     if (!catalog.success) {
       const issue = catalog.error.issues[0];
@@ -331,14 +330,14 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
 
   const found: Record<string, ParsedAgent> = {};
   for (const [path, text] of texts) {
-    if (!path.startsWith(`${rolesDir}/`)) continue;
+    if (!path.startsWith(`${AGENTS_DIR}/`)) continue;
     const agent = parseAgent(path, text, options.knownTools, existing);
     found[agent.name] = agent;
   }
   const skillNames = skills.map((s) => s.name);
   const agents: Record<string, AgentDefinition> = {};
   for (const agent of Object.values(found)) {
-    const path = `${rolesDir}/${agent.name}.md`;
+    const path = `${AGENTS_DIR}/${agent.name}.md`;
     const missing = agent.subagents.find((n) => !found[n]);
     if (missing) throw new WorkflowParseError(path, `subagent "${missing}" is not a role file`);
     if (agent.checkedBy && !found[agent.checkedBy]) {
@@ -356,7 +355,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     agents[agent.name] = { ...agent, skills: agent.skills ?? skillNames };
   }
   const { main } = agents;
-  if (!main) throw new WorkflowParseError(`${rolesDir}/main.md`, "not found");
+  if (!main) throw new WorkflowParseError(`${AGENTS_DIR}/main.md`, "not found");
   return {
     dir,
     commit: await getText(store, `${prefix}${DONE}`),
