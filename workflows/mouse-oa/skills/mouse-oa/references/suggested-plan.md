@@ -52,7 +52,8 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 - **Needs:** `scan`, `frame`, `bone-pieces`.
 - **Check first:** the keyframe cuts femur and tibia through the joint, with the joint space dark between them; every
   piece intake named is one you can find.
-- **Makes:** `bone-labels` and the structures in it, `bone-threshold`, `disagreement`, and the label volumes #1–3
+- **Makes:** `bone-labels` (the femur, tibia, patella, fibula and labels 5 to 12 are values in it: reporting `bone-labels`
+  reports them, so report none of them on its own), `bone-threshold`, `disagreement`, and the label volumes #1–3
   (protocol step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason and the
   view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`, `anatomy.md`
   "Segmentation notes").

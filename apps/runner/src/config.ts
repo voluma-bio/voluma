@@ -228,15 +228,15 @@ export function runnerConfig() {
      */
     models,
     /**
-     * The thinking level of every thread of a `voluma` run (`RUNNER_THINKING`), set as each Pi
-     * agent's `thinkingLevel`; main.ts refuses a non-off level an alias's model does
+     * `RUNNER_THINKING`: the thinking level of a `voluma` run's roles whose file sets none, or of
+     * every role when the model is forced, set as each Pi agent's `thinkingLevel`; main.ts refuses a non-off level an alias's model does
      * not support, since Pi would quietly use another. Unset or "off": no requested effort
      * (DeepSeek: thinking disabled; Muse: provider default). Visitor runs: "off".
      */
     thinking: thinkingLevel(),
     /**
-     * `RUNNER_MODEL` forces every role onto one model (a plumbing check); the role files' thinking
-     * levels are chosen for their own models, so then `RUNNER_THINKING` alone sets the level.
+     * `RUNNER_MODEL` forces every role onto one model (a test run); each role keeps its file's
+     * thinking level, at the nearest the forced model supports, unless `RUNNER_THINKING` sets one.
      */
     modelForced: optional("RUNNER_MODEL") !== undefined,
     /**
