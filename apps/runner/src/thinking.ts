@@ -30,7 +30,8 @@ export function assertThinking(
 
 /**
  * The level to send a model for a wanted one: the wanted level if it supports it, else the
- * nearest it supports above, else below. Unset and `off` stay as they are.
+ * nearest it supports above, else below, else `off` (a model with no reasoning). Unset and `off`
+ * stay as they are.
  */
 export function nearestThinking(
   wanted: ModelThinkingLevel | undefined,
@@ -43,6 +44,6 @@ export function nearestThinking(
   return (
     order.find((l) => THINKING_LEVELS.indexOf(l) >= at) ??
     order.findLast((l) => THINKING_LEVELS.indexOf(l) < at) ??
-    wanted
+    "off"
   );
 }
