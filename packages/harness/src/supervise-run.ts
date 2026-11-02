@@ -79,7 +79,7 @@ export interface SuperviseRunOptions {
   recorder: Recorder;
   history: History;
   evidence: Evidence;
-  /** The run's bucket, read and written host-side by `view_image` and `read_file`. */
+  /** The run's bucket, read and written host-side by `view_image` and `read`. */
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;

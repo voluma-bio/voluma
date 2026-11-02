@@ -15,11 +15,14 @@ segmentation of every bone and a second opinion on your own; **you own the final
 
 ## When not to use it
 
-- **The growth plate and anything thinner than a bone.** SAM labels whole bones; a plate, a trabecular ROI,
-  cartilage or a contact face comes from the protocol's own steps (`regions-and-landmarks`).
 - **A segmentation you can already verify cheaply.** Clean threshold components need no second opinion.
 - **A scan that may not leave the lab.** Meta's API retains what it receives. If the study's terms forbid sending
   the scan out, do not call it, and say so.
+
+## Planning requests
+
+Open `references/strategies.md` before you plan your requests: how to group structures into requests. Then the
+workflow's anatomy reference, for how that applies to its structures.
 
 ## What the tool does, so you can plan around it
 
@@ -28,18 +31,10 @@ segmentation of every bone and a second opinion on your own; **you own the final
   before you send.
 - **Survey bare bone first** (`components.py --in <oriented stack>`): with no labels yet, it lists the threshold's
   largest connected components (size, box, centre, whether they touch the edge), in 3D or on one slice with `--index`.
-- **One request for every bone a target could track into.** Structures in one request are tracked together and
-  never share a voxel; a bone left out is tracked onto by its neighbour. Up to 16 per request, each boxed on a
-  slice where it is separate from its neighbours. One request per bone costs three times as much and gives
-  overlapping masks.
 - **A SAM mask spans soft tissue and marrow**, several times a small bone's volume: clip to bone
   (`clip_to_bone.py`) before any volume means anything, and never refill clipped voxels by nearest label. Read the
   clipped labels' checks (`segmentation-check`) per label: a label in range keeps SAM's result, and one bad label
   does not discard the request.
-- **Small structures go in their own request**, one temporary label per 3D piece, after `unlabelled.py` has found
-  them on the scan grid and `map_points.py --pieces` has given each a slice and a box. Added to the big-bone
-  request they cost the mid-size bone beside them its track. A piece the stack's edge cuts needs a wider
-  orientation margin first.
 - **Stamp the output's grid** (`sidecar.py --like oriented.json`): `segment_sam`'s own sidecar has no grid, and
   the next scripts refuse labels they cannot place.
 - **Trim each small track** (`trim_tracks.py`): untrimmed, a track keeps going after its structure ends and picks

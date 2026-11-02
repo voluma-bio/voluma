@@ -147,7 +147,7 @@ treat the current four-image write or its request token trigger as a bound
 on all hydrated bytes. This audit does not implement a competing compactor
 or a pagination/storage migration.
 
-Current tool bounds also matter: `read_file` accepts 1 MiB; `view_image` reads
+Current tool bounds also matter: `read` accepts 8 MiB; `view_image` reads
 at most 64 MiB per input and returns at most four 1 MiB images. Sharp's resize
 runs asynchronously, but decode cost was not benchmarked here. The measured
 history write is the returned-image path, not an image-decoding benchmark.

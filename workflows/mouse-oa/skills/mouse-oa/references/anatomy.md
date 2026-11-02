@@ -9,7 +9,7 @@ not proof of a wrong label. `anatomy.json` beside this file is the machine-reada
 
 | Item | Value | Where it is used |
 |---|---|---|
-| Display window | 1000 to 8000 HU | orient, keyframe and quad view renders, box drawing (the same window the orientation step used) |
+| Display window | 1000 to 8000 HU | orient, keyframe and quad view renders, box drawing (one window for every render) |
 | Segmentation threshold | 2500 HU (`segmentation_threshold_hu` in `anatomy.json`) | `--threshold-hu` of `orient_joint`, `snap_boxes`, `clip_to_bone`, `unlabelled`, `classic_segment`, `disagree`; it builds masks and is **not** the BV threshold |
 | Measurement threshold | the lab's 2.16/cm, computed from `hu.json` (2459.875 HU on OA6-1RK) | every BV, BV/TV and TV script computes it; see `microct-core` |
 | Voxel | read it from `hu.json` (`spacing_zyx_mm`) | never hard-code 0.0105 |
@@ -18,7 +18,7 @@ not proof of a wrong label. `anatomy.json` beside this file is the machine-reada
 ## Orienting the knee
 
 In `orient-joint` terms the reference object is the patella and bone A is the femur (the patella sits on it). The keyframe cuts
-femur and tibia through the joint, and the patella when it is in the field (`examples/README.md` in the skill directory, orientation). A field of the bone ends only has no shaft, and a tibia cut to a short stub can fall under
+femur and tibia through the joint, and the patella when it is in the field (`examples/README.md` in the skill directory, intake). A field of the bone ends only has no shaft, and a tibia cut to a short stub can fall under
 `--second-bone-frac`. When the notes put the patella outside the field, a piece taken for the reference object is something
 else (the fibula head, say): it is harmless to the cut but sets the side of the slice.
 
@@ -97,7 +97,10 @@ a merged one shows on the 3D sheet as a bump or a disconnected piece. How to loo
 4. **Labels 10 to 12:** keep separate. Whether they belong to the tibia or patella volumes is the lab's call. Whether label 12
    counts toward the patella (#1) is open.
 
-## Prompts for `segment_sam`
+## Segmentation notes
+
+How `sam-segmentation`'s general strategies play out on the mouse knee. On OA6-1RK, small structures sent in the
+big-bone request cost the patella its track (Dice with the reference 0.95 to 0.86).
 
 - **Request 1, the four big bones together:** femur (1), tibia (2), patella (3), fibula (4), one box each, even though only the
   first three are measured: the fibula box stops the tibia track from taking it. Put the fibula box on a slice where it is
