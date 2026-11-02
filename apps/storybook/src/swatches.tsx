@@ -19,9 +19,9 @@ const roles: [string, string][] = [
   ["mark-mine", "Your marks on the scan"],
   ["mark-mine-text", "Your mark tags in text"],
   ["mark-ai", "The AI's marks on the scan"],
-  ["plane-coronal", "Coronal plane (XZ): its pane, chip and crosshair"],
-  ["plane-sagittal", "Sagittal plane (YZ)"],
-  ["plane-axial", "Axial plane (XY)"],
+  ["plane-coronal", "Coronal plane: its pane, chip and crosshair"],
+  ["plane-sagittal", "Sagittal plane"],
+  ["plane-axial", "Axial plane"],
   ["plane-coronal-text", "Coronal in text on a panel"],
 ];
 
