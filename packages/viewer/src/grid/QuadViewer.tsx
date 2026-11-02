@@ -79,7 +79,7 @@ export type QuadLayout = {
 export const QUAD_START: QuadLayout = { count: 4, views: ["3d", "xy", "xz", "yz"], full: null };
 
 /** Shows `view` in `slot`; a view another slot shows trades places with this slot's. */
-export function showIn(layout: QuadLayout, slot: number, view: QuadView): QuadLayout {
+function showIn(layout: QuadLayout, slot: number, view: QuadView): QuadLayout {
   const views = [...layout.views];
   const was = views[slot]!;
   const from = views.indexOf(view);

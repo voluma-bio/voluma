@@ -280,10 +280,6 @@ export function outputsFold(events: readonly RunEvent[]): OutputsFold {
 export const finalOutputs = (events: readonly RunEvent[]): OutputState[] =>
   outputsFold(events).outputs.filter((o) => o.final);
 
-/** An output's latest version, with its hash; undefined while nothing is published. */
-export const latest = (events: readonly RunEvent[], id: string): OutputVersion | undefined =>
-  outputsFold(events).byId.get(id)?.latest;
-
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>
   finalOutputs(events)

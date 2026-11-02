@@ -1,6 +1,6 @@
 /** The grid viewers (the task review's, the outputs review's four panes), and the grid and scene a subject is shown with. */
 export { GridViewer, type GridViewerHandle, type PaneId, type ViewerState } from "./GridViewer";
-export { angleDegrees, markPoints, outlineAxis, probeText, worldOf } from "./marks";
+export { markPoints, outlineAxis, probeText, worldOf } from "./marks";
 export {
   type GridPlanes,
   type MarkPlane,
@@ -10,7 +10,6 @@ export {
   type QuadState,
   type QuadView,
   QuadViewer,
-  showIn,
 } from "./QuadViewer";
 export {
   type Blocks,
