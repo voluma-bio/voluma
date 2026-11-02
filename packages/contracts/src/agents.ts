@@ -33,7 +33,7 @@ export interface AgentRecord extends ThreadBase {
   /** The turn's input came from main (the brief, or a message from main) and it said nothing since: `silent` if the turn ends so. */
   fromMain: boolean;
   spoke: boolean;
-  /** When it last said what it is doing (`activity`), or else when it last started: the clock of its silence. */
+  /** When it last said what it is doing (`activity`), or else when it last started. */
   activityAt: number;
   /** Pings recorded since it last received a real input or made a tool call (0: none). */
   pings: number;
@@ -41,6 +41,11 @@ export interface AgentRecord extends ThreadBase {
   idleFrom: number;
   /** A recorded ping not yet delivered (id), until a delivery or any other input follows. */
   pendingPing: string | undefined;
+  /** The later of `activityAt` and its latest tool result: when it last showed progress. */
+  progressAt: number;
+  /** Time in turn outside tool calls before `markAt`, since `activityAt`; `markAt` is 0 inside a tool call. */
+  outsideMs: number;
+  markAt: number;
   /** Its latest report: output id, version and the log position. */
   lastReport: { outputId: string; version: number; at: number } | undefined;
 }
@@ -93,6 +98,20 @@ export interface AgentLog {
   hasUnansweredPerson: boolean;
 }
 
+/** Calls that say nothing was done, so a ping turn made of them is not an answer to the ping. */
+const NOT_AN_ANSWER = ["activity", "read", "bash_manage"];
+
+/** Minutes since the agent last showed progress (an activity line or a tool result); 0 while it is inside a tool call or not in a turn. */
+export function stalledMinutes(r: AgentRecord, inTurn: boolean, now: number): number {
+  return inTurn && r.openCalls.size === 0 ? Math.max(0, (now - r.progressAt) / 60_000) : 0;
+}
+
+/** Minutes of its turn outside tool calls since its last activity line: what the reminder counts. */
+export function silentMinutes(r: AgentRecord, inTurn: boolean, now: number): number {
+  const open = inTurn && r.openCalls.size === 0 ? Math.max(0, now - r.markAt) : 0;
+  return (r.outsideMs + open) / 60_000;
+}
+
 const memo = new WeakMap<readonly RunEvent[], { length: number; value: AgentLog }>();
 
 export function agentLog(events: readonly RunEvent[]): AgentLog {
@@ -118,6 +137,9 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       pings: prev?.pings ?? 0,
       idleFrom: prev?.idleFrom ?? 0,
       pendingPing: prev?.pendingPing,
+      progressAt: 0,
+      outsideMs: 0,
+      markAt: 0,
       lastReport: prev?.lastReport,
     };
   });
@@ -167,7 +189,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       case "thread.started": {
         if (!record) break;
         record.startedAt = at;
-        record.activityAt = Date.parse(e.createdAt);
+        record.activityAt = record.progressAt = record.markAt = Date.parse(e.createdAt);
+        record.outsideMs = 0;
         idByName.set(record.name, record.id);
         if (record.place === "main") {
           main = record;
@@ -182,7 +205,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         }
         if (sender?.kind === "thread" && sender.messageId) delivered.add(sender.messageId);
         if (sender?.kind === "runtime" && sender.covers) delivered.add(sender.covers);
-        if (e.payload.input)
+        // A start that continues a cut-off turn received nothing new: the first start counted the input.
+        if (e.payload.input && !(before && before.end === undefined))
           receive(record, sender?.kind === "runtime" ? sender.covers : undefined);
         break;
       }
@@ -245,7 +269,21 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         break;
       }
       case "activity":
-        if (record) record.activityAt = Date.parse(e.createdAt);
+        if (record) {
+          record.activityAt = record.progressAt = Date.parse(e.createdAt);
+          record.outsideMs = 0;
+        }
+        break;
+      case "tool.call":
+        if (record) {
+          if (record.markAt > 0) record.outsideMs += Date.parse(e.createdAt) - record.markAt;
+          record.markAt = 0;
+          // A ping turn that did work was answered: the next idle stretch starts from zero.
+          if (!NOT_AN_ANSWER.includes(e.payload.name)) record.pings = 0;
+        }
+        break;
+      case "tool.result":
+        if (record) record.progressAt = record.markAt = Date.parse(e.createdAt);
         break;
       case "ping": {
         const target = fold.threads.get(e.payload.threadId);
@@ -256,10 +294,6 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         pingIds.add(e.id);
         break;
       }
-      case "tool.call":
-        // A ping turn that did work was answered: the next idle stretch starts from zero.
-        if (record) record.pings = 0;
-        break;
       case "person.message":
         personAt = at;
         break;

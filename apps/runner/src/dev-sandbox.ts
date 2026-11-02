@@ -31,7 +31,7 @@ import type { Sandbox } from "@voluma/harness/ports/sandbox";
 import { specOf } from "@voluma/harness/sandbox-specs";
 import { HARNESSES } from "@voluma/harness/supervise-run";
 import { segmentSamTool } from "@voluma/harness/tools/segment-sam";
-import { runnerConfig } from "./config.ts";
+import { runnerConfig, sandboxIdleSeconds } from "./config.ts";
 import { holdLease } from "./lease.ts";
 import { claimSandboxes, terminateClaim } from "./modal-sandbox.ts";
 import { redactor } from "./redact.ts";
@@ -171,7 +171,7 @@ try {
         runId: run.id,
         image: config.sandbox.image,
         lifetimeSeconds: config.sandbox.lifetimeSeconds,
-        idleSeconds: config.sandbox.idleSeconds,
+        idleSeconds: sandboxIdleSeconds(config, run.harness),
       },
       sandboxGateway(
         config,

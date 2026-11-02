@@ -180,6 +180,10 @@ function checkoutCommit(): string {
 
 export type Config = ReturnType<typeof runnerConfig>;
 
+/** How long a sandbox idles before it stops: the agent loop's runs get the shorter wait. */
+export const sandboxIdleSeconds = (config: Config, harness: string | undefined) =>
+  harness === "agents" ? config.sandbox.agentIdleSeconds : config.sandbox.idleSeconds;
+
 export function runnerConfig() {
   const modal = modalToken();
   const models = modelAliases();

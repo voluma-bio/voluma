@@ -233,6 +233,10 @@ const startWorkerTool = (api: AgentsApi): Tool =>
         api.section(async () => {
           const { role, d } = caller(api, ctx);
           if (role !== "main") throw new Refusal("Only main starts workers: message main.");
+          if (![...d.messages.values()].some((m) => m.from === "main" && m.to === "researcher"))
+            throw new Refusal(
+              "Send your plan note to the researcher first: message `researcher` with the text of /work/main/plan.md, then start workers.",
+            );
           const workerId = threadIdOf(api.runId, name);
           const started = d.records.get(workerId);
           if (started?.spawnedBy === ctx.toolCallId) return text(`Started ${name}.`);

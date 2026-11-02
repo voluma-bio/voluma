@@ -64,7 +64,7 @@ import type { ObjectStore } from "@voluma/object-store";
 import type { AgentDefinition } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
-import { type Config, isVisitorSafe, providerKey } from "./config.ts";
+import { type Config, isVisitorSafe, providerKey, sandboxIdleSeconds } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaImages } from "./meta-images.ts";
@@ -463,8 +463,7 @@ async function claimBody(
       sandbox: {
         image: sandboxImage,
         lifetimeSeconds: config.sandbox.lifetimeSeconds,
-        idleSeconds:
-          harness === "agents" ? config.sandbox.agentIdleSeconds : config.sandbox.idleSeconds,
+        idleSeconds: sandboxIdleSeconds(config, harness),
       },
       // The token follows the tool grant: `superviseRun` asks for it only for a sandbox whose role holds `segment_sam`.
       gateway: config.gateway

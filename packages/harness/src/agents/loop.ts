@@ -20,6 +20,8 @@ import {
   agentLog,
   agentState,
   type InboxItem,
+  silentMinutes,
+  stalledMinutes,
 } from "@voluma/contracts/agents";
 import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
 import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
@@ -148,7 +150,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const handed = new Map<string, Set<string>>();
   const dealtWith = new Set<string>();
   /** When each agent was last reminded to send an activity line. */
-  const reminded = new Map<string, number>();
+  const reminded = new Map<string, { activityAt: number; minutes: number }>();
 
   const shell = loopShell({
     rootThreadId: root,
@@ -507,17 +509,18 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
    * An idle agent past the ping interval is pinged: the ping is recorded, then delivered as the
    * start of a turn. A worker already pinged with nothing received since, and idle at least
    * `pingCloseMinutes`, is asked to wrap up instead (as if it had called `close`). Main is
-   * pinged only while a worker or a background command runs, and never closed.
+   * pinged only while a worker works or its own background command runs, and never closed.
    */
   async function pingIdle(d: AgentLog): Promise<boolean> {
     for (const r of d.records.values()) {
       if (r.pendingPing || r.closeAt !== undefined || r.end === undefined) continue;
-      if (stateOf(r) !== "idle") continue;
-      if (now() - Date.parse(r.endedTime) < pingMinutes * 60_000) continue;
+      // Main's own background command makes it busy, not idle, yet it is pinged then (a worker's is not).
+      const idle = r.place === "main" ? turnState(r) === "idle" : stateOf(r) === "idle";
+      if (!idle || now() - Date.parse(r.endedTime) < pingMinutes * 60_000) continue;
       if (r.place === "main") {
-        const somethingRuns = [...d.records.values()].some(
-          (x) => x.place === "worker" && stateOf(x) === "working",
-        );
+        const somethingRuns =
+          o.bash.busy(r.id) ||
+          [...d.records.values()].some((x) => x.place === "worker" && stateOf(x) === "working");
         if (!somethingRuns) continue;
       } else if (r.pings > 0 && now() - r.idleFrom >= pingCloseMinutes * 60_000) {
         await recorder.append(
@@ -540,29 +543,28 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   async function deliverPings(d: AgentLog): Promise<boolean> {
     for (const r of d.records.values()) {
       if (!r.pendingPing || threads.running(r.id) || turnState(r) !== "idle") continue;
-      await resume(r, pingText(pingMinutes), { kind: "runtime", covers: r.pendingPing });
+      // Main's list may be as old as the interval: it gets the current one.
+      const text =
+        r.place === "main"
+          ? `${pingText(pingMinutes)}\n\nAgents:\n${agentList(d, stateOf, now())}`
+          : pingText(pingMinutes);
+      await resume(r, text, { kind: "runtime", covers: r.pendingPing });
       return true;
     }
     return false;
   }
 
-  /**
-   * Minutes an agent's turn has run without an `activity` line, or 0 when it is not in a turn or is
-   * inside a tool call (which cannot send one).
-   */
-  const silentMinutes = (r: AgentRecord) =>
-    threads.running(r.id) && r.openCalls.size === 0
-      ? Math.max(0, (now() - r.activityAt) / 60_000)
-      : 0;
-
   /** An agent silent for a window is reminded, and again for each further window it stays silent. */
   async function remindSilent(d: AgentLog): Promise<boolean> {
     for (const r of d.records.values()) {
       if (r.closeAt !== undefined) continue;
-      const since = Math.max(r.activityAt, reminded.get(r.id) ?? 0);
-      if (silentMinutes(r) < activityMinutes || now() - since < activityMinutes * 60_000) continue;
+      const silent = silentMinutes(r, threads.running(r.id), now());
+      const last = reminded.get(r.id);
+      // The level resets with the silence: a new activity line or start moves `activityAt`.
+      const level = last?.activityAt === r.activityAt ? last.minutes : 0;
+      if (silent < level + activityMinutes) continue;
       if (threads.send(r.id, activityReminder(activityMinutes), RUNTIME)) {
-        reminded.set(r.id, now());
+        reminded.set(r.id, { activityAt: r.activityAt, minutes: silent });
         return true;
       }
     }
@@ -576,7 +578,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     // A working or closing agent holds the run open (main may end its turn while a worker winds
     // up), unless it is silent for two windows: it did not answer its reminder.
     const holdsRun = (r: AgentRecord) =>
-      ["working", "closing"].includes(stateOf(r)) && silentMinutes(r) < 2 * activityMinutes;
+      ["working", "closing"].includes(stateOf(r)) &&
+      stalledMinutes(r, threads.running(r.id), now()) < 2 * activityMinutes;
     if ([...d.records.values()].some(holdsRun)) return false;
     const events = recorder.events();
     if (d.emptyDeliveries < stuckLimit) {
