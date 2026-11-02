@@ -1,36 +1,53 @@
 /**
- * The scan review's main area: the task in view on its own analysis grid in Andrew's grid viewer
- * (3D and three slices through one crosshair), with the blocks the task names drawn on it, from
- * the run's converted assets. Loaded lazily, with three.js. Each grid gets its own viewer, kept
- * mounted and hidden while another grid is shown; structure display changes redraw in place.
- * The marking tools sit on the viewer's bar; your marks on this grid's image are drawn, and a
- * new one is named by that image's id. The page learns which grid is shown (`onShown`), since
- * marks and the picture belong to it.
+ * The scan review's main area: the subject in view (a task, or an output of the agent loop) on
+ * its own analysis grid in Andrew's grid viewer (3D and three slices through one crosshair), with
+ * the blocks the subject names drawn on it, from the run's converted assets. Loaded lazily, with
+ * three.js. Each grid gets its own viewer, kept mounted and hidden while another grid is shown;
+ * structure display changes redraw in place. The marking tools sit on the viewer's bar when the
+ * page takes marks (`onTool`); your marks on this grid's image are drawn, and a new one is named
+ * by that image's id. The page learns which grid is shown (`onShown`), since marks and the picture
+ * belong to it.
  */
 import { reviewAssetUrl } from "@voluma/api-client";
 import { MAX_MARKS } from "@voluma/contracts/messages";
-import type { Focus, ReviewAssets, ReviewTask, Revision } from "@voluma/contracts/review";
+import type { Focus, ReviewAssets, ReviewTask } from "@voluma/contracts/review";
 import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
 import {
+  type Blocks,
   type GridMark,
   type GridScene,
   GridViewer,
   type GridViewerHandle,
   labelsMiddle,
   type MarkTool,
+  reviewGrid,
   type ShownMark,
   type StructureDisplay,
-  taskGrid,
+  taskBlocks,
   tokenColor,
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type Ref, useEffect, useMemo, useRef, useState } from "react";
 import { FULL, gridKeyOf, gridMark, type ShownGrid, TOOLS, type YourMark } from "./marks-panel";
 
+/** A task in view: what its numbers are measured on and drawn with, and what it reported. */
 export function TaskViewer({
+  task,
+  ...props
+}: Omit<Parameters<typeof SceneViewer>[0], "subject" | "title"> & { task: ReviewTask }) {
+  const { revision } = props;
+  const subject = useMemo(
+    () => ({ id: task.id, shown: taskBlocks(revision, task) }),
+    [revision, task],
+  );
+  return <SceneViewer subject={subject} {...props} />;
+}
+
+export function SceneViewer({
   runId,
   revision,
-  task,
+  subject,
+  title,
   assets,
   display,
   focus,
@@ -45,14 +62,18 @@ export function TaskViewer({
   viewer,
 }: {
   runId: string;
-  revision: Revision;
-  task: ReviewTask;
+  revision: Blocks;
+  /** What is in view: its id (a task's, an output's) and the block ids it shows. */
+  subject: { id: string; shown: readonly string[] };
+  /** Replaces the grid's name above the views: the output and its value. */
+  title?: string;
   assets: Record<string, ReviewAssets>;
   display: StructureDisplay;
   /** The selected item's place: each new object moves the crosshair there once. */
   focus?: Focus;
   tool: MarkTool | null;
-  onTool: (tool: MarkTool | null) => void;
+  /** Absent: the page takes no marks, and the marking tools are not shown. */
+  onTool?: (tool: MarkTool | null) => void;
   marks: readonly YourMark[];
   selected: string | undefined;
   /** A mark picked in Marks: it moves the crosshair once its grid is shown, then `onJumped`. */
@@ -60,16 +81,16 @@ export function TaskViewer({
   onJumped: () => void;
   /** A new mark, on the image volume `volumeId`. */
   onMark: (mark: GridMark, volumeId: string, gridKey: string) => void;
-  /** The mounted task and grid; undefined while no viewer is shown. */
+  /** The mounted subject and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
   viewer: Ref<GridViewerHandle>;
 }) {
   const [labels, setLabels] = useState(false);
   const grid = useMemo(
     () =>
-      taskGrid({
+      reviewGrid({
         revision,
-        task,
+        shown: subject.shown,
         assets,
         display,
         labels,
@@ -79,7 +100,7 @@ export function TaskViewer({
           new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href,
         token: tokenColor,
       }),
-    [runId, revision, task, assets, display, labels, focus],
+    [runId, revision, subject.shown, assets, display, labels, focus],
   );
   // A focused label has no extent in the run's data: find its middle on the grid. Keyed by
   // what it reads, since `grid` is rebuilt on every display change.
@@ -116,8 +137,8 @@ export function TaskViewer({
     if (jump.gridKey === gridKey) {
       setAim({ gridKey, target: { at: jump.at } });
       onJumped();
-    } else if (jump.taskId === task.id) onJumped();
-  }, [jump, gridKey, task.id, onJumped]);
+    } else if (jump.taskId === subject.id) onJumped();
+  }, [jump, gridKey, subject.id, onJumped]);
   // A new grid mounts before effects run; never initialize it with the previous grid's voxel.
   const shownFocus = aim.gridKey === gridKey ? aim.target : target;
   const shown = useMemo(() => {
@@ -142,7 +163,7 @@ export function TaskViewer({
           key: gridKey,
           imageId: grid.imageId,
           scene: grid.scene,
-          title: grid.name,
+          title: title ?? grid.name,
           notes: grid.notes,
           focus: shownFocus,
         }
@@ -165,11 +186,11 @@ export function TaskViewer({
     );
   const shownReady = !!live && !!slots.find((k) => k.key === live.key)?.ready;
   useEffect(
-    () => onShown(gridKey ? { key: gridKey, taskId: task.id, ready: shownReady } : undefined),
-    [gridKey, task.id, shownReady, onShown],
+    () => onShown(gridKey ? { key: gridKey, taskId: subject.id, ready: shownReady } : undefined),
+    [gridKey, subject.id, shownReady, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
-  // One tree shape whether or not this task's grid is ready, so the kept viewers never remount.
+  // One tree shape whether or not this subject's grid is ready, so the kept viewers never remount.
   return (
     <>
       {grid.state !== "ready" && (
@@ -202,15 +223,17 @@ export function TaskViewer({
             >
               {on && (
                 <>
-                  <SegmentedControl
-                    label="Marking tool"
-                    options={TOOLS.map((t) => ({
-                      ...t,
-                      reason: full && t.value !== "navigate" ? FULL : undefined,
-                    }))}
-                    value={tool ?? "navigate"}
-                    onValueChange={(v) => onTool(v === "navigate" ? null : v)}
-                  />
+                  {onTool && (
+                    <SegmentedControl
+                      label="Marking tool"
+                      options={TOOLS.map((t) => ({
+                        ...t,
+                        reason: full && t.value !== "navigate" ? FULL : undefined,
+                      }))}
+                      value={tool ?? "navigate"}
+                      onValueChange={(v) => onTool(v === "navigate" ? null : v)}
+                    />
+                  )}
                   <label className="flex items-center gap-1.5">
                     <input
                       type="checkbox"
@@ -252,7 +275,7 @@ const NO_MARKS: ShownMark[] = [];
  * redo that replaces an image retires its viewer), with the shown grid last and up to date.
  * Reordering moves a viewer in the DOM; its canvases keep their WebGL contexts.
  */
-const keep = (had: Kept[], live: View | undefined, revision: Revision): Kept[] => {
+const keep = (had: Kept[], live: View | undefined, revision: Blocks): Kept[] => {
   const images = new Set(revision.volumes.map(gridKeyOf));
   const others = had.filter((k) => k.key !== live?.key && images.has(k.key));
   if (!live) return others.length === had.length ? had : others;

@@ -40,7 +40,7 @@ import type { SandboxMount } from "./ports/sandbox";
 import type { ThreadIdentity } from "./thread-log";
 
 const INPUTS = "/inputs";
-const OUTPUTS = "/outputs";
+export const OUTPUTS = "/outputs";
 const SCRATCH = "/scratch";
 export const WORKFLOW = "/workflow";
 export const EVIDENCE = "/evidence";
@@ -105,7 +105,7 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 
 export interface RunLayout {
   /**
-   * The review-asset converter's sandbox, outside the threads: reads the evidence and the
+   * The review-asset converter's sandbox, outside the threads: reads the evidence, the published versions and the
    * workflow, writes the run's review prefix and the input's conversion cache, no network.
    */
   convert: SandboxLayout;
@@ -259,9 +259,11 @@ export function runLayout({
 
   const convert: SandboxLayout = {
     name: "convert",
-    // Read by the converter, which imports `sidecar` through the run's PYTHONPATH.
+    // Read by the converter, which imports `sidecar` through the run's PYTHONPATH. `/outputs`
+    // holds the agent loop's published versions.
     mounts: [
       { path: EVIDENCE, prefix: evidencePrefix(runId), access: "read-only" },
+      { path: OUTPUTS, prefix: outputsPrefix(runId), access: "read-only" },
       { path: WORKFLOW, prefix: workflowSnapshotPrefix(runId), access: "read-only" },
       { path: REVIEW, prefix: reviewAssetPrefix(runId), access: "read-write" },
       { path: INPUT_REVIEW, prefix: inputReviewPrefix(inputId), access: "read-write" },

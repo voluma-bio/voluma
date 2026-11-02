@@ -36,7 +36,8 @@ export type RunRecord = {
 /** Only authenticated human decisions can cross the review write port. */
 export type ReviewDecision =
   | Pick<Extract<RunEvent, { type: "check.accepted" }>, "type" | "payload">
-  | Pick<Extract<RunEvent, { type: "review.completed" }>, "type" | "payload">;
+  | Pick<Extract<RunEvent, { type: "review.completed" }>, "type" | "payload">
+  | Pick<Extract<RunEvent, { type: "tocheck.resolved" }>, "type" | "payload">;
 
 /** Run-owned coherent reads and serialized human writes; Review owns decision policy. */
 export type RunRecords = {

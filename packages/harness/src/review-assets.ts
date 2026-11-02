@@ -1,10 +1,11 @@
 /**
  * The conversion worker: turns every file a task reports as a volume, a structure mask or a
- * surface into review assets (`workflows/core/convert/review_assets.py`: OME-Zarr levels and
+ * surface, and the first file of every published version that says how to read it (`detail`),
+ * into review assets (`workflows/core/convert/review_assets.py`: OME-Zarr levels and
  * meshes) while the run is live, and records `assets.ready` or `assets.failed` for it on the
  * run's root thread. Review fetches the files by `reviewAssetKey`.
  *
- * Queue: every `output` event in the recorder's view, from the first (a resume reads the whole
+ * Queue: every `output` and `output.published` event in the recorder's view, from the first (a resume reads the whole
  * log), minus the files that already have an `assets.*` event; new
  * outputs join as the recorder stores them (polled, one cheap scan of the new events). One file at a
  * time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session, which
@@ -26,7 +27,7 @@ import { ASSET_ERROR_MAX, type RunEvent } from "@voluma/contracts/events";
 import { inputReviewPrefix } from "@voluma/contracts/r2";
 import { type ReviewAssetsManifest, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { errorText } from "./error-text";
-import { EVIDENCE, REVIEW, WORKFLOW } from "./layout";
+import { EVIDENCE, OUTPUTS, REVIEW, WORKFLOW } from "./layout";
 import { type Sandbox, SandboxEndedError } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 
@@ -51,12 +52,34 @@ const converting = new Map<string, Promise<void>>();
 
 interface Job {
   sha256: string;
+  /** The file in the convert sandbox: a task's output in the evidence store, a version's in `/outputs`. */
+  source: string;
   /** The converter's flags after `--source`. */
   flags: string;
 }
 
-/** The conversion an `output` event asks for; undefined for a kind with no review assets. */
+/**
+ * The conversion an `output` or `output.published` event asks for; undefined for a kind with no
+ * review assets. A published version says how to read its first file in `detail` (the writer
+ * fills it from the catalog): `as`, and `axis` for a surface; `dtype: float32` with `unit: HU`
+ * converts to int16, as the task loop's scan does.
+ */
 export function convertJob(event: RunEvent): Job | undefined {
+  if (event.type === "output.published") {
+    const { detail, files, path } = event.payload;
+    const file = files?.[0];
+    const as = detail?.as;
+    if (!file || (as !== "image" && as !== "labels" && as !== "mask" && as !== "surface"))
+      return undefined;
+    const axis = detail?.axis;
+    if (as === "surface" && axis !== 0 && axis !== 1 && axis !== 2) return undefined;
+    const int16 = as === "image" && detail?.dtype === "float32" && detail?.unit === "HU";
+    return {
+      sha256: file.sha256,
+      source: `${OUTPUTS}/${path}/${file.name}`,
+      flags: `--as ${as}${as === "surface" ? ` --axis ${axis}` : ""}${int16 ? " --int16" : ""}`,
+    };
+  }
   if (event.type !== "output") return undefined;
   const { output } = event.payload;
   switch (output.kind) {
@@ -64,15 +87,24 @@ export function convertJob(event: RunEvent): Job | undefined {
       const { kind, dtype, unit, file } = output.volume;
       // The scan's HU are float32 on disk; the viewer loads int16.
       const int16 = kind === "image" && dtype === "float32" && unit === "HU" ? " --int16" : "";
-      return { sha256: file.sha256, flags: `--as ${kind}${int16}` };
+      return {
+        sha256: file.sha256,
+        source: `${EVIDENCE}/${file.sha256}`,
+        flags: `--as ${kind}${int16}`,
+      };
     }
     case "structure":
       return "mask" in output.structure
-        ? { sha256: output.structure.mask.sha256, flags: "--as mask" }
+        ? {
+            sha256: output.structure.mask.sha256,
+            source: `${EVIDENCE}/${output.structure.mask.sha256}`,
+            flags: "--as mask",
+          }
         : undefined;
     case "surface":
       return {
         sha256: output.surface.heights.sha256,
+        source: `${EVIDENCE}/${output.surface.heights.sha256}`,
         flags: `--as surface --axis ${output.surface.axis}`,
       };
     default:
@@ -228,7 +260,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   async function convertInSandbox(job: Job): Promise<ConvertResult> {
     const box = await options.sandbox();
     const command =
-      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${EVIDENCE}/${job.sha256} ` +
+      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${job.source} ` +
       `${job.flags} --out ${REVIEW}`;
     let stdout = "";
     let stderr = "";
