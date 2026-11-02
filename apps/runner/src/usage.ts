@@ -27,19 +27,32 @@ export function usageMeter() {
   >();
   // Cache state per thread: a miss is judged against the same thread's previous call.
   const cache = new Map<string, CacheState>();
+  // Cache misses in a row per thread: a hit resets it, an unreported call leaves it.
+  const streaks = new Map<string, number>();
   return {
-    /** One model call's usage: its cost goes to the heartbeat, its tokens and cache miss to the per-role totals. */
-    addModelCall(role: string, threadId: string, used: ModelUsage | undefined) {
-      if (!used) return;
+    /**
+     * One model call's usage: its cost goes to the heartbeat, its tokens and cache miss to the
+     * per-role totals. Returns the thread's cache misses in a row, this call included.
+     */
+    addModelCall(role: string, threadId: string, used: ModelUsage | undefined): number {
+      if (!used) return streaks.get(threadId) ?? 0;
       this.addModelCost(used.costUsd);
       const { miss, next } = cacheStep(cache.get(threadId), used);
       cache.set(threadId, next);
+      const prompt = used.input + used.cacheRead + used.cacheWrite;
+      const streak = miss
+        ? (streaks.get(threadId) ?? 0) + 1
+        : prompt === 0
+          ? (streaks.get(threadId) ?? 0)
+          : 0;
+      streaks.set(threadId, streak);
       const t = tokens.get(role) ?? { calls: 0, input: 0, cacheRead: 0, misses: 0 };
       t.misses += miss ? 1 : 0;
       t.calls++;
       t.input += used.input;
       t.cacheRead += used.cacheRead;
       tokens.set(role, t);
+      return streak;
     },
     /** One line per role: calls, uncached input, cache reads, the share of the prompt read from cache, and the calls that lost the cache. The meter cannot see a compaction (the run view resets its baseline there), so the call after one counts as a miss here; it lives for one claim, so a thread's first call after a restart is never a miss here, unlike the run view. */
     cacheSummary(): string[] {
@@ -76,3 +89,21 @@ export function usageMeter() {
   };
 }
 export type UsageMeter = ReturnType<typeof usageMeter>;
+
+/**
+ * The error that fails a run whose thread missed the prompt cache `streak` calls in a row, or
+ * undefined below `limit`. One miss happens (an idle eviction, the call after a compaction or a
+ * "Tools changed" notice); misses in a row mean the prefix changes on every call, so each call
+ * pays full price for the whole prompt. It fails the run rather than being retried, because a
+ * retry sends the same prompt.
+ */
+export function cacheBrokenError(
+  runId: string,
+  threadId: string,
+  role: string,
+  streak: number,
+  limit: number,
+): string | undefined {
+  if (streak < limit) return undefined;
+  return `cache broken: thread ${threadId} (${role}) of run ${runId} missed the prompt cache on ${streak} model calls in a row (RUNNER_CACHE_MISS_LIMIT=${limit})`;
+}

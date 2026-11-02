@@ -222,6 +222,11 @@ export function runnerConfig() {
   return {
     api,
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
+    /**
+     * `RUNNER_CACHE_MISS_LIMIT`: prompt-cache misses in a row on one thread that fail the run as
+     * cache-broken (`cacheBrokenError`, `usage.ts`). Default 3.
+     */
+    cacheMissLimit: positiveInt("RUNNER_CACHE_MISS_LIMIT", 3),
     /** The run loop's limits (`LoopConfig`); the harness default is 2 fix rounds. */
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),

@@ -80,7 +80,7 @@ import { storePublish } from "./store-publish.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
-import { usageMeter } from "./usage.ts";
+import { cacheBrokenError, usageMeter } from "./usage.ts";
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -192,6 +192,7 @@ async function claimBody(
   if (shutdown.aborted) stop("shutdown");
 
   const meter = usageMeter();
+  let cacheBroken = false;
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -333,7 +334,16 @@ async function claimBody(
           ...(m.provider === "meta" && { cacheRetention: "long" }),
         });
         stream.result().then(
-          (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
+          (reply) => {
+            const streak = meter.addModelCall(role, threadId, usageOf(reply));
+            // Not a provider error: failing the run is final, so nothing retries the same prompt.
+            const broken = cacheBrokenError(runId, threadId, role, streak, config.cacheMissLimit);
+            if (broken && !cacheBroken) {
+              cacheBroken = true;
+              log(broken);
+              scope.fail?.(new Error(broken));
+            }
+          },
           () => {},
         );
         return stream;
