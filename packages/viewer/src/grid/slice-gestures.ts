@@ -106,10 +106,14 @@ export function useSliceGestures(args: {
       q[ra] = clamp(Math.round(p[ra]), scene.shapeZyx[ra]);
       return q as unknown as Zyx;
     };
-    // Where the pointer is on this slice, between voxel centres: a line's or an outline's points.
-    const toPosition = (event: { clientX: number; clientY: number }): Zyx => {
+    // Where the pointer is on the slice through `at` (by default the crosshair), between voxel
+    // centres: a line's or an outline's points.
+    const toPosition = (
+      event: { clientX: number; clientY: number },
+      at: Zyx = latest.current.point,
+    ): Zyx => {
       const [x, y] = paneMm(event);
-      const { point: at, fromPane: from, whole: w } = latest.current;
+      const { fromPane: from, whole: w } = latest.current;
       const p = inside(from(x, y, at)).map(hundredths);
       if (w) p[axis] = Math.round(at[axis]);
       return p as unknown as Zyx;
@@ -121,6 +125,8 @@ export function useSliceGestures(args: {
       mode: "cross" | "pan" | "tilt" | MarkTool;
       x: number;
       y: number;
+      /** The crosshair at press: a drawn mark stays on its slice if the wheel steps mid-drag. */
+      at: Zyx;
       from: Zyx;
       moved: boolean;
       /** An outline's points, and the screen position of the last. */
@@ -181,6 +187,7 @@ export function useSliceGestures(args: {
         mode: pan ? "pan" : hit ? "tilt" : (tool ?? "cross"),
         x: event.clientX,
         y: event.clientY,
+        at: latest.current.point,
         from,
         moved: false,
         path: [from],
@@ -212,7 +219,7 @@ export function useSliceGestures(args: {
           return;
         drag.moved = true;
         // On the slice the gesture began on, even if the wheel stepped since.
-        const to = toPosition(event);
+        const to = toPosition(event, drag.at);
         if (drag.mode === "box") layer.draft = boxMark(round(drag.from), round(to));
         else if (drag.mode === "line" && !clicks.length) {
           layer.hover = null;
