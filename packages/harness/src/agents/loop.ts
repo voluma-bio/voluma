@@ -22,7 +22,7 @@ import {
   type InboxItem,
 } from "@voluma/contracts/agents";
 import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
-import type { OutputCatalog } from "@voluma/contracts/output-catalog";
+import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import { callKey, type UserSender } from "@voluma/contracts/thread-records";
@@ -99,7 +99,7 @@ export interface AgentLoopOptions {
   threads: Threads;
   section: Section;
   catalog: OutputCatalog;
-  /** The outputs the researcher selected (every output when absent). */
+  /** The outputs the researcher selected (the catalog's `selectable` ones when absent). */
   selectedOutputs: readonly string[] | undefined;
   /** The skills a brief may name. */
   skills: readonly string[];
@@ -120,6 +120,16 @@ export interface AgentLoopOptions {
 
 const RUNTIME: UserSender = { kind: "runtime" };
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
+
+/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
+export function openingOutputs(
+  catalog: readonly OutputEntry[],
+  selected: readonly string[] | undefined,
+) {
+  return selected
+    ? catalog.filter((e) => selected.includes(e.id))
+    : catalog.filter((e) => e.selectable);
+}
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, threads } = o;
@@ -258,9 +268,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   }
 
   async function startup() {
-    const entries = o.selectedOutputs
-      ? o.catalog.filter((e) => o.selectedOutputs?.includes(e.id))
-      : o.catalog;
+    const entries = openingOutputs(o.catalog, o.selectedOutputs);
     const id = `${root}:outputs`;
     if (entries.length > 0 && !derive().written.has(id)) {
       const change = {

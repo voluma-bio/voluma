@@ -12,7 +12,7 @@ import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
 import type { Recorder } from "../recorder";
 import { keepNotes } from "./keep-notes";
-import { type AgentLoopConfig, agentLoop, interruptedResult } from "./loop";
+import { type AgentLoopConfig, agentLoop, interruptedResult, openingOutputs } from "./loop";
 import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
@@ -114,7 +114,7 @@ async function runAgents(
           ? {
               role: "main",
               finalOutputs: renderFinalOutputs(recorder.events()),
-              selected: o.selectedOutputs?.length ?? catalog.length,
+              selected: openingOutputs(catalog, o.selectedOutputs).length,
               limit: api.limit,
               ...(o.notes && { notes: o.notes }),
             }
