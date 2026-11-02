@@ -82,12 +82,14 @@
   name: Removal mask
   description: "what intake set to air in the scan: holder, padding and debris"
   base: scan
+  shape: mask
 
 - id: bone-labels
   kind: overlay
   name: Bone labels
   description: labels.npy on the scan grid; the bones below are values in it
   base: scan
+  shape: labels
   expect:
     - Every label is one structure, and every piece present is labelled or raised as a To check
       item, checked on the 3D sheet and the label checks, as
@@ -100,6 +102,7 @@
     "disagreement.npy from disagree.py on the scan grid: the regions where your labels and
     the classic method's differ, for To check items to point at"
   base: scan
+  shape: labels
 
 - id: femur
   kind: overlay
@@ -142,6 +145,7 @@
   name: ROI-1 (IIOC)
   description: "the voxels measured for deck #4-6: growth plate to articular surface"
   base: tibia-grid
+  shape: mask
   expect:
     - ROI-1 runs from the growth plate's proximal face to the articular surface, as
       /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (iioc) describes, checked on a
@@ -152,6 +156,7 @@
   name: ROI-2 (IIOC trabecular)
   description: "the voxels measured for deck #13-15"
   base: tibia-grid
+  shape: mask
   expect:
     - ROI-2 excludes the subchondral plate and the cortical line and covers the trabecular core over
       ROI-1's whole front-to-back extent, as
@@ -162,6 +167,7 @@
   name: ROI-3 (metaphyseal)
   description: "the voxels measured for deck #16-23"
   base: tibia-grid
+  shape: mask
   expect:
     - ROI-3 is a band in the marrow below the growth plate's distal face and clear of the cortical
       wall, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (metaphyseal-roi)
@@ -172,6 +178,7 @@
   name: Medial subchondral plate
   description: "the voxels measured for deck #11"
   base: tibia-grid
+  shape: mask
   expect: &a1
     - Each slab sits inside the subchondral plate under the articular surface, in the compartment the
       tibia-grid names medial or lateral, as
@@ -183,6 +190,7 @@
   name: Lateral subchondral plate
   description: "the voxels measured for deck #12"
   base: tibia-grid
+  shape: mask
   expect: *a1
 
 - id: roi-cortex-100um
@@ -190,6 +198,7 @@
   name: Cortex at 100 µm
   description: "the voxels measured for deck #24"
   base: tibia-grid
+  shape: mask
   expect: &a2
     - Measured on the `cortex` and `growth-plate-distal-face` the metaphysis step reported (the face
       is not traced again), as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md
@@ -200,6 +209,7 @@
   name: Cortex at 1000 µm
   description: "the voxels measured for deck #25"
   base: tibia-grid
+  shape: mask
   expect: *a2
 
 - id: cortex
@@ -207,6 +217,7 @@
   name: Cortex
   description: the cortical shell mask the cortical task reads
   base: tibia-grid
+  shape: mask
   expect:
     - The cortical wall only, all round, never reaching the fibula.
 
@@ -293,7 +304,7 @@
   description: patella label, thresholded voxels
   source: "deck #1"
   unit: mm3
-  on: [patella]
+  "on": [patella]
   selectable: true
   expect: &a3
     - Counted on the final labels (label voxels, not BV).
@@ -307,7 +318,7 @@
     count"
   source: "deck #2"
   unit: mm3
-  on: [lateral-meniscus-osteophyte]
+  "on": [lateral-meniscus-osteophyte]
   selectable: true
   expect: *a3
 
@@ -319,7 +330,7 @@
     count"
   source: "deck #3"
   unit: mm3
-  on: [medial-meniscus-osteophyte]
+  "on": [medial-meniscus-osteophyte]
   selectable: true
   expect: *a3
 
@@ -329,7 +340,7 @@
   description: the HU threshold that separates bone from soft tissue in the segmentation (review
     derives the bone inside a region from it)
   unit: "[hnsf'U]"
-  on: [bone-labels]
+  "on": [bone-labels]
   selectable: true
 
 - id: tv-tibial-iioc
@@ -338,7 +349,7 @@
   description: "ROI-1: growth plate to articular surface"
   source: "deck #4"
   unit: mm3
-  on: [roi-iioc]
+  "on": [roi-iioc]
   context: [growth-plate-proximal-face]
   selectable: true
 
@@ -348,7 +359,7 @@
   description: ROI-1
   source: "deck #5"
   unit: mm3
-  on: [roi-iioc]
+  "on": [roi-iioc]
   context: [growth-plate-proximal-face]
   selectable: true
 
@@ -358,7 +369,7 @@
   description: ROI-1
   source: "deck #6"
   unit: "%"
-  on: [roi-iioc]
+  "on": [roi-iioc]
   context: [growth-plate-proximal-face]
   headline: true
   selectable: true
@@ -369,7 +380,7 @@
   description: middle of the growth plate to the top of the articular bone, vertical
   source: "deck #7"
   unit: mm
-  on: [iioc-height-ruler]
+  "on": [iioc-height-ruler]
   context: [roi-iioc, growth-plate-proximal-face, articular-surface]
   selectable: true
   expect: &a4
@@ -382,7 +393,7 @@
   description: "as #7, medial"
   source: "deck #8"
   unit: mm
-  on: [iioc-medial-ruler]
+  "on": [iioc-medial-ruler]
   context: [roi-iioc, growth-plate-proximal-face, articular-surface]
   selectable: true
   expect: *a4
@@ -393,7 +404,7 @@
   description: "as #7, lateral"
   source: "deck #9"
   unit: mm
-  on: [iioc-lateral-ruler]
+  "on": [iioc-lateral-ruler]
   context: [roi-iioc, growth-plate-proximal-face, articular-surface]
   selectable: true
   expect: *a4
@@ -405,7 +416,7 @@
     the other side (open question for the lab: confirm the endpoints on one annotated scan)"
   source: "deck #10"
   unit: mm
-  on: [tibial-width-ruler]
+  "on": [tibial-width-ruler]
   context: [growth-plate-proximal-face]
   selectable: true
   expect:
@@ -419,7 +430,7 @@
   description: medial plate
   source: "deck #11"
   unit: mm
-  on: [roi-subchondral-plate-medial]
+  "on": [roi-subchondral-plate-medial]
   context: [articular-surface]
   selectable: true
 
@@ -429,7 +440,7 @@
   description: lateral plate
   source: "deck #12"
   unit: mm
-  on: [roi-subchondral-plate-lateral]
+  "on": [roi-subchondral-plate-lateral]
   context: [articular-surface]
   selectable: true
 
@@ -439,7 +450,7 @@
   description: "ROI-2: ROI-1 minus the subchondral plate and the cortical line next to the growth plate"
   source: "deck #13"
   unit: mm3
-  on: [roi-iioc-trabecular]
+  "on": [roi-iioc-trabecular]
   context: [under-plate-boundary]
   selectable: true
 
@@ -449,7 +460,7 @@
   description: ROI-2
   source: "deck #14"
   unit: mm3
-  on: [roi-iioc-trabecular]
+  "on": [roi-iioc-trabecular]
   context: [under-plate-boundary]
   selectable: true
 
@@ -459,7 +470,7 @@
   description: ROI-2
   source: "deck #15"
   unit: "%"
-  on: [roi-iioc-trabecular]
+  "on": [roi-iioc-trabecular]
   context: [under-plate-boundary]
   selectable: true
 
@@ -469,7 +480,7 @@
   description: "ROI-3: a band below the growth plate, clear of cortical bone (offsets in protocol.json)"
   source: "deck #16"
   unit: mm3
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -479,7 +490,7 @@
   description: ROI-3
   source: "deck #17"
   unit: mm3
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -489,7 +500,7 @@
   description: ROI-3
   source: "deck #18"
   unit: "%"
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -499,7 +510,7 @@
   description: ROI-3
   source: "deck #19"
   unit: 1/mm
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -509,7 +520,7 @@
   description: ROI-3, largest contained sphere
   source: "deck #20"
   unit: mm
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -519,7 +530,7 @@
   description: ROI-3, largest contained sphere in marrow
   source: "deck #21"
   unit: mm
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -529,7 +540,7 @@
   description: ROI-3, 3D skeleton junctions of ≥3 struts (the lab reports a count per tissue volume)
   source: "deck #22"
   unit: 1/mm3
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -539,7 +550,7 @@
   description: ROI-3, skeleton free ends (the lab reports a count per tissue volume)
   source: "deck #23"
   unit: 1/mm3
-  on: [roi-metaphyseal]
+  "on": [roi-metaphyseal]
   context: [growth-plate-distal-face]
   selectable: true
 
@@ -549,7 +560,7 @@
   description: cortical shell at that level
   source: "deck #24"
   unit: mm
-  on: [roi-cortex-100um]
+  "on": [roi-cortex-100um]
   context: [cortex, growth-plate-distal-face]
   selectable: true
 
@@ -559,7 +570,7 @@
   description: "as #24"
   source: "deck #25"
   unit: mm
-  on: [roi-cortex-1000um]
+  "on": [roi-cortex-1000um]
   context: [cortex, growth-plate-distal-face]
   headline: true
   selectable: true
@@ -570,7 +581,7 @@
   description: midpoint (a) of the upper line of the intercondylar groove to the intercondylar notch (b)
   source: "deck #26"
   unit: mm
-  on: [dfl-ruler]
+  "on": [dfl-ruler]
   headline: true
   selectable: true
 
@@ -581,7 +592,7 @@
     medial condyle (open question for the lab: confirm the endpoints on one annotated scan)"
   source: "deck #27"
   unit: mm
-  on: [dfw-ruler]
+  "on": [dfw-ruler]
   selectable: true
 
 - id: width-length-ratio
@@ -590,5 +601,5 @@
   description: "#27 ÷ #26"
   source: "deck #28"
   unit: "1"
-  on: [dfl-ruler, dfw-ruler]
+  "on": [dfl-ruler, dfw-ruler]
   selectable: true

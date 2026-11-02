@@ -44,14 +44,12 @@ import {
   bashBackgroundedSchema,
   bashEndedSchema,
   closeRequestedSchema,
-  madeFromSchema,
-  outputRefSchema,
+  outputPublishedSchema,
   outputsChangedSchema,
   pingSchema,
   skillLoadedSchema,
   toCheckItemSchema,
   tocheckResolvedSchema,
-  versionSchema,
   viewSavedSchema,
 } from "./agent-events";
 import {
@@ -68,8 +66,7 @@ import {
   runReopenedSchema,
 } from "./messages";
 import { evidenceRefSchema, outputReportSchema } from "./output";
-import { outputKindSchema } from "./output-catalog";
-import { relativePathSchema, sha256Schema } from "./r2";
+import { sha256Schema } from "./r2";
 import { checkAcceptedSchema, reviewAssetsManifestSchema, reviewCompletedSchema } from "./review";
 import { claimEndReasonSchema } from "./runner";
 import { planTaskSchema, recordedPinSchema, workflowPlanSchema } from "./workflow";
@@ -150,7 +147,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    * the runtime (the restart note), or a person.
    */
   const userSender = z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
+    z.object({
+      kind: z.literal("thread"),
+      threadId: nonEmpty,
+      /** The `agent.message` event a delivery carries, so the agent loop knows what was delivered. */
+      messageId: nonEmpty.optional(),
+    }),
     z.object({
       kind: z.literal("runtime"),
       /**
@@ -451,45 +453,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    */
   const output = event(
     "output",
-    outputReportSchema.extend({
-      /** An id the catalog declares, or `<worker>/<id>` for one it does not (the agent model). */
-      outputId: outputRefSchema,
-      // The agent model's outputs belong to no task; the task loop still writes both.
-      taskId: taskIdSchema.optional(),
-      attemptId: nonEmpty.optional(),
-      /**
-       * An agent-model version (`agents/tools/report-output.ts`): the nested `output` is then a
-       * compatibility shell for parsers that read it (`measurement` for a value, `file` holding
-       * the primary file for anything else); the fold reads the fields below.
-       * 1, 2, ... per output; a published version is never changed.
-       */
-      version: versionSchema.optional(),
-      /**
-       * Where the version's files were copied, keyed by the tool call: a folder under the run's
-       * `outputs/`, shown to agents as `/outputs/<path>/`. A kept version points at the folder
-       * of the version it keeps.
-       */
-      path: relativePathSchema.optional(),
-      /** The version's files with their hashes, relative to `path`; the first is the primary file. A value has none. */
-      files: z.array(z.object({ path: relativePathSchema, sha256: sha256Schema })).optional(),
-      /** The versions of other outputs it used, with the role of each. */
-      madeFrom: z.array(madeFromSchema).optional(),
-      /** Items a person must judge, in order. */
-      toCheck: z.array(toCheckItemSchema).optional(),
-      /** No reference comparison yet. */
-      provisional: z.boolean().optional(),
-      /**
-       * What the output is and the base it is drawn on (an overlay's, or a value's unit is in the
-       * nested `measurement`). Written on every version, so the fold needs no catalog; an agent
-       * states them itself only for an id the catalog does not declare.
-       */
-      kind: outputKindSchema.optional(),
-      base: outputRefSchema.optional(),
-      /** Written by `keep_output`: an old version kept after a look, with the reason. */
-      kept: z.object({ reason: nonEmpty }).optional(),
-    }),
+    outputReportSchema.extend({ taskId: taskIdSchema, attemptId: nonEmpty }),
   );
 
+  /** A version of an output published by the agent loop; the task loop writes `output`. */
+  const outputPublished = event("output.published", outputPublishedSchema);
   const outputsChanged = event("outputs.changed", outputsChangedSchema);
   const agentMessage = event("agent.message", agentMessageSchema);
   const closeRequested = event("close.requested", closeRequestedSchema);
@@ -637,6 +605,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     outputsRestored,
     outputsDiscarded,
     outputsChanged,
+    outputPublished,
     agentMessage,
     closeRequested,
     ping,
