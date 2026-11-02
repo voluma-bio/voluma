@@ -80,7 +80,7 @@ import { storePublish } from "./store-publish.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
-import { usageMeter } from "./usage.ts";
+import { RunStopped, usageMeter } from "./usage.ts";
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -139,10 +139,10 @@ function cutOffReport(stopped: Stopped): ReportRequest["report"] | undefined {
     : { kind: "released", reason: stopped };
 }
 
-const endedReport = (error?: string): ReportRequest["report"] =>
+const endedReport = (readSeq: number | undefined, error?: string): ReportRequest["report"] =>
   error === undefined
-    ? { kind: "ended", outcome: "completed" }
-    : { kind: "ended", outcome: "failed", error };
+    ? { kind: "ended", outcome: "completed", readSeq }
+    : { kind: "ended", outcome: "failed", error, readSeq };
 
 /** Runs the claim inside its `RunScope`, so an uncaught error in its work fails this run alone. */
 export function runClaim(ctx: RunnerContext, claim: Claim, shutdown: AbortSignal): Promise<void> {
@@ -157,7 +157,7 @@ async function claimBody(
   scope: RunScope,
 ): Promise<void> {
   const { config, models, objects } = ctx;
-  const { run, leaseToken, keys } = claim;
+  const { run, leaseToken, keys, budgetUsd } = claim;
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
@@ -191,7 +191,13 @@ async function claimBody(
   shutdown.addEventListener("abort", onShutdown);
   if (shutdown.aborted) stop("shutdown");
 
-  const meter = usageMeter();
+  const meter = usageMeter({
+    runId,
+    capUsd: Math.min(budgetUsd ?? Number.POSITIVE_INFINITY, config.stop.maxRunCostUsd),
+    priorUsd: run.usage.modelCostUsd,
+    cacheMissLimit: config.stop.cacheMissLimit,
+  });
+  let stopReason: RunStopped | undefined;
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -231,6 +237,9 @@ async function claimBody(
       meter,
       onStop: stop,
       onRoundTrip: heartbeatRoundTrip,
+      // Before the recorder exists there is no view to extend; the claim's own read covers it.
+      onLastSeq: (seq) =>
+        void events?.pull(seq).catch((e) => log(`pull failed, will retry: ${errorText(e)}`)),
       log,
     });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
@@ -255,7 +264,7 @@ async function claimBody(
     // A thread's name for a log line, from its `thread.started` (recorded before any other event of the thread).
     const names = new Map<string, string>();
     const nameOf = (id: string) => names.get(id) ?? id;
-    const stored = await client.storedEvents();
+    const stored = await client.eventsAfter(0);
     // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
     // run to different dependencies. A run made before this was recorded is refused here.
     const pin = pinOf(runId, stored);
@@ -268,9 +277,11 @@ async function claimBody(
     const recorded = recorder(
       {
         async append(event) {
-          await client.append(event);
+          const seq = await client.append(event);
           log(eventLine(event, redact, nameOf));
+          return seq;
         },
+        eventsAfter: (after, upTo) => client.eventsAfter(after, upTo),
       },
       runId,
       () => stop("lease-lost"),
@@ -281,6 +292,8 @@ async function claimBody(
     // the queue delivers them: a stall must name the call that caused it.
     const track = (threadId: string, type: string, payload: unknown) => {
       if (type === "thread.started") names.set(threadId, (payload as { name: string }).name);
+      if (type === "message")
+        meter.addMessage(threadId, payload as { role: string; text: string; compaction?: true });
       const { toolCallId, name } = payload as { toolCallId: string; name?: string };
       if (type === "tool.call") scope.inFlight.set(toolCallId, `${nameOf(threadId)} ${name}`);
       else if (type === "tool.result") scope.inFlight.delete(toolCallId);
@@ -328,7 +341,14 @@ async function claimBody(
           ...(m.provider === "meta" && { cacheRetention: "long" }),
         });
         stream.result().then(
-          (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
+          (reply) => {
+            const reason = meter.addModelCall(role, threadId, usageOf(reply));
+            // Fails the run once; `scope.fail` is final, so the prompt is not sent again.
+            if (!reason || stopReason) return;
+            stopReason = new RunStopped(reason);
+            log(reason.message);
+            scope.fail?.(stopReason);
+          },
           () => {},
         );
         return stream;
@@ -495,12 +515,14 @@ async function claimBody(
   } finally {
     // The harness decided how the claim ended, drained included; a stop landing now changes nothing.
     // Without an outcome the claim failed before the supervisor ran (or was stopped then).
+    // What the runner had read when it decided to end; a claim that never ended the root (failed before, or resumed after it ended) reports its view's tail.
+    const readSeq = events?.endedSeq() ?? events?.events().at(-1)?.seq;
     const report =
       outcome?.kind === "ended"
-        ? endedReport(outcome.error === undefined ? undefined : redact(outcome.error))
+        ? endedReport(readSeq, outcome.error === undefined ? undefined : redact(outcome.error))
         : stopped
           ? cutOffReport(stopped)
-          : endedReport(uncaught ?? error);
+          : endedReport(readSeq, uncaught ?? error);
     if (report?.kind === "ended") await closeSandboxes(CLOSE_BUDGET_MS.ended);
     shutdown.removeEventListener("abort", onShutdown);
     lease?.halt();

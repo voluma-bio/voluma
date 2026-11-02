@@ -92,7 +92,7 @@ let pending: (() => void) | undefined;
 
 /**
  * Keeps the tab from leaving for a deploy while work that a reload would lose is under way (a
- * scan uploading). Returns the release; the tab leaves once the last hold is released. Release on
+ * input uploading). Returns the release; the tab leaves once the last hold is released. Release on
  * every way the work ends, unmount included, or the tab stays on the old app.
  */
 export function holdLeave(): () => void {

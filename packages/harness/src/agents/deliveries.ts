@@ -3,7 +3,13 @@
  * out of date or pending), a worker's wrap-up request, the cut-off and liveness lines, and the
  * refusals and results of the coordination tools. The task loop's are `messages.ts`.
  */
-import type { AgentLog, AgentRecord, AgentState, Notice } from "@voluma/contracts/agents";
+import {
+  type AgentLog,
+  type AgentRecord,
+  type AgentState,
+  approvalLeftId,
+  type Notice,
+} from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
@@ -104,7 +110,10 @@ function approvalLine(
       return `- ${call} was withdrawn: ${n.text || WITHDRAWN}.`;
     case "declined": {
       const left = events
-        .filter((e) => e.type === "output.published" && e.id.startsWith(`${request?.id}:left:`))
+        .filter(
+          (e) =>
+            e.type === "output.published" && e.id.startsWith(approvalLeftId(request?.id ?? "", "")),
+        )
         .map((e) => (e.type === "output.published" ? e.payload.outputId : ""));
       return [
         `- The researcher declined ${call}.${n.text ? ` Their words: ${n.text}` : ""}`,

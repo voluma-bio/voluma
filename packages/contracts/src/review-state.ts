@@ -115,7 +115,7 @@ type ItemFacts = Pick<FoldedTask, "status" | "checks" | "rejected" | "checker" |
 
 /**
  * A To check task with no check gets one card nobody can accept, saying why: the second AI sent
- * it back, values are missing, or the AI marked it. Null for any other task. The scan review
+ * it back, values are missing, or the AI marked it. Null for any other task. The input review
  * draws the card; the study read counts it.
  */
 export function cardWithoutCheck(task: ItemFacts): Unacceptable | null {
@@ -126,7 +126,7 @@ export function cardWithoutCheck(task: ItemFacts): Unacceptable | null {
 }
 
 /**
- * A task's items that need a person, as the scan review counts them: its checks not yet
+ * A task's items that need a person, as the input review counts them: its checks not yet
  * accepted, or its card without a check (`cardWithoutCheck`). A done task can still carry open
  * checks. What every screen calls To check; `progress().acceptable` is only the accept flow's.
  */
@@ -136,7 +136,7 @@ export function openItems(task: ItemFacts): number {
 }
 
 /**
- * A scan's newest run as the scan review shows its tasks, for the study read: each plan task's
+ * An input's newest run as the input review shows its tasks, for the study read: each plan task's
  * state (`taskStates`), its items that need a person where it has any (`openItems`), and why a
  * card without a check is there. `revision` is the one the review reads (`latestRevision`); no
  * run, or no plan yet, reads as no tasks.
@@ -178,7 +178,7 @@ export function shownTasks(
 }
 
 /**
- * The revision the scan review reads: a correction in progress's own, else the latest. The
+ * The revision the input review reads: a correction in progress's own, else the latest. The
  * study read takes its task states and items from the same one.
  */
 export const latestRevision = <R>(fold: {
@@ -187,12 +187,14 @@ export const latestRevision = <R>(fold: {
 }): R | undefined => fold.correcting ?? fold.results.revisions.at(-1);
 
 /**
- * What needs a person on a scan, the count Home, the study pages and the queues call To check:
+ * What needs a person on an input, the count Home, the study pages and the queues call To check:
  * its newest run's items (`ReviewSummary.needsYou`) when that run completed, else the acceptable
  * checks of its newest completed result (a live or stopped rerun's items show on its tasks only).
  */
-export const scanNeedsYou = (newest: Pick<ReviewSummary, "needsYou"> | null, acceptable: number) =>
-  newest ? newest.needsYou : acceptable;
+export const inputNeedsYou = (
+  newest: Pick<ReviewSummary, "needsYou"> | null,
+  acceptable: number,
+) => (newest ? newest.needsYou : acceptable);
 
 /** What `taskStates` reads of a folded task. */
 export type StateFacts = Pick<FoldedTask, "id" | "status" | "skipped" | "satisfied" | "threads">;
@@ -210,7 +212,7 @@ export type RunStateFacts =
 type RunHalt = "stopped" | "waiting" | "paused" | undefined;
 
 /**
- * Every plan task's state, the one rule the scan review and the study both show. It reads fold
+ * Every plan task's state, the one rule the input review and the study both show. It reads fold
  * fields only (status, skipped, satisfied, the attempt's threads), never a sentence, and the run's
  * `state`. `open`: the threads started and not ended (`openThreads`); they run only while the run
  * does. `failed`: the threads whose latest end failed (`failedThreads`); they count only when the

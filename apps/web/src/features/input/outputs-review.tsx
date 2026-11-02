@@ -1,8 +1,8 @@
 /**
- * The scan review of a run of the agent loop (Q24, mockup C), in the shell's two side panels. The
+ * The input review of a run of the agent loop (Q24, mockup C), in the shell's two side panels. The
  * left side's tabs: the conversation with the run's main AI (the default; read-only until
  * researchers can write to it on this kind of run, badged while main waits on an approval) and
- * the scans (the shared tree, named by `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with
+ * the inputs (the shared tree, named by `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with
  * the tool bar docked under them, or a file output, the whole run's graph (W) or the run's agents
  * in the panes' place. On the right, Final outputs: the picked value opens in place with what it
  * rests on. Everything comes from the run's stream as it arrives: the output fold
@@ -83,6 +83,7 @@ import {
 } from "react";
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
+import { InputHeading, RunAlert } from "./input-header";
 import { describe, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
 import { FinalOutputs, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
@@ -90,7 +91,6 @@ import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
 import { RunNews } from "./run-news";
 import { Samples } from "./samples-tab";
-import { RunAlert, ScanHeading } from "./scan-header";
 import type { Accepting } from "./version-report";
 
 // three.js and the zarr reader load only once there is an output to show.
@@ -113,7 +113,7 @@ export function OutputsReview({
   const study = useQuery({
     ...studyQuery(run.studyId),
     refetchInterval: (query) =>
-      isLive(run) || query.state.data?.scans.some((scan) => isLive(scan.runs[0])) ? 5000 : false,
+      isLive(run) || query.state.data?.inputs.some((input) => isLive(input.runs[0])) ? 5000 : false,
   });
   const events = useEvents();
   const catalog = useMemo(() => outputCatalogOf(run.workflows[0]?.path), [run.workflows]);
@@ -349,7 +349,7 @@ export function OutputsReview({
 
   return (
     <>
-      <ScanHeading run={run} study={study.data} />
+      <InputHeading run={run} study={study.data} />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"
@@ -375,7 +375,7 @@ export function OutputsReview({
               id: "samples",
               label: INPUT_WORD.Many,
               icon: <ListTree />,
-              content: <Samples studyId={run.studyId} runId={run.id} />,
+              content: <Samples studyId={run.studyId} inputId={run.input.id} />,
             },
           ]}
         />
@@ -401,13 +401,7 @@ export function OutputsReview({
               {panes}
             </div>
             {centre === "run" && (
-              <RunGraphView
-                fold={fold}
-                catalog={catalog}
-                selected={inView?.id}
-                rows={review.rows}
-                onPick={show}
-              />
+              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
             )}
             {centre === "agents" && (
               <RunAgents events={events} fold={fold} live={live} nameOf={nameOf} />

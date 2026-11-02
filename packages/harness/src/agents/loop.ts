@@ -20,15 +20,22 @@ import {
   type ApprovalRecord,
   agentLog,
   agentState,
+  approvalLeftId,
   approvalRecords,
+  approvalRequestId,
+  approvalSettledId,
   givenApprovals,
   type InboxItem,
   type Notice,
   silentMinutes,
   stalledMinutes,
 } from "@voluma/contracts/agents";
-import { labelOverlaysUnder, refuseOutputsChange } from "@voluma/contracts/final-outputs";
-import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
+import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
+import {
+  labelMapsOf,
+  type OutputCatalog,
+  type OutputEntry,
+} from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "@voluma/contracts/thread-records";
@@ -57,7 +64,6 @@ import {
   wrapUpText,
 } from "./deliveries";
 import {
-  approvalRequestId,
   changeOutputsId,
   closedEndId,
   closeEventId,
@@ -156,15 +162,14 @@ interface AgentLoopOptions {
 
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
-/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen, with the label overlays they rest on. */
+/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
 export function openingOutputs(
   catalog: readonly OutputEntry[],
   selected: readonly string[] | undefined,
 ) {
-  const chosen = selected
+  return selected
     ? catalog.filter((e) => selected.includes(e.id))
     : catalog.filter((e) => e.selectable);
-  return [...chosen, ...labelOverlaysUnder(catalog, chosen)];
 }
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
@@ -330,6 +335,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         by: "runner" as const,
         reason: "The outputs the researcher chose for this run.",
         add: entries,
+        labels: labelMapsOf(o.catalog),
       };
       const why = refuseOutputsChange(undefined, change, o.catalog);
       if (why) throw new Error(`the run's opening outputs were refused: ${why}`);
@@ -707,7 +713,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
           outcome: result.isError ? "refused" : "done",
           text: result.output,
         },
-        `${a.requestId}:settled`,
+        approvalSettledId(a.requestId),
       );
     } catch (error) {
       if (!o.signal?.aborted) jobFailure ??= error;
@@ -722,7 +728,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     for (const a of approvalRecords(recorder.events())) {
       if (a.answer?.kind !== "declined") continue;
       for (const id of outputsNamed(a.tool, a.args))
-        if (await o.leave(api, a.threadId, `${a.requestId}:left:${id}`, id)) return true;
+        if (await o.leave(api, a.threadId, approvalLeftId(a.requestId, id), id)) return true;
     }
     return false;
   }
@@ -855,6 +861,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   o.bash.wake = shell.nudge;
   // A delivery stored for a running main frees the next one, which `deliverToMain` holds back
   // until then; no thread settling or tool call wakes the loop for it.
+  // Events the API wrote into the claim (`recorder.ts`) may be what an idle loop waits for.
+  recorder.onPulled(shell.nudge);
   recorder.onStored((e) => {
     if (e.type !== "message" || e.payload.role !== "user") return;
     if (e.payload.sender.kind === "runtime" && e.payload.sender.covers) shell.nudge();

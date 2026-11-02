@@ -1,11 +1,11 @@
 /**
- * The study panel: the study's name, how far its scans are (one Progress cell per scan) and its
- * scans by group, each with its state, linking to the scan's review. It is the left panel one
- * click away on every study page and in the scan review, so both render it from here. Also the
- * scan-level facts both read from a `StudyDetail`: a scan's status, knee and group.
+ * The study panel: the study's name, how far its inputs are (one Progress cell per input) and its
+ * inputs by group, each with its state, linking to the input's review. It is the left panel one
+ * click away on every study page and in the input review, so both render it from here. Also the
+ * input-level facts both read from a `StudyDetail`: an input's status, knee and group.
  */
-import { scanNeedsYou } from "@voluma/contracts/review-state";
-import type { StudyDetail, StudyRunSummary, StudyScanDetail } from "@voluma/contracts/study";
+import { inputNeedsYou } from "@voluma/contracts/review-state";
+import type { StudyDetail, StudyInputDetail, StudyRunSummary } from "@voluma/contracts/study";
 import {
   INPUT_WORD,
   type LinkTo,
@@ -18,40 +18,40 @@ import {
 } from "@voluma/ui";
 import { liveStatus, needsYouText, plural } from "./run-status";
 
-type ScanStatus = { label: string; status: Status; open: number };
+type InputStatus = { label: string; status: Status; open: number };
 
-/** What needs a person on a scan (`scanNeedsYou`), as Studies counts it too. */
-export const needsYouOf = (scan: StudyScanDetail) =>
-  scanNeedsYou(scan.review, scan.acceptable.length);
+/** What needs a person on an input (`inputNeedsYou`), as Studies counts it too. */
+export const needsYouOf = (input: StudyInputDetail) =>
+  inputNeedsYou(input.review, input.acceptable.length);
 
 /**
- * A scan's status: its newest run's (`runStatus`, which reads To check from the items that need
+ * An input's status: its newest run's (`runStatus`, which reads To check from the items that need
  * a person), with "Task N of M" while it runs; "Not started" without a run. Its values may come
  * from an older completed run.
  */
-export function scanStatus(scan: StudyScanDetail): ScanStatus {
-  const [run] = scan.runs;
+export function inputStatus(input: StudyInputDetail): InputStatus {
+  const [run] = input.runs;
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
-  // The scan's `review` is its newest run's, of either loop (a `Run` has one for the task loop only).
-  const { label, status } = liveStatus({ ...run, review: scan.review });
-  const open = status === "check" ? needsYouOf(scan) : 0;
+  // The input's `review` is its newest run's, of either loop (a `Run` has one for the task loop only).
+  const { label, status } = liveStatus({ ...run, review: input.review });
+  const open = status === "check" ? needsYouOf(input) : 0;
   return { label: open > 0 ? needsYouText(open, run.harness) : label, status, open };
 }
 
-/** A scan's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */
-export function kneeOf(scan: StudyScanDetail): string | null {
-  const knee = scan.scan.attributes.knee;
+/** An input's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */
+export function kneeOf(input: StudyInputDetail): string | null {
+  const knee = input.member.attributes.knee;
   return typeof knee === "string" && knee ? knee : null;
 }
 
-/** The row a scan sits on: its group, or one shared row when no scan of the study has one. */
-export const groupOf = (scan: StudyScanDetail, grouped: boolean) =>
-  scan.scan.group ?? (grouped ? "No group" : `All ${INPUT_WORD.many}`);
+/** The row an input sits on: its group, or one shared row when no input of the study has one. */
+export const groupOf = (input: StudyInputDetail, grouped: boolean) =>
+  input.member.group ?? (grouped ? "No group" : `All ${INPUT_WORD.many}`);
 
-/** Groups in the order their first scan appears in the study. */
+/** Groups in the order their first input appears in the study. */
 export function groupNames(detail: StudyDetail): string[] {
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
-  return [...new Set(detail.scans.map((s) => groupOf(s, grouped)))];
+  const grouped = detail.inputs.some((s) => s.member.group !== null);
+  return [...new Set(detail.inputs.map((s) => groupOf(s, grouped)))];
 }
 
 /** A run the API or the runner is still moving: a page refetches while one is in view. */
@@ -60,50 +60,50 @@ export const isLive = (run: Pick<StudyRunSummary, "state"> | undefined) =>
 
 /** "11 of 20 finished, 2 running". */
 function finishedLine(detail: StudyDetail): string {
-  const finished = detail.scans.filter((s) => s.resultRunId !== null).length;
-  const running = detail.scans.filter((s) => s.runs[0]?.state.status === "running").length;
-  return `${finished} of ${detail.scans.length} finished${running ? `, ${running} running` : ""}`;
+  const finished = detail.inputs.filter((s) => s.resultRunId !== null).length;
+  const running = detail.inputs.filter((s) => s.runs[0]?.state.status === "running").length;
+  return `${finished} of ${detail.inputs.length} finished${running ? `, ${running} running` : ""}`;
 }
 
 export function StudyPanel({
   detail,
   about,
-  scanLink,
+  inputLink,
   current,
 }: {
   detail: StudyDetail;
   /** One line under the name: what the study is, e.g. "20 knees, Mouse OA knee". */
   about: string;
-  /** Where a scan's row goes; `undefined` for a scan with no run yet. */
-  scanLink: (scan: StudyScanDetail) => LinkTo | undefined;
-  /** The scan open in the review, drawn selected. */
+  /** Where an input's row goes; `undefined` for an input with no run yet. */
+  inputLink: (input: StudyInputDetail) => LinkTo | undefined;
+  /** The input open in the review, drawn selected. */
   current?: string;
 }) {
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
+  const grouped = detail.inputs.some((s) => s.member.group !== null);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="grid gap-1 border-b border-border px-4 pt-3 pb-3.5">
         <p className="m-0 font-semibold">{detail.study.name}</p>
         <p className="m-0 text-sm text-muted-foreground">{about}</p>
-        <Progress states={detail.scans.map((s) => scanStatus(s).status)} className="mt-1.5" />
+        <Progress states={detail.inputs.map((s) => inputStatus(s).status)} className="mt-1.5" />
         <p className="m-0 text-sm text-muted-foreground">{finishedLine(detail)}</p>
       </div>
       {groupNames(detail).map((group) => {
-        const scans = detail.scans.filter((s) => groupOf(s, grouped) === group);
+        const inputs = detail.inputs.filter((s) => groupOf(s, grouped) === group);
         return (
           <section
             key={group}
-            aria-label={`${group}, ${plural(scans.length, INPUT_WORD.one, INPUT_WORD.many)}`}
+            aria-label={`${group}, ${plural(inputs.length, INPUT_WORD.one, INPUT_WORD.many)}`}
             className="pt-2"
           >
             {grouped && <h3 className="m-0 px-4 pb-1 text-xs text-muted-foreground">{group}</h3>}
             <List density="compact" columns="auto" label={group}>
-              {scans.map((scan) => (
+              {inputs.map((input) => (
                 <PanelRow
-                  key={scan.scan.inputId}
-                  scan={scan}
-                  to={scanLink(scan)}
-                  selected={current === scan.scan.inputId}
+                  key={input.member.inputId}
+                  input={input}
+                  to={inputLink(input)}
+                  selected={current === input.member.inputId}
                 />
               ))}
             </List>
@@ -115,20 +115,20 @@ export function StudyPanel({
 }
 
 function PanelRow({
-  scan,
+  input,
   to,
   selected,
 }: {
-  scan: StudyScanDetail;
+  input: StudyInputDetail;
   to: LinkTo | undefined;
   selected: boolean;
 }) {
-  const { label, status } = scanStatus(scan);
-  const knee = kneeOf(scan);
+  const { label, status } = inputStatus(input);
+  const knee = kneeOf(input);
   const title = (
     <span className="flex min-w-0 items-center gap-2.5">
-      <span className="truncate font-mono text-sm" title={scan.scan.subject}>
-        {scan.scan.subject}
+      <span className="truncate font-mono text-sm" title={input.member.subject}>
+        {input.member.subject}
       </span>
       {knee && <span className="truncate font-normal text-muted-foreground">{knee} knee</span>}
       {selected && <span className="shrink-0 text-xs text-select-text">Viewing</span>}

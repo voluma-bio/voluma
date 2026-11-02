@@ -1,7 +1,7 @@
 /**
  * What `run.json` holds, shared by the operator scripts that write it (`export:run`,
  * `archive:run`) and read it (`import:run`): every database row that belongs to one run.
- * Evidence stays in R2 under `runs/<id>/`; nothing there is copied. Shared study, scan,
+ * Evidence stays in R2 under `runs/<id>/`; nothing there is copied. Shared study, study member,
  * and input rows travel with the run so restoring it never invents research metadata.
  */
 
@@ -11,7 +11,7 @@ import { catalog, workflowById } from "@voluma/workflow/bundled";
 import { asc, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { reviewSnapshots } from "../domains/review/schema";
-import { events, inputs, piMessages, runs, studies, studyScans } from "../domains/run/schema";
+import { events, inputs, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
 
 export async function readDump(db: PostgresJsDatabase, runId: string) {
   return db.transaction((tx) => readRows(tx, runId), { isolationLevel: "repeatable read" });
@@ -22,16 +22,16 @@ async function readRows(db: PostgresJsDatabase, runId: string) {
   if (!run) throw new Error(`run ${runId} not found`);
   const [input] = await db.select().from(inputs).where(eq(inputs.id, run.inputId));
   const [study] = await db.select().from(studies).where(eq(studies.id, run.studyId));
-  const scans = await db.select().from(studyScans).where(eq(studyScans.studyId, run.studyId));
+  const members = await db.select().from(studyMembers).where(eq(studyMembers.studyId, run.studyId));
   return {
     run,
     input,
     study,
-    studyScans: scans,
-    studyInputs: await db
+    studyMembers: members,
+    inputs: await db
       .select()
       .from(inputs)
-      .where(inArray(inputs.id, [...new Set([run.inputId, ...scans.map((s) => s.inputId)])])),
+      .where(inArray(inputs.id, [...new Set([run.inputId, ...members.map((s) => s.inputId)])])),
     events: await db.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
     piMessages: await db
       .select()

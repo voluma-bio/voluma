@@ -5,7 +5,7 @@ importing each other: the run model (`run-model.ts`: `runView`, `agentTree`, `ha
 transcript fold (`transcript.ts`), the run store (`run-store.tsx`), `AgentThread`, the task graph
 (`task-graph.tsx`: `TaskGraph` at study, summary and report size), `ItemToCheck`, `chat/`, the
 clock (`use-now.ts`), and the status, formatting and visitor-key helpers. It has no router. Its
-screens are the scan review (`apps/web/src/features/scan`) and the study pages
+screens are the scan review (`apps/web/src/features/input`) and the study pages
 (`apps/web/src/features/study`).
 
 - **Parts take data and callbacks; screens own the calls.** `ItemToCheck` makes no request: each
@@ -71,13 +71,12 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   upstream, breadth first, with roles and the version used), `madeFromIt` (what rests on it),
   `runGraph` (the whole run by column), `versionWords` (a worker's message after its version) and
   `workersOf` (the agents from `agentLog`, with what each reported). No drawing lives there.
-  One link rule (`resolveLink`): a link to an output with a version of its own is a link to it; a
-  link to a label overlay with none goes to its map (`labelMapOf`: the catalog's `label.of`, else
-  the run's list). The chain (`chainOf`) is the same breadth-first walk as `trailOf` along the
+  One link rule (`resolveLink`): a link to a label overlay is a link to its map, as the fold
+  resolved it (`fold.labels`, from the run's `outputs.changed` events: `labels` and list entries' `label`); run-view resolves nothing itself. The chain (`chainOf`) is the same breadth-first walk as `trailOf` along the
   spine a final value is computed on, nearest first (value `on` overlay, label to its map, overlay
   to its base, base to its `from`): each step follows the published version's `on`/`base` links
   where it names some, else the catalog's, so it exists before anything is published, and each
-  link is ticked by its own published version and status. `outputsReview` carries each row's
+  link is ticked by its status (a label overlay's is its map's; pending and missing are not yet in). `outputsReview` carries each row's
   `trail` and `chain` and the run's `others` (published, not final, not on a chain), so components
   only read them.
 - **Run-level data** is one `runView(events, state, providerCalls, halt)` (`run-model.ts`):
@@ -128,7 +127,7 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   in this browser is sent with every start, and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
   `voluma.visitor-keys.<userId>`. A run in `awaiting-keys` is handled on its page
-  (`features/scan/scan-header.tsx`) for the user who started it only: with a key stored, the page
+  (`features/input/input-header.tsx`) for the user who started it only: with a key stored, the page
   sends it (`resendKeys`) by itself, and again after a refusal that clears: a 429 every minute with no
   cap (a slot frees only when another run ends), a 5xx or network failure with a capped backoff. So
   the run page polls in a background tab too. A 409 means another tab already sent it. The form

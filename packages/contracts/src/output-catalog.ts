@@ -163,6 +163,12 @@ export const labelMapOf = (catalog: readonly OutputEntry[], id: string): string 
   return e?.kind === "overlay" && e.label ? e.label.of : id;
 };
 
+/** Each label overlay the catalog lists, to its map (`{overlayId: mapId}`): what the opening `outputs.changed` records as `labels`. */
+export const labelMapsOf = (catalog: readonly OutputEntry[]): Record<string, string> =>
+  Object.fromEntries(
+    catalog.flatMap((e) => (e.kind === "overlay" && e.label ? [[e.id, e.label.of]] : [])),
+  );
+
 /** The ids `entry` links to, for the cycle check. */
 function linksOf(entry: OutputEntry): string[] {
   switch (entry.kind) {

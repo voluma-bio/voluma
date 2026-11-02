@@ -1,8 +1,8 @@
 /**
- * One item waiting for a person's decision: where it is (its task, or its scan), what the AI says about it,
+ * One item waiting for a person's decision: where it is (its task, or its input), what the AI says about it,
  * what the second AI check found, the value it affects, and the two decisions (Looks right,
  * Something's wrong). The decision lives here only: other places (the AI panel, the report) refer
- * to the item, never draw it again. Data comes in as props; the scan review's To check panel and
+ * to the item, never draw it again. Data comes in as props; the input review's To check panel and
  * the study's To check page show it.
  */
 import { Button, cx, StatusGlyph, StatusMark } from "@voluma/ui";
@@ -11,8 +11,8 @@ import type { ReactNode } from "react";
 
 export type ItemToCheckProps = {
   /**
-   * Where it is, named above the title: its task, or its scan in a list of one check across
-   * scans. Whichever the list around it doesn't already say.
+   * Where it is, named above the title: its task, or its input in a list of one check across
+   * inputs. Whichever the list around it doesn't already say.
    */
   context: string;
   /** What to look at; none when `context` says it. */

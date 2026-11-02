@@ -14,7 +14,7 @@
  * column, its mouse's row. Ids compare without case, spaces, `-` or `_`.
  */
 
-import { stem } from "./scan-files";
+import { stem } from "./input-files";
 
 export type Knee = "Right" | "Left";
 

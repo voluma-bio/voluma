@@ -1,14 +1,14 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
- * Studies, the study page and the scan review so they read the same: Running, N to check, Checked,
+ * Studies, the study page and the input review so they read the same: Running, N to check, Checked,
  * Failed, Stopped, Waiting (queued),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
- * reviewed, which is never inferred. Also where a run's row links (the scan review), how a scan
+ * reviewed, which is never inferred. Also where a run's row links (the input review), how an input
  * is named, and how its cost, time and age ("12 min ago") read.
  */
 import type { Run } from "@voluma/contracts/run";
-import type { StudyRunSummary, StudyScan } from "@voluma/contracts/study";
+import type { StudyMember, StudyRunSummary } from "@voluma/contracts/study";
 import type { Status } from "@voluma/ui";
 
 /** "1 run", "3 runs"; `many` for an irregular plural. */
@@ -39,28 +39,30 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
 
-/** A scan as people name it: its subject and knee ("OA6-1, right knee"), the subject alone without one. */
-export function scanLabel(scan: Pick<StudyScan, "subject" | "attributes">): string {
-  const knee = scan.attributes.knee;
+/** An input as people name it: its subject and knee ("OA6-1, right knee"), the subject alone without one. */
+export function inputLabel(input: Pick<StudyMember, "subject" | "attributes">): string {
+  const knee = input.attributes.knee;
   return typeof knee === "string" && knee
-    ? `${scan.subject}, ${knee.toLowerCase()} knee`
-    : scan.subject;
+    ? `${input.subject}, ${knee.toLowerCase()} knee`
+    : input.subject;
 }
 
-/** Where a row leads: the scan review, live while the run goes and for review once it ends. */
-export const runHref = ({ runId }: Pick<StudyRunSummary, "runId">) =>
-  `/scans/${encodeURIComponent(runId)}`;
+/**
+ * Where an input opens: its page in a study, on the input's newest run (live while it goes, for
+ * review once it ends). `query` carries the page's selection (`task`, `item`, `output`...); a link
+ * that means an earlier run adds `run`.
+ */
+export const inputHref = (studyId: string, inputId: string, query: Record<string, string> = {}) =>
+  `/studies/${encodeURIComponent(studyId)}/inputs/${encodeURIComponent(inputId)}${
+    Object.keys(query).length > 0 ? `?${new URLSearchParams(query)}` : ""
+  }`;
 
-/** Where one To check item leads: its scan review, opened on that task and item (`checkId`, as `acceptCheck` takes it). */
-export const itemHref = ({
-  runId,
-  taskId,
-  checkId,
-}: {
-  runId: string;
-  taskId: string;
-  checkId: string;
-}) => `${runHref({ runId })}?${new URLSearchParams({ task: taskId, item: checkId })}`;
+/** Where one To check item leads: its input page, opened on that task and item (`checkId`, as `acceptCheck` takes it). */
+export const itemHref = (
+  studyId: string,
+  inputId: string,
+  { taskId, checkId, run }: { taskId: string; checkId: string; run?: string },
+) => inputHref(studyId, inputId, { task: taskId, item: checkId, ...(run && { run }) });
 
 export type RunStatus = { label: string; status: Status };
 

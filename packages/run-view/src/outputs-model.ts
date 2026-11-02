@@ -1,7 +1,7 @@
 /**
  * The outputs-first review of a run of the agent loop (`harness: agents`): its final outputs in
  * their sections, each with its value, status and To check items, and the blocks that draw an
- * output in the scan review's 3D scene. Built from the output fold (`outputsFold`, live from the
+ * output in the input review's 3D scene. Built from the output fold (`outputsFold`, live from the
  * run's events) and the workflow's catalog (`outputs.yaml`, bundled: names, label maps, shapes).
  * Rules: the agent-model design's `review.md` ("Layout") and `outputs.md` ("Kinds", "Status").
  *
@@ -81,7 +81,7 @@ export type OutputsReview = {
   progress: { done: number; total: number };
 };
 
-/** What the scan review's scene needs: the blocks it draws from. */
+/** What the input review's scene needs: the blocks it draws from. */
 export type OutputBlocks = {
   volumes: Volume[];
   structures: Structure[];
@@ -129,7 +129,7 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
   const links = (role: string) =>
     latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
   const on = [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])];
-  const trail = trailOf(fold, catalog, state.id);
+  const trail = trailOf(fold, state.id);
   return {
     id: state.id,
     name: outputName(catalog, state.id),

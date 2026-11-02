@@ -436,6 +436,19 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   return value;
 }
 
+/**
+ * The ids of a held call's events, written once here. The request is `<thread>:approval:<toolCallId>`;
+ * the researcher's answer (given or declined, so only one lands) is `<request>:answer`; the
+ * runner's outcome is `<request>:settled`; an output left to the researcher after a declined
+ * keep or redo is `<request>:left:<output>`.
+ */
+export const approvalRequestId = (threadId: string, toolCallId: string) =>
+  `${threadId}:approval:${toolCallId}`;
+export const approvalAnswerId = (requestId: string) => `${requestId}:answer`;
+export const approvalSettledId = (requestId: string) => `${requestId}:settled`;
+export const approvalLeftId = (requestId: string, outputId: string) =>
+  `${requestId}:left:${outputId}`;
+
 /** A held call and what became of it. `requestId` is the request event's id, the one the answer route takes. */
 export type ApprovalRecord = Payload<"approval.requested"> & {
   requestId: string;
@@ -479,8 +492,10 @@ function foldApprovals(events: readonly RunEvent[]): ApprovalRecord[] {
             requestId: e.id,
             threadId: e.threadId,
             ...e.payload,
-            ...(answers.has(`${e.id}:answer`) && { answer: answers.get(`${e.id}:answer`) }),
-            settled: settled.has(`${e.id}:settled`),
+            ...(answers.has(approvalAnswerId(e.id)) && {
+              answer: answers.get(approvalAnswerId(e.id)),
+            }),
+            settled: settled.has(approvalSettledId(e.id)),
           },
         ]
       : [],

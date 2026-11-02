@@ -3,11 +3,11 @@ import { Progress } from "./progress";
 import type { Status } from "./status-mark";
 
 /**
- * **What:** how far along a set of tasks or scans is, and where it's stuck: one cell per task or
- * scan coloured by its state (`cells`), or the same states summed into a thin bar (`bar`) when
+ * **What:** how far along a set of tasks or inputs is, and where it's stuck: one cell per task or
+ * input coloured by its state (`cells`), or the same states summed into a thin bar (`bar`) when
  * there are too many to draw. **Why:** one progress look (today there are three hand-rolled
  * bars). **Where:** the study panel header, the study summary, task graph boxes at study size,
- * scan rows and Home's study cards.
+ * input rows and Home's study cards.
  */
 const meta = {
   title: "Parts/Progress",
@@ -26,7 +26,7 @@ const study: Status[] = [
   ...repeat("waiting", 5),
 ];
 
-/** One scan's tasks, in task order. */
+/** One input's tasks, in task order. */
 export const Tasks: Story = {
   args: {
     states: [
@@ -42,7 +42,7 @@ export const Tasks: Story = {
     ],
   },
 };
-/** A study of 20 scans, one cell each. */
+/** A study of 20 inputs, one cell each. */
 export const StudyCells: Story = { args: { states: study, label: "11 of 20" } };
 export const StudyBar: Story = {
   args: { states: study, look: "bar", label: "11 of 20" },

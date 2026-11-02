@@ -54,7 +54,7 @@ areas of the app, never a person's patch.
 
 What the structure still requires:
 
-- Web features (`features/study`, `features/scan`) never import each other,
+- Web features (`features/study`, `features/input`) never import each other,
   and neither do `domains/run` and `domains/review` in the API. They share
   code only through `packages/` (and `apps/api/src/ports` on the server).
 - Web features reach the API only through `@voluma/api-client`.

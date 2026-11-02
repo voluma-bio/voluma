@@ -10,15 +10,12 @@ import {
   type AgentLog,
   type AgentRecord,
   type AgentState,
+  approvalSettledId,
   givenApprovals,
   openApprovals,
   openWorkers,
 } from "@voluma/contracts/agents";
-import {
-  entriesOf,
-  labelOverlaysUnder,
-  refuseOutputsChange,
-} from "@voluma/contracts/final-outputs";
+import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
 import {
   type OutputCatalog,
   outputKindSchema,
@@ -234,7 +231,7 @@ const closeTool = (api: AgentsApi): Tool =>
                 a.threadId,
                 "approval.settled",
                 { toolCallId: a.toolCallId, outcome: "withdrawn", text: "The run was closed." },
-                `${a.requestId}:settled`,
+                approvalSettledId(a.requestId),
               );
             await api.recorder.append(
               api.rootThreadId,
@@ -445,11 +442,6 @@ const changeOutputsTool = (api: AgentsApi): Tool => {
     if (role !== "main") throw new Refusal("Only main changes the final outputs.");
     const list = outputsFold(api.recorder.events()).list;
     const change = { by: "main" as const, ...input };
-    if (input.add)
-      change.add = [
-        ...input.add,
-        ...labelOverlaysUnder(api.catalog, input.add, new Set(entriesOf(list).map((e) => e.id))),
-      ];
     const why = refuseOutputsChange(list, change, api.catalog);
     if (why) throw new Refusal(why);
     return change;

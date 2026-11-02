@@ -4,7 +4,7 @@
  * counts. Like a file browser's details pane, a click selects a study and the right side
  * describes it (details, samples by group, the headline measurement, recent activity); the row's
  * chevron, a double-click, Enter or "Open study" opens it. Up and Down move the selection. A study
- * of one opens its scan.
+ * of one opens its input.
  *
  * Data: `listStudies` for the list (it refetches every 5 s while a run is live); the selected
  * study's `getStudy` for the side.
@@ -14,13 +14,13 @@ import { runThumbnailUrl } from "@voluma/api-client";
 import { studiesQuery, studyQuery } from "@voluma/api-client/query";
 import type { StudyDetail, StudyRunSummary, StudySummary } from "@voluma/contracts/study";
 import {
+  inputHref,
+  inputStatus,
   isLive,
   liveStatus,
   placeOfStatus,
   plural,
-  runHref,
   runStatus,
-  scanStatus,
   useNow,
   whenText,
 } from "@voluma/run-view";
@@ -46,16 +46,16 @@ import { Link, useNavigate } from "react-router";
 import { PLACES, type Place, placeOf } from "./study/study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study/study-side";
 
-/** Where a study opens: its page, or a study of one's scan once it has a run. */
+/** Where a study opens: its page, or a study of one's input once it has a run. */
 const hrefOf = (study: StudySummary) => {
-  const one = study.scanCount === 1 ? study.newestRuns[0] : undefined;
-  return one ? runHref(one) : `/studies/${study.id}`;
+  const one = study.inputCount === 1 ? study.newestRuns[0] : undefined;
+  return one ? inputHref(study.id, one.inputId) : `/studies/${study.id}`;
 };
 
 /** One mark per sample: its newest run's status; a sample with no run waits. */
 function marksOf(study: StudySummary): Status[] {
   const ran = study.newestRuns.map((r) => runStatus(r).status);
-  return [...ran, ...Array<Status>(Math.max(0, study.scanCount - ran.length)).fill("waiting")];
+  return [...ran, ...Array<Status>(Math.max(0, study.inputCount - ran.length)).fill("waiting")];
 }
 
 /** How many samples sit in each place, as the study page groups them. */
@@ -63,8 +63,8 @@ function placeCounts(study: StudySummary): Map<Place, number> {
   const counts = new Map<Place, number>();
   const add = (p: Place, n = 1) => counts.set(p, (counts.get(p) ?? 0) + n);
   for (const run of study.newestRuns) add(placeOfStatus(runStatus(run).status, study.example));
-  if (study.scanCount > study.newestRuns.length)
-    add("not-started", study.scanCount - study.newestRuns.length);
+  if (study.inputCount > study.newestRuns.length)
+    add("not-started", study.inputCount - study.newestRuns.length);
   return counts;
 }
 
@@ -141,7 +141,7 @@ export function StudiesPage() {
     );
   }
 
-  const samples = list.reduce((n, s) => n + s.scanCount, 0);
+  const samples = list.reduce((n, s) => n + s.inputCount, 0);
   return (
     <>
       <ShellHeading>
@@ -212,7 +212,7 @@ function StudyRow({
           <span className="truncate text-sm text-muted-foreground">
             {[
               workflow?.name ?? study.workflowId,
-              plural(study.scanCount, INPUT_WORD.one, INPUT_WORD.many),
+              plural(study.inputCount, INPUT_WORD.one, INPUT_WORD.many),
               study.example && "an example",
             ]
               .filter(Boolean)
@@ -293,7 +293,7 @@ function StudyPane({ study }: { study: StudySummary }) {
     <div className="grid content-start gap-7 px-4 pt-3 pb-6">
       <Button asChild className="justify-self-start">
         <Link to={hrefOf(study)}>
-          {study.scanCount === 1 ? `Open ${INPUT_WORD.one}` : "Open study"}
+          {study.inputCount === 1 ? `Open ${INPUT_WORD.one}` : "Open study"}
           <ChevronRight aria-hidden />
         </Link>
       </Button>
@@ -321,15 +321,15 @@ function StudyPane({ study }: { study: StudySummary }) {
 function SamplesBlock({ study, detail }: { study: StudySummary; detail: StudyDetail }) {
   const counts = PLACES.map((p) => ({
     ...p,
-    n: detail.scans.filter((s) => placeOf(s, detail.study.example) === p.place).length,
+    n: detail.inputs.filter((s) => placeOf(s, detail.study.example) === p.place).length,
   })).filter((p) => p.n > 0);
-  const grouped = detail.scans.some((s) => s.scan.group !== null);
-  const groups = [...new Set(detail.scans.map((s) => s.scan.group ?? ""))];
-  const many = study.scanCount > 1;
+  const grouped = detail.inputs.some((s) => s.member.group !== null);
+  const groups = [...new Set(detail.inputs.map((s) => s.member.group ?? ""))];
+  const many = study.inputCount > 1;
   return (
     <SideBlock
       title={INPUT_WORD.Many}
-      aside={<span className="text-fg-subtle">{study.scanCount}</span>}
+      aside={<span className="text-fg-subtle">{study.inputCount}</span>}
     >
       {many && (
         <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -346,37 +346,37 @@ function SamplesBlock({ study, detail }: { study: StudySummary; detail: StudyDet
       )}
       <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
         {groups.map((g) => {
-          const scans = detail.scans.filter((s) => (s.scan.group ?? "") === g);
+          const inputs = detail.inputs.filter((s) => (s.member.group ?? "") === g);
           return (
             <div key={g} className="contents">
               {grouped && (
                 <dt className="whitespace-nowrap text-fg-subtle">
-                  {g || "No group"} <span className="tabular-nums">{scans.length}</span>
+                  {g || "No group"} <span className="tabular-nums">{inputs.length}</span>
                 </dt>
               )}
               <dd className={cx("m-0 flex flex-wrap gap-x-3 gap-y-1", !grouped && "col-span-2")}>
-                {scans.map((s) => {
+                {inputs.map((s) => {
                   const run = s.runs[0];
                   const name = (
                     <>
                       <Thumbnail
                         size={36}
                         src={run && runThumbnailUrl(run.id)}
-                        mark={<StatusGlyph status={scanStatus(s).status} className="size-3" />}
+                        mark={<StatusGlyph status={inputStatus(s).status} className="size-3" />}
                       />
-                      <span className="font-mono text-xs">{s.scan.subject}</span>
+                      <span className="font-mono text-xs">{s.member.subject}</span>
                     </>
                   );
                   return run ? (
                     <Link
-                      key={s.scan.inputId}
-                      to={runHref({ runId: run.id })}
+                      key={s.member.inputId}
+                      to={inputHref(study.id, s.member.inputId)}
                       className="inline-flex items-center gap-2 rounded-sm hover:underline"
                     >
                       {name}
                     </Link>
                   ) : (
-                    <span key={s.scan.inputId} className="inline-flex items-center gap-2">
+                    <span key={s.member.inputId} className="inline-flex items-center gap-2">
                       {name}
                     </span>
                   );

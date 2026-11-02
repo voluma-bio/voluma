@@ -117,6 +117,7 @@ export async function leaveToResearcher(
   const o = fold.byId.get(id);
   if (!o?.latest || !o.undecided) return false;
   const stale = o.latest.madeFrom.find((l) => {
+    if (l.id === id) return false;
     const now = fold.byId.get(fold.labels.get(l.id) ?? l.id)?.latest?.version;
     return now !== undefined && now !== l.version;
   });

@@ -7,9 +7,9 @@
  * and only main is gated: a worker also has `report_output`, and its limit is `outputs`.
  */
 
+import { approvalRequestId } from "@voluma/contracts/agents";
 import type { Tool } from "../../tools/tool";
 import { madeStale, outputsNamed, summaryOf } from "../approvals";
-import { approvalRequestId } from "../effects";
 import type { AgentsApi } from "./coordination";
 import { Refusal } from "./refusal";
 

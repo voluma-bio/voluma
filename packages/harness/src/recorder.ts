@@ -18,6 +18,23 @@
  * (`live.ts`) that never waits, and they do not join the queue, the view or `flush`. The creator of the recorder `flush()`es when its threads end so the
  * record is complete before the process exits.
  *
+ * The view is a gapless prefix of the store up to its last `seq`, in store order. The API
+ * writes into a running claim too (marks, saved views, `tocheck.resolved`, and the messages
+ * and answers of a later lane), and a delivery cursor is a position in the event list, so an
+ * event may only ever join the view at its end, never before an event the view already holds.
+ * Two things keep that true, both inside the same queue turn as the runner's own events so
+ * nothing of the runner's lands between: `deliver` stores an event, and when the store says its
+ * `seq` is above the view's next one, it first reads the events in between and adds them
+ * ahead of its own; `pull` (the heartbeat saw a `lastSeq` past the view) reads everything after the
+ * view; at most one pull is pending. The view advances by the last `seq` read, not by a count: the
+ * event log skips an event it cannot parse, so a page can have holes. A store that returns no `seq` (an API from
+ * before the pull) gets no gap fill, so the view then numbers the event after its last. A read
+ * of the store that runs out of retries (`EventLogUnavailable`) stops the recorder like a failed
+ * write: the run is released and the next claim resumes from the store.
+ *
+ * `endedSeq()` is the view's last `seq` when the root thread's end was delivered, before the events
+ * stored below it were added: what the runner had read when it decided to end.
+ *
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
  * `onLeaseLost` once (the creator aborts the run) and drops every event still queued. The
  * event log retries an unavailable store itself, for a bounded time (`run-client.ts`), and
@@ -38,6 +55,7 @@ import type { LiveFrame } from "@voluma/contracts/stream";
 import type { LiveBatcher, LiveBody } from "./live";
 import { type EventLog, EventLogUnavailable } from "./ports/event-log";
 import { LeaseLost } from "./ports/lease-lost";
+import { ROOT_NAME, threadIdOf } from "./thread-id";
 
 export type PayloadOf<T extends EventType> = Extract<EventInput, { type: T }>["payload"];
 
@@ -58,10 +76,20 @@ export interface Recorder {
     payload: PayloadOf<T>,
     id: string,
   ): Promise<boolean>;
-  /** The stored events: those the recorder started with and those it has since delivered. */
+  /**
+   * Adds the events the store holds past the view, after everything queued before this call, if
+   * `lastSeq` (the store's last `seq`, from a heartbeat) is past the view. Throws if the store
+   * cannot be read; the next call retries.
+   */
+  pull(lastSeq: number): Promise<void>;
+  /** The view's last `seq` when the root thread's `thread.ended` was delivered; undefined until then. */
+  endedSeq(): number | undefined;
+  /** The stored events: those the recorder started with, those it has delivered and those it pulled. */
   events(): readonly RunEvent[];
   /** Calls `listener` with each event once it joins the view (not the events the recorder started with). */
   onStored(listener: (event: RunEvent) => void): void;
+  /** Calls `listener` after events the runner did not write (pulled, or a gap filled) join the view. */
+  onPulled(listener: () => void): void;
   /** Resolves once every event queued so far is stored or given up on. */
   flush(): Promise<void>;
   /** The first error that made `emit` give up on an event; undefined while none has. */
@@ -90,19 +118,48 @@ export function recorder(
   const storedIds = new Set(ids);
   let failure: unknown;
   const listeners: ((event: RunEvent) => void)[] = [];
+  const pulledListeners: (() => void)[] = [];
+  const viewSeq = () => held.at(-1)?.seq ?? 0;
+  const rootThreadId = threadIdOf(runId, ROOT_NAME);
+  let endedSeq: number | undefined;
+  let pulling: Promise<void> | undefined;
+
+  /** The store's answer to a call failed: a lost lease or an unreachable store ends deliveries. */
+  function storeFailed(error: unknown) {
+    if (error instanceof LeaseLost && !stopped) onLeaseLost();
+    if (error instanceof LeaseLost || error instanceof EventLogUnavailable) stopped = true;
+  }
+
+  /** Adds events the store holds that the runner did not write, in store order. */
+  function join(read: readonly RunEvent[]) {
+    for (const event of read) {
+      if (storedIds.has(event.id)) continue;
+      held.push(event);
+      ids.add(event.id);
+      storedIds.add(event.id);
+      for (const listener of listeners) listener(event);
+    }
+    if (read.length > 0) for (const listener of pulledListeners) listener();
+  }
 
   /** Stores the event (the log retries it) and adds it to the view, or throws. */
   async function deliver(event: EventInput): Promise<void> {
     try {
       if (stopped) throw new RecorderStopped();
+      const before = viewSeq();
+      let seq: number | undefined;
       try {
-        await eventLog.append(event);
+        seq = await eventLog.append(event);
+        // Events the API wrote below `seq` come first, so the view has no hole before this event.
+        // If this read fails the event is stored but not in the view: the claim stops and the next resumes.
+        if (seq !== undefined && seq > viewSeq() + 1)
+          join(await eventLog.eventsAfter(viewSeq(), seq - 1));
       } catch (error) {
-        if (error instanceof LeaseLost && !stopped) onLeaseLost();
-        if (error instanceof LeaseLost || error instanceof EventLogUnavailable) stopped = true;
+        storeFailed(error);
         throw error;
       }
-      const stored = { ...event, seq: held.length + 1 };
+      if (event.type === "thread.ended" && event.threadId === rootThreadId) endedSeq ??= before;
+      const stored = { ...event, seq: seq ?? viewSeq() + 1 };
       held.push(stored);
       storedIds.add(event.id);
       for (const listener of listeners) listener(stored);
@@ -138,6 +195,25 @@ export function recorder(
 
   return {
     events: () => held,
+    endedSeq: () => endedSeq,
+    pull(lastSeq) {
+      if (pulling) return pulling;
+      if (lastSeq <= viewSeq()) return Promise.resolve();
+      const result = queue.then(async () => {
+        if (stopped || lastSeq <= viewSeq()) return;
+        try {
+          join(await eventLog.eventsAfter(viewSeq()));
+        } catch (error) {
+          storeFailed(error);
+          throw error;
+        }
+      });
+      pulling = result.finally(() => {
+        pulling = undefined;
+      });
+      queue = pulling.catch(() => {});
+      return pulling;
+    },
     live: (frame) => live?.push({ ...frame, runId } as LiveFrame),
     emit(threadId, type, payload, id = crypto.randomUUID()) {
       if (ids.has(id)) return;
@@ -179,6 +255,9 @@ export function recorder(
     },
     onStored: (listener) => {
       listeners.push(listener);
+    },
+    onPulled: (listener) => {
+      pulledListeners.push(listener);
     },
     flush: async () => {
       await queue;

@@ -19,6 +19,7 @@
  * that decides a write uses row columns only (cancel, which also runs inside the claim, so it
  * must never refuse) or refuses on an event it can't read (corrections, review).
  */
+import { approvalAnswerId, approvalSettledId } from "@voluma/contracts/agents";
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { type CancelRow, cancelEnds } from "@voluma/contracts/threads";
 import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
@@ -98,11 +99,11 @@ export async function cancelReviewWorkers(tx: Tx, runId: string, withdraw: boole
   if (!withdraw) return;
   const ids = new Set(rows.map((r) => r.id));
   for (const r of requests) {
-    if (!ids.has(`${r.id}:answer`) || ids.has(`${r.id}:settled`)) continue;
-    const given = rows.find((x) => x.id === `${r.id}:answer`);
+    if (!ids.has(approvalAnswerId(r.id)) || ids.has(approvalSettledId(r.id))) continue;
+    const given = rows.find((x) => x.id === approvalAnswerId(r.id));
     if (given?.type !== "approval.given") continue;
     await insertEvent(tx, {
-      id: `${r.id}:settled`,
+      id: approvalSettledId(r.id),
       runId,
       threadId: r.threadId,
       type: "approval.settled",
@@ -225,19 +226,27 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
     checkLease: (runId: string, leaseToken: string) =>
       db.transaction((tx) => assertLease(tx, runId, leaseToken)),
 
-    /** Throws `LeaseLost`. */
+    /** The event's stored seq, for a repeated id the seq it has. Throws `LeaseLost`. */
     async append(event: EventInput, leaseToken: string) {
-      await db.transaction(async (tx) => {
+      const seq = await db.transaction(async (tx) => {
         await eventLock(tx, event.runId);
         await assertLease(tx, event.runId, leaseToken);
-        const inserted = await insertEvent(tx, event);
-        if (inserted.length === 0) return;
-        const [row] = inserted;
-        if (row && isProgress(event)) {
+        const [row] = await insertEvent(tx, event);
+        if (!row) {
+          const [stored] = await tx
+            .select({ seq: events.seq })
+            .from(events)
+            .where(and(eq(events.runId, event.runId), eq(events.id, event.id)));
+          if (!stored) throw new Error(`event ${event.id} is neither inserted nor stored`);
+          return stored.seq;
+        }
+        if (isProgress(event)) {
           await tx.update(runs).set({ lastProgressSeq: row.seq }).where(eq(runs.id, event.runId));
         }
+        return row.seq;
       });
       notifier.notify(event.runId);
+      return seq;
     },
   };
 }

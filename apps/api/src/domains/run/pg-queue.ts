@@ -55,7 +55,7 @@ import {
   type Tx,
 } from "./pg-runs";
 import { modelChoices, pickModel } from "./run-models";
-import { events, inputs, runs, studies, studyScans } from "./schema";
+import { events, inputs, runs, studies, studyMembers } from "./schema";
 
 /**
  * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
@@ -87,6 +87,8 @@ export type Claimed = {
   leaseToken: string;
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
+  /** The study's budget (`claimSchema.budgetUsd`); null: none. */
+  budgetUsd: number | null;
   /** Present on every claim after the run's first. */
   previousClaim?: { reason: NonNullable<(typeof runs.$inferSelect)["lastClaimEnd"]> };
 };
@@ -395,8 +397,8 @@ export function pgRunQueue(
     models: () => modelChoices(modelOverride),
 
     /**
-     * Creates one run `queued` on a scan of an existing study. Refuses a study the reader
-     * can't read (or the example's), a scan the study lacks, an input still uploading, a
+     * Creates one run `queued` on an input of an existing study. Refuses a study the reader
+     * can't read (or the example's), an input the study lacks, an input still uploading, a
      * limit already reached, and a visitor run when the vault is full.
      */
     start: (
@@ -411,13 +413,16 @@ export function pgRunQueue(
           .where(and(readableStudies(reader), eq(studies.id, request.studyId)));
         if (!study) throw new HTTPException(404, { message: "unknown study" });
         if (study.example) throw new HTTPException(403, { message: "Examples are read-only." });
-        const [scan] = await tx
-          .select({ inputId: studyScans.inputId })
-          .from(studyScans)
+        const [member] = await tx
+          .select({ inputId: studyMembers.inputId })
+          .from(studyMembers)
           .where(
-            and(eq(studyScans.studyId, request.studyId), eq(studyScans.inputId, request.inputId)),
+            and(
+              eq(studyMembers.studyId, request.studyId),
+              eq(studyMembers.inputId, request.inputId),
+            ),
           );
-        if (!scan) throw new HTTPException(404, { message: "unknown input" });
+        if (!member) throw new HTTPException(404, { message: "unknown input" });
         await checkInputs(tx, reader, caller, [request.inputId]);
         await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
@@ -427,7 +432,7 @@ export function pgRunQueue(
       }),
 
     /**
-     * Creates a study, its scans and a `queued` run for each of `starts.runs`, in one
+     * Creates a study, its inputs and a `queued` run for each of `starts.runs`, in one
      * transaction: any refusal (an input, a limit, the vault) refuses the whole call and
      * leaves nothing. Returns the study's id.
      */
@@ -437,10 +442,10 @@ export function pgRunQueue(
       request: {
         study: Omit<typeof studies.$inferInsert, "labId" | "createdBy" | "example" | "createdAt">;
         /** `subject` absent: the input's name. */
-        scans: (Omit<typeof studyScans.$inferInsert, "studyId" | "position" | "subject"> & {
+        inputs: (Omit<typeof studyMembers.$inferInsert, "studyId" | "position" | "subject"> & {
           subject?: string;
         })[];
-        /** The runs to start now, one per scan to start. */
+        /** The runs to start now, one per input to start. */
         starts: Starts;
       },
     ) =>
@@ -450,17 +455,17 @@ export function pgRunQueue(
           tx,
           reader,
           caller,
-          request.scans.map((scan) => scan.inputId),
+          request.inputs.map((input) => input.inputId),
         );
         await tx.insert(studies).values({
           ...request.study,
           labId: reader.labId,
           createdBy: caller.userId,
         });
-        await tx.insert(studyScans).values(
-          request.scans.map((scan, position) => ({
-            ...scan,
-            subject: scan.subject ?? found.get(scan.inputId)!.name,
+        await tx.insert(studyMembers).values(
+          request.inputs.map((input, position) => ({
+            ...input,
+            subject: input.subject ?? found.get(input.inputId)!.name,
             studyId: request.study.id,
             position,
           })),
@@ -625,9 +630,14 @@ export function pgRunQueue(
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
+          const [study] = await tx
+            .select({ budgetUsd: studies.budgetUsd })
+            .from(studies)
+            .where(eq(studies.id, run.studyId));
           return {
             run: await loadRun(tx, run.id),
             leaseToken,
+            budgetUsd: study?.budgetUsd ?? null,
             ...(keys && { keys }),
             ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
           };
@@ -660,7 +670,11 @@ export function pgRunQueue(
             sandboxSeconds: sql`${runs.sandboxSeconds} + ${used.sandboxSeconds}`,
           })
           .where(eq(runs.id, runId));
-        return { stop: false };
+        const [last] = await tx
+          .select({ seq: sql<number>`coalesce(max(${events.seq}), 0)` })
+          .from(events)
+          .where(eq(events.runId, runId));
+        return { stop: false, lastSeq: last?.seq ?? 0 };
       }),
 
     /**

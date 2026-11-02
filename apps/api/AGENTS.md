@@ -63,17 +63,17 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   recovery) and the key vault, `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per limit.
-- **Every run belongs to a study** (`studies`, `study_scans`; `runs.study_id` is not null), and
+- **Every run belongs to a study** (`studies`, `study_members`; `runs.study_id` is not null), and
   the study owns the workflow. `readableStudies` (`pg-runs.ts`) is `readableRuns` on the study
   (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
-  it. `queue.createStudy` inserts the study, its scans and the runs to start in one
+  it. `queue.createStudy` inserts the study, its inputs and the runs to start in one
   transaction under the lock: any refusal throws an `HTTPException` (status and text, where it is decided) and rolls the whole call back, and
   `startRuns` reads the counts once and raises them for each run it inserts. Every browser
   write (start, create, cancel, resume) goes through `attempt`: a refusal rolls it back and reaches the
   client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run, and readable from every organization (`readableRuns`/`readableStudies` test `example` before the org); `import:run` restores
-  a dump's original study, scans and inputs, refusing conflicting shared rows. Only legacy dumps
+  a dump's original study, study members and inputs, refusing conflicting shared rows. Only legacy dumps
   without study metadata get a study of one.
 - **Rows are keyed by run.** `events` is `(run_id, id)` and `pi_messages` `(run_id, thread_id, idx)`:
   event ids and thread ids (opaque UUIDs for new threads, `<runId>.<name>` in older runs) are unique within a

@@ -7,7 +7,7 @@ import { ItemToCheck } from "./item-to-check";
  * **What:** one item waiting for your decision: its task, what the AI says, what the second AI
  * check found, the value it affects, and Looks right / Something's wrong. **Why:** the decision
  * lives in one place; the AI panel and the report refer to the item instead of drawing it again.
- * **Where:** the scan review's To check panel and the study's To check page.
+ * **Where:** the input review's To check panel and the study's To check page.
  *
  * Sample data (stories only).
  */
@@ -45,13 +45,13 @@ export const NothingToAccept: Story = {
   args: {
     context: "Tibial cortical thickness",
     title: "Sent back by the second AI",
-    text: "The cortex is thinner than the scan supports at the medial edge.",
+    text: "The cortex is thinner than the input supports at the medial edge.",
     found: undefined,
     value: undefined,
     state: "info",
   },
 };
-/** On the study's To check page, by issue: the scan above the title, and a way into the scan review. */
+/** On the study's To check page, by issue: the input above the title, and a way into the input review. */
 export const OnTheStudyPage: Story = {
   args: {
     context: "OA7-2, right knee",
