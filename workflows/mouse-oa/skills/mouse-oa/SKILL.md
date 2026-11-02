@@ -22,9 +22,9 @@ the input it names or pass the question on; do not route around it with code of 
   for the lab. `anatomy.json` is its machine-readable half.
 - `examples/README.md`: for each placement a step makes, what correct looks like, with the lab's figures. Read the
   section of the step you work on before you place or judge anything.
-- `resources/`: the protocol's scripts; `--help` is each one's contract. `resources/protocol.json` holds every number the
-  protocol fixes and the output ids the scripts write under; scripts read it with `--spec`, so you pass no protocol number
-  as a flag.
+- `resources/` (in a run, `/workflow/workflows/mouse-oa/skills/mouse-oa/resources/`): the protocol's scripts; `--help`
+  is each one's contract. `resources/protocol.json` holds every number the protocol fixes and the output ids the
+  scripts write under; scripts read it with `--spec`, so you pass no protocol number as a flag.
 - Report each placed object (region, surface, ruler, grid) by passing the `objects` entry of the script's result record to
   `report_output` unchanged, under the id it is keyed by; `morphometry.py cortical` reports its slab under the `--output` id. A named
   bone is reported as a structure with its label value in `bone-labels` (`{label: 2}` for the tibia; the labels are in

@@ -26,8 +26,10 @@ or from another grid is refused). This script reads these keys; any other key is
                           articular surface inside the U and V ranges; ROI-1 keeps only what lies below it
   compartment_midpoint_u  required: {"lateral": U, "medial": U}, the U index at the middle of each plateau compartment. A height
                           point outside the ROI-1 footprint (or within 3 voxels of its edge) stops the script: move the point
-  width_points_uvw        required: two [u, v, w] points (deck #10): the centre of the fibula-tibia junction on the tibial
-                          surface, and the most prominent point on the other side
+  width_points_uvw        required: two [u, v, w] points (deck #10) on the growth plate's proximal face, on one coronal section:
+                          the centre of the fibula-tibia junction on the tibial surface, and the most prominent point on the
+                          other side. Points more than 1 apart in V are refused, and so is a point more than `width_point_off_face_um`
+                          (spec, entry roi-iioc) along W from the face at its (V, U)
   growth_plate_mid_u      optional: U of "the middle of the growth plate" for height #7 (default: the mean U of the two width points)
   height_section_v        optional: the coronal section the heights are measured on (default: where the footprint's
                           growth-plate-to-top distance is largest)
@@ -129,6 +131,24 @@ def ray_length(roi, start, direction, step=0.05, max_lead=3.0):
     return t
 
 
+def refuse_width_points(wp, gp, off_face_um, vox):
+    """Refuse width points (deck #10, [u, v, w] rows of `wp`) that are not on the growth plate's proximal face on one coronal
+    section: two points more than 1 apart in V, or a point farther than `off_face_um` along W from the face `gp` at its (V, U)."""
+    (_, v0, _), (_, v1, _) = wp
+    if abs(v1 - v0) > 1:
+        sidecar.fail(f'"width_points_uvw" (#10) must be two points on one coronal section, but they are on V={v0:g} and V={v1:g}: '
+                     'put both on the same section, each on the growth plate\'s proximal face')
+    off = []
+    for u, v, w in wp:
+        face = gp[round(v), round(u)]
+        um = (w - face) * vox * 1000
+        if abs(um) > off_face_um:
+            off.append(f'[{u:g}, {v:g}, {w:g}] is {abs(um):.0f} um {"above" if um < 0 else "below"} the face (W={face:.0f} at U={u:g}, V={v:g})')
+    if off:
+        sidecar.fail(f'"width_points_uvw" (#10) must be two points on the growth plate\'s proximal face, but {" and ".join(off)}: '
+                     f'move each point onto the face, within {off_face_um:g} um of its W at that U and V')
+
+
 def first_run(bone, v, u):
     ww = np.flatnonzero(bone[:, v, u])
     if not len(ww):
@@ -141,7 +161,7 @@ def first_run(bone, v, u):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc gives the plate patch width")
+    ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc gives the plate patch width and how far a width point may be off the face")
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
@@ -157,7 +177,7 @@ def main():
         help='mm: move the traced growth-plate face by this much (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
-    plate_width_um = sidecar.protocol(a.spec, ROI_ID, 'plate_patch_width_um')['plate_patch_width_um']
+    spec = sidecar.protocol(a.spec, ROI_ID, 'plate_patch_width_um', 'width_point_off_face_um')
     plate_qc_panels = sidecar.protocol(a.spec, 'plate-faces', 'qc_panels')['qc_panels']
     frame = fr.load(a.frame)
     ann = load_annotations(a.annotations, frame)
@@ -170,11 +190,14 @@ def main():
         sidecar.fail('the frame was made on another scan grid than hu.json: rerun tibia_frame.py on this scan')
     gp_spec = need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate')
     gp, gp_traced = traced_surface(gp_spec, 'growth_plate_curves', h.shape)
-    gp = gp + a.gp_shift_mm / vox
     v_traced = sorted(int(k) for k in gp_spec['slices'])
     gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
     refuse_off_tibia(ann, 'growth_plate_curves', tib, a.spec, vox)
     refuse_gaps(ann, 'growth_plate_curves', tib, a.spec, vox)
+    wp = np.array(need(ann, 'width_points_uvw', 'two [u, v, w] points on the growth plate\'s proximal face, on one coronal section: '
+                       'the centre of the fibula-tibia junction on the tibial surface, and the prominent point on the other side'), float)
+    refuse_width_points(wp, gp, spec['width_point_off_face_um'], vox)  # against the face as traced: --gp-shift-mm moves the cut, not the plate
+    gp = gp + a.gp_shift_mm / vox
     _, plate = eroded_marks(ann, 'growth_plate_curves', h.shape, footprint(tib))
     env = envelope(tib, gp, vox)
     w = np.arange(h.shape[0])[:, None, None]
@@ -201,13 +224,6 @@ def main():
     interior = ndi.binary_erosion(valid, iterations=EDGE_ERODE)
     vmax, umax = np.unravel_index(np.nanargmax(np.where(interior, local_height, np.nan)), valid.shape)
     v_star = int(ann.get('height_section_v', vmax))
-    wp = need(
-        ann,
-        'width_points_uvw',
-        'two [u, v, w] points: centre of the fibula-tibia junction on the tibial surface, '
-        'and the prominent point on the other side',
-    )
-    wp = np.array(wp, float)
     u_mid = round(ann.get('growth_plate_mid_u', wp[:, 0].mean()))
     mids = need(ann, 'compartment_midpoint_u', 'U index of the middle of the lateral and the medial compartment')
     vv, uu = np.nonzero(valid)
@@ -271,9 +287,8 @@ def main():
     values['tibial-width-at-the-growth-plate'] = sidecar.value(
         width,
         'mm',
-        'tibial width at the growth plate (deck #10): straight distance between '
-        'the two annotated points (centre of fibula-tibia junction to the prominent point on '
-        'the other side)',
+        'tibial width at the growth plate (deck #10): straight distance between the two annotated points on the growth '
+        'plate\'s proximal face, on one coronal section (centre of fibula-tibia junction to the prominent point on the other side)',
         points_uvw=wp.tolist(),
     )
     rulers['tibial-width-ruler'] = objects.line(wp[0, ::-1], wp[1, ::-1], frame['grid_id'])  # [u, v, w] -> aligned (w, v, u)
@@ -282,7 +297,7 @@ def main():
     plates = {}
     for side in ('medial', 'lateral'):
         patch = ann.get('plate_patches', {}).get(side)
-        half = round(plate_width_um / 2000 / vox)
+        half = round(spec['plate_patch_width_um'] / 2000 / vox)
         if patch is None:
             c = int(mids[side])
             patch = {'u': [c - half, c + half], 'v': [v_star - half, v_star + half]}

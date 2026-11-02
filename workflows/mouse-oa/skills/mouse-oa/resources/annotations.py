@@ -108,11 +108,12 @@ def check_bounds(ann, shape):
         curves('articular_corrections[].curves', fix['curves'])
         rng('articular_corrections[].u_range', fix['u_range'], U, 'U')
         rng('articular_corrections[].v_range', fix['v_range'], V, 'V')
-    for pt in listof('width_points_uvw', ann.get('width_points_uvw', []), None, 'a list of [u, v, w] points'):
-        listof('width_points_uvw', pt, 3, '[u, v, w] points with three numbers')
-        for key, x, n, axis in zip('UVW', pt, (U, V, W), 'UVW'):
-            number('width_points_uvw', x, '[u, v, w] points with three numbers')
-            inside('width_points_uvw', f'a point with {key}', x, n, axis)
+    if 'width_points_uvw' in ann:
+        for pt in listof('width_points_uvw', ann['width_points_uvw'], 2, 'two [u, v, w] points'):
+            listof('width_points_uvw', pt, 3, '[u, v, w] points with three numbers')
+            for key, x, n, axis in zip('UVW', pt, (U, V, W), 'UVW'):
+                number('width_points_uvw', x, '[u, v, w] points with three numbers')
+                inside('width_points_uvw', f'a point with {key}', x, n, axis)
     for side, u in mapping('compartment_midpoint_u', ann.get('compartment_midpoint_u', {}), '{"lateral": U, "medial": U}').items():
         scalar('compartment_midpoint_u', u, U, 'U', f'{side} U')
     for key, n, axis in (('growth_plate_mid_u', U, 'U'), ('height_section_v', V, 'V')):
