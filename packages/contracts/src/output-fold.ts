@@ -294,11 +294,25 @@ export function finalValues(fold: OutputsFold): Map<string, { number: number; un
 }
 
 /**
- * The To check items open on the outputs' latest versions, each once: what needs a person on a
- * run of the agent loop, and what "Looks right" accepts one by one.
+ * The final outputs that need a person: each with an open To check item on its latest version or
+ * on one it was made from, through latest versions (a link to a label overlay with no version of
+ * its own goes to its map, as the run's list names it). What "Needs you" counts on the sample page
+ * and on every row that shows an agent-loop sample, so the number seen before opening a sample is
+ * the one found on it.
  */
-export const openToCheck = (fold: OutputsFold): number =>
-  fold.outputs.reduce((n, o) => n + (o.latest?.toCheck ?? []).filter((t) => !t.resolved).length, 0);
+export function needingYou(fold: OutputsFold): Set<string> {
+  const to = (id: string) => (fold.byId.get(id)?.latest ? id : (fold.labels.get(id) ?? id));
+  const open = (id: string) => fold.byId.get(id)?.latest?.toCheck.some((t) => !t.resolved);
+  const needs = (root: string) => {
+    const seen = new Set([root]);
+    for (const id of seen) {
+      if (open(id)) return true;
+      for (const link of fold.byId.get(id)?.latest?.madeFrom ?? []) seen.add(to(link.id));
+    }
+    return false;
+  };
+  return new Set(fold.outputs.filter((o) => o.final && needs(o.id)).map((o) => o.id));
+}
 
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>

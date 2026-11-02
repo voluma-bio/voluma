@@ -6,7 +6,7 @@
  * scans' values, checks and states are read from each fold here. Writes are the queue's.
  */
 import { unitAsWritten } from "@voluma/contracts/output-catalog";
-import { finalValues, openToCheck } from "@voluma/contracts/output-fold";
+import { finalValues, needingYou } from "@voluma/contracts/output-fold";
 import { latestRevision, scanNeedsYou, shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
@@ -92,8 +92,8 @@ function reviewOf({ run, results }: RunResult): StudyRunSummary["review"] {
     return { acceptable, needsYou, reviewedAt };
   }
   if (!completed(run) || run.harness !== "agents") return null;
-  const open = openToCheck(results.outputs);
-  return { acceptable: open, needsYou: open, reviewedAt: null };
+  const needs = needingYou(results.outputs).size;
+  return { acceptable: needs, needsYou: needs, reviewedAt: null };
 }
 
 /** The newest run's final outputs' status, for a run of the agent loop; empty otherwise. */
@@ -137,6 +137,7 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
         state: result.run.state,
         tasks: result.run.tasks,
         ...(result.run.outputs && { outputs: result.run.outputs }),
+        ...(result.run.harness && { harness: result.run.harness }),
         review: reviewOf(result),
         example: result.run.example,
       }),

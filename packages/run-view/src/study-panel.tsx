@@ -16,7 +16,7 @@ import {
   type Status,
   StatusMark,
 } from "@voluma/ui";
-import { liveStatus, plural } from "./run-status";
+import { liveStatus, needsYouText, plural } from "./run-status";
 
 type ScanStatus = { label: string; status: Status; open: number };
 
@@ -35,7 +35,7 @@ export function scanStatus(scan: StudyScanDetail): ScanStatus {
   // The scan's `review` is its newest run's, of either loop (a `Run` has one for the task loop only).
   const { label, status } = liveStatus({ ...run, review: scan.review });
   const open = status === "check" ? needsYouOf(scan) : 0;
-  return { label: open > 0 ? `${open} to check` : label, status, open };
+  return { label: open > 0 ? needsYouText(open, run.harness) : label, status, open };
 }
 
 /** A scan's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */

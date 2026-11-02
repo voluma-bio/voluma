@@ -69,7 +69,7 @@ export type RunStatus = { label: string; status: Status };
  * outputs) while an agent-loop run does: what a row says about a live run.
  */
 export function liveStatus(
-  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs">,
+  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness">,
 ): RunStatus {
   const running = run.state.status === "running";
   if (running && run.outputs)
@@ -86,8 +86,19 @@ export function liveStatus(
     : runStatus(run);
 }
 
-/** A run's status; a study's newest-run summary carries the same `state` and `review` fields. */
-export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
+/**
+ * What needs a person on a run, as its sample page says it: the agent loop counts final values
+ * ("1 needs you", as its Needs you), the task loop items ("3 to check", as its To check).
+ */
+export const needsYouText = (n: number, harness: StudyRunSummary["harness"]) =>
+  harness === "agents" ? `${n} ${n === 1 ? "needs" : "need"} you` : `${n} to check`;
+
+/** A run's status; a study's newest-run summary carries the same `state`, `review` and `harness`. */
+export function runStatus({
+  state,
+  review,
+  harness,
+}: Pick<StudyRunSummary, "state" | "review" | "harness">): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Waiting", status: "waiting" };
@@ -99,7 +110,7 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
       // To check means needs you: a card nobody can accept outranks Reviewed too.
       if (state.outcome === "completed")
         return review?.needsYou
-          ? { label: `${review.needsYou} to check`, status: "check" }
+          ? { label: needsYouText(review.needsYou, harness), status: "check" }
           : review?.reviewedAt
             ? { label: "Reviewed", status: "done" }
             : { label: "Checked", status: "done" };

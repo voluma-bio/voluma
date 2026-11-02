@@ -15,10 +15,10 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { type OutputCatalog, unitAsWritten } from "@voluma/contracts/output-catalog";
 import {
+  needingYou,
   type OutputState,
   type OutputsFold,
   type OutputVersion,
-  openToCheck,
   outputsIn,
 } from "@voluma/contracts/output-fold";
 import { outputsPrefix } from "@voluma/contracts/r2";
@@ -75,8 +75,8 @@ export type OutputsReview = {
    * undeclared: what "Other outputs so far" lists while the run goes.
    */
   others: OutputRow[];
-  /** Unresolved items across every output's latest version. */
-  open: number;
+  /** The final outputs that need a person (`needingYou`): what Needs you counts. */
+  needing: Set<string>;
   /** Final outputs with a version, of all final outputs. */
   progress: { done: number; total: number };
 };
@@ -166,7 +166,7 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     others: [...rows.values()].filter(
       (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
     ),
-    open: openToCheck(fold),
+    needing: needingYou(fold),
     progress: outputsIn(fold),
   };
 }

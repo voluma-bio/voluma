@@ -98,9 +98,10 @@ export const studySchema = z.object({
 export type Study = z.infer<typeof studySchema>;
 
 /**
- * A completed run's review in brief, of either loop: the task loop's `runSchema.review`, or for a
- * run of the agent loop its open To check items (`openToCheck`), each of which "Looks right"
- * accepts (so `acceptable` is `needsYou`), never reviewed. Null for a run that has not completed.
+ * A completed run's review in brief, of either loop: the task loop's `runSchema.review` (items to
+ * check), or for a run of the agent loop its final outputs that need a person (`needingYou`, what
+ * its sample page's Needs you counts; `acceptable` is the same count), never reviewed. Null for a
+ * run that has not completed.
  */
 export const runReviewBriefSchema = z
   .object({
@@ -128,6 +129,8 @@ export const studyRunSummarySchema = z.object({
   state: runStateSchema,
   /** As `runSchema.tasks`: a live run's finished tasks out of its plan's. */
   tasks: runTasksSchema,
+  /** As `runSchema.harness`: which loop, so a row says "needs you" (values) or "to check" (items). */
+  harness: harnessSchema.optional(),
   /** As `runSchema.outputs`: a live agent-loop run's final outputs in, of all of them. */
   outputs: runOutputsInSchema,
   review: runReviewBriefSchema,

@@ -72,7 +72,7 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `scanStatus` (a sample's: its newest run's, "Not started" with no run), the Samples tree's data
   (`sampleTree`), the run and item links, `ItemToCheck`, the formatters (`whenText` included), and visitor keys.
   `runStatus` and `runHref` take a run's `state` and `review`. A `newestRuns` entry and a study
-  scan's `review` hold it for either loop (an agent-loop run's open To check items, `openToCheck`);
+  scan's `review` hold it for either loop (an agent-loop run's final outputs that need a person, `needingYou`, the sample page's Needs you count, worded "N needs you" by `needsYouText`);
   a full `Run`'s `review` is the task loop's only, so `scanStatus` reads the scan's. Every page uses this mapping; don't add another.
 - **A study's pages** sit under `study/study-layout.tsx`, which loads the study once, renders the
   header line (breadcrumb, "Next scan that needs you") and the scan tree on the left side

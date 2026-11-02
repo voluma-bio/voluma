@@ -84,7 +84,7 @@ import {
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { describe, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
-import { FinalOutputs, needingYou, statusOf } from "./outputs-panel";
+import { FinalOutputs, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
@@ -211,7 +211,7 @@ export function OutputsReview({
 
   const accepting = useAcceptToCheck(run, reopen);
   const [onlyNeeds, setOnlyNeeds] = useState(false);
-  const needing = needingYou(review).size;
+  const needing = review.needing.size;
   const [leftTab, setLeftTab] = useState("conversation");
   const waiting = useMemo(() => waitingApprovals(events), [events]);
   const runMarks = useRunMarks({
