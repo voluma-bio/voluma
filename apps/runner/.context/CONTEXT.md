@@ -534,7 +534,7 @@ visitor run without `run.model` uses `RUNNER_VISITOR_MODEL` for every role excep
 
 A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
 levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a test
-run), `RUNNER_THINKING` when set applies to every role, and otherwise each role keeps its file's level (`config.modelForced`); either goes to the nearest level the forced model supports (Jimmy, 2 Nov: forcing the model must not turn thinking off). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+run), `RUNNER_THINKING` when set applies to every role, and otherwise each role keeps its file's level at the nearest the forced model supports, `off` for a model with no reasoning (`config.modelForced`; `main.ts` refuses at boot a `RUNNER_THINKING` the model lacks) (Jimmy, 2 Nov: forcing the model must not turn thinking off). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
