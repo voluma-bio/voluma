@@ -7,7 +7,7 @@
  */
 import { unitAsWritten } from "@voluma/contracts/output-catalog";
 import { finalValues, needingYou } from "@voluma/contracts/output-fold";
-import { inputNeedsYou, latestRevision, shownTasks } from "@voluma/contracts/review-state";
+import { latestRevision, shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
@@ -117,17 +117,10 @@ function summarize(study: Study, inputCount: number, results: RunResult[]): Stud
       if (at && at > lastActivityAt) lastActivityAt = at;
     }
   }
-  let needsYou = 0;
-  // Each input as the study page counts it (`needsYouOf`): the same function on the same fields.
-  for (const [id, result] of newest) {
-    const done = newestCompleted.get(id);
-    needsYou += inputNeedsYou(reviewOf(result), done ? resultOf(done).acceptable.length : 0);
-  }
   return {
     ...study,
     inputCount,
     inputsCompleted: newestCompleted.size,
-    needsYou,
     lastActivityAt,
     newestRuns: [...newest.values()].map(
       (result): StudyRunSummary => ({

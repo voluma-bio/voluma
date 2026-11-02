@@ -45,3 +45,8 @@ keys per catalog `shape`, narrowing in two steps if any writer already ran.
 
 A link to a label overlay resolves to its map's version. If bulk keeps after a one-bone fix prove
 costly, record per-label hashes on the map's version instead (an addition to `output.published`).
+
+Readers that take an output's status from `fold.byId` by its own id (`hasVersion` in
+`outputsIn`, the panel's not-in list) are right only while label overlays stay off the final list.
+One fold helper, `stateOf(fold, id)`, that resolves the label to its map first and is the only way
+readers get a state, would end that class (`chainOf` needed the same step, #489).

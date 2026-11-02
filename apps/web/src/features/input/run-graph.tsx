@@ -5,7 +5,6 @@
  * what it rests on and what rests on it; the rest is dimmed. Out-of-date outputs are marked.
  * A box picks its output. Data from `runGraph` (`outputs-trail.ts`).
  */
-import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import type { OutputsFold } from "@voluma/contracts/output-fold";
 import { madeFromIt, type OutputRow, runGraph } from "@voluma/run-view";
 import { cx, StatusGlyph } from "@voluma/ui";
@@ -21,13 +20,11 @@ const PAD = 16;
 
 export function RunGraphView({
   fold,
-  catalog,
   selected,
   onPick,
   rows,
 }: {
   fold: OutputsFold;
-  catalog: OutputCatalog;
   /** The output in the spotlight. */
   selected: string | undefined;
   onPick: (id: string) => void;
@@ -35,12 +32,12 @@ export function RunGraphView({
   rows: ReadonlyMap<string, OutputRow>;
 }) {
   const nameOf = (id: string) => rows.get(id)?.name ?? id;
-  const graph = useMemo(() => runGraph(fold, catalog), [fold, catalog]);
+  const graph = useMemo(() => runGraph(fold), [fold]);
   const lit = useMemo(() => {
     if (!selected) return undefined;
     const trail = rows.get(selected)?.trail ?? [];
-    return new Set([...trail.map((r) => r.id), ...madeFromIt(fold, catalog, selected)]);
-  }, [fold, catalog, rows, selected]);
+    return new Set([...trail.map((r) => r.id), ...madeFromIt(fold, selected)]);
+  }, [fold, rows, selected]);
 
   // Each column top to bottom; the last holds the final outputs under their section titles.
   const place = new Map<string, { x: number; y: number }>();

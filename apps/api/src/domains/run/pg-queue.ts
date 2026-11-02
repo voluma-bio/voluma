@@ -87,6 +87,8 @@ export type Claimed = {
   leaseToken: string;
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
+  /** The study's budget (`claimSchema.budgetUsd`); null: none. */
+  budgetUsd: number | null;
   /** Present on every claim after the run's first. */
   previousClaim?: { reason: NonNullable<(typeof runs.$inferSelect)["lastClaimEnd"]> };
 };
@@ -619,9 +621,14 @@ export function pgRunQueue(
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
+          const [study] = await tx
+            .select({ budgetUsd: studies.budgetUsd })
+            .from(studies)
+            .where(eq(studies.id, run.studyId));
           return {
             run: await loadRun(tx, run.id),
             leaseToken,
+            budgetUsd: study?.budgetUsd ?? null,
             ...(keys && { keys }),
             ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
           };

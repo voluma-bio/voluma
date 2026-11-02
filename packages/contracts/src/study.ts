@@ -89,7 +89,11 @@ export const studySchema = z.object({
   id: studyIdSchema,
   name: label,
   workflowId: workflowIdSchema,
-  /** Shown, never enforced. */
+  /**
+   * Model dollars a run of the study may spend. The runner enforces it per run (earlier claims
+   * included) as min(budgetUsd, RUNNER_MAX_RUN_COST_USD), failing the run past it; null: the
+   * runner's ceiling alone (`claimSchema.budgetUsd`).
+   */
   budgetUsd: z.number().nonnegative().nullable(),
   /** The seeded, read-only example's study. */
   example: z.boolean(),
@@ -143,8 +147,6 @@ export const studySummarySchema = studySchema.extend({
   inputCount: z.number().int().nonnegative(),
   /** Inputs with a completed run, whether or not it is the newest. */
   inputsCompleted: z.number().int().nonnegative(),
-  /** What needs a person on each input (`inputNeedsYou`), summed. */
-  needsYou: z.number().int().nonnegative(),
   /** The latest of the study's creation and its runs' creation, start and end. */
   lastActivityAt: z.iso.datetime(),
   /** Each input's newest run, newest first; an input with no run is absent. */

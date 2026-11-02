@@ -440,7 +440,7 @@ function rowsOf(
           else if (p.usage) {
             const step = cacheStep(cache.get(e.threadId), p.usage);
             cache.set(e.threadId, step.next);
-            cacheMiss = step.miss;
+            cacheMiss = step.miss === true;
           }
           if (p.reasoning)
             b.step({ kind: "reasoning", id: `${e.id}:reasoning`, text: p.reasoning });
