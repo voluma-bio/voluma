@@ -15,6 +15,7 @@
  * running keeps them until whoever starts it next calls `takeNotices`.
  */
 import { createHash } from "node:crypto";
+import type { RunEvent } from "@voluma/contracts/events";
 import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { coalescer, type ModelView, modelView, OutputBuffer } from "./tools/bash-output";
@@ -24,8 +25,6 @@ const EXEC_SECONDS = 4 * 3600;
 const WAIT_MIN = 10;
 const OUTPUT_TAIL_CHARS = 4_000;
 const COMMAND_SHOWN_CHARS = 200;
-/** Exit code recorded for a command whose process died with the claim. */
-const CUT_OFF_EXIT = 137;
 
 /** Short enough to type, derived so a repeated call names the same command and events. */
 export const bashIdOf = (threadId: string, toolCallId: string): string =>
@@ -68,7 +67,8 @@ export interface BashDeps {
 }
 
 class Command {
-  readonly output = new OutputBuffer();
+  /** Replaced by an empty one when the command ended: `result` holds what the agent reads. */
+  output = new OutputBuffer();
   readonly abort = new AbortController();
   /** foreground: a call waits for it; background: reported when it ends; ended. */
   phase: "foreground" | "background" | "ended" = "foreground";
@@ -156,29 +156,46 @@ export class BashRuntime {
 
   /**
    * First step of a claim: ends every command the last claim left running, which died with its
-   * sandbox, and owes the thread a notice for each.
+   * sandbox, and owes the thread a notice for each. A command that ended just before the cut-off
+   * may also have its end notice only in the inbox, not in History: it is owed again unless the
+   * thread has seen the result (as a notice, or from `wait` or `output`).
    */
   async endCutOff(): Promise<void> {
     const events = this.#deps.recorder.events();
-    const ended = new Set<string>();
-    for (const e of events) if (e.type === "bash.ended") ended.add(e.payload.bashId);
+    const ended = new Map<string, RunEvent & { type: "bash.ended" }>();
+    for (const e of events) if (e.type === "bash.ended") ended.set(e.payload.bashId, e);
     for (const e of events) {
-      if (e.type !== "bash.backgrounded" || ended.has(e.payload.bashId)) continue;
+      if (e.type !== "bash.backgrounded") continue;
       const { bashId, command } = e.payload;
-      await this.#deps.recorder.append(
-        e.threadId,
-        "bash.ended",
-        { bashId, exit: CUT_OFF_EXIT, output: "", cutOff: true },
-        endedId(bashId),
-      );
-      this.#queue(
-        e.threadId,
-        `Background command ${bashId} was cut off when the run restarted: its process did not survive and its output is lost. Run it again if you still need it. Command: ${shown(command)}`,
-      );
+      const end = ended.get(bashId);
+      if (!end) {
+        await this.#deps.recorder.append(
+          e.threadId,
+          "bash.ended",
+          { bashId, output: "", cutOff: true },
+          endedId(bashId),
+        );
+        this.#queue(
+          e.threadId,
+          `Background command ${bashId} was cut off when the run restarted: its process did not survive and its output is lost. Run it again if you still need it. Command: ${shown(command)}`,
+        );
+      } else if (!end.payload.cutOff && !seenBy(events, e.threadId, bashId)) {
+        this.#queue(
+          e.threadId,
+          endNotice(bashId, command, {
+            exit: end.payload.exit ?? 0,
+            view: { output: end.payload.output, truncated: false },
+          }),
+        );
+      }
     }
   }
 
-  /** The thread is ending: kills its running commands (the sandbox goes next) and waits for their ends. */
+  /**
+   * The thread is ending: kills its running commands (the sandbox goes next), waits for their
+   * ends, and owes the thread a notice for each it had not let go of: the thread resumes believing
+   * them running unless told.
+   */
   async release(threadId: string): Promise<void> {
     const running = [...this.#commands.values()].filter(
       (c) => c.start.threadId === threadId && c.phase === "background",
@@ -188,7 +205,15 @@ export class BashRuntime {
       c.abort.abort();
     }
     await Promise.all(running.map((c) => c.ended));
-    this.#pending.delete(threadId);
+    // Not `#queue`: the thread is over, and `deliver` could still accept a notice that nothing reads.
+    const owed = running
+      .filter((c) => !c.detached)
+      .map(
+        (c) =>
+          `Background command ${c.id} was stopped when your turn ended (exit code ${c.exit}): ${shown(c.start.command)}. Run it again if you still need it, and bash_manage wait for it before you end your turn.`,
+      );
+    if (owed.length > 0)
+      this.#pending.set(threadId, [...(this.#pending.get(threadId) ?? []), ...owed]);
   }
 
   /** `bash_manage`: the text the agent reads and whether the call failed. */
@@ -259,6 +284,7 @@ export class BashRuntime {
         endedId(cmd.id),
       );
       cmd.result = { exit: cmd.exit, view };
+      cmd.output = new OutputBuffer();
       cmd.phase = "ended";
       if (!cmd.detached && !cmd.consumed && cmd.waiters === 0) {
         this.#queue(threadId, endNotice(cmd.id, cmd.start.command, cmd.result));
@@ -289,6 +315,7 @@ export class BashRuntime {
     try {
       await cmd.recorded;
     } catch (error) {
+      this.#commands.delete(cmd.id);
       cmd.abort.abort();
       throw error;
     }
@@ -314,10 +341,10 @@ export class BashRuntime {
     this.#pending.set(threadId, [...(this.#pending.get(threadId) ?? []), text]);
   }
 
+  /** This claim's commands, then those the log holds from earlier claims (all ended by now). */
   #list(threadId: string): string {
-    const rows = [...this.#commands.values()].filter((c) => c.start.threadId === threadId);
-    if (rows.length === 0) return "No background commands.";
-    return rows
+    const rows = [...this.#commands.values()]
+      .filter((c) => c.start.threadId === threadId)
       .map((c) => {
         const state =
           c.phase === "ended"
@@ -326,8 +353,23 @@ export class BashRuntime {
               ? "running, detached"
               : "running";
         return `${c.id}  ${state}  ${seconds(c)}s  ${shown(c.start.command)}`;
-      })
-      .join("\n");
+      });
+    const events = this.#deps.recorder.events();
+    for (const e of events) {
+      if (e.type !== "bash.backgrounded" || e.threadId !== threadId) continue;
+      if (this.#commands.has(e.payload.bashId)) continue;
+      const end = events.find(
+        (x) => x.type === "bash.ended" && x.payload.bashId === e.payload.bashId,
+      );
+      const state =
+        end?.type === "bash.ended"
+          ? end.payload.cutOff
+            ? "cut off"
+            : `exit ${end.payload.exit}`
+          : "running";
+      rows.push(`${e.payload.bashId}  ${state}  ${shown(e.payload.command)}`);
+    }
+    return rows.length === 0 ? "No background commands." : rows.join("\n");
   }
 
   #output(cmd: Command): { output: string; isError: boolean } {
@@ -392,7 +434,7 @@ export class BashRuntime {
     cmd.detached = true;
     clearTimeout(cmd.pingTimer);
     return {
-      output: `${cmd.id} detached: it keeps running, but its end and the follow-up ping are not reported, and it no longer counts as work in progress.`,
+      output: `${cmd.id} detached: its end and the follow-up ping are not reported, and it no longer counts as work in progress. It runs until you kill it or your thread ends.`,
       isError: false,
     };
   }
@@ -412,18 +454,16 @@ export class BashRuntime {
     if (started?.type !== "bash.backgrounded" || ended?.type !== "bash.ended") {
       return { output: `bash_id not found: ${bashId}`, isError: true };
     }
-    if (action !== "output" && action !== "wait") {
-      return { output: `${bashId} already ended (exit ${ended.payload.exit})`, isError: true };
+    if (ended.payload.cutOff) {
+      return {
+        output: `${bashId} was cut off when the run restarted; its process and output are lost.`,
+        isError: true,
+      };
     }
-    return ended.payload.cutOff
-      ? {
-          output: `${bashId} was cut off when the run restarted; its process and output are lost.`,
-          isError: true,
-        }
-      : endedText(bashId, {
-          exit: ended.payload.exit,
-          view: { output: ended.payload.output, truncated: false },
-        });
+    const exit = ended.payload.exit ?? 0;
+    return action === "output" || action === "wait"
+      ? endedText(bashId, { exit, view: { output: ended.payload.output, truncated: false } })
+      : { output: `${bashId} already ended (exit ${exit})`, isError: true };
   }
 }
 
@@ -444,3 +484,15 @@ function endedText(
 
 const endNotice = (bashId: string, command: string, result: { exit: number; view: ModelView }) =>
   `Background command ${bashId} ended (exit code ${result.exit}): ${shown(command)}\n${result.view.output}`;
+
+/** Whether the thread has been told how `bashId` ended: by its end notice, or by a `wait` or `output` result. */
+function seenBy(events: readonly RunEvent[], threadId: string, bashId: string): boolean {
+  return events.some(
+    (e) =>
+      e.threadId === threadId &&
+      ((e.type === "message" &&
+        e.payload.role === "user" &&
+        e.payload.text.includes(`Background command ${bashId} ended`)) ||
+        (e.type === "tool.result" && e.payload.output.startsWith(`${bashId}: ended`))),
+  );
+}

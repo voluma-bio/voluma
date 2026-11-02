@@ -19,6 +19,7 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
+import type { UserSender } from "./adapters/pi/start-thread";
 import { BashRuntime } from "./bash-runtime";
 import { errorText } from "./error-text";
 import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
@@ -38,6 +39,9 @@ import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
 import { type Threads, threads } from "./threads";
 import { buildTools } from "./tools/registry";
+
+/** The sender of a background command's notices. */
+const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
 export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
 
@@ -256,7 +260,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     });
     const bash = new BashRuntime({
       recorder,
-      deliver: (id, text) => running.send(id, text, { kind: "runtime", notice: true }),
+      deliver: (id, text) => running.send(id, text, BASH_NOTICE),
       cutOff,
       log: options.log,
     });
@@ -277,10 +281,11 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     const pool: Threads = {
       ...running,
       start(spec) {
-        const { input } = spec;
-        if (!input) return running.start(spec);
-        const text = [input.text, ...bash.takeNotices(spec.threadId)].filter(Boolean).join("\n\n");
-        return running.start({ ...spec, input: { ...input, text } });
+        const handle = running.start(spec);
+        if (spec.input) {
+          for (const text of bash.takeNotices(spec.threadId)) handle.send(text, BASH_NOTICE);
+        }
+        return handle;
       },
     };
     // Before any thread resumes: the commands the last claim left running are over.

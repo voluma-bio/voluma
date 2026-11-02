@@ -69,7 +69,14 @@ const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => To
     readTool({ layout, files, name: "read_file", hasSandbox: names.includes("bash") }),
 };
 
-export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
+export function buildTools(roleNames: readonly string[], deps: ToolDeps): Tool[] {
+  // A role that holds `bash` holds `bash_manage`: `bash` backgrounds a command, and the agent must be
+  // able to wait for it. A run's role files are its snapshot, so one from before `bash_manage`
+  // lacks the name; a resumed thread is told of the added tool. DELETE once no run's snapshot lacks it.
+  const names =
+    roleNames.includes("bash") && !roleNames.includes("bash_manage")
+      ? [...roleNames, "bash_manage"]
+      : roleNames;
   // The task and main tools are built once for the thread, not once per name.
   const coordination: Record<string, Tool> = {
     ...taskTools(deps.runtime, deps.main.agents.changed),

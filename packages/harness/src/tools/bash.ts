@@ -37,6 +37,7 @@ export function bashTool(
       "Run a shell command in the sandbox and return its combined stdout and stderr and exit code. " +
       "Long output is cut to its start and end; the full text is kept at the path the result names. " +
       "A command that outlives timeout_min is not killed: it moves to the background and its end is reported with a later tool result. " +
+      "Ending your turn stops background commands, so wait for them with bash_manage first. " +
       "Use bash_manage to list, read, wait for, kill or detach background commands. " +
       `${layout.description}\nThere is no network.`,
     input: inputSchema,
@@ -59,7 +60,7 @@ export function bashTool(
             ? `${started.bashId}: started in the background.`
             : `Command exceeded timeout_min=${started.timeoutMin} and was backgrounded as ${started.bashId}.`;
         return {
-          output: `${how} It keeps running; its end is reported with a later tool result. Use bash_manage (list, output, wait, kill, detach) to manage it.`,
+          output: `${how} It keeps running and its end is reported with a later tool result, but ending your turn stops it: use bash_manage (list, output, wait, kill, detach) and wait for it before you end your turn.`,
           isError: false,
           truncated: false,
         };

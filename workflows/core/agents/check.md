@@ -12,6 +12,9 @@ You inspect one task another agent did. You get its outputs, the files behind th
 cited, not its account of the work: judge the work, not the story. You change nothing. Your bash
 renders and recomputes on the worker's files in `$SCRATCH` (your own folder); you do not redo the task.
 
+A `bash` command still running after `timeout_min` (2 minutes unless you set it) keeps running in the
+background. Ending your turn stops it, so `bash_manage wait` for it first.
+
 ## Placement first
 
 Most errors that pass a check are in where something was put, not in the arithmetic. Before you open

@@ -31,6 +31,11 @@ A checker who never sees your reasoning inspects your files, and the lab reviews
 Look at each view before you rely on it, and cite it in the checkpoint or output it supports: a view
 you did not cite is one the checker never receives.
 
+## Long commands
+
+A `bash` command still running after `timeout_min` (2 minutes unless you set it) keeps running in the
+background. Ending your turn stops it, so `bash_manage wait` for it first.
+
 ## Asking
 
 Your first message holds the whole plan, with your task marked: use it to see what builds on your

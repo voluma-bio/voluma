@@ -9,7 +9,6 @@
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { Mark } from "@voluma/contracts/messages";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
-import { backgroundedId, bashIdOf } from "./bash-runtime";
 import {
   askRef,
   checkAwaitsMain,
@@ -451,12 +450,6 @@ export function interruptedResult(
   tool: string,
   toolCallId: string,
 ): string | undefined {
-  if (tool === "bash") {
-    const bashId = bashIdOf(threadId, toolCallId);
-    return d.written.has(backgroundedId(bashId))
-      ? `\`bash\` moved the command to the background as ${bashId} before the run was cut off; the cut-off ended it.`
-      : undefined;
-  }
   if (!isEffectTool(tool)) return undefined;
   const written = d.written.get(effectId(tool, threadId, toolCallId));
   if (written?.type === "attempt.opened" && tool === "message") {
