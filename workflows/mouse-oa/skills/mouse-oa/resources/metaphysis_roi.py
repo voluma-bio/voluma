@@ -18,10 +18,11 @@ It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, 
 or from another grid is refused). This script reads these keys; any other unknown key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_distal_curves  required: the distal face of the growth-plate band (the side facing the shaft), curves (below),
                               traced on the coronal sections of tibia-hu.npy
-  plate_stretches             from plate_faces.py (copy it with the curves): {"<V>": [{"u": [first, last], "why": [...]}]}, the stretches
-                              the search could not follow. Each must be cleared or the script stops, naming the section and U range: its
-                              section's distal curve has points at most `max_gap_um` of the spec (entry plate-faces) apart across it, or
-                              you add "eroded": "<why>" to the stretch where the plate is gone (the curve follows the remaining bone)
+  plate_eroded                optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: the section and U range
+                              of a stretch of --plate-faces exactly as plate-faces.json lists it (anything else is refused), U integers.
+                              It never replaces points: every stretch of --plate-faces, eroded or not, needs the distal curve's points inside
+                              it, from its first to its last column, at most `max_gap_um` of the spec (entry plate-faces) apart, or the script
+                              stops naming the section and U range; on an eroded stretch they follow the remaining bone
 Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
 V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
 is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
@@ -48,7 +49,7 @@ Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sideca
                          `objects` holds roi-metaphyseal, cortex and growth-plate-distal-face
         <out>/qc-roi3.jpg, qc-roi3-axial.jpg  coronal and axial sections: ROI-3 cyan, cortex orange (coronal: the distal face magenta)
 Prints: one JSON line {out, values, objects, qc (the two images), roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels, eroded_stretches}
-Example: python metaphysis_roi.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
+Example: python metaphysis_roi.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --plate-faces plate/ --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -58,7 +59,13 @@ import numpy as np
 import objects
 import sidecar
 import viewlib as vl
-from annotations import cleared_stretches, load_annotations, need, traced_surface
+from annotations import (
+    cleared_stretches,
+    load_annotations,
+    load_plate_stretches,
+    need,
+    traced_surface,
+)
 from envelope import close_and_fill, footprint
 from scipy import ndimage as ndi
 
@@ -90,7 +97,7 @@ def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox, eroded):
         sidecar.fail(f'the traced distal face lies at or above the proximal face at {int(bad.sum())} traced (V, U) positions, '
                      f'V={vi.min()}..{vi.max()}, U={ui.min()}..{ui.max()} (worst {float((prox - gd)[bad].max()) * vox * 1000:.0f} um): '
                      'retrace the distal face lower, or the proximal face higher, on sections in that V range; where the plate is gone there, '
-                     'mark those stretches "eroded" in plate_stretches (on the sections either side) instead')
+                     'mark those stretches in "plate_eroded" (on the sections either side) and trace the remaining bone instead')
     needs = []
     for name, known in (('distal', dv), ('proximal', pv)):
         held = cross & ~known
@@ -134,6 +141,7 @@ def main():
     ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
     ap.add_argument('--proximal-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py: the distal face must lie below it')
     ap.add_argument('--proximal-valid', type=sidecar.existing, required=True, help='growth-plate-proximal-valid.npy from iioc.py: where the proximal face was traced')
+    ap.add_argument('--plate-faces', type=sidecar.existing, required=True, help='the directory plate_faces.py wrote: its plate-faces.json lists the flagged stretches the curves must trace')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument('--cortex-mm', type=float, help='mm: cortex thickness for the clearance (default: estimated)')
@@ -157,7 +165,7 @@ def main():
     if prox.shape != gd.shape:
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
     dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
-    eroded, plate = cleared_stretches(ann, 'growth_plate_distal_curves', a.spec, h.shape, vox, footprint(tib))
+    eroded, plate = cleared_stretches(ann, load_plate_stretches(a.plate_faces, g), 'growth_plate_distal_curves', a.spec, h.shape, vox, footprint(tib))
     check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox, eroded)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
@@ -205,7 +213,7 @@ def main():
                        titles=[f'axial W={k}: ROI-3 cyan, cortex orange' for k in ws]),
     ]
     values = {'plate-eroded-fraction': sidecar.value(
-        plate['eroded_fraction'], 'fraction', 'share of the tibia\'s (V, U) footprint, over the V range of the traced distal face, that the worker marked eroded in plate_stretches: '
+        plate['eroded_fraction'], 'fraction', 'share of the tibia\'s (V, U) footprint, over the V range of the traced distal face, that the worker marked eroded in plate_eroded: '
         'ROI-3 there starts below the remaining bone, not below a plate', kind='diagnostic')}
     sidecar.emit_values(
         out / 'roi3.json',

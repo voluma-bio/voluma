@@ -66,13 +66,15 @@ schema is `regions-and-landmarks`'):
 
 - **A, for `iioc.py`.** The growth plate's proximal face across the whole width, on at least two coronal sections.
   `plate_faces.py` proposes it (and annotation C) from the densities: dense curves on every tenth section, and no points
-  where it is flagged. Copy its three keys (`growth_plate_curves`, `growth_plate_distal_curves`, `plate_stretches`) into your
-  `annotations.json`. The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in
+  where it is flagged. Copy its two curve keys (`growth_plate_curves`, `growth_plate_distal_curves`) into your
+  `annotations.json`; the flagged stretches stay in its `plate-faces.json`, which `iioc.py` and `metaphysis_roi.py` read (`--plate-faces`). The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in
   two known ways, jumping up into dark marrow spaces of the epiphysis and drawing a convincing sheet on the wrong structure where
-  the plate is eroded. Look at every proposed section's render. Keep the stretches that sit on the plate. Every stretch in
-  `plate_stretches` must be cleared or `iioc.py` stops, naming the section and U range: retrace it densely on zoomed views,
-  adding your points to that section's curve (in both curve keys, at most the spec's `max_gap_um` apart), or, where the plate is
-  destroyed, trace the remaining bone and add `"eroded": "<why>"` to the stretch. Retrace a stretch that is wrong but not flagged
+  the plate is eroded. Look at every proposed section's render. Keep the stretches that sit on the plate. Every flagged stretch
+  in `plate-faces.json` must be traced or `iioc.py` stops, naming the section and U range: retrace it densely on zoomed views,
+  adding your points to that section's curve (in both curve keys) from the stretch's first to its last column, at most the spec's
+  `max_gap_um` apart. Where the plate is destroyed, the points follow the remaining bone, and you also list the stretch in
+  `plate_eroded` (`{"<V>": [{"u": [first, last], "eroded": "<why>"}]}`, section and U range exactly as `plate-faces.json` has them): the mark
+  never replaces the points. Retrace a stretch that is wrong but not flagged
   the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
   eroded plate). The eroded stretches and their share of the plate are in `iioc.json`: report them. Where part of the tibia label is really femur or fibula
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
@@ -86,11 +88,11 @@ schema is `regions-and-landmarks`'):
   with the end points on the inner side of the cortex: the first and last point of each curve limit ROI-2 across.
   The V range it covers.
 - **C, for `metaphysis_roi.py`.** The growth plate's distal face, over at least the proximal face's V range. `plate_faces.py`
-  proposes it with the proximal face (same sections, same `plate_stretches`): check and retrace it the same way, in step 6. There is no thickness
+  proposes it with the proximal face (same sections, same flagged stretches): check and retrace it the same way, in step 6. There is no thickness
   fallback: ROI-3 starts a fixed offset below this face (the spec's `start_um`), so a face a few tens of µm off moves ROI-3 (a
   guessed band thickness on OA6-1RK moved ROI-3 BV/TV from 23% to 15%). Where the plate is eroded (OA6-1RK from U~296 on
-  section V=231) the two faces meet or cross: trace the remaining bone with both faces, mark the stretch eroded on the sections either side,
-  and raise a To check item. `metaphysis_roi.py` then accepts faces that meet inside it, cuts ROI-3 `start_um` below the
+  section V=231) the two faces meet or cross: trace the remaining bone with both faces, densely, list the stretch in `plate_eroded` on the sections either side,
+  and raise a To check item. If the faces cross onto a neighbouring section, trace that section's remaining bone so they meet there; a mark names only flagged stretches. `metaphysis_roi.py` then accepts faces that meet inside it, cuts ROI-3 `start_um` below the
   remaining bone, and reports the eroded stretches and their share (`roi3.json`): say so in your report. OA6-1RK's eroded plate (bone destruction,
   possibly age-related) is not representative of the lab's knees: OA6-2RK's is. Look at the faces drawn on the sections before you run.
 - **D, the landmark points files** (scan grid, each name once across the files, straight from `pick.py`: do not
