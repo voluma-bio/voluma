@@ -168,15 +168,27 @@ def traced_surface(spec, key, shape):
     return H, valid
 
 
+def tibia_margin(spec_path, vox):
+    """The spec's `off_tibia_margin_um` (entry plate-faces) in voxels: how far from the tibia mask a placed point may lie."""
+    return round(sidecar.protocol(spec_path, 'plate-faces', 'off_tibia_margin_um')['off_tibia_margin_um'] / 1000 / vox)
+
+
+def off_tibia(tib, v, points_wu, margin):
+    """The [W, U] points on coronal section `v` farther than `margin` voxels from any voxel of the tibia mask's cut there (axes W, U),
+    each as (point, distance in voxels); a point is read at its nearest voxel, clipped into the section."""
+    dist = ndi.distance_transform_edt(~tib[:, v, :])
+    near = [float(dist[min(max(round(w), 0), dist.shape[0] - 1), min(max(round(u), 0), dist.shape[1] - 1)]) for w, u in points_wu]
+    return [(p, d) for p, d in zip(points_wu, near) if d > margin]
+
+
 def refuse_off_tibia(ann, key, tib, spec_path, vox):
     """Refuse curve points that lie off the tibia: on the section's coronal cut of the tibia mask (axes W, U), farther than the spec's
     `off_tibia_margin_um` (entry plate-faces) from any tibia voxel. A line run across empty space or up a cortical wall's far side is
     an invented face, so the script stops and names the section, the count and the first point."""
-    margin = round(sidecar.protocol(spec_path, 'plate-faces', 'off_tibia_margin_um')['off_tibia_margin_um'] / 1000 / vox)
+    margin = tibia_margin(spec_path, vox)
     refused = []
     for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
-        dist = ndi.distance_transform_edt(~tib[:, int(k), :])
-        off = [(w, u) for w, u in pts if dist[min(max(round(w), 0), dist.shape[0] - 1), min(max(round(u), 0), dist.shape[1] - 1)] > margin]
+        off = [p for p, _ in off_tibia(tib, int(k), pts, margin)]
         if off:
             refused.append(f'V={k}: {len(off)} of {len(pts)} points, the first at W={off[0][0]:g}, U={off[0][1]:g}')
     if refused:
