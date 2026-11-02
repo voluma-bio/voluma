@@ -119,6 +119,13 @@ export const outputEntrySchema = z.discriminatedUnion("kind", [
      * call. The map must be an overlay of shape `labels` that is itself no label.
      */
     label: z.strictObject({ of: segmentSchema, value: z.int().positive() }).optional(),
+    /**
+     * A surface review fits one plane through, with every other surface of the same `code`, so
+     * the views can be aligned to it and a pane can show it ("GP", "growth plate").
+     */
+    fitsPlane: z
+      .strictObject({ code: z.string().regex(/^[A-Z]{1,3}$/), name: nonEmpty })
+      .optional(),
   }),
   z.strictObject({
     ...entryBase,

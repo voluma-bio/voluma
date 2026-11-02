@@ -42,7 +42,7 @@ import type { Contrast } from "./compose";
 import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
-import { readLevel } from "./planes";
+import { sharedLevel } from "./planes";
 import {
   type AssetLevel,
   capturePane,
@@ -199,17 +199,12 @@ export function Grid3D({
     controls.update();
     three.current = { meshes, annotations, volumes, depth, render };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
+    const now = () => ({
+      camera: { position: xyz(camera.position), target: xyz(controls.target), up: xyz(camera.up) },
+    });
     handle.current = {
-      capture: () => ({
-        ...capturePane(renderer.domElement, draw),
-        view: {
-          camera: {
-            position: xyz(camera.position),
-            target: xyz(controls.target),
-            up: xyz(camera.up),
-          },
-        },
-      }),
+      capture: () => ({ ...capturePane(renderer.domElement, draw), view: now() }),
+      view: now,
       layers: () => layer.layers(renderer.domElement, draw),
       show(saved) {
         if (!("camera" in saved)) return;
@@ -534,7 +529,8 @@ export function Grid3D({
     setVolumeLoad({ loading: true });
     (async () => {
       for (const k of target === coarsest ? [coarsest] : [coarsest, target]) {
-        const { data } = await readLevel(base, all[k]!.path, abort.signal);
+        const { data } = await sharedLevel(base, all[k]!.path);
+        if (abort.signal.aborted) return;
         setLevels((had) => [...had.filter((l) => l.k !== k), { k, values: data }]);
       }
       setVolumeLoad({ loading: false });

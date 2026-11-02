@@ -1,4 +1,4 @@
-/** A slice pane's picture: the image plane in grey between its contrast limits, overlays blended on top. */
+/** A slice pane's picture: the image in grey between its contrast limits, overlays blended on top. */
 import { Color } from "three";
 import type { Plane } from "./planes";
 import { type Axis, type Overlay, planeAxes } from "./scene";
@@ -40,44 +40,74 @@ export function compose(
   overlays: OverlayPlane[],
 ): Uint8Array {
   const { rows, cols, data } = image;
-  const rgba = new Uint8Array(rows * cols * 4);
-  const span = contrast.high - contrast.low || 1;
-  for (let i = 0; i < rows * cols; i++) {
-    const g = Math.max(0, Math.min(255, ((data[i]! - contrast.low) / span) * 255));
-    rgba[i * 4] = g;
-    rgba[i * 4 + 1] = g;
-    rgba[i * 4 + 2] = g;
-    rgba[i * 4 + 3] = 255;
-  }
+  const rgba = grey(data, rows * cols, contrast);
   const [ra, ca] = planeAxes(axis);
   for (const { overlay, plane, scale } of overlays) {
     const rowOf = lookup(rows, imageScale, overlay.offsetZyx[ra], scale, plane.rows);
     const colOf = lookup(cols, imageScale, overlay.offsetZyx[ca], scale, plane.cols);
-    const single = typeof overlay.color === "string" ? rgb(overlay.color) : null;
-    const byLabel = typeof overlay.color === "string" ? null : overlay.color;
-    const opacityOf = (value: number) =>
-      OVERLAY_ALPHA *
-      (typeof overlay.opacity === "number" ? overlay.opacity : (overlay.opacity[value] ?? 1));
+    const paint = painter(overlay);
     for (let r = 0; r < rows; r++) {
       const pr = rowOf[r]!;
       if (pr < 0) continue;
       for (let c = 0; c < cols; c++) {
         const pc = colOf[c]!;
-        if (pc < 0) continue;
-        const value = plane.data[pr * plane.cols + pc]!;
-        if (!value) continue;
-        const hex = byLabel?.[value];
-        const color = single ?? (hex ? rgb(hex) : null);
-        if (!color) continue;
-        const a = opacityOf(value);
-        const o = (r * cols + c) * 4;
-        rgba[o] = rgba[o]! * (1 - a) + color[0] * a;
-        rgba[o + 1] = rgba[o + 1]! * (1 - a) + color[1] * a;
-        rgba[o + 2] = rgba[o + 2]! * (1 - a) + color[2] * a;
+        if (pc >= 0) paint(rgba, r * cols + c, plane.data[pr * plane.cols + pc]!);
       }
     }
   }
   return rgba;
+}
+
+/**
+ * A resliced picture (`reslice.ts`): the image's values and each overlay's, one per pixel. A
+ * pixel off the image (NaN) is left transparent.
+ */
+export function composeSampled(
+  values: ArrayLike<number>,
+  contrast: Contrast,
+  overlays: { overlay: Overlay; values: ArrayLike<number> }[],
+): Uint8Array {
+  const rgba = grey(values, values.length, contrast);
+  for (const layer of overlays) {
+    const paint = painter(layer.overlay);
+    for (let i = 0; i < values.length; i++) if (rgba[i * 4 + 3]) paint(rgba, i, layer.values[i]!);
+  }
+  return rgba;
+}
+
+function grey(data: ArrayLike<number>, count: number, contrast: Contrast): Uint8Array {
+  const rgba = new Uint8Array(count * 4);
+  const span = contrast.high - contrast.low || 1;
+  for (let i = 0; i < count; i++) {
+    const v = data[i]!;
+    if (Number.isNaN(v)) continue;
+    const g = Math.max(0, Math.min(255, ((v - contrast.low) / span) * 255));
+    rgba[i * 4] = g;
+    rgba[i * 4 + 1] = g;
+    rgba[i * 4 + 2] = g;
+    rgba[i * 4 + 3] = 255;
+  }
+  return rgba;
+}
+
+/** Blends an overlay's value into pixel `i`: its colour at its opacity, nothing for 0 or an uncoloured label. */
+function painter(overlay: Overlay) {
+  const single = typeof overlay.color === "string" ? rgb(overlay.color) : null;
+  const byLabel = typeof overlay.color === "string" ? null : overlay.color;
+  const opacityOf = (value: number) =>
+    OVERLAY_ALPHA *
+    (typeof overlay.opacity === "number" ? overlay.opacity : (overlay.opacity[value] ?? 1));
+  return (rgba: Uint8Array, i: number, value: number) => {
+    if (!value) return;
+    const hex = byLabel?.[value];
+    const color = single ?? (hex ? rgb(hex) : null);
+    if (!color) return;
+    const a = opacityOf(value);
+    const o = i * 4;
+    rgba[o] = rgba[o]! * (1 - a) + color[0] * a;
+    rgba[o + 1] = rgba[o + 1]! * (1 - a) + color[1] * a;
+    rgba[o + 2] = rgba[o + 2]! * (1 - a) + color[2] * a;
+  };
 }
 
 /** Contrast limits that span the image's values: the 1st to the 99.9th percentile of a coarse level. */

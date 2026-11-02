@@ -50,7 +50,10 @@ export function quad(points: [number, number, number][]): BufferGeometry {
   return geometry;
 }
 
-export function texture(picture: Picture, smooth: boolean): DataTexture {
+export function texture(
+  picture: Pick<Picture, "rgba" | "rows" | "cols">,
+  smooth: boolean,
+): DataTexture {
   const t = new DataTexture(picture.rgba, picture.cols, picture.rows, RGBAFormat);
   t.colorSpace = SRGBColorSpace;
   t.magFilter = smooth ? LinearFilter : NearestFilter;

@@ -72,3 +72,25 @@ export const readPlane = (
 /** A whole level; meant for the coarsest, which is one or a few chunks. */
 export const readLevel = (base: string, path: string, signal: AbortSignal) =>
   request({ base, path, whole: true }, signal);
+
+/**
+ * A whole level, shared: the 3D pane, the contrast and tilted slices read the same copy. The last
+ * few levels asked for are kept; a caller that stops waiting doesn't cancel the read.
+ */
+export function sharedLevel(base: string, path: string): Promise<Plane> {
+  const key = `${base}${path}`;
+  const had = levels.get(key);
+  if (had) {
+    levels.delete(key);
+    levels.set(key, had);
+    return had;
+  }
+  const read = request({ base, path, whole: true }, new AbortController().signal);
+  read.catch(() => levels.delete(key));
+  levels.set(key, read);
+  while (levels.size > KEPT_LEVELS) levels.delete(levels.keys().next().value!);
+  return read;
+}
+/** Two grids' coarsest and 3D levels. */
+const KEPT_LEVELS = 4;
+const levels = new Map<string, Promise<Plane>>();

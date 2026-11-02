@@ -1,9 +1,12 @@
 /** The grid viewers (the task review's, the outputs review's four panes), and the grid and scene a subject is shown with. */
 export { GridViewer, type GridViewerHandle, type PaneId, type ViewerState } from "./GridViewer";
+export { angleDegrees, outlineAxis, probeText } from "./marks";
 export {
   type GridPlanes,
+  type PlaneTarget,
   QUAD_START,
   type QuadLayout,
+  type QuadState,
   type QuadView,
   QuadViewer,
   showIn,
@@ -16,6 +19,7 @@ export {
   type StructureDisplay,
   taskBlocks,
 } from "./review";
+export { readView, type StoredView, storeView } from "./saved-view";
 export type {
   AssetLevel,
   GridMark,
@@ -24,7 +28,9 @@ export type {
   MarkTool,
   Overlay,
   PaneView,
+  ProbeValue,
   ShownMark,
   Zyx,
 } from "./scene";
+export { type PlaneFit, planeTargets } from "./targets";
 export { tokenColor } from "./token-color";

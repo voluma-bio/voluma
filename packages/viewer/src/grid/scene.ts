@@ -4,22 +4,27 @@
  * position is a source voxel (z, y, x) of the grid; the viewer never resamples between grids.
  */
 
-import type { Mark } from "@voluma/contracts/messages";
-
 export type Zyx = readonly [number, number, number];
 
 /**
- * A mark on the grid in source voxels (z, y, x): a voxel, an inclusive box, a line or a closed
- * outline on one slice, exactly as `Mark` (`@voluma/contracts/messages`) without its `volumeId`.
+ * A mark on the grid in source voxels (z, y, x): a voxel (with a note, or the value a probe read
+ * there), an inclusive box, a line, an angle (its vertex between two ends), or a closed outline on
+ * one plane, which may be tilted. The task review sends these as the contract's `Mark`
+ * (`@voluma/contracts/messages`), which has no notes, values or angles and whose outlines lie on a
+ * grid axis.
  */
 export type GridMark =
-  | Required<Pick<Mark, "point">>
-  | Required<Pick<Mark, "box">>
-  | Required<Pick<Mark, "line">>
-  | Required<Pick<Mark, "outline">>;
+  | { point: Zyx; note?: string; probe?: ProbeValue }
+  | { box: { min: Zyx; max: Zyx } }
+  | { line: { aZyx: Zyx; bZyx: Zyx; lengthMm: number } }
+  | { angle: { aZyx: Zyx; vertexZyx: Zyx; bZyx: Zyx; degrees: number } }
+  | { outline: { zyx: Zyx[]; areaMm2: number } };
 
-/** What a marking gesture makes; none is the viewer's own navigation. */
-export type MarkTool = "point" | "box" | "line" | "outline";
+/** What a probe read: the image's value at a source position, approximate when read off a coarser level. */
+export type ProbeValue = { value: number; unit: string | null; approx: boolean; inside: string[] };
+
+/** What a marking gesture makes; none is the viewer's own navigation. Probe reads values and keeps a point on click. */
+export type MarkTool = "point" | "box" | "line" | "angle" | "outline" | "probe";
 
 /** A mark as drawn: the person's own in `--mark-mine`, the AI's dashed in `--mark-ai`. */
 export type ShownMark = {
@@ -82,6 +87,8 @@ export type GridScene = {
   /** mm per voxel along z, y, x: the norms of the affine's columns. */
   spacingZyx: Zyx;
   image: ZarrSource;
+  /** What the image's values are (`"HU"`), for the probe; null or absent when unitless. */
+  imageUnit?: string | null;
   overlays: Overlay[];
   meshes: GridMesh[];
   annotations: GridAnnotation[];
@@ -134,6 +141,8 @@ export type PaneStatus = "loading" | "refining" | "ready" | "failed";
 /** What a pane does for screenshots: its pixels as drawn now, and showing a saved view. */
 export type PaneHandle = {
   capture(): { pngBase64: string; width: number; height: number; view: PaneView };
+  /** The pane's own view now, without drawing. */
+  view(): PaneView;
   show(view: PaneView): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be

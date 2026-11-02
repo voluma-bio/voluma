@@ -21,7 +21,10 @@ import {
   type GridViewerHandle,
   labelsMiddle,
   type MarkTool,
+  type PlaneFit,
+  planeTargets,
   type QuadLayout,
+  type QuadState,
   QuadViewer,
   reviewGrid,
   type ShownMark,
@@ -31,7 +34,7 @@ import {
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type Ref, useEffect, useMemo, useRef, useState } from "react";
-import { FULL, gridKeyOf, gridMark, type ShownGrid, TOOLS, type YourMark } from "./marks-panel";
+import { FULL, gridKeyOf, type ShownGrid, TOOLS, type Tool, type YourMark } from "./marks-panel";
 
 /** A task in view: what its numbers are measured on and drawn with, and what it reported. */
 export function TaskViewer({
@@ -64,6 +67,7 @@ export function SceneViewer({
   onShown,
   viewer,
   quad,
+  tools = TOOLS,
 }: {
   runId: string;
   revision: Blocks;
@@ -78,13 +82,15 @@ export function SceneViewer({
   tool: MarkTool | null;
   /** Absent: the page takes no marks, and the marking tools are not shown. */
   onTool?: (tool: MarkTool | null) => void;
+  /** The marking tools on the bar; the task review's when absent. */
+  tools?: readonly Tool[];
   marks: readonly YourMark[];
   selected: string | undefined;
   /** A mark picked in Marks: it moves the crosshair once its grid is shown, then `onJumped`. */
   jump?: { at: Zyx; gridKey: string; taskId: string };
   onJumped: () => void;
-  /** A new mark, on the image volume `volumeId`. */
-  onMark: (mark: GridMark, volumeId: string, gridKey: string) => void;
+  /** A new mark, on the image volume `volumeId`; returns its id. */
+  onMark: (mark: GridMark, volumeId: string, gridKey: string) => string | undefined;
   /** The mounted subject and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
   viewer?: Ref<GridViewerHandle>;
@@ -96,6 +102,14 @@ export function SceneViewer({
     layout: QuadLayout;
     onLayout(layout: QuadLayout): void;
     planesOf(imageId: string): GridPlanes | undefined;
+    /** The planes the catalog fits through surfaces, for Align and GP. */
+    fits: readonly PlaneFit[];
+    /** A point's note. */
+    onNote(id: string, note: string): void;
+    /** Saves the view on the grid of image volume `grid`; absent, no Save view. */
+    onSave?(state: QuadState, grid: string): void;
+    /** A saved view to show on its grid: each new object is applied once. */
+    restore?: { grid: string; state: QuadState };
   };
 }) {
   const [labels, setLabels] = useState(false);
@@ -157,15 +171,28 @@ export function SceneViewer({
   const shown = useMemo(() => {
     const byGrid = new Map<string, ShownMark[]>();
     for (const m of marks) {
-      const mark = gridMark(m.mark);
-      if (!mark) continue;
       const on = byGrid.get(m.gridKey) ?? [];
-      on.push({ id: m.id, tag: m.tag, mark, by: "you", selected: m.id === selected });
+      on.push({ id: m.id, tag: m.tag, mark: m.mark, by: "you", selected: m.id === selected });
       byGrid.set(m.gridKey, on);
     }
     return byGrid;
   }, [marks, selected]);
   const full = marks.length >= MAX_MARKS;
+  // What the shown grid's planes can be aligned to: the catalog's fitted planes, the other grids.
+  const fits = quad?.fits;
+  const targets = useMemo(
+    () =>
+      imageId && fits
+        ? planeTargets({
+            revision,
+            imageId,
+            assets,
+            fits,
+            assetBase: (sha256) => reviewAssetUrl(runId, sha256, "x").slice(0, -1),
+          })
+        : undefined,
+    [revision, imageId, assets, fits, runId],
+  );
 
   // Each grid shown keeps its viewer, hidden while another grid is shown, so going back is
   // instant with the camera, crosshair, window and loaded data as they were. A hidden viewer
@@ -204,14 +231,17 @@ export function SceneViewer({
   );
   useEffect(() => () => onShown(undefined), [onShown]);
   // The marking tools and the Labels toggle, on the shown viewer's bar.
-  const tools = (on: boolean) =>
+  const bar = (on: boolean) =>
     on && (
       <>
         {onTool && (
           <SegmentedControl
             label="Marking tool"
-            options={TOOLS.map((t) => ({
-              ...t,
+            options={tools.map((t) => ({
+              value: t.value,
+              label: t.label,
+              shortcut: t.keys[0],
+              icon: t.icon,
               reason: full && t.value !== "navigate" ? FULL : undefined,
             }))}
             value={tool ?? "navigate"}
@@ -255,9 +285,13 @@ export function SceneViewer({
                 tool={on ? tool : null}
                 marks={shown.get(k.key) ?? NO_MARKS}
                 onMark={on ? (mark) => onMark(mark, k.imageId, k.key) : undefined}
+                onNote={quad.onNote}
                 onReady={report(k.key)}
+                targets={k.imageId === live?.imageId ? targets : undefined}
+                onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
+                restore={quad.restore?.grid === k.imageId ? quad.restore.state : undefined}
               >
-                {tools(on)}
+                {bar(on)}
               </QuadViewer>
             ) : (
               <GridViewer
@@ -271,7 +305,7 @@ export function SceneViewer({
                 onReady={report(k.key)}
                 ref={on ? viewer : undefined}
               >
-                {tools(on)}
+                {bar(on)}
               </GridViewer>
             )}
           </div>

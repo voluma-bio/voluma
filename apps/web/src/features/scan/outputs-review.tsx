@@ -13,7 +13,7 @@
  * is page state: it holds while another output, on another grid, is shown.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, acceptToCheck } from "@voluma/api-client";
+import { ApiError, acceptToCheck, saveView } from "@voluma/api-client";
 import { studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
@@ -32,10 +32,38 @@ import {
   undrawn,
   useEvents,
 } from "@voluma/run-view";
-import { Button, EmptyState, LoadingState, ShellPanel, StatusMark, useFullView } from "@voluma/ui";
-import { type GridPlanes, QUAD_START, type QuadLayout } from "@voluma/viewer/grid";
+import {
+  Button,
+  Chip,
+  EmptyState,
+  IconButton,
+  LoadingState,
+  Menu,
+  MenuItem,
+  ShellPanel,
+  StatusMark,
+  useFullView,
+} from "@voluma/ui";
+import {
+  type GridPlanes,
+  type PlaneFit,
+  QUAD_START,
+  type QuadLayout,
+  type QuadState,
+  readView,
+  storeView,
+} from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
-import { ChevronLeft, ListTree, MessagesSquare, Network, Workflow } from "lucide-react";
+import {
+  Bookmark,
+  ChevronDown,
+  ChevronLeft,
+  ListTree,
+  MessagesSquare,
+  Network,
+  Workflow,
+  X,
+} from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -48,7 +76,7 @@ import {
 } from "react";
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
-import { useMarking } from "./marks-panel";
+import { describe, QUAD_TOOLS, useMarking } from "./marks-panel";
 import { type Accepting, OUTPUT_STATUS, OutputsPanel } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
@@ -72,7 +100,7 @@ export function OutputsReview({
   reopen: () => void;
 }) {
   const me = useOutletContext<Me>();
-  // Under 1440 px, two panels leave the panes too narrow: the conversation waits for i.
+  // Under 1440 px, two panels leave the panes too narrow: the conversation waits for C (I is Probe).
   const [wide] = useState(() => globalThis.innerWidth >= 1440);
   const study = useQuery({
     ...studyQuery(run.studyId),
@@ -96,6 +124,21 @@ export function OutputsReview({
     },
     [catalog],
   );
+
+  // Planes the catalog fits through surfaces (the growth plate's faces), by code.
+  const fits = useMemo(() => {
+    const byCode = new Map<string, PlaneFit>();
+    for (const e of catalog)
+      if (e.kind === "overlay" && e.fitsPlane) {
+        const had = byCode.get(e.fitsPlane.code);
+        byCode.set(e.fitsPlane.code, {
+          code: e.fitsPlane.code,
+          name: e.fitsPlane.name,
+          surfaces: [...(had?.surfaces ?? []), e.id],
+        });
+      }
+    return [...byCode.values()];
+  }, [catalog]);
 
   const [params, setParams] = useSearchParams();
   const select = useCallback(
@@ -138,7 +181,8 @@ export function OutputsReview({
 
   const accepting = useAcceptToCheck(run, reopen);
   const live = run.state.status !== "ended";
-  const marking = useMarking();
+  const marking = useMarking(QUAD_TOOLS);
+  const views = useSavedViews(run, reopen);
 
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
   // leaving Full view (Esc, F, opening a panel) puts the panes back.
@@ -230,7 +274,15 @@ export function OutputsReview({
         nameOf={nameOf}
         focus={trailOpen ? undefined : focus}
         marking={marking}
-        quad={{ layout, onLayout, planesOf }}
+        quad={{
+          layout,
+          onLayout,
+          planesOf,
+          fits,
+          onNote: marking.note,
+          onSave: views.save && ((state, grid) => views.save!(inView, state, grid)),
+          restore: views.restore,
+        }}
       />
     );
 
@@ -247,10 +299,10 @@ export function OutputsReview({
         group="scan"
         label="The AI"
         icon={<MessagesSquare />}
-        shortcut="i"
+        shortcut="c"
         defaultOpen={wide}
       >
-        <MainConversation live={live} />
+        <MainConversation live={live} nameOf={nameOf} marking={marking} />
       </ShellPanel>
       <ShellPanel
         id="scan-outputs"
@@ -320,6 +372,10 @@ export function OutputsReview({
           trailOpen={!!trailOpen}
           onBack={() => select({ trail: null, item: null })}
           onCentre={(c) => select({ centre: c })}
+          views={inView ? views.of(inView.id) : []}
+          viewShown={views.shown}
+          viewError={views.error}
+          onView={views.open}
         />
         <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
           {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
@@ -349,6 +405,10 @@ function SceneBar({
   trailOpen,
   onBack,
   onCentre,
+  views,
+  viewShown,
+  viewError,
+  onView,
 }: {
   centre: Centre | undefined;
   root: OutputRow | undefined;
@@ -356,6 +416,12 @@ function SceneBar({
   trailOpen: boolean;
   onBack: () => void;
   onCentre: (centre: Centre | null) => void;
+  /** The views saved of the output in view, oldest first. */
+  views: SavedView[];
+  /** The saved view the panes were last set to. */
+  viewShown: string | undefined;
+  viewError: string | undefined;
+  onView: (view: SavedView) => void;
 }) {
   const bar = "flex h-10 shrink-0 items-center gap-3 border-b border-border bg-card px-3 text-sm";
   if (centre)
@@ -407,6 +473,32 @@ function SceneBar({
         className="shrink-0"
       />
       <span className="flex-1" />
+      {viewError && (
+        <span className="text-xs text-destructive" role="alert">
+          {viewError}
+        </span>
+      )}
+      {views.length > 0 && (
+        <Menu
+          align="end"
+          trigger={
+            <Button size="sm" variant="ghost">
+              <Bookmark aria-hidden />
+              {views.find((v) => v.id === viewShown)?.title ?? "Saved views"}
+              <ChevronDown aria-hidden />
+            </Button>
+          }
+        >
+          {views.map((v) => (
+            <MenuItem key={v.id} onSelect={() => onView(v)}>
+              <span className="flex items-baseline justify-between gap-3">
+                <span>{v.title}</span>
+                <span className="text-xs text-fg-subtle">{v.time}</span>
+              </span>
+            </MenuItem>
+          ))}
+        </Menu>
+      )}
       <Button size="sm" variant="ghost" onClick={() => onCentre("agents")}>
         Agents
       </Button>
@@ -468,6 +560,7 @@ function OutputScene({
             focus={focus}
             tool={marking.tool}
             onTool={marking.setTool}
+            tools={marking.tools}
             marks={marking.marks}
             selected={marking.selected}
             jump={marking.jump}
@@ -511,18 +604,27 @@ function useAcceptToCheck(run: { id: string; example: boolean }, reopen: () => v
 
 /**
  * The conversation with the run's main AI, read-only: researchers write to it on runs of this kind
- * once corrections arrive.
+ * once corrections arrive. The views you saved show in it, where they fall. Under it, your marks
+ * wait for the message that will carry them: a chip goes to its mark, × removes it.
  */
-function MainConversation({ live }: { live: boolean }) {
+function MainConversation({
+  live,
+  nameOf,
+  marking,
+}: {
+  live: boolean;
+  nameOf: (id: string) => string;
+  marking: ReturnType<typeof useMarking>;
+}) {
   const events = useEvents();
-  // A run of this kind has no corrections, so no correction outcomes: messages only.
-  const items = useMemo(
-    () =>
-      conversation(events).filter(
-        (m): m is Exclude<typeof m, { from: "outcome" }> => m.from !== "outcome",
-      ),
-    [events],
-  );
+  // A run of this kind has no corrections, so no correction outcomes: messages, and saved views.
+  const items = useMemo(() => {
+    const said = conversation(events)
+      .filter((m): m is Exclude<typeof m, { from: "outcome" }> => m.from !== "outcome")
+      .map((m) => ({ ...m, kind: "message" as const }));
+    const saved = savedViews(events).map((v) => ({ ...v, kind: "view" as const }));
+    return [...said, ...saved].sort((a, b) => a.seq - b.seq);
+  }, [events]);
   const log = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = log.current;
@@ -538,7 +640,15 @@ function MainConversation({ live }: { live: boolean }) {
         ) : (
           <ol className="grid gap-3">
             {items.map((m) =>
-              m.from === "person" ? (
+              m.kind === "view" ? (
+                <li key={m.id} className="flex gap-2 text-xs text-muted-foreground">
+                  <Bookmark aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
+                    You saved {m.title.toLowerCase()} of {nameOf(m.output)}
+                    {m.words && `: ${m.words}`}.
+                  </span>
+                </li>
+              ) : m.from === "person" ? (
                 <li key={m.id} className="ml-6 grid gap-1 rounded-lg bg-muted px-3 py-2">
                   <span className="text-xs text-muted-foreground">You</span>
                   <p className="text-sm whitespace-pre-wrap">{m.text}</p>
@@ -553,12 +663,140 @@ function MainConversation({ live }: { live: boolean }) {
           </ol>
         )}
       </div>
-      <p className="border-t border-border p-3 text-xs text-muted-foreground">
-        You can't write to the AI on this run yet. Corrections through the AI come in a later
-        version; until then, accept To check items in How the AI got here.
-      </p>
+      <div className="grid gap-2 border-t border-border p-3 text-xs text-muted-foreground">
+        {marking.marks.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <span>With your next message:</span>
+            {marking.marks.map((m) => {
+              const { title, measure } = describe(m.mark, marking.tools);
+              return (
+                <Chip key={m.id} className="gap-0.5 pr-0.5 text-mark-mine-text">
+                  <button
+                    type="button"
+                    className="cursor-pointer font-mono"
+                    title={measure ? `${title}: ${measure}` : title}
+                    onClick={() => marking.select(m.id)}
+                  >
+                    {m.tag}
+                  </button>
+                  <IconButton
+                    size="sm"
+                    label={`Remove ${m.tag}`}
+                    onClick={() => marking.remove(m.id)}
+                  >
+                    <X />
+                  </IconButton>
+                </Chip>
+              );
+            })}
+          </div>
+        )}
+        <p>
+          You can't write to the AI on this run yet. Corrections through the AI come in a later
+          version; until then, accept To check items in How the AI got here.
+        </p>
+      </div>
     </div>
   );
+}
+
+/** A view saved of an output: its title ("View 2"), when, and what it was in words. */
+type SavedView = {
+  id: string;
+  seq: number;
+  output: string;
+  view: unknown;
+  title: string;
+  time: string;
+  words?: string;
+};
+
+/** The run's saved views, oldest first, each numbered among its output's. */
+function savedViews(events: ReturnType<typeof useEvents>): SavedView[] {
+  const count = new Map<string, number>();
+  return events.flatMap((e) => {
+    if (e.type !== "view.saved") return [];
+    const n = (count.get(e.payload.output) ?? 0) + 1;
+    count.set(e.payload.output, n);
+    const review = (
+      e.payload.view as {
+        review?: {
+          aligned?: { name?: string } | null;
+          layout?: { views?: string[]; count?: number };
+        };
+      }
+    ).review;
+    const panes = review?.layout?.views
+      ?.slice(0, review.layout.count ?? 4)
+      .map((v) => v.toUpperCase().replace("3D", "3D"));
+    const along = review?.aligned?.name;
+    return [
+      {
+        id: e.id,
+        seq: e.seq,
+        output: e.payload.output,
+        view: e.payload.view,
+        title: `View ${n}`,
+        time: new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        words:
+          [along && `along ${along}`, panes?.join(", ")].filter(Boolean).join("; ") || undefined,
+      },
+    ];
+  });
+}
+
+/**
+ * Saving a view (`view.saved`, which the stream brings back) and opening one. Example runs can't
+ * be changed, so they have no Save view.
+ */
+function useSavedViews(run: { id: string; example: boolean }, reopen: () => void) {
+  const events = useEvents();
+  const all = useMemo(() => savedViews(events), [events]);
+  const [restore, setRestore] = useState<{ grid: string; state: QuadState }>();
+  const [shown, setShown] = useState<string>();
+  const [error, setError] = useState<string>();
+  const mutation = useMutation<void, Error, { output: string; view: ReturnType<typeof storeView> }>(
+    {
+      mutationFn: (body) => saveView(run.id, body),
+      onMutate: () => setError(undefined),
+      onSuccess: reopen,
+      onError: (e) =>
+        setError(
+          e instanceof ApiError && e.serverMessage ? e.serverMessage : "Couldn't save the view.",
+        ),
+    },
+  );
+  // The newest saved view of what was just saved is the one shown.
+  const pendingFor = useRef<string>(undefined);
+  useEffect(() => {
+    const output = pendingFor.current;
+    if (!output) return;
+    const newest = all.filter((v) => v.output === output).at(-1);
+    if (newest) setShown(newest.id);
+  }, [all]);
+  return {
+    of: (output: string) => all.filter((v) => v.output === output),
+    shown,
+    error,
+    restore,
+    save: run.example
+      ? undefined
+      : (row: OutputRow, state: QuadState, grid: string) => {
+          pendingFor.current = row.id;
+          mutation.mutate({ output: row.id, view: storeView(state, grid, shownOf(row)) });
+        },
+    open: (v: SavedView) => {
+      const grid = (v.view as { review?: { grid?: string } }).review?.grid;
+      const state = grid ? readView(v.view, grid) : undefined;
+      if (!grid || !state) {
+        setError("This view can't be opened here.");
+        return;
+      }
+      setError(undefined);
+      setShown(v.id);
+      setRestore({ grid, state });
+    },
+  };
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

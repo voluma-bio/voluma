@@ -11,11 +11,17 @@
  *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
  *   POST /runs/:runId/tocheck/accept  Looks right on a To check item of an output version
  *                                   (`acceptToCheckRequestSchema`, the agent loop's runs)
+ *   POST /runs/:runId/views         a view of an output the researcher saved
+ *                                   (`saveViewRequestSchema`, the agent loop's runs)
  *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
  *                                   the snapshot is checked and stored here, the Run domain judges
  *                                   and stores the message
  */
-import { acceptToCheckRequestSchema } from "@voluma/contracts/agent-events";
+import {
+  acceptToCheckRequestSchema,
+  MAX_VIEW_BYTES,
+  saveViewRequestSchema,
+} from "@voluma/contracts/agent-events";
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
   type PersonMessage,
@@ -143,6 +149,21 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
         type: "tocheck.resolved",
         payload: { output, version, item, by: c.var.user.userId, outcome: "accepted" },
       };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json({});
+  });
+
+  app.post("/runs/:runId/views", async (c) => {
+    const { output, view } = await parseJson(c, saveViewRequestSchema);
+    if (JSON.stringify(view).length > MAX_VIEW_BYTES)
+      return c.json({ error: "The view is too large." }, 413);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      if (record.run.example)
+        throw new HTTPException(403, { message: "Example runs can't be changed." });
+      if (!record.results.outputs.byId.has(output))
+        throw new HTTPException(404, { message: "Output not found." });
+      return { type: "view.saved", payload: { output, view } };
     });
     if (!record) return c.json({ error: "not found" }, 404);
     return c.json({});

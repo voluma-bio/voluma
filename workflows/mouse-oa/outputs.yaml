@@ -236,6 +236,7 @@
   description: traced once; the later tasks read it
   base: tibia-grid
   shape: surface
+  fitsPlane: { code: GP, name: the growth plate }
 
 - id: growth-plate-distal-face
   kind: overlay
@@ -243,6 +244,7 @@
   description: traced once; the later tasks read it
   base: tibia-grid
   shape: surface
+  fitsPlane: { code: GP, name: the growth plate }
 
 - id: under-plate-boundary
   kind: overlay

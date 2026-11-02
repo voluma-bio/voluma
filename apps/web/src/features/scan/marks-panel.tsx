@@ -3,18 +3,36 @@
  * has a short tag (P1, B1, L1, O1) drawn beside it in the views and belongs to the image it was
  * made on (`gridKeyOf`); a redo that replaces that image drops it. A row selects it (the views
  * move to it, opening its task when it is on another grid) or deletes it. The tools that make
- * them, and their keys, are `TOOLS`, picked above the views. The page mounts the panel only
- * while there is a mark.
+ * them, and their keys, are `TOOLS` in the task review and `QUAD_TOOLS` in the outputs review,
+ * picked on the viewer's bar. The page mounts the panel only while there is a mark. Marks are
+ * the viewer's (`GridMark`); a message converts them (`messageMark`).
  */
 import { MAX_MARKS, type Mark } from "@voluma/contracts/messages";
 import type { Volume } from "@voluma/contracts/review";
 import { IconButton, List, Row } from "@voluma/ui";
-import type { GridMark, GridViewerHandle, MarkTool, Zyx } from "@voluma/viewer/grid";
-import { Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type GridMark,
+  type GridViewerHandle,
+  type MarkTool,
+  outlineAxis,
+  probeText,
+  type Zyx,
+} from "@voluma/viewer/grid";
+import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler, Trash2 } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
-/** A mark of yours: `mark` is what the message sends; `taskId` the task it was made in view of. */
-export type YourMark = { id: string; tag: string; taskId: string; gridKey: string; mark: Mark };
+/**
+ * A mark of yours, as the viewer draws it: `volumeId` the grid's image it was made on,
+ * `taskId` the task (or output) it was made in view of.
+ */
+export type YourMark = {
+  id: string;
+  tag: string;
+  taskId: string;
+  gridKey: string;
+  volumeId: string;
+  mark: GridMark;
+};
 
 /**
  * The task and immutable image/grid identity actually mounted in the viewer, and whether a
@@ -32,20 +50,35 @@ export function gridKeyOf(image: Volume): string | undefined {
     : undefined;
 }
 
-/** The marking tools in the order shown, each with the key that picks it. */
-export const TOOLS: { value: MarkTool | "navigate"; label: string; shortcut: string }[] = [
-  { value: "navigate", label: "Navigate", shortcut: "Escape" },
-  { value: "point", label: "Point", shortcut: "p" },
-  { value: "box", label: "Box", shortcut: "b" },
-  { value: "line", label: "Line", shortcut: "l" },
-  { value: "outline", label: "Lasso", shortcut: "o" },
+/** A marking tool: the keys that pick it (the first shown), and the letter of the tags it makes. */
+export type Tool = {
+  value: MarkTool | "navigate";
+  label: string;
+  keys: string[];
+  letter?: string;
+  icon?: ReactNode;
+};
+
+/** The task review's tools, in the order shown. */
+export const TOOLS: Tool[] = [
+  { value: "navigate", label: "Navigate", keys: ["Escape"] },
+  { value: "point", label: "Point", keys: ["p"], letter: "P" },
+  { value: "box", label: "Box", keys: ["b"], letter: "B" },
+  { value: "line", label: "Line", keys: ["l"], letter: "L" },
+  { value: "outline", label: "Lasso", keys: ["o"], letter: "O" },
+];
+
+/** The outputs review's tools (mockup C's tool bar), icons with their names in the tooltips. */
+export const QUAD_TOOLS: Tool[] = [
+  { value: "navigate", label: "Navigate", keys: ["v", "Escape"], icon: <Crosshair /> },
+  { value: "point", label: "Point, with a note", keys: ["p"], letter: "P", icon: <MapPin /> },
+  { value: "line", label: "Ruler", keys: ["l"], letter: "R", icon: <Ruler /> },
+  { value: "angle", label: "Angle", keys: ["a"], letter: "A", icon: <Angle /> },
+  { value: "outline", label: "Outline", keys: ["o"], letter: "O", icon: <Lasso /> },
+  { value: "probe", label: "Probe", keys: ["i"], letter: "P", icon: <Pipette /> },
 ];
 
 export const FULL = `A message carries up to ${MAX_MARKS} marks. Delete one to add another.`;
-
-const LETTER: Record<MarkTool, string> = { point: "P", box: "B", line: "L", outline: "O" };
-
-const wordOf = (tool: MarkTool) => TOOLS.find((t) => t.value === tool)!.label;
 
 /** The mark's one shape, as the viewer takes it; null for a mark with none. */
 export function gridMark(mark: Mark): GridMark | null {
@@ -56,32 +89,74 @@ export function gridMark(mark: Mark): GridMark | null {
   return null;
 }
 
-export const kindOf = (mark: GridMark): MarkTool =>
-  "point" in mark ? "point" : "box" in mark ? "box" : "line" in mark ? "line" : "outline";
+/**
+ * The mark as a message sends it; null for what a message can't carry (an angle, an outline off
+ * the grid's axes). Notes and probe values aren't sent: the task review makes neither.
+ */
+export function messageMark({ mark, volumeId }: YourMark): Mark | null {
+  if ("point" in mark) return { volumeId, point: [...mark.point] };
+  if ("box" in mark) return { volumeId, box: { min: [...mark.box.min], max: [...mark.box.max] } };
+  if ("line" in mark)
+    return {
+      volumeId,
+      line: { aZyx: [...mark.line.aZyx], bZyx: [...mark.line.bZyx], lengthMm: mark.line.lengthMm },
+    };
+  if ("angle" in mark) return null;
+  const axis = outlineAxis(mark.outline.zyx);
+  const { zyx, areaMm2 } = mark.outline;
+  return axis === null
+    ? null
+    : { volumeId, outline: { axis, zyx: zyx.map((p) => [...p]), areaMm2 } };
+}
+
+const kindOf = (mark: GridMark): MarkTool =>
+  "point" in mark
+    ? mark.probe
+      ? "probe"
+      : "point"
+    : "box" in mark
+      ? "box"
+      : "line" in mark
+        ? "line"
+        : "angle" in mark
+          ? "angle"
+          : "outline";
 
 /** The slice panes by the array axis they hold. */
 const PLANE = ["axial", "sagittal", "coronal"] as const;
 
-/** A mark's kind with its measure, in words: "Line 0.556 mm", "Lasso on axial 241 0.112 mm²". */
-export function describe(mark: Mark): { title: string; measure?: string } {
-  const shape = gridMark(mark);
-  if (!shape) return { title: "Mark" };
-  const word = wordOf(kindOf(shape));
+/**
+ * A mark's kind with its measure, in words, as `tools` name it: "Line 0.556 mm", "Lasso on axial
+ * 241 0.112 mm²", "Probe ≈ −172 HU".
+ */
+export function describe(
+  mark: GridMark,
+  tools: readonly Tool[] = TOOLS,
+): { title: string; measure?: string } {
+  const word = tools.find((t) => t.value === kindOf(mark))?.label.split(",")[0] ?? "Mark";
   const n = (v: number) => String(Number(v.toPrecision(3)));
-  if ("line" in shape) return { title: word, measure: `${n(shape.line.lengthMm)} mm` };
-  if ("outline" in shape) {
-    const { axis, zyx, areaMm2 } = shape.outline;
+  if ("line" in mark) return { title: word, measure: `${n(mark.line.lengthMm)} mm` };
+  if ("angle" in mark) return { title: word, measure: `${n(mark.angle.degrees)}°` };
+  if ("outline" in mark) {
+    const { zyx, areaMm2 } = mark.outline;
+    const axis = outlineAxis(zyx);
     return {
-      title: `${word} on ${PLANE[axis]} ${Math.round(zyx[0]![axis]) + 1}`,
+      title: axis === null ? word : `${word} on ${PLANE[axis]} ${Math.round(zyx[0]![axis]) + 1}`,
       measure: `${n(areaMm2)} mm²`,
     };
   }
+  if ("point" in mark && mark.probe) return { title: word, measure: probeText(mark.probe) };
+  if ("point" in mark && mark.note) return { title: word, measure: mark.note };
   return { title: word };
 }
 
-/** A new mark's tag: the kind's letter and the next number for that kind. */
-export function nextTag(marks: readonly YourMark[], mark: GridMark): string {
-  const letter = LETTER[kindOf(mark)];
+/** A new mark's tag: its tool's letter and the next number for that letter. */
+export function nextTag(
+  marks: readonly YourMark[],
+  mark: GridMark,
+  tools: readonly Tool[],
+): string {
+  const letter = tools.find((t) => t.value === kindOf(mark))?.letter ?? "M";
   const used = marks
     .filter((m) => m.tag.startsWith(letter))
     .map((m) => Number(m.tag.slice(letter.length)));
@@ -97,7 +172,9 @@ export function middleOf(mark: GridMark): Zyx {
         ? [mark.box.min, mark.box.max]
         : "line" in mark
           ? [mark.line.aZyx, mark.line.bZyx]
-          : mark.outline.zyx;
+          : "angle" in mark
+            ? [mark.angle.vertexZyx]
+            : mark.outline.zyx;
   const mid = (k: number) => Math.round(points.reduce((s, p) => s + p[k]!, 0) / points.length);
   return [mid(0), mid(1), mid(2)];
 }
@@ -162,12 +239,12 @@ export function MarksPanel({
 }
 
 /**
- * Your marks and the tool that makes them. A tool's key (`TOOLS`) picks it and Esc puts it away,
+ * Your marks and the tool that makes them. A tool's key (`tools`) picks it and Esc puts it away,
  * as the shell's panel keys do: never while typing, never with a modifier. Listening on the
  * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
  * (leaving Full view), so one Esc does one thing.
  */
-export function useMarking() {
+export function useMarking(tools: readonly Tool[] = TOOLS) {
   const [tool, setTool] = useState<MarkTool | null>(null);
   const [marks, setMarks] = useState<YourMark[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -175,16 +252,13 @@ export function useMarking() {
   const [shown, setShown] = useState<ShownGrid>();
   const viewer = useRef<GridViewerHandle>(null);
   const full = marks.length >= MAX_MARKS;
-  const latest = useRef({ tool, full });
-  latest.current = { tool, full };
+  const latest = useRef({ tool, full, tools });
+  latest.current = { tool, full, tools };
   // At the cap the tools are held off (`viewer.tsx` says why).
   useEffect(() => {
     if (full) setTool(null);
   }, [full]);
   useEffect(() => {
-    const keys = new Map(
-      TOOLS.map((t) => [t.shortcut.toLowerCase(), t.value === "navigate" ? null : t.value]),
-    );
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || event.isComposing) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -194,8 +268,10 @@ export function useMarking() {
         target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
       )
         return;
-      const next = keys.get(event.key.toLowerCase());
-      if (next === undefined) return;
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      const picked = latest.current.tools.find((t) => t.keys.includes(key));
+      if (!picked) return;
+      const next = picked.value === "navigate" ? null : picked.value;
       // Esc with no tool out is the shell's; a tool's key at the cap does nothing.
       if (next === null ? !latest.current.tool : latest.current.full) return;
       event.preventDefault();
@@ -207,6 +283,7 @@ export function useMarking() {
   return {
     tool,
     setTool,
+    tools,
     marks,
     selected,
     jump,
@@ -214,20 +291,36 @@ export function useMarking() {
     setShown,
     viewer,
     jumped: useCallback(() => setJump(undefined), []),
-    add: useCallback((mark: GridMark, volumeId: string, gridKey: string, taskId: string) => {
+    /** Adds a mark at the cap's mercy; returns its id, or undefined when full. */
+    add: useCallback(
+      (mark: GridMark, volumeId: string, gridKey: string, taskId: string): string | undefined => {
+        if (latest.current.full) return undefined;
+        const id = crypto.randomUUID();
+        setMarks((had) =>
+          had.length >= MAX_MARKS
+            ? had
+            : [
+                ...had,
+                {
+                  id,
+                  tag: nextTag(had, mark, latest.current.tools),
+                  taskId,
+                  gridKey,
+                  volumeId,
+                  mark,
+                },
+              ],
+        );
+        return id;
+      },
+      [],
+    ),
+    /** Gives a point its note. */
+    note: useCallback((id: string, note: string) => {
       setMarks((had) =>
-        had.length >= MAX_MARKS
-          ? had
-          : [
-              ...had,
-              {
-                id: crypto.randomUUID(),
-                tag: nextTag(had, mark),
-                taskId,
-                gridKey,
-                mark: { volumeId, ...mark },
-              },
-            ],
+        had.map((m) =>
+          m.id === id && "point" in m.mark ? { ...m, mark: { ...m.mark, note } } : m,
+        ),
       );
     }, []),
     /** Selects a mark and aims the views at it; returns it. */
@@ -235,9 +328,7 @@ export function useMarking() {
       (id: string) => {
         setSelected(id);
         const mark = marks.find((m) => m.id === id);
-        const shape = mark && gridMark(mark.mark);
-        if (mark && shape)
-          setJump({ at: middleOf(shape), gridKey: mark.gridKey, taskId: mark.taskId });
+        if (mark) setJump({ at: middleOf(mark.mark), gridKey: mark.gridKey, taskId: mark.taskId });
         return mark;
       },
       [marks],

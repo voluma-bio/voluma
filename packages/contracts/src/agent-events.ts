@@ -186,3 +186,14 @@ export const skillLoadedSchema = z.object({ name: nonEmpty, cause: nonEmpty });
 
 /** The researcher saved a view of an output; `view` is the `.view.json` format. Written by the API. */
 export const viewSavedSchema = z.object({ output: outputRefSchema, view: viewSchema });
+
+/**
+ * The researcher saves a view of an output: `POST /api/review/runs/:runId/views`, answered 200
+ * `{}`. The API writes `view.saved` as sent, by the caller. 404: a run the caller can't read, or an
+ * output it doesn't have; 403: an example run. Allowed while the run goes. At most
+ * `MAX_VIEW_BYTES` of JSON.
+ */
+export const saveViewRequestSchema = viewSavedSchema;
+export type SaveViewRequest = z.infer<typeof saveViewRequestSchema>;
+export const saveViewResponseSchema = z.object({});
+export const MAX_VIEW_BYTES = 64 * 1024;

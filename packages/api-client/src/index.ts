@@ -9,6 +9,9 @@ import {
   type AcceptToCheckRequest,
   acceptToCheckRequestSchema,
   acceptToCheckResponseSchema,
+  type SaveViewRequest,
+  saveViewRequestSchema,
+  saveViewResponseSchema,
 } from "@voluma/contracts/agent-events";
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
@@ -310,6 +313,20 @@ export async function acceptToCheck(runId: string, body: AcceptToCheckRequest): 
     await request(`/review/runs/${encodeURIComponent(runId)}/tocheck/accept`, {
       method: "POST",
       body: acceptToCheckRequestSchema.parse(body),
+    }),
+  );
+}
+
+/**
+ * Saves a view of an output (a run of the agent loop). It comes back on the run's event stream
+ * as `view.saved`: reconnect it to see it.
+ */
+export async function saveView(runId: string, body: SaveViewRequest): Promise<void> {
+  await read(
+    saveViewResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/views`, {
+      method: "POST",
+      body: saveViewRequestSchema.parse(body),
     }),
   );
 }
