@@ -7,12 +7,13 @@
  *
  * Both directories hold skills, `skills/<name>/SKILL.md` with optional `references/` and
  * `resources/`. `core/` also holds the role files, `agents/<role>.md`, the same for every
- * workflow; the workflow's directory adds `outputs.json` and `tasks.json`. `core/convert/`
+ * workflow; the workflow's directory adds `outputs.json` and `tasks.json`, and `outputs.yaml` when it has one. `core/convert/`
  * (the review converter, run by the runner's convert sandbox) is snapshotted too; nothing else
  * in either directory is.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
 import { parse as parseYaml } from "yaml";
@@ -74,7 +75,7 @@ const agentSchema = z.strictObject({
 
 /** Written last, so a snapshot cut short is redone, not trusted; its body is the commit. */
 const DONE = ".snapshot-done";
-const FILES = ["outputs.json", "tasks.json"];
+const FILES = ["outputs.json", "outputs.yaml", "tasks.json"];
 
 /** Parses the `---` block against `schema`; `body` is what follows it, trimmed. */
 function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
@@ -208,7 +209,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   for (const { key } of (await store.list(prefix)).objects) {
     const path = key.slice(prefix.length);
     if (
-      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|^workflows\/core\/agents\/[^/]+\.md$/.test(
+      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|(^|\/)outputs\.yaml$|^workflows\/core\/agents\/[^/]+\.md$/.test(
         path,
       ) ||
       scriptOf(path)
@@ -280,6 +281,26 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     );
   }
 
+  const yaml = texts.get(`${dir}/outputs.yaml`);
+  let outputCatalog: OutputCatalog | undefined;
+  if (yaml !== undefined) {
+    let data: unknown;
+    try {
+      data = parseYaml(yaml);
+    } catch (e) {
+      throw new WorkflowParseError(`${dir}/outputs.yaml`, `invalid YAML: ${(e as Error).message}`);
+    }
+    const catalog = outputCatalogSchema.safeParse(data);
+    if (!catalog.success) {
+      const issue = catalog.error.issues[0];
+      throw new WorkflowParseError(
+        `${dir}/outputs.yaml`,
+        `${issue?.path.join(".")}: ${issue?.message}`,
+      );
+    }
+    outputCatalog = catalog.data;
+  }
+
   const toolIndex: ToolIndexEntry[] = [];
   for (const skill of skills) {
     const scripts = [...texts.keys()].filter((p) =>
@@ -329,6 +350,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     dir,
     commit: await getText(store, `${prefix}${DONE}`),
     files: files.data,
+    ...(outputCatalog && { outputCatalog }),
     skills,
     toolIndex,
     agents: { ...agents, main },

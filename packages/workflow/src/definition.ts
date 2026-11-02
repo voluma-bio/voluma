@@ -3,6 +3,7 @@
  * the data files the plan is built from.
  */
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 
 export interface Skill {
@@ -61,6 +62,8 @@ export interface WorkflowDefinition {
   commit: string;
   /** Its `outputs.json` and `tasks.json`, validated together. */
   files: WorkflowFiles;
+  /** Its `outputs.yaml` (the agent model's catalog), validated; absent when the workflow has none. Nothing reads it at runtime yet. */
+  outputCatalog?: OutputCatalog;
   /** The workflow's own skills first, then those of `workflows/core/skills/`. */
   skills: Skill[];
   /** Every skill's scripts, in `skills` order, each with its docstring's first line. */

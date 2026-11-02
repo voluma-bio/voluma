@@ -404,7 +404,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "output": {
         const { taskId, outputId, output } = e.payload;
-        if (output.kind === "volume") {
+        if (taskId && output.kind === "volume") {
           volumeFiles.set(`${taskId}/${outputId}`, pathOf(taskId, output.volume.file));
         }
         break;

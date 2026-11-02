@@ -38,6 +38,23 @@
  */
 import { z } from "zod";
 import {
+  agentMessageSchema,
+  approvalAnsweredSchema,
+  approvalRequestedSchema,
+  bashBackgroundedSchema,
+  bashEndedSchema,
+  closeRequestedSchema,
+  madeFromSchema,
+  outputRefSchema,
+  outputsChangedSchema,
+  pingSchema,
+  skillLoadedSchema,
+  toCheckItemSchema,
+  tocheckResolvedSchema,
+  versionSchema,
+  viewSavedSchema,
+} from "./agent-events";
+import {
   modelRefSchema,
   runIdSchema,
   taskIdSchema,
@@ -51,13 +68,9 @@ import {
   runReopenedSchema,
 } from "./messages";
 import { evidenceRefSchema, outputReportSchema } from "./output";
-import { sha256Schema } from "./r2";
-import {
-  checkAcceptedSchema,
-  focusSchema,
-  reviewAssetsManifestSchema,
-  reviewCompletedSchema,
-} from "./review";
+import { outputKindSchema } from "./output-catalog";
+import { relativePathSchema, sha256Schema } from "./r2";
+import { checkAcceptedSchema, reviewAssetsManifestSchema, reviewCompletedSchema } from "./review";
 import { claimEndReasonSchema } from "./runner";
 import { planTaskSchema, recordedPinSchema, workflowPlanSchema } from "./workflow";
 
@@ -201,10 +214,26 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * its input, and the next claim resumes it with this. Absent on a thread's first start.
          */
         input: z.object({ text: z.string(), sender: userSender }).optional(),
+        /** The agent model's role: `main`, or a `worker` main started. Absent on a thread of the task loop. */
+        role: z.enum(["main", "worker"]).optional(),
+        /** The closed worker (its `name`) this worker starts from, with its note, folder and transcript. */
+        from: nonEmpty.optional(),
+        /** The worker (its `name`) this one must not see: the two exchange messages with main only. */
+        blind: nonEmpty.optional(),
+        /**
+         * The loop that drives the run, on the root thread only; every claim writes it and the
+         * first one decides it, so a resume keeps the loop the run began on (`pinnedImageOf` pins the
+         * sandbox image the same way). Absent means the task loop.
+         */
+        harness: z.enum(["tasks", "agents"]).optional(),
       })
       .refine((p) => p.parentThreadId !== null || p.workflows !== undefined, {
         path: ["workflows"],
         message: "the root thread records the workflows it ran",
+      })
+      .refine((p) => p.parentThreadId === null || p.harness === undefined, {
+        path: ["harness"],
+        message: "only the root thread records the run's loop",
       })
       .refine((p) => p.parentThreadId !== null || p.model === undefined, {
         path: ["model"],
@@ -255,7 +284,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const threadEnded = event(
     "thread.ended",
     z.object({
-      status: z.enum(["completed", "failed", "cancelled"]),
+      status: z.enum(["completed", "failed", "cancelled", "closed"]),
       error: z.string().optional(),
       /**
        * A `failed` end whose model reply had started when the provider's error came (a dropped
@@ -268,6 +297,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
        * `cancelled` end of a worker or check: why the run loop stopped it, which the main agent is told.
        */
       summary: nonEmpty.optional(),
+      /** On a `closed` end: what a new worker needs to carry on from this one (`from`). */
+      note: nonEmpty.optional(),
     }),
   );
 
@@ -410,7 +441,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       /** The check thread's verdict line; only check threads may set it. */
       verdict: z.enum(["passed", "needs-review"]).optional(),
       /** Raises a To check item: `text` is its detail; the fold resolves `focus` ids (`fold.ts`). */
-      toCheck: z.object({ title: nonEmpty, focus: focusSchema.optional() }).optional(),
+      toCheck: toCheckItemSchema.optional(),
     }),
   );
 
@@ -420,8 +451,36 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    */
   const output = event(
     "output",
-    outputReportSchema.extend({ taskId: taskIdSchema, attemptId: nonEmpty }),
+    outputReportSchema.extend({
+      // The agent model's outputs belong to no task; the task loop still writes both.
+      taskId: taskIdSchema.optional(),
+      attemptId: nonEmpty.optional(),
+      /** 1, 2, ... per output; a published version is never changed. */
+      version: versionSchema.optional(),
+      /** Where the version's files were copied, keyed by the tool call. */
+      path: relativePathSchema.optional(),
+      /** The versions of other outputs it used, with the role of each. */
+      madeFrom: z.array(madeFromSchema).optional(),
+      /** Items a person must judge, in order. */
+      toCheck: z.array(toCheckItemSchema).optional(),
+      /** No reference comparison yet. */
+      provisional: z.boolean().optional(),
+      /** Only for an id the catalog does not declare: what it is and the base it is drawn on. */
+      kind: outputKindSchema.optional(),
+      base: outputRefSchema.optional(),
+      /** Written by `keep_output`: an old version kept after a look, with the reason. */
+      kept: z.object({ reason: nonEmpty }).optional(),
+    }),
   );
+
+  const outputsChanged = event("outputs.changed", outputsChangedSchema);
+  const agentMessage = event("agent.message", agentMessageSchema);
+  const closeRequested = event("close.requested", closeRequestedSchema);
+  const ping = event("ping", pingSchema);
+  const approvalRequested = event("approval.requested", approvalRequestedSchema);
+  const bashBackgrounded = event("bash.backgrounded", bashBackgroundedSchema);
+  const bashEnded = event("bash.ended", bashEndedSchema);
+  const skillLoaded = event("skill.loaded", skillLoadedSchema);
 
   /**
    * The main agent changed the plan, written by the main thread before the change applies;
@@ -560,6 +619,14 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     outputsBackedUp,
     outputsRestored,
     outputsDiscarded,
+    outputsChanged,
+    agentMessage,
+    closeRequested,
+    ping,
+    approvalRequested,
+    bashBackgrounded,
+    bashEnded,
+    skillLoaded,
   ]);
 };
 
@@ -602,6 +669,25 @@ export const runEventSchema = z.discriminatedUnion("type", [
     type: z.literal("correction.ended"),
     payload: correctionEndedSchema,
   }),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("tocheck.resolved"),
+    payload: tocheckResolvedSchema,
+  }),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("approval.given"),
+    payload: approvalAnsweredSchema,
+  }),
+  z.object({
+    ...envelope,
+    ...stored,
+    type: z.literal("approval.declined"),
+    payload: approvalAnsweredSchema,
+  }),
+  z.object({ ...envelope, ...stored, type: z.literal("view.saved"), payload: viewSavedSchema }),
 ]);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];

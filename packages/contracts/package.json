@@ -28,7 +28,9 @@
     "./conversation": "./src/conversation.ts",
     "./messages": "./src/messages.ts",
     "./study": "./src/study.ts",
-    "./workflow-files": "./src/workflow-files.ts"
+    "./workflow-files": "./src/workflow-files.ts",
+    "./output-catalog": "./src/output-catalog.ts",
+    "./agent-events": "./src/agent-events.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

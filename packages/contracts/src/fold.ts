@@ -958,7 +958,8 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
         break;
       }
       case "output": {
-        const a = attempts.get(e.payload.attemptId);
+        // An output of the agent model has no attempt; the task rows ignore it.
+        const a = e.payload.attemptId && attempts.get(e.payload.attemptId);
         if (!a) break;
         addEvidence(a, e.runId, e.payload.evidence);
         // The output's own files are the checker's to inspect, though they are not evidence.
