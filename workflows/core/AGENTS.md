@@ -6,7 +6,8 @@ its scripts). Design: `work/iterate-and-review/design/workflow-behavior/tool-con
 file, a method skill, a workflow skill and a script's `--help`). The measurements behind the skills' rules are in `.context/evidence.md`: SKILL.md
 holds rules, not experiment logs.
 
-- A skill is `skills/<name>/SKILL.md` (frontmatter `name`, `description` only) plus `resources/`. The run agent reads
+- A skill is `skills/<name>/SKILL.md` (frontmatter `name`, `description` only) plus `resources/`, and `references/` for
+  depth only some tasks need, each file named in SKILL.md with when to open it. The run agent reads
   SKILL.md and runs the resources as `python <skill dir>/resources/<x>.py`; so SKILL.md names a resource by file name,
   says when to reach for it and what its result means, and leaves flags, schemas and outputs to the script's `--help`
   (the tool index in every agent's prompt lists each script by its first docstring line). There are no per-workflow agent definitions: the roles shared by every workflow are in

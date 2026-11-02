@@ -35,6 +35,14 @@ const CONVERT_TIMEOUT_SECONDS = 1200;
 /** A conversion's outcome; `retry: false` marks a failure a repeat cannot fix. */
 type ConvertResult = { manifest: ReviewAssetsManifest } | { error: string; retry?: false };
 
+const lastLine = (text: string) => text.split("\n").filter(Boolean).at(-1) ?? "";
+
+/** One sentence for `assets.failed`; a traceback stays in the runner log. */
+function recordedAssetError(stderr: string, code: number): string {
+  if (/Traceback \(most recent call last\)/.test(stderr)) return "couldn't write the review files";
+  return lastLine(stderr) || `the converter exited ${code}`;
+}
+
 const POLL_MS = 1000;
 /** How long `drain` waits for a halted loop (a sandbox call that ignores abort) before it moves on. */
 const HALT_GRACE_MS = 5000;
@@ -241,9 +249,16 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     // Exit 2 is the converter's argument error: a repeat fails the same way, and a timeout would take another full timeout.
     if (code === 124)
       return { error: `conversion timed out after ${CONVERT_TIMEOUT_SECONDS}s`, retry: false };
-    if (code === 2)
-      return { error: stderr.trim() || "the converter rejected its arguments", retry: false };
-    if (code !== 0) return { error: stderr.trim() || `the converter exited ${code}` };
+    if (code !== 0) {
+      const text = stderr.trim();
+      if (text) log(`review assets: converter stderr:\n${text}`);
+      if (code === 2)
+        return {
+          error: lastLine(text) || "the converter rejected its arguments",
+          retry: false,
+        };
+      return { error: recordedAssetError(text, code) };
+    }
     const last = stdout.trim().split("\n").at(-1) ?? "";
     let printed: unknown;
     try {

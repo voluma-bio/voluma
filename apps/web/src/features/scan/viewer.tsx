@@ -10,7 +10,7 @@
 import { reviewAssetUrl } from "@voluma/api-client";
 import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { Focus, ReviewAssets, ReviewTask, Revision } from "@voluma/contracts/review";
-import { EmptyState, SegmentedControl } from "@voluma/ui";
+import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
 import {
   type GridMark,
   type GridScene,
@@ -173,13 +173,16 @@ export function TaskViewer({
   return (
     <>
       {grid.state !== "ready" && (
-        <div
-          className="grid h-full place-content-center p-6"
-          role={grid.state === "failed" ? "alert" : "status"}
-        >
-          <EmptyState title={grid.state === "preparing" ? "Preparing the views" : "No views"}>
-            {grid.message}
-          </EmptyState>
+        <div className="grid h-full place-content-center p-6">
+          {grid.state === "failed" ? (
+            <ErrorState title={grid.message} />
+          ) : (
+            <div role="status">
+              <EmptyState title={grid.state === "preparing" ? "Preparing the views" : "No views"}>
+                {grid.message}
+              </EmptyState>
+            </div>
+          )}
         </div>
       )}
       {slots.map((k) => {

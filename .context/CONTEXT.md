@@ -222,8 +222,9 @@ means the sign-in wall, and a guest cookie is ignored. `createAuth` throws when 
 organization is a member organization. There is no per-visitor mint limit: every cap is per
 org. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
 share, run by run, so it is for signed-in members; public examples are seeded into the Demo
-organization instead. They share the Demo workspace
-but each sees only their own runs (`self`). When an `Authorization` header is present only the
+organization instead, and every organization reads them (`readableRuns`: `example` rows need no
+org match, so the Judges see them too). They share the Demo workspace
+but each sees only their own runs (`self`) plus the examples. When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
 a domain guards a subtree with `requireService` (the runner) or `requireUser` (which also sets
 a typed `c.var.user`) and gets 403 for the other kind; a run read takes `requireReader` on its

@@ -69,7 +69,10 @@ Staging URL: `https://voluma-api.onrender.com` (`srv-dbidaf3l550s73btnpg0`).
 `<APP_URL>/api/auth/callback` to Redirects (`http://localhost:*/api/auth/callback` is
 already there for `pnpm dev`), and add `<APP_URL>/` as a sign-out redirect. Without the
 sign-out redirect WorkOS ends the session but lands the browser on the app's homepage URL
-(`https://voluma.bio/`), not the app. Set sign-up to invitation only: staging holds
+(`https://voluma.bio/`), not the app, or shows AuthKit's "Server Error" page on
+`/api/logout` (seen on staging 2026-11-01, the logout JWT's `uri` `http://localhost:*/`). The
+code is not the cause: `/api/auth/logout` sends `returnTo: <APP_URL>/`, and WorkOS falls back to
+the environment's default sign-out redirect when `returnTo` is not in its list. Set sign-up to invitation only: staging holds
 unrelated users, and AuthKit lets any of them through sign-in; the API refuses non-members
 after the fact (callback and every request), but invitation-only keeps them out of the
 organization to begin with.
