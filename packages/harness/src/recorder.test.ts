@@ -1,5 +1,6 @@
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { expect, test } from "vitest";
+import { EventLogUnavailable } from "./ports/event-log";
 import { recorder } from "./recorder";
 
 // A store the API also writes into: `server` appends an event without the runner.
@@ -48,10 +49,39 @@ test("pull adds the tail once, and a retried append of a pulled id is a no-op", 
   expect(ids(rec.events())).toEqual(["1:m1", "2:a"]);
 });
 
-test("a store that answers no seq numbers each event after the view's last", async () => {
+test("a gap-fill read that cannot reach the store stops the recorder without failing the run", async () => {
   const s = store();
-  const rec = recorder(s.log(false), "r", () => {});
-  await rec.append("t", "tool.call", { toolCallId: "c", name: "bash", input: {} } as never, "a");
-  await rec.append("t", "tool.call", { toolCallId: "d", name: "bash", input: {} } as never, "b");
+  const log = {
+    ...s.log(true),
+    eventsAfter: () => Promise.reject(new EventLogUnavailable("down")),
+  };
+  const rec = recorder(log, "r", () => {});
+  s.server("m1");
+  await expect(
+    rec.append("t", "tool.call", { toolCallId: "c", name: "bash", input: {} } as never, "a"),
+  ).rejects.toBeInstanceOf(EventLogUnavailable);
+  await expect(
+    rec.append("t", "tool.call", { toolCallId: "d", name: "bash", input: {} } as never, "b"),
+  ).rejects.toThrow();
+  expect(rec.events()).toEqual([]);
+  expect(rec.failure()).toBeUndefined();
+});
+
+test("a pull queued behind the runner's own appends reads nothing when they cover its lastSeq", async () => {
+  const s = store();
+  const log = s.log(true);
+  const reads: number[] = [];
+  const rec = recorder(
+    {
+      append: log.append,
+      eventsAfter: (after, upTo) => (reads.push(after), log.eventsAfter(after, upTo)),
+    },
+    "r",
+    () => {},
+  );
+  rec.emit("t", "tool.call", { toolCallId: "c", name: "bash", input: {} } as never, "a");
+  rec.emit("t", "tool.call", { toolCallId: "d", name: "bash", input: {} } as never, "b");
+  await rec.pull(2); // the heartbeat saw the runner's own two events
+  expect(reads).toEqual([]);
   expect(ids(rec.events())).toEqual(["1:a", "2:b"]);
 });

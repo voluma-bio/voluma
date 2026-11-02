@@ -16,7 +16,9 @@
  * append is the port's `EventLogUnavailable`; a lease loss or a 4xx passes through. History
  * writes are idempotent on the server (an idx repeated with the same content is a no-op), and a
  * 409 on one is the port's `HistoryConflict`. `eventsAfter` is the read of the stored events (the
- * resume read from 0, the recorder's gap fill and tail pull), paged (`@voluma/contracts/events`). An append
+ * resume read from 0, the recorder's gap fill and tail pull), paged (`@voluma/contracts/events`): an event that
+ * does not parse is skipped (the next page starts after its seq), and a read that runs out of retries calls
+ * `policy.onUnreachable` and throws `EventLogUnavailable`, like a write. An append
  * answers with the stored seq; a 204 (an API from before that) answers none.
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt, cut at HEARTBEAT_ATTEMPT_MS: the caller keeps the usage and resends it if this throws.
@@ -28,7 +30,7 @@ import {
   appendEventResponseSchema,
   type EventInput,
   type RunEvent,
-  runEventsResponseSchema,
+  runEventSchema,
 } from "@voluma/contracts/events";
 import { type HistoryRow, historyResponseSchema } from "@voluma/contracts/history";
 import {
@@ -39,6 +41,7 @@ import {
   type Usage,
 } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
+import { z } from "zod";
 import { errorText } from "../../error-text";
 import { type EventLog, EventLogUnavailable } from "../../ports/event-log";
 import { type History, HistoryConflict } from "../../ports/history";
@@ -46,6 +49,11 @@ import { LeaseLost } from "../../ports/lease-lost";
 import { type Endpoint, HttpError, postJson, send } from "./request";
 
 const READ_BUDGET_MS = 60_000;
+/** A page of stored events; each event is parsed on its own, so one the runner cannot read costs only itself. */
+const pageSchema = z.object({
+  events: z.array(z.looseObject({ seq: z.number().int() })),
+  more: z.boolean(),
+});
 /** Short, so a heartbeat lost to a dead connection is retried in seconds (`lease.ts`). */
 const HEARTBEAT_ATTEMPT_MS = 5_000;
 const REPORT_BUDGET_MS = 60_000;
@@ -91,8 +99,8 @@ export function runClient(
   }
   const post = (path: string, body: unknown, retry?: Parameters<typeof send>[3]) =>
     guarded(() => postJson(endpoint, path, body, { leaseToken, retry, redact }));
-  const get = (path: string) =>
-    guarded(() => send(endpoint, path, { leaseToken }, { forMs: READ_BUDGET_MS }));
+  const get = (path: string, onGiveUp?: (firstFailureAt: number) => void) =>
+    guarded(() => send(endpoint, path, { leaseToken }, { forMs: READ_BUDGET_MS, onGiveUp }));
 
   return {
     async append(event: EventInput) {
@@ -111,9 +119,22 @@ export function runClient(
       const events: RunEvent[] = [];
       // Each page starts after the last seq read, not after a count: a page can have holes.
       for (let cursor = after, more = true; more && cursor < upTo; ) {
-        const response = await get(`${runPath}/events?after=${cursor}`);
-        const page = runEventsResponseSchema.parse(await response.json());
-        events.push(...page.events.filter((e) => e.seq <= upTo));
+        let page: z.infer<typeof pageSchema>;
+        try {
+          const response = await get(`${runPath}/events?after=${cursor}`, policy.onUnreachable);
+          page = pageSchema.parse(await response.json());
+        } catch (error) {
+          if (error instanceof LeaseLost || (error instanceof HttpError && error.status < 500)) {
+            throw error;
+          }
+          throw new EventLogUnavailable(errorText(error), { cause: error });
+        }
+        for (const raw of page.events) {
+          if (raw.seq > upTo) continue;
+          const event = runEventSchema.safeParse(raw);
+          if (event.success) events.push(event.data);
+          else console.error(`event ${raw.seq} skipped, it does not parse: ${event.error.message}`);
+        }
         cursor = page.events.at(-1)?.seq ?? cursor;
         more = page.more && page.events.length > 0;
       }

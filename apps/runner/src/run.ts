@@ -496,7 +496,8 @@ async function claimBody(
   } finally {
     // The harness decided how the claim ended, drained included; a stop landing now changes nothing.
     // Without an outcome the claim failed before the supervisor ran (or was stopped then).
-    const readSeq = events?.events().at(-1)?.seq;
+    // What the runner had read when it decided to end; a claim that never ended the root (failed before, or resumed after it ended) reports its view's tail.
+    const readSeq = events?.endedSeq() ?? events?.events().at(-1)?.seq;
     const report =
       outcome?.kind === "ended"
         ? endedReport(readSeq, outcome.error === undefined ? undefined : redact(outcome.error))
