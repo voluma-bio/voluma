@@ -37,6 +37,6 @@ export const TextAreaWithError: Story = {
 /** The AI composer: the box's purpose shows on screen, so the label is for screen readers. */
 export const HiddenLabel: Story = {
   render: () => (
-    <TextAreaField label="Message to the AI" hideLabel placeholder="Ask about this scan" />
+    <TextAreaField label="Message to the AI" hideLabel placeholder="Ask about this sample" />
   ),
 };

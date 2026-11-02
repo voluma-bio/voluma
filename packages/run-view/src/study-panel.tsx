@@ -6,7 +6,16 @@
  */
 import { scanNeedsYou } from "@voluma/contracts/review-state";
 import type { StudyDetail, StudyRunSummary, StudyScanDetail } from "@voluma/contracts/study";
-import { type LinkTo, List, Progress, Row, RowLink, type Status, StatusMark } from "@voluma/ui";
+import {
+  INPUT_WORD,
+  type LinkTo,
+  List,
+  Progress,
+  Row,
+  RowLink,
+  type Status,
+  StatusMark,
+} from "@voluma/ui";
 import { liveStatus, plural } from "./run-status";
 
 type ScanStatus = { label: string; status: Status; open: number };
@@ -36,7 +45,7 @@ export function kneeOf(scan: StudyScanDetail): string | null {
 
 /** The row a scan sits on: its group, or one shared row when no scan of the study has one. */
 export const groupOf = (scan: StudyScanDetail, grouped: boolean) =>
-  scan.scan.group ?? (grouped ? "No group" : "All scans");
+  scan.scan.group ?? (grouped ? "No group" : `All ${INPUT_WORD.many}`);
 
 /** Groups in the order their first scan appears in the study. */
 export function groupNames(detail: StudyDetail): string[] {
@@ -83,7 +92,7 @@ export function StudyPanel({
         return (
           <section
             key={group}
-            aria-label={`${group}, ${plural(scans.length, "scan")}`}
+            aria-label={`${group}, ${plural(scans.length, INPUT_WORD.one, INPUT_WORD.many)}`}
             className="pt-2"
           >
             {grouped && <h3 className="m-0 px-4 pb-1 text-xs text-muted-foreground">{group}</h3>}

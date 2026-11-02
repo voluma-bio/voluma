@@ -27,7 +27,15 @@ import {
   useEvents,
   useRunStore,
 } from "@voluma/run-view";
-import { Button, EmptyState, ErrorState, LoadingState, ShellPanel, useOpenPanel } from "@voluma/ui";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  INPUT_WORD,
+  LoadingState,
+  ShellPanel,
+  useOpenPanel,
+} from "@voluma/ui";
 import type { GridViewerHandle, StructureDisplay } from "@voluma/viewer/grid";
 import { CircleAlert, Layers, ListChecks, MessagesSquare, Network, Users } from "lucide-react";
 import {
@@ -94,7 +102,7 @@ function Scan({ runId }: { runId: string }) {
   if (run.isPending)
     return (
       <div className={page}>
-        <LoadingState label="Loading the scan" rows={4} />
+        <LoadingState label={`Loading the ${INPUT_WORD.one}`} rows={4} />
       </div>
     );
   if (!run.data) {
@@ -102,7 +110,9 @@ function Scan({ runId }: { runId: string }) {
     return (
       <div className={page}>
         <ErrorState
-          title={missing ? "This scan isn't here" : "Couldn't load the scan"}
+          title={
+            missing ? `This ${INPUT_WORD.one} isn't here` : `Couldn't load the ${INPUT_WORD.one}`
+          }
           onRetry={missing ? undefined : () => void run.refetch()}
         >
           {missing

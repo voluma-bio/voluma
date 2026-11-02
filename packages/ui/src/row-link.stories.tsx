@@ -16,7 +16,7 @@ const meta = {
   component: RowLink,
   args: {
     title: "OA7 DMM vs Sham",
-    subtitle: "18 to check across 7 scans",
+    subtitle: "18 to check across 7 samples",
     to: "#study",
     cells: [
       <span key="n" className="text-sm text-check">
@@ -41,13 +41,13 @@ type Story = StoryObj<typeof meta>;
 
 /** Hover a row for its arrow; the chevron opens the first one in place without navigating. */
 export const WithNextLayer: Story = {
-  args: { children: <p className="m-0 text-sm text-fg-subtle">The scans that need you.</p> },
+  args: { children: <p className="m-0 text-sm text-fg-subtle">The samples that need you.</p> },
 };
 
 export const Open: Story = {
   args: {
     defaultOpen: true,
-    children: <p className="m-0 text-sm text-fg-subtle">The scans that need you.</p>,
+    children: <p className="m-0 text-sm text-fg-subtle">The samples that need you.</p>,
   },
 };
 
@@ -65,7 +65,7 @@ export const RouterLink: Story = {
 export const WrappedSubtitle: Story = {
   args: {
     subtitle:
-      "18 to check across 8 scans. 2 scans failed: OA7-15, OA7-20. 1 scan paused until you add your API key.",
+      "18 to check across 8 samples. 2 samples failed: OA7-15, OA7-20. 1 sample paused until you add your API key.",
     wrapSubtitle: true,
   },
 };

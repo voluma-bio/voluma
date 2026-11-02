@@ -50,7 +50,7 @@ export type TableProps<Row> = {
   rowDetail?: (row: Row) => ReactNode | undefined;
   /** The selected row's key, drawn with an ice outline. */
   selectedKey?: string;
-  /** The group head a row sits under, e.g. "DMM, 4 scans". */
+  /** The group head a row sits under, e.g. "DMM, 4 samples". */
   groupOf?: (row: Row) => string;
   empty?: ReactNode;
   className?: string;

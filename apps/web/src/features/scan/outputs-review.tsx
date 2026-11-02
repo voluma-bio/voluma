@@ -863,7 +863,7 @@ function waitingApprovals(events: readonly RunEvent[]): number {
   return open.size;
 }
 
-/** The scans tab: every study's scans, this run's study open and this scan highlighted. */
+/** The Samples tab (`INPUT_WORD`): every study's samples, this run's study open and its sample highlighted. */
 function Samples({ studyId, runId }: { studyId: string; runId: string }) {
   const studies = useQuery(studiesQuery());
   const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);

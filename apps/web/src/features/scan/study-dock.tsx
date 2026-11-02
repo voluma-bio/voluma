@@ -7,7 +7,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import type { Run } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { plural, runHref, StudyPanel } from "@voluma/run-view";
-import { Button, ErrorState, LoadingState, ShellPanel } from "@voluma/ui";
+import { Button, ErrorState, INPUT_WORD, LoadingState, ShellPanel } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
 import { ArrowUpRight, PanelLeft } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
@@ -44,7 +44,7 @@ export function StudyDock({ run, study }: { run: Run; study: UseQueryResult<Stud
           )}
           <StudyPanel
             detail={study.data}
-            about={`${plural(study.data.scans.length, "scan")}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
+            about={`${plural(study.data.scans.length, INPUT_WORD.one, INPUT_WORD.many)}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
             current={run.input.id}
             scanLink={({ runs: [latestRun] }) =>
               latestRun

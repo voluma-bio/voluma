@@ -2,10 +2,9 @@
 
 Studies (`/`, `studies-page.tsx`), Run on new scans (`/new`, `new-page.tsx`), Workflows
 (`/workflows`, `workflows-page.tsx`) and a study's two pages (`/studies/:id` and
-`/studies/:id/compare`, `study/`). On screen one scanned knee is a **scan** (agent-model `review.md`,
-Naming: "Scan" stays for now; the mockups' "sample" was not adopted). Write the word only through
-`INPUT_WORD` (`@voluma/ui`), so a rename is one edit; code names (`SampleTree`, `SampleBar`) keep
-"sample". Every run
+`/studies/:id/compare`, `study/`). On screen one scanned knee is a **sample** (agent-model `review.md`,
+Naming: the mouse-OA workflow's noun). Write the word only through `INPUT_WORD` (`@voluma/ui`), so
+a rename is one edit; code names and routes (`scan`, `input`, `/scans/…`) don't change with it. Every run
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
 shown as its scan and linked straight to its scan review (`/scans/:runId`, `runHref`).
 The deleted study pages' paths redirect (`index.tsx`): `check` to `?status=needs-you`, `results` to

@@ -10,7 +10,7 @@ import { EmptyState, ErrorState, LoadingState } from "./states";
 const meta = {
   title: "Parts/States",
   component: EmptyState,
-  args: { title: "Nothing to check yet", children: "Items appear as each scan's run finishes." },
+  args: { title: "Nothing to check yet", children: "Items appear as each sample's run finishes." },
   decorators: [
     (Story) => (
       <div className="max-w-xl overflow-hidden rounded-lg border border-border">{Story()}</div>
@@ -21,9 +21,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {};
-export const Loading: Story = { render: () => <LoadingState label="Loading scans" /> };
+export const Loading: Story = { render: () => <LoadingState label="Loading samples" /> };
 export const LoadingCompact: Story = {
-  render: () => <LoadingState rows={5} density="compact" label="Loading scans" />,
+  render: () => <LoadingState rows={5} density="compact" label="Loading samples" />,
 };
 export const ErrorWithRetry: Story = {
   render: () => (

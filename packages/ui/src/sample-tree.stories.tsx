@@ -5,7 +5,7 @@ import { SampleTree, type TreeSample, type TreeStudy } from "./sample-tree";
  * **What:** the studies and their samples, grouped Needs you, Running and Done, with a search.
  * **Why:** a researcher jumps between samples without leaving review. **Where:** the left side of the
  * study pages, which build it with `sampleTree` (`@voluma/run-view`); the scan page is to show it
- * as a tab. On screen it is called by `INPUT_WORD` ("Scans").
+ * as a tab. On screen it is called by `INPUT_WORD` ("Samples").
  *
  * Try: type "oa61" (dashes and case don't matter); Up and Down move, Left and Right close and
  * open a branch, Enter opens a sample. Which branches are open is kept across pages.

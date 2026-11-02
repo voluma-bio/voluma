@@ -1,7 +1,12 @@
 /**
- * The on-screen word for one scanned knee, in every case a sentence needs. It is "scan" for now
- * (agent-model design, review.md "Naming": "Scan" stays for now), and the mockups' "sample" was
- * not adopted; a later switch is this one edit. Code names (`SampleTree`, `TreeSample`) keep
- * "sample" and are not words on screen.
+ * The on-screen word for one scanned knee, in every case a sentence needs: "sample", the mouse-OA
+ * workflow's noun (agent-model design, review.md "Naming"). Every on-screen text that names one
+ * goes through this; it moves into the workflow's definition when a second workflow names its
+ * input differently. Code, routes and the API keep "scan" and "input"; "run" stays one go of the AI.
  */
-export const INPUT_WORD = { one: "scan", many: "scans", One: "Scan", Many: "Scans" } as const;
+export const INPUT_WORD = {
+  one: "sample",
+  many: "samples",
+  One: "Sample",
+  Many: "Samples",
+} as const;

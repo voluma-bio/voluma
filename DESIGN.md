@@ -29,13 +29,13 @@ where it is used.
   done; red stopped; grey waiting. Ice (`select`) means selection only. Don't reuse them for
   decoration.
 
-## Comparing scans
+## Comparing samples
 
 - **Comparisons live on a study's Compare page**, not on the study page, which stays calm: which
-  scan needs you.
-- **Groups of scans compare as strip plots, not bars** (`StripPlot`): every scan a dot, a tick for the
-  group mean. Groups hold 1 to 8 scans, and a bar or box hides them.
-- Dots are ink; only a scan far from its group turns amber, with its name beside it. Nothing else
+  sample needs you.
+- **Groups of samples compare as strip plots, not bars** (`StripPlot`): every sample a dot, a tick for the
+  group mean. Groups hold 1 to 8 samples, and a bar or box hides them.
+- Dots are ink; only a sample far from its group turns amber, with its name beside it. Nothing else
   in a chart gets colour.
 
 ## The shell
@@ -79,7 +79,10 @@ where it is used.
 
 ## Copy
 
-- Plain labels: "Runs", "To check", "Rerun for this scan".
+- Plain labels: "Runs", "To check", "Rerun for this sample".
+- One scanned knee is a **Sample** on screen, written only through `INPUT_WORD` (`@voluma/ui`), the
+  mouse-OA workflow's noun; a **run** is one go of the AI over it. Code, routes and the API keep
+  `scan` and `input`.
 - Choices are worded as the user's decisions ("Accept", "Move endpoints",
   "Rerun and save to task list"), not as system states.
 - Screens show state. Teach a concept once, where it first appears, then

@@ -107,7 +107,7 @@ export const IconOnly: Story = {
 export const Link: Story = {
   render: () => (
     <p className="m-0 text-sm text-muted-foreground">
-      Couldn't load the scans.{" "}
+      Couldn't load the samples.{" "}
       <Button variant="link" onClick={() => {}}>
         Try again
       </Button>

@@ -43,7 +43,7 @@ function Frame({ theme }: { theme: "light" | "dark" }) {
         shortcut="t"
         defaultOpen
       >
-        <Lorem what="The scan's task graph and the selected task's values." />
+        <Lorem what="The sample's task graph and the selected task's values." />
       </ShellPanel>
       <ShellPanel
         id="s-agents"
