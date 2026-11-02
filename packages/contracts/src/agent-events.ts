@@ -306,11 +306,11 @@ export const attachedMarkSchema = z.looseObject({
 export const attachedWasSchema = attachedMarkSchema.pick({ world: true, plane: true });
 
 /**
- * A mark attached to a researcher's message. `change`: `delete` (a `mark.deleted` follows its last
- * `mark.placed`), `move` (main has seen an earlier state of this mark, a previous message having
- * frozen it) or `place`. `was` is the state main last saw; it equals `mark` when it is sent again
- * unmoved. `version` is the output's latest version
- * when the message was sent.
+ * A mark attached to a researcher's message, as `changeOf` (review-state.ts) judges it against
+ * what that person's previous messages froze: `place` (never told, or placed again after a told
+ * delete), `move` (a told mark's position, plane or shape changed; `was` is the state main last
+ * saw) or `delete` (a told mark deleted since). A told mark unchanged is not attached at all.
+ * `version` is the output's latest version when the message was sent.
  */
 export const attachedSchema = z.object({
   change: z.enum(["place", "move", "delete"]),

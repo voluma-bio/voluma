@@ -6,15 +6,14 @@
 import type { Attached } from "@voluma/contracts/agent-events";
 import type { RunEvent } from "@voluma/contracts/events";
 import { outputsFold } from "@voluma/contracts/output-fold";
-import { markStatesOf } from "@voluma/contracts/review-state";
+import { changeOf, markStatesOf, toldMarks } from "@voluma/contracts/review-state";
 import { HTTPException } from "hono/http-exception";
 
 /**
  * The marks a message names, as the log holds them now (the browser sends ids, never geometry),
- * from the caller's own writes only. `delete` once the caller deleted it; `move` when main has
- * seen an earlier state of this mark (a previous message froze it), with `was` that state, which
- * equals the mark when it is sent again unmoved; else `place`. `version` is the mark's output's
- * latest. 404 for an id the caller did not place.
+ * from the caller's own writes only, each with the `change` since main was last told of it
+ * (`changeOf`); `was` is the state main last saw, on a `move`. A mark with nothing new is left out.
+ * `version` is the mark's output's latest. 404 for an id the caller did not place.
  */
 export function freezeAttached(
   log: readonly RunEvent[],
@@ -22,12 +21,9 @@ export function freezeAttached(
   markIds: readonly string[],
 ): Attached[] {
   const own = markStatesOf(log, userId);
-  const told = new Map<string, Attached["mark"]>();
-  for (const e of log)
-    if (e.type === "person.message")
-      for (const a of e.payload.attached ?? []) if (a.mark.id) told.set(a.mark.id, a.mark);
+  const told = toldMarks(log, userId);
   const outputs = outputsFold(log).byId;
-  return [...new Set(markIds)].map((id) => {
+  return [...new Set(markIds)].flatMap((id) => {
     const held = own.get(id);
     if (!held) throw new HTTPException(404, { message: "Mark not found." });
     const { by: _by, ...state } = held.mark;
@@ -35,10 +31,11 @@ export function freezeAttached(
     if (version === undefined)
       throw new HTTPException(409, { message: "That output has no version yet." });
     const mark = { ...state, id } satisfies Attached["mark"];
-    if (held.deleted) return { change: "delete", mark, version };
     const before = told.get(id);
-    if (!before) return { change: "place", mark, version };
-    return { change: "move", mark, was: { world: before.world, plane: before.plane }, version };
+    const change = changeOf({ mark, deleted: held.deleted }, before);
+    if (!change) return [];
+    if (change !== "move" || !before) return [{ change, mark, version }];
+    return [{ change, mark, was: { world: before.mark.world, plane: before.mark.plane }, version }];
   });
 }
 

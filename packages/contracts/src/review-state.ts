@@ -1,4 +1,5 @@
 /** Human review overlays scientific results; it never changes the scientific fold. */
+import type { Attached } from "./agent-events";
 import type { RunEvent } from "./events";
 import { corrections, type FoldedTask, fold } from "./fold";
 import type { TaskState, TaskStatus } from "./ids";
@@ -84,6 +85,51 @@ export function markStatesOf(
     }
   }
   return marks;
+}
+
+/** What the caller's previous messages froze of each mark, and the change that message told. */
+export type ToldMark = { mark: Attached["mark"]; change: Attached["change"] };
+
+/**
+ * What main was last told of each mark `by` placed: the state their latest message naming it
+ * froze (`person.message` attached), by mark id.
+ */
+export function toldMarks(events: readonly RunEvent[], by: string): Map<string, ToldMark> {
+  const own = markStatesOf(events, by);
+  const told = new Map<string, ToldMark>();
+  for (const e of events)
+    if (e.type === "person.message")
+      for (const a of e.payload.attached ?? [])
+        if (a.mark.id && own.has(a.mark.id))
+          told.set(a.mark.id, { mark: a.mark, change: a.change });
+  return told;
+}
+
+/** Key order is not meaning: stored JSON may come back reordered. */
+const canon = (v: unknown): string =>
+  JSON.stringify(v, (_k, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : x,
+  );
+
+/**
+ * What to tell main of a mark now, against what it was last told (`toldMarks`): `place` for a mark
+ * never told, or placed again after a told delete; `move` when a told mark's position, plane or
+ * shape (its note too) changed; `delete` for a told mark deleted since; undefined when there is
+ * nothing new (unchanged, or deleted though main never saw it).
+ */
+export function changeOf(
+  current: { mark: Attached["mark"]; deleted: boolean },
+  told: ToldMark | undefined,
+): Attached["change"] | undefined {
+  const toldLive = told !== undefined && told.change !== "delete";
+  if (current.deleted) return toldLive ? "delete" : undefined;
+  if (!toldLive) return "place";
+  const { mark, world, plane } = current.mark;
+  return canon([mark, world, plane]) === canon([told.mark.mark, told.mark.world, told.mark.plane])
+    ? undefined
+    : "move";
 }
 
 /** The researchers' marks the log holds now, by id, in the order first placed. */

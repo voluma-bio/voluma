@@ -274,6 +274,10 @@ export async function decideMessage(
       throw new HTTPException(404, { message: "To check item not found." });
     const attached = freezeAttached(log, userId, msg.markIds ?? []);
     if (attached.length) payload = { ...payload, attached };
+    else if ((msg.markIds ?? []).length && !payload.text?.trim() && !payload.go)
+      throw new HTTPException(400, {
+        message: "Nothing new to send: those marks are as main last saw them.",
+      });
   } else {
     const view = fold(log);
     if (view.plan.tasks.length === 0)
