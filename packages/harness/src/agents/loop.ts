@@ -452,7 +452,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   /**
    * Main has notices: refresh the run files and deliver them, with main's next tool result when it
    * is in a turn (a long wait must not hold a worker's report back), as a new turn when it is idle.
-   * `handed` keeps a running main from being sent the same delivery twice before it is stored.
+   * `handed` holds the covers of the send not yet stored.
    */
   async function deliverToMain(d: AgentLog): Promise<boolean> {
     const m = d.main;
@@ -461,7 +461,9 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const running = state === "working" && threads.running(m.id);
     if (!running && state !== "idle") return false;
     const covers = d.lastEventId;
-    if (running && (!covers || handed.get(m.id)?.has(covers))) return false;
+    // One send at a time to a running main: until it is stored, the next would repeat its notices.
+    const [outstanding] = handed.get(m.id) ?? [];
+    if (running && (!covers || (outstanding && d.cursor !== outstanding))) return false;
     await o.runFiles.refresh();
     const events = recorder.events();
     const cut = d.cursor ? (d.written.get(d.cursor) ?? -1) : -1;
