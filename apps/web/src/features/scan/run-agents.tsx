@@ -1,32 +1,37 @@
 /**
- * The run's agents by name, in the panes' place: when each worked, the outputs it reported, and
- * whether it is still at work. From `workersOf` (`outputs-trail.ts`).
+ * The run's agents, in the panes' place: when each worked, the outputs it reported, and whether
+ * it is still at work. From `workersOf` (`outputs-trail.ts`), on the agent log.
  */
 
+import type { AgentState } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { OutputsFold } from "@voluma/contracts/output-fold";
 import { workersOf } from "@voluma/run-view";
 import { useMemo } from "react";
 import { clockOf } from "./version-report";
 
-const NOW: Record<string, string> = {
-  running: "Working",
-  completed: "Done",
+const NOW: Record<AgentState, string> = {
+  working: "Working",
+  idle: "Waiting",
+  closing: "Winding up",
   closed: "Done",
   failed: "Failed",
-  cancelled: "Stopped",
+  "cut-off": "Cut off",
 };
 
 export function RunAgents({
   events,
   fold,
+  live,
   nameOf,
 }: {
   events: readonly RunEvent[];
   fold: OutputsFold;
+  /** The run hasn't ended. */
+  live: boolean;
   nameOf: (id: string) => string;
 }) {
-  const workers = useMemo(() => workersOf(events, fold), [events, fold]);
+  const workers = useMemo(() => workersOf(events, fold, live), [events, fold, live]);
   if (workers.length === 0)
     return <p className="p-6 text-sm text-muted-foreground">No agent has started yet.</p>;
   return (
@@ -42,7 +47,7 @@ export function RunAgents({
         </thead>
         <tbody>
           {workers.map((w) => (
-            <tr key={`${w.name}/${w.from}`} className="border-b border-border align-top">
+            <tr key={w.id} className="border-b border-border align-top">
               <td className="px-4 py-2 font-mono">{w.name}</td>
               <td className="px-4 py-2 font-mono whitespace-nowrap tabular-nums">
                 {clockOf(w.from)}
@@ -55,7 +60,9 @@ export function RunAgents({
                   <span className="text-muted-foreground">Nothing</span>
                 )}
               </td>
-              <td className="px-4 py-2 text-muted-foreground">{NOW[w.status]}</td>
+              <td className="px-4 py-2 text-muted-foreground">
+                {w.stopped ? "Stopped" : w.state === "idle" && !live ? "Done" : NOW[w.state]}
+              </td>
             </tr>
           ))}
         </tbody>

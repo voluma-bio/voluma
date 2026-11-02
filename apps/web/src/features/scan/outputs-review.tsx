@@ -412,7 +412,9 @@ export function OutputsReview({
             {centre === "run" && (
               <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
             )}
-            {centre === "agents" && <RunAgents events={events} fold={fold} nameOf={nameOf} />}
+            {centre === "agents" && (
+              <RunAgents events={events} fold={fold} live={live} nameOf={nameOf} />
+            )}
           </div>
         </div>
         <SidePanel

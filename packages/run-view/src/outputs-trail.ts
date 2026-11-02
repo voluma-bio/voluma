@@ -1,13 +1,14 @@
 /**
  * How the AI got to an output, from the output fold: the trail behind one output (what its
  * latest version was made from, recursively), the whole run's made-from graph, a version's
- * report, and the run's workers by name. Pure data; the scan review draws it (the trail panel,
+ * report, and the run's agents (`agentLog`). Pure data; the scan review draws it (the trail panel,
  * the whole-run graph, Run details), so a new look changes only the drawing. Rules: the agent-model
  * design's `review.md` (Layout, Panels and views) and `outputs.md` (Stale).
  *
  * A link to a label overlay (a bone of the labels map) is a link to its map, as the fold has it.
  * A link from an output to its own earlier version is not drawn.
  */
+import { type AgentState, agentLog, agentState } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { LinkRole } from "@voluma/contracts/output-catalog";
 import type { OutputState, OutputsFold, OutputVersion } from "@voluma/contracts/output-fold";
@@ -167,43 +168,46 @@ export function versionWords(events: readonly RunEvent[], v: OutputVersion): str
 }
 
 export type Worker = {
+  id: string;
   name: string;
-  kind: string;
-  /** Its first start and last end; no end while it runs. */
+  /** Its first start and latest end; no end while it works. */
   from: string;
   to?: string;
-  status: "running" | "completed" | "failed" | "cancelled" | "closed";
+  /** `agentState` with `live` standing for "the runner runs it": a run's open thread works. */
+  state: AgentState;
+  /** Its latest end was a cancellation (a stop), not a close. */
+  stopped: boolean;
   /** The outputs it reported, in order of first version. */
   made: string[];
 };
 
-/** The run's agents by name, in order of first start, without the supervisor. */
-export function workersOf(events: readonly RunEvent[], fold: OutputsFold): Worker[] {
-  const byThread = new Map<string, Worker>();
-  for (const e of events) {
-    if (e.type === "thread.started") {
-      if (e.payload.kind === "supervisor") continue;
-      const had = byThread.get(e.threadId);
-      byThread.set(e.threadId, {
-        name: e.payload.name,
-        kind: e.payload.kind,
-        from: had?.from ?? e.createdAt,
-        status: "running",
-        made: had?.made ?? [],
-      });
-    } else if (e.type === "thread.ended") {
-      const w = byThread.get(e.threadId);
-      if (w) {
-        w.to = e.createdAt;
-        w.status = e.payload.status;
-      }
-    }
-  }
-  const workers = [...byThread.values()];
-  const byName = new Map(workers.map((w) => [w.name, w]));
+/**
+ * The run's agents (`agentLog`, without the supervisor), in order of first start. `live`: the run
+ * has not ended, so a thread with no end is at work; on an ended run it was cut off.
+ */
+export function workersOf(events: readonly RunEvent[], fold: OutputsFold, live: boolean): Worker[] {
+  const log = agentLog(events);
+  const firstStart = new Map<string, string>();
+  for (const e of events)
+    if (e.type === "thread.started" && !firstStart.has(e.threadId))
+      firstStart.set(e.threadId, e.createdAt);
+  const workers = [...log.records.values()].map(
+    (r): Worker => ({
+      id: r.id,
+      name: r.name,
+      from: firstStart.get(r.id) ?? r.endedTime,
+      ...(r.end && { to: r.endedTime }),
+      state: agentState(r, live && r.end === undefined),
+      stopped: r.end?.status === "cancelled",
+      made: [],
+    }),
+  );
+  // A version names its thread by name; the event it came in says which thread it was.
+  const byId = new Map(workers.map((w) => [w.id, w]));
   for (const o of fold.outputs)
     for (const v of o.versions) {
-      const w = byName.get(v.by);
+      const at = log.written.get(v.eventId);
+      const w = at === undefined ? undefined : byId.get(events[at]!.threadId);
       if (w && !w.made.includes(o.id)) w.made.push(o.id);
     }
   return workers;
