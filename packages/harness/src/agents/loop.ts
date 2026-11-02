@@ -20,6 +20,8 @@ import {
   agentLog,
   agentState,
   type InboxItem,
+  silentMinutes,
+  stalledMinutes,
 } from "@voluma/contracts/agents";
 import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
 import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
@@ -141,7 +143,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const handed = new Map<string, Set<string>>();
   const dealtWith = new Set<string>();
   /** When each agent was last reminded to send an activity line. */
-  const reminded = new Map<string, number>();
+  const reminded = new Map<string, { activityAt: number; minutes: number }>();
 
   const shell = loopShell({
     rootThreadId: root,
@@ -496,23 +498,17 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       .outputs.filter((x) => x.undecided)
       .map((x) => x.id);
 
-  /**
-   * Minutes an agent's turn has run without an `activity` line, or 0 when it is not in a turn or is
-   * inside a tool call (which cannot send one).
-   */
-  const silentMinutes = (r: AgentRecord) =>
-    threads.running(r.id) && r.openCalls.size === 0
-      ? Math.max(0, (now() - r.activityAt) / 60_000)
-      : 0;
-
   /** An agent silent for a window is reminded, and again for each further window it stays silent. */
   async function remindSilent(d: AgentLog): Promise<boolean> {
     for (const r of d.records.values()) {
       if (r.closeAt !== undefined) continue;
-      const since = Math.max(r.activityAt, reminded.get(r.id) ?? 0);
-      if (silentMinutes(r) < activityMinutes || now() - since < activityMinutes * 60_000) continue;
+      const silent = silentMinutes(r, threads.running(r.id), now());
+      const last = reminded.get(r.id);
+      // The level resets with the silence: a new activity line or start moves `activityAt`.
+      const level = last?.activityAt === r.activityAt ? last.minutes : 0;
+      if (silent < level + activityMinutes) continue;
       if (threads.send(r.id, activityReminder(activityMinutes), RUNTIME)) {
-        reminded.set(r.id, now());
+        reminded.set(r.id, { activityAt: r.activityAt, minutes: silent });
         return true;
       }
     }
@@ -525,7 +521,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     if (!m || stateOf(m) !== "idle" || d.undelivered.length > 0) return false;
     // An agent silent for two windows did not answer its reminder: it no longer holds the run open.
     const holdsRun = (r: AgentRecord) =>
-      stateOf(r) === "working" && silentMinutes(r) < 2 * activityMinutes;
+      stateOf(r) === "working" &&
+      stalledMinutes(r, threads.running(r.id), now()) < 2 * activityMinutes;
     if ([...d.records.values()].some(holdsRun)) return false;
     const events = recorder.events();
     if (d.emptyDeliveries < stuckLimit) {
