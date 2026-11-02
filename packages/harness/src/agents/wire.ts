@@ -9,13 +9,17 @@ import type { AgentsDefinition } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
 import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
+import { EvidenceNotFound } from "../ports/evidence";
 import type { Recorder } from "../recorder";
 import { keepNotes } from "./keep-notes";
 import { agentLoop, interruptedResult, openingOutputs } from "./loop";
-import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
+import { type AgentStart, firstMessageOf, skillBlock, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
-import { buildAgentTools } from "./tools/registry";
+import type { AgentsApi } from "./tools/coordination";
+import { leaveToResearcher } from "./tools/keep-output";
+import type { OutputToolDeps } from "./tools/output-shared";
+import { approvedTool, buildAgentTools } from "./tools/registry";
 import { prepareTranscript } from "./transcript";
 
 interface AgentsWireOptions {
@@ -100,6 +104,23 @@ async function runAgents(
   const { recorder } = o;
   const catalog = definition.outputCatalog;
   const files = runFiles({ runId: o.runId, recorder, files: o.files, signal: o.signal });
+  /** `sandboxThread`: the thread whose sandbox hashes a file (an approved call runs in the live main's, whoever made it). */
+  const outputDeps = (api: AgentsApi, sandboxThread?: string): OutputToolDeps => ({
+    runId: o.runId,
+    recorder,
+    publish: o.publish,
+    catalog,
+    layoutOf: (threadId) => {
+      const r = api.log().records.get(threadId);
+      if (!r) throw new Error(`${threadId} has no thread.started`);
+      return forAgent(r.name, r.place, r.blind !== undefined, r.from);
+    },
+    hashIn: async (threadId, path, signal) =>
+      sandboxHash(await o.session.get(sandboxThread ?? threadId, { note: false }), path, signal),
+    section: o.section,
+    changed: api.changed,
+    refreshRunFiles: files.refresh,
+  });
   await agentLoop({
     runId: o.runId,
     rootThreadId: o.rootThreadId,
@@ -124,6 +145,52 @@ async function runAgents(
     providerError: o.providerError,
     config: o.config,
     signal: o.signal,
+    skillBlock: (name) => {
+      const skill = definition.skills.find((s) => s.name === name);
+      return skill && skillBlock(skill);
+    },
+    stageScreenshot: async (snapshotKey) => {
+      const main = forAgent("main", "main", false);
+      const file = `person/${snapshotKey.split("/").pop()}`;
+      try {
+        await o.publish.copy(snapshotKey, `${main.scratch.prefix}${file}`, { signal: o.signal });
+      } catch (error) {
+        if (error instanceof EvidenceNotFound) return undefined;
+        throw error;
+      }
+      return `${main.dir}/${file}`;
+    },
+    leave: (api, threadId, eventId, outputId, labels) =>
+      leaveToResearcher(
+        outputDeps(api),
+        threadId,
+        eventId,
+        outputId,
+        labels.map((id) => catalog.find((e) => e.id === id)?.name ?? id),
+      ),
+    async approved(call, api) {
+      const record = api.log().records.get(call.threadId);
+      if (!record) throw new Error(`${call.threadId} has no thread.started`);
+      const layout = forAgent(record.name, record.place, record.blind !== undefined, record.from);
+      // Main's folder is the same whichever main made the call, and a replaced one's sandbox is gone:
+      // the job uses the live main's, so no sandbox is made for a thread that ended.
+      const sandboxThread = api.log().main?.id ?? call.threadId;
+      const tool = approvedTool(
+        call.tool,
+        { layout, files: o.files, api, bash: o.bash, outputs: outputDeps(api, sandboxThread) },
+        call.fileHashes,
+      );
+      return tool.execute(tool.input.parse(call.args), {
+        threadId: call.threadId,
+        kind: "main",
+        agent: { name: record.name, role: "main" },
+        toolCallId: call.toolCallId,
+        batch: [],
+        signal: o.signal,
+        sandbox: () => o.session.get(sandboxThread),
+        output: () => {},
+      });
+    },
     setup(agent, api) {
       const layout = forAgent(agent.name, agent.role, agent.blind !== undefined, agent.from);
       const recorded = api.log().records.get(agent.id)?.model;
@@ -135,6 +202,7 @@ async function runAgents(
               finalOutputs: renderFinalOutputs(recorder.events()),
               selected: openingOutputs(catalog, o.selectedOutputs).length,
               limit: api.limit,
+              ...(agent.takeover !== undefined && { takeover: agent.takeover }),
               ...(o.notes && { notes: o.notes }),
             }
           : {
@@ -144,33 +212,20 @@ async function runAgents(
               ...(agent.blind && { blind: true }),
               ...(agent.from && { from: startedFrom(api.log(), agent.from) }),
               ...(agent.skills && { skills: agent.skills }),
+              ...(agent.outputs && { outputs: agent.outputs }),
             };
+      const tools = buildAgentTools(layout.tools, {
+        layout,
+        files: o.files,
+        api,
+        bash: o.bash,
+        outputs: outputDeps(api),
+      });
       return {
         ...setup,
         systemPrompt: systemPromptOf({ definition, layout }),
         prompt: firstMessageOf({ definition, start }),
-        tools: buildAgentTools(layout.tools, {
-          layout,
-          files: o.files,
-          api,
-          bash: o.bash,
-          outputs: {
-            runId: o.runId,
-            recorder,
-            publish: o.publish,
-            catalog,
-            layoutOf: (threadId) => {
-              const r = api.log().records.get(threadId);
-              if (!r) throw new Error(`${threadId} has no thread.started`);
-              return forAgent(r.name, r.place, r.blind !== undefined, r.from);
-            },
-            hashIn: async (threadId, path, signal) =>
-              sandboxHash(await o.session.get(threadId, { note: false }), path, signal),
-            section: o.section,
-            changed: api.changed,
-            refreshRunFiles: files.refresh,
-          },
-        }),
+        tools,
         labelOf: (sender) => {
           if (sender.kind === "person") return "the researcher";
           if (sender.kind === "runtime") return "Voluma";

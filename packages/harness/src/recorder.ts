@@ -67,14 +67,15 @@ export interface Recorder {
   /**
    * Stores the event after everything queued before it, with retries, and adds it to the
    * view once stored; an id already held or queued is a no-op. Throws if the event is invalid
-   * or the store refuses it, leaving the view as it was.
+   * or the store refuses it, leaving the view as it was. Resolves true when this call wrote the
+   * event, false when the id was already held: a loop step counts itself as having acted only on true.
    */
   append<T extends EventType>(
     threadId: string,
     type: T,
     payload: PayloadOf<T>,
     id: string,
-  ): Promise<void>;
+  ): Promise<boolean>;
   /**
    * Adds the events the store holds past the view, after everything queued before this call, if
    * `lastSeq` (the store's last `seq`, from a heartbeat) is past the view. Throws if the store
@@ -243,13 +244,14 @@ export function recorder(
         await queue; // it may still be queued
         if (!storedIds.has(id))
           throw new Error(`the ${type} event ${id} was queued but not stored`);
-        return;
+        return false;
       }
       const parsed = parse(threadId, type, payload, id);
       if (!parsed.success) {
         throw new Error(`the ${type} event ${id} is invalid: ${parsed.error.message}`);
       }
       await enqueue(parsed.data);
+      return true;
     },
     onStored: (listener) => {
       listeners.push(listener);

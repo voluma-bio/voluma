@@ -1,4 +1,5 @@
 import type { Sandbox } from "../ports/sandbox";
+import { Refusal } from "./tools/refusal";
 
 /** The sha256 of a file where the sandbox has it mounted: files are hashed in place, never moved through the host. */
 export async function sandboxHash(
@@ -15,8 +16,10 @@ export async function sandboxHash(
     else if (chunk.type === "stdout") out += chunk.data;
     else if (chunk.type === "stderr") err += chunk.data;
   }
+  // A file the agent named that is not there, or is a folder, is its mistake: the tool's own refusal.
+  if (code !== 0) throw new Refusal(`No file at ${path}. Name files in your folder, not folders.`);
   const sha256 = /^[0-9a-f]{64}(?= )/.exec(out)?.[0];
-  if (code !== 0 || !sha256) {
+  if (!sha256) {
     throw new Error(`could not hash ${path} (exit ${code}): ${err.trim() || out.trim()}`);
   }
   return sha256;

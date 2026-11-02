@@ -14,7 +14,11 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 
-export type Interrupted = (toolName: string, toolCallId: string) => string | undefined;
+/** A tool's result for a call a restart cut off: its text, or text that also ends the turn (a held call). */
+export type Interrupted = (
+  toolName: string,
+  toolCallId: string,
+) => string | { text: string; terminate: true } | undefined;
 
 /** The error result for a call that has none: the tool's own text if it has one. */
 export function interruptedResult(
@@ -22,7 +26,8 @@ export function interruptedResult(
   interrupted: Interrupted | undefined,
   timestamp = Date.now(),
 ): ToolResultMessage {
-  const built = interrupted?.(call.name, call.id);
+  const found = interrupted?.(call.name, call.id);
+  const built = typeof found === "string" ? found : found?.text;
   return {
     role: "toolResult",
     toolCallId: call.id,
@@ -36,6 +41,7 @@ export function interruptedResult(
       },
     ],
     isError: built === undefined,
+    ...(typeof found === "object" && { details: { terminate: true } }),
     timestamp,
   };
 }

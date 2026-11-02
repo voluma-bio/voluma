@@ -12,6 +12,7 @@ import { bashManageTool } from "../../tools/bash-manage";
 import { segmentSamTool } from "../../tools/segment-sam";
 import type { Tool } from "../../tools/tool";
 import { type AgentsApi, coordinationTools } from "./coordination";
+import { gate, gatedNames } from "./gate";
 import { keepOutput } from "./keep-output";
 import type { OutputToolDeps } from "./output-shared";
 import { readTool } from "./read";
@@ -40,7 +41,7 @@ const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) 
     readTool({ layout, files, hasSandbox: names.includes("bash") }),
 };
 
-interface AgentToolDeps {
+export interface AgentToolDeps {
   layout: ThreadLayout;
   files: Files;
   bash: BashRuntime;
@@ -48,21 +49,39 @@ interface AgentToolDeps {
   outputs: OutputToolDeps;
 }
 
-export function buildAgentTools(names: readonly string[], deps: AgentToolDeps): Tool[] {
+function toolNamed(
+  name: string,
+  names: readonly string[],
+  deps: AgentToolDeps,
+  fileHashes?: Readonly<Record<string, string>>,
+): Tool {
   const coordination = coordinationTools(deps.api);
   const outputs: Record<string, Tool> = {
-    report_output: reportOutput(deps.outputs) as unknown as Tool,
+    report_output: reportOutput(deps.outputs, fileHashes) as unknown as Tool,
     keep_output: keepOutput(deps.outputs) as unknown as Tool,
   };
-  return names.map((name) => {
-    const tool = Object.hasOwn(coordination, name)
-      ? coordination[name]
-      : Object.hasOwn(outputs, name)
-        ? outputs[name]
-        : Object.hasOwn(factories, name)
-          ? factories[name]?.(deps, names)
-          : undefined;
-    if (!tool) throw new Error(`tool "${name}" is not a tool of the agent loop`);
-    return tool;
-  });
+  const tool = Object.hasOwn(coordination, name)
+    ? coordination[name]
+    : Object.hasOwn(outputs, name)
+      ? outputs[name]
+      : Object.hasOwn(factories, name)
+        ? factories[name]?.(deps, names)
+        : undefined;
+  if (!tool) throw new Error(`tool "${name}" is not a tool of the agent loop`);
+  return tool;
 }
+
+/** The tools a thread holds; those that change results are gated (`gate.ts`). */
+export function buildAgentTools(names: readonly string[], deps: AgentToolDeps): Tool[] {
+  const tools = names.map((name) => toolNamed(name, names, deps));
+  const gated = gatedNames(tools);
+  const gateDeps = { api: deps.api, hashIn: deps.outputs.hashIn };
+  return tools.map((tool) => gate(tool, gated, gateDeps));
+}
+
+/** A tool as an approved call runs it: not gated, and `report_output` bound to the approved file hashes. */
+export const approvedTool = (
+  name: string,
+  deps: AgentToolDeps,
+  fileHashes: Readonly<Record<string, string>>,
+): Tool => toolNamed(name, [name], deps, fileHashes);

@@ -28,8 +28,8 @@
  */
 
 import { madeFromSchema, toCheckItemSchema } from "@voluma/contracts/agent-events";
+import { agentLog } from "@voluma/contracts/agents";
 import {
-  labelMapOf,
   type OutputEntry,
   type OutputKind,
   outputKindSchema,
@@ -39,6 +39,7 @@ import { OUTPUTS_MOUNT } from "@voluma/contracts/output-fold";
 import {
   outputsPrefix,
   relativePathSchema,
+  runPrefix,
   versionPath,
   versionPrefix,
 } from "@voluma/contracts/r2";
@@ -46,7 +47,8 @@ import type { Volume } from "@voluma/contracts/review";
 import { toWorld } from "@voluma/contracts/ruler";
 import { z } from "zod";
 import { EvidenceNotFound, EvidenceRefused } from "../../ports/evidence";
-import type { Tool } from "../../tools/tool";
+import type { Tool, ToolContext } from "../../tools/tool";
+import { briefOf } from "../deliveries";
 import { reportOutputId } from "../effects";
 import {
   answerOf,
@@ -270,10 +272,9 @@ function planOf(deps: OutputToolDeps, caller: Caller, input: ReportOutputInput):
   let plan: Plan;
   if (entry) {
     // Its voxels are its map's: the map's version covers it (`resolvedId`, `outputBlocks`).
-    const map = labelMapOf(deps.catalog, id);
-    if (map !== id && entry.kind === "overlay" && entry.label)
+    if (entry.kind === "overlay" && entry.label)
       throw new Refusal(
-        `${id} is label ${entry.label.value} of ${map}: report ${map}; its version covers ${id}.`,
+        `${id} is label ${entry.label.value} of ${entry.label.of}: report ${entry.label.of}; its version covers ${id}.`,
       );
     if (input.kind && input.kind !== entry.kind)
       throw new Refusal(`${id} is ${KEYS[entry.kind]} in this workflow, not ${KEYS[input.kind]}.`);
@@ -375,13 +376,67 @@ function inOwnFolder(dir: string, resolved: string, what: string): string {
   return rel;
 }
 
-export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
+/** A worker started with `outputs` may report only those and its own `<name>/...` intermediates. */
+function workerLimit(deps: OutputToolDeps, caller: Caller, threadId: string, id: string) {
+  const d = agentLog(deps.recorder.events());
+  const record = d.records.get(threadId);
+  const outputs = record && caller.role === "worker" ? briefOf(d, record).outputs : undefined;
+  if (outputs && !outputs.includes(id) && !id.startsWith(`${caller.name}/`))
+    throw new Refusal(
+      `You were started to correct ${outputs.join(", ")} and may report only ${outputs.length === 1 ? "that" : "those"}. Tell main what else you see.`,
+    );
+}
+
+/**
+ * The checks of a call that need no copy: who may report what, then the catalog's rules and the
+ * names of the files. Both `preflight` and the call itself run them before anything is copied.
+ */
+function checkedPlan(deps: OutputToolDeps, ctx: ToolContext, input: ReportOutputInput) {
+  const caller = callerOf(deps, ctx.threadId);
+  workerLimit(deps, caller, ctx.threadId, input.id);
+  const plan = planOf(deps, caller, input);
+  const layout = deps.layoutOf(ctx.threadId);
+  const names = [...(input.files ?? []), ...input.evidence].map((n) => layout.resolve(n));
+  if (new Set(names).size !== names.length) throw new Refusal("A file is named twice.");
+  for (const n of input.files ?? [])
+    if (inOwnFolder(layout.dir, layout.resolve(n), "The file").startsWith("evidence/"))
+      throw new Refusal(
+        "evidence/ is where the evidence of a version goes; give the file another path.",
+      );
+  return { caller, plan };
+}
+
+/**
+ * `expected` (an approved call's `fileHashes`, keyed as `changesResults.files` keys them): a file
+ * whose sha256, computed during the copy, differs from the one the researcher approved is refused
+ * before anything is appended. Hash binding covers this tool only: the other gated tools are
+ * bound by being the stored arguments, and a kept output's files are immutable.
+ */
+export function reportOutput(
+  deps: OutputToolDeps,
+  expected?: Readonly<Record<string, string>>,
+): Tool<typeof inputSchema> {
   const { recorder, publish, runId, section } = deps;
+  const keyOf = (ctx: ToolContext, path: string) =>
+    deps.layoutOf(ctx.threadId).keyOf(path, "read").slice(runPrefix(runId).length);
   return {
     name: "report_output",
     description:
       "Publish one version of an output: a value, or the files that make it. The files are moved out of your /work folder into /outputs/<id>/<toolCallId>/, which nobody can change, and recorded with what you made it from. Reporting an id again publishes a new version; the old one stays. Everything you cite in madeFrom must already be published.",
     input: inputSchema,
+    changesResults: {
+      preflight: async (input, ctx) => {
+        checkedPlan(deps, ctx, input);
+      },
+      files: (input, ctx) =>
+        [...(input.files ?? []), ...input.evidence].map((n) => {
+          const path = deps.layoutOf(ctx.threadId).resolve(n);
+          return { path, key: keyOf(ctx, path) };
+        }),
+      outputs: (input) => [input.id],
+      summary: (input, titleOf) => `Publish a new version of ${titleOf(input.id)}.`,
+      makesStale: true,
+    },
     execute: (input, ctx) =>
       result(async () => {
         const id = reportOutputId(ctx.threadId, ctx.toolCallId);
@@ -413,8 +468,7 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           return answerOf(done);
         }
 
-        const caller = callerOf(deps, ctx.threadId);
-        const plan = planOf(deps, caller, input);
+        const { caller, plan } = checkedPlan(deps, ctx, input);
         const publishFile = async (named: string, folder: "" | "evidence/") => {
           const path = layout.resolve(named);
           const rel = inOwnFolder(layout.dir, path, "The file");
@@ -433,15 +487,13 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
               if (error instanceof EvidenceRefused) throw new Refusal(error.message);
               throw error;
             });
+          const approved = expected?.[keyOf(ctx, path)];
+          if (approved !== undefined && approved !== sha256)
+            throw new Refusal(
+              `${rel} changed after the researcher was asked: ask again with the file as it is now.`,
+            );
           return { name: `${folder}${rel}`, sha256 };
         };
-        const names = [...(input.files ?? []), ...input.evidence].map((n) => layout.resolve(n));
-        if (new Set(names).size !== names.length) throw new Refusal("A file is named twice.");
-        for (const n of input.files ?? [])
-          if (inOwnFolder(layout.dir, layout.resolve(n), "The file").startsWith("evidence/"))
-            throw new Refusal(
-              "evidence/ is where the evidence of a version goes; give the file another path.",
-            );
 
         const first = layout.resolve(input.files?.[0] ?? "");
         const sidecarPath = `${first.slice(0, -4)}.json`;

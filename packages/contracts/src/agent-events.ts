@@ -39,7 +39,9 @@ export const toCheckItemSchema = z.object({ title: nonEmpty, focus: focusSchema.
  * `expect` appends lines to an output's own. `labels` maps each label overlay to the map whose
  * voxels it holds (`{overlayId: mapId}`); the runner records the catalog's whole map once, at the
  * start, so the fold resolves a link to an overlay that no list entry carries. It sits on the
- * change, not on `add` entries, because it is the catalog's, not part of the list.
+ * change, not on `add` entries, because it is the catalog's, not part of the list. It must ride
+ * on a change that also adds: a parser from before `labels` drops it, and a change left with
+ * nothing else fails "a change changes something".
  */
 export const outputsChangedSchema = z
   .object({
@@ -166,6 +168,10 @@ export const approvalRequestedSchema = z.object({
   args: z.unknown(),
   fileHashes: z.record(relativePathSchema, sha256Schema),
   summary: nonEmpty,
+  /** The outputs the call names (`Tool.changesResults.outputs`), by catalog id: what it changes, and what a decline leaves to the researcher. */
+  outputs: z.array(outputRefSchema).optional(),
+  /** The outputs the call makes out of date if it runs (the transitive dependents of what it changes), for the researcher's card. */
+  outOfDate: z.array(outputRefSchema).optional(),
 });
 
 /** The researcher's answer to an `approval.requested`; written by the API. */

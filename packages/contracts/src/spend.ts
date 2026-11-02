@@ -104,15 +104,15 @@ export type CacheState = { prompt: number; active: boolean };
  * is an earlier call, and this call's `cacheRead` is below half the earlier call's full prompt
  * (`input + cacheRead + cacheWrite`): the cache the earlier call left was lost. The first call
  * is never a miss. A call that reports no prompt tokens at all (an aborted or failed reply)
- * is unreported, not a miss, and leaves the state as it was. Ported from meridian-flow's
- * `isCacheReset`.
+ * is unreported: `miss` is undefined and the state is left as it was. Ported from
+ * meridian-flow's `isCacheReset`.
  */
 export function cacheStep(
   prev: CacheState | undefined,
   u: ModelUsage,
-): { miss: boolean; next: CacheState } {
+): { miss: boolean | undefined; next: CacheState } {
   const prompt = u.input + u.cacheRead + u.cacheWrite;
-  if (prompt === 0) return { miss: false, next: prev ?? { prompt: 0, active: false } };
+  if (prompt === 0) return { miss: undefined, next: prev ?? { prompt: 0, active: false } };
   return {
     miss: !!prev?.active && u.cacheRead < prev.prompt * 0.5,
     next: {
@@ -120,6 +120,26 @@ export function cacheStep(
       active: !!prev?.active || u.cacheRead > 0 || u.cacheWrite > 0,
     },
   };
+}
+
+/**
+ * Whether a thread's system message is a "Tools changed" notice. The tool set is part of the
+ * prompt prefix, so the thread's next call is expected to miss the cache.
+ */
+export const isToolsChangedNotice = (m: { role: string; text: string }) =>
+  m.role === "system" && m.text.startsWith("Tools changed");
+
+/**
+ * A `cacheStep` miss judged against what came before it in its thread: `expected` right after a
+ * "Tools changed" notice (`isToolsChangedNotice`), else `unexpected`; undefined for a hit or an
+ * unreported call. A compaction summary is not judged at all: callers reset the baseline there.
+ */
+export function missKind(
+  miss: boolean | undefined,
+  toolsChanged: boolean,
+): "expected" | "unexpected" | undefined {
+  if (!miss) return undefined;
+  return toolsChanged ? "expected" : "unexpected";
 }
 
 const sum = (spends: Iterable<Spend>): Spend => {
@@ -198,7 +218,7 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         else {
           const step = cacheStep(cache.get(e.threadId), used);
           cache.set(e.threadId, step.next);
-          miss = step.miss;
+          miss = step.miss === true;
         }
         add(e.threadId, (s) => {
           s.cacheMisses += miss ? 1 : 0;
