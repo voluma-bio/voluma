@@ -7,6 +7,7 @@
  */
 
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import type { BashRuntime } from "./bash-runtime";
 import type { ThreadLayout } from "./layout";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
@@ -48,6 +49,8 @@ export interface Shared {
   outputs: Outputs;
   session: SandboxSession;
   pool: Threads;
+  /** The claim's background commands (`bash-runtime.ts`), built once for every loop. */
+  bash: BashRuntime;
   /** The run's one lock. */
   section: Section;
   signal: AbortSignal;

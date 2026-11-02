@@ -71,7 +71,7 @@ export function tasksWire(o: TasksWireOptions): Wire {
 }
 
 async function runTasks(o: Shared, plan: readonly PlanTask[], layout: RunLayout): Promise<void> {
-  const { runId, rootThreadId, recorder, definition, session, pool, signal } = o;
+  const { runId, rootThreadId, recorder, definition, session, pool, bash, signal } = o;
   const main = definition.agents.main;
   // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
   await keepOutputs({
@@ -111,6 +111,7 @@ async function runTasks(o: Shared, plan: readonly PlanTask[], layout: RunLayout)
     tools: (thread, agents) =>
       buildTools(thread.tools, {
         layout: thread,
+        bash,
         files: o.files,
         runtime,
         main: {
