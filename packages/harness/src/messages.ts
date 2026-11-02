@@ -147,6 +147,10 @@ export const deliveryText = (
 export const livenessNudge = (state: string, asking = false) =>
   `Nothing is running and the run is not finished: ${asking ? "answer the open question (nothing else can move until you do), then " : ""}start the next workers, or finish the run.\n\n${state}`;
 
+/** The agent loop's nudge to an idle main: its tools are messages, workers and `close`. */
+export const agentLivenessNudge = (state: string) =>
+  `Nothing is running and the run is not finished: answer a worker, start one, or close the run.\n\n${state}`;
+
 /** What the researcher reads when the main agent stopped moving and code ended the run. */
 export const STUCK_PLAN_REASON = "The AI stopped before every task was done, so the run ended.";
 export const STUCK_SKIP_REASON = "The run stopped before this task was done";

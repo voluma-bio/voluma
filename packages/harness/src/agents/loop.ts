@@ -30,7 +30,7 @@ import type { BashRuntime } from "../bash-runtime";
 import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
 import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "../loop-config";
 import { loopShell, RUNTIME, type Section, type Step } from "../loop-shell";
-import { cutOffText, livenessNudge, PROVIDER_FAILED_RESUME } from "../messages";
+import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "../messages";
 import type { Recorder } from "../recorder";
 import { threadIdOf } from "../thread-id";
 import type { ThreadSpec, Threads } from "../threads";
@@ -497,7 +497,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const events = recorder.events();
     if (d.emptyDeliveries < stuckLimit) {
       const state = `Agents:\n${agentList(d, stateOf, now())}`;
-      await resume(m, livenessNudge(state), { kind: "runtime", covers: d.lastEventId });
+      await resume(m, agentLivenessNudge(state), { kind: "runtime", covers: d.lastEventId });
       return true;
     }
     const pending = pendingFinal(events);
