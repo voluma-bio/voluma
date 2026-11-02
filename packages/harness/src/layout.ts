@@ -13,10 +13,14 @@
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
  * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
  *
- * The agent model (`forAgent`) has one shape: its own `/work/<folder>` read-write; `/outputs` (the published
- * versions), `/run` (the files rendered from the events), `/inputs` and `/workflow` read-only; no other
- * agent's folder; and host-side, every agent may `read` `/work/main/plan.md`. The folder is the agent's name,
- * except that every main thread (`main`, `main.2`) works in `main`; the sandbox keeps the thread's name.
+ * The agent model (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work`
+ * (so main's `plan.md` too), `/outputs` (the published versions), `/run` (the files rendered from the
+ * events), `/inputs` and `/workflow` read-only. Mounts must not overlap (a nested one is unreliable on
+ * Modal: the same spec once wrote and once failed read-only), so the sandbox mounts each peer folder that
+ * exists when it is created (`peers`); host-side tools (`read`, `view_image`) see all of `/work`, peers
+ * that started later included. `others` is the one place that narrows what an agent sees of the rest
+ * (a blind worker: `none`). The folder is the agent's name, except that every main thread (`main`,
+ * `main.2`) works in `main`; the sandbox keeps the thread's name.
  *
  * `/inputs` is mounted read-only in every sandbox. Only a thread of a task whose `tasks.json`
  * entry sets `copyInputs` gets it copied to local disk (`stage`); the others read the mount.
@@ -48,8 +52,6 @@ export const REVIEW = "/review";
 const INPUT_REVIEW = "/input-review";
 const RUN = "/run";
 const WORK = "/work";
-/** The one file of another agent's folder that every agent may `read` (host-side, never mounted). */
-const PLAN = "plan.md";
 
 export interface ThreadLayout {
   /** What the thread is in the run (main, a task's worker, a task's check). */
@@ -120,6 +122,10 @@ export interface RunLayout {
     name: string;
     role: "main" | "worker";
     tools: readonly string[];
+    /** The `/work` folders of the other agents that exist now: mounted read-only in the sandbox. */
+    peers: readonly string[];
+    /** `none`: the agent sees only its own folder (a blind worker). Default `all`. */
+    others?: "all" | "none";
   }): ThreadLayout;
 }
 
@@ -274,24 +280,30 @@ export function runLayout({
 
   return {
     convert,
-    forAgent({ name, role, tools }) {
+    forAgent({ name, role, tools, peers, others = "all" }) {
       const folder = role === "main" ? "main" : name;
       const dir = `${WORK}/${folder}`;
       const work = workPrefix(runId);
       const own: SandboxMount = { path: dir, prefix: `${work}${folder}/`, access: "read-write" };
+      // The one seam for what of /work an agent sees besides its own folder.
+      const peerMounts: SandboxMount[] =
+        others === "none"
+          ? []
+          : [...new Set(peers)]
+              .filter((p) => p !== folder)
+              .map((p) => ({ path: `${WORK}/${p}`, prefix: `${work}${p}/`, access: "read-only" }));
+      const hostWork: SandboxMount[] =
+        others === "none" ? [] : [{ path: WORK, prefix: work, access: "read-only" }];
       const mounts: SandboxMount[] = [
         inputs(false),
         workflow,
         outputs("read-only"),
         { path: RUN, prefix: runFilesPrefix(runId), access: "read-only" },
         own,
+        ...peerMounts,
       ];
-      const plan: SandboxMount = {
-        path: `${WORK}/main/${PLAN}`,
-        prefix: `${work}main/${PLAN}`,
-        access: "read-only",
-      };
-      const table = [...mounts, plan];
+      // `own` before the whole of /work: the more specific folder matches first.
+      const table = [...mounts, ...hostWork];
       const resolve = (path: string) =>
         path.startsWith("/") ? path : `${dir}/${path.replace(/^(\.\/)+/, "")}`;
       return {
@@ -309,8 +321,8 @@ export function runLayout({
         gateway: tools.includes("segment_sam"),
         description:
           `${common(false)}- ${OUTPUTS} holds every published output version, one folder per version: read it, do not modify it. ${RUN}/outputs.yaml lists the versions and ${RUN}/final-outputs.yaml the outputs the researcher asked for; both are rewritten as the run goes.\n` +
-          `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, and no other agent has it mounted; share a result by reporting it as an output. ` +
-          `Every agent can read ${WORK}/main/${PLAN} with read.`,
+          `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, and the other agents' folders under ${WORK} are read-only to you; read their files, never change them. A folder of an agent that started after your sandbox did is visible to read and view_image at once, and to bash after the sandbox restarts. ` +
+          `Reporting an output moves the files you name out of your folder into ${OUTPUTS}, leaving a <file>.removed.txt that says where.`,
         restartNote: `The sandbox was restarted. ${dir} was kept, and local files elsewhere (including /tmp) are gone.`,
         toolOutputPath: (toolCallId) => `${dir}/.tool-output/${toolCallId}`,
         resolve,
