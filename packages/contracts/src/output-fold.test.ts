@@ -198,6 +198,32 @@ describe("label overlays", () => {
   });
 });
 
+describe("a label overlay the catalog names", () => {
+  it("takes its map's status and needs-you, and a new catalog is not served the old fold", () => {
+    const catalog = [
+      scan,
+      overlay("labels"),
+      {
+        kind: "overlay",
+        id: "femur",
+        name: "femur",
+        base: "scan",
+        label: { of: "labels", value: 1 },
+      },
+    ] as OutputCatalog;
+    const r = run();
+    r.final(scan, overlay("labels"), overlay("femur"));
+    r.publish("labels", 1, { "l.npy": "a1" }, [], { toCheck: [{ title: "edge" }] });
+    const bare = outputsFold(r.events);
+    expect(bare.byId.get("femur")?.status).toBe("pending");
+    const fold = outputsFold(r.events, catalog);
+    expect(fold).not.toBe(bare);
+    expect(fold.byId.get("femur")).toMatchObject({ status: "to-check", needsYou: true });
+    expect(fold.byId.get("femur")?.latest).toBeUndefined();
+    expect(outputsFold(r.events, catalog)).toBe(fold);
+  });
+});
+
 describe("needing you", () => {
   it("counts a final label overlay and a value on it through the map's open item", () => {
     const r = run();

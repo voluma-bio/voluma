@@ -16,7 +16,7 @@
  */
 import { type AgentState, agentLog, agentState } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
-import { type LinkRole, labelMapOf, type OutputCatalog } from "@voluma/contracts/output-catalog";
+import type { LinkRole, OutputCatalog } from "@voluma/contracts/output-catalog";
 import type {
   OutputState,
   OutputStatus,
@@ -47,18 +47,17 @@ export type TrailRow = {
   from: number[];
 };
 
-/** What a link to `id` is a link to: its map for a label overlay (always: it has no versions), else `id`. */
-export const resolveLink = (fold: OutputsFold, catalog: OutputCatalog, id: string) =>
-  fold.labels.get(id) ?? labelMapOf(catalog, id);
+/** What a link to `id` is a link to: its map for a label overlay (it has no versions), else `id`. The fold resolved it. */
+export const resolveLink = (fold: OutputsFold, id: string) => fold.labels.get(id) ?? id;
 
 type Link = { id: string; role?: LinkRole; version?: number };
 
 /** The latest version's links, resolved, self-links dropped, the first of each output kept. */
-function linksOf(fold: OutputsFold, catalog: OutputCatalog, id: string): OutputVersion["madeFrom"] {
+function linksOf(fold: OutputsFold, id: string): OutputVersion["madeFrom"] {
   const seen = new Set<string>();
   const links: OutputVersion["madeFrom"] = [];
   for (const link of fold.byId.get(id)?.latest?.madeFrom ?? []) {
-    const to = resolveLink(fold, catalog, link.id);
+    const to = resolveLink(fold, link.id);
     if (to === id || seen.has(to)) continue;
     seen.add(to);
     links.push({ ...link, id: to });
@@ -101,8 +100,8 @@ function walk(fold: OutputsFold, root: string, next: (id: string) => Link[]): Tr
 }
 
 /** The trail behind `id`: the root, then what its latest version was made from, recursively. */
-export const trailOf = (fold: OutputsFold, catalog: OutputCatalog, id: string): TrailRow[] =>
-  walk(fold, resolveLink(fold, catalog, id), (at) => linksOf(fold, catalog, at));
+export const trailOf = (fold: OutputsFold, id: string): TrailRow[] =>
+  walk(fold, resolveLink(fold, id), (at) => linksOf(fold, at));
 
 /** One link of a chain: absent `status` while nothing of it is published. */
 export type ChainLink = { id: string; status?: OutputStatus };
@@ -127,7 +126,7 @@ function spineOf(fold: OutputsFold, catalog: OutputCatalog, id: string, on: stri
           (ls) => ls.length > 0,
         );
   if (published?.length) return published.map((l) => ({ id: l.id }));
-  const map = resolveLink(fold, catalog, id);
+  const map = resolveLink(fold, id);
   if (map !== id) return [{ id: map }];
   const back =
     entry?.kind === "overlay" ? entry.base : entry?.kind === "base" ? entry.from : state?.base;
@@ -136,8 +135,8 @@ function spineOf(fold: OutputsFold, catalog: OutputCatalog, id: string, on: stri
 
 /**
  * The chain a final output rests on, one array per step back, nearest first ("Patella ‹ Bone
- * labels ‹ Scan"). Each link is ticked by its own published version and status; a label overlay
- * with none is not yet in, whatever its map is.
+ * labels ‹ Scan"). Each link is ticked by its status, which for a label overlay is its map's;
+ * one with nothing published (pending or missing) is not yet in.
  */
 export function chainOf(
   fold: OutputsFold,
@@ -150,16 +149,20 @@ export function chainOf(
   for (const r of rows.slice(1)) {
     const step = steps[r.depth - 1] ?? [];
     steps[r.depth - 1] = step;
-    step.push({ id: r.id, ...(r.state?.latest && { status: r.state.status }) });
+    const status = r.state?.status;
+    step.push({
+      id: r.id,
+      ...(status && status !== "pending" && status !== "missing" && { status }),
+    });
   }
   return steps;
 }
 
 /** Every output whose latest version was made, directly or not, from `id`. */
-export function madeFromIt(fold: OutputsFold, catalog: OutputCatalog, id: string): Set<string> {
+export function madeFromIt(fold: OutputsFold, id: string): Set<string> {
   const users = new Map<string, string[]>();
   for (const o of fold.outputs)
-    for (const link of linksOf(fold, catalog, o.id))
+    for (const link of linksOf(fold, o.id))
       users.set(link.id, [...(users.get(link.id) ?? []), o.id]);
   const out = new Set<string>();
   const visit = (at: string) => {
@@ -169,7 +172,7 @@ export function madeFromIt(fold: OutputsFold, catalog: OutputCatalog, id: string
         visit(next);
       }
   };
-  visit(resolveLink(fold, catalog, id));
+  visit(resolveLink(fold, id));
   return out;
 }
 
@@ -187,7 +190,7 @@ export type RunGraph = {
 };
 
 /** The whole run's made-from graph: every output with a version, and every final output, by column. */
-export function runGraph(fold: OutputsFold, catalog: OutputCatalog): RunGraph {
+export function runGraph(fold: OutputsFold): RunGraph {
   const published = fold.outputs.filter((o) => o.latest || o.final);
   const has = new Set(published.map((o) => o.id));
   const memo = new Map<string, number>();
@@ -199,7 +202,7 @@ export function runGraph(fold: OutputsFold, catalog: OutputCatalog): RunGraph {
     visiting.add(id);
     const d = Math.max(
       0,
-      ...linksOf(fold, catalog, id)
+      ...linksOf(fold, id)
         .filter((l) => has.has(l.id))
         .map((l) => depth(l.id) + 1),
     );
@@ -215,7 +218,7 @@ export function runGraph(fold: OutputsFold, catalog: OutputCatalog): RunGraph {
     column: o.final ? last : depth(o.id),
   }));
   const links = published.flatMap((o) =>
-    linksOf(fold, catalog, o.id)
+    linksOf(fold, o.id)
       .filter((l) => has.has(l.id))
       .map((l) => ({ from: l.id, to: o.id, role: l.role })),
   );

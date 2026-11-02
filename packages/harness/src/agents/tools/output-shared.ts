@@ -4,7 +4,7 @@
  * version inside the run's section, so a version number is read and used with no other write in
  * between.
  */
-import { labelMapOf, type OutputCatalog } from "@voluma/contracts/output-catalog";
+import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
 import type { ThreadLayout } from "../../layout";
 import type { Publish } from "../../ports/publish";
@@ -54,7 +54,7 @@ export function callerOf(deps: OutputToolDeps, threadId: string): Caller {
 export const eventById = (deps: OutputToolDeps, id: string) =>
   deps.recorder.events().find((e) => e.id === id);
 
-export const foldOf = (deps: OutputToolDeps) => outputsFold(deps.recorder.events());
+export const foldOf = (deps: OutputToolDeps) => outputsFold(deps.recorder.events(), deps.catalog);
 
 /** The next version number of `id`. Read inside the section. */
 export const nextVersion = (deps: OutputToolDeps, id: string) =>
@@ -76,11 +76,6 @@ export function answerOf(p: OutputEvent) {
   };
 }
 
-/**
- * The id a link resolves to: a label overlay is its map (`output-fold.ts`), found in the catalog
- * or in the log's `outputs.changed` entries.
- */
-export function resolvedId(deps: OutputToolDeps, id: string): string {
-  const map = labelMapOf(deps.catalog, id);
-  return map !== id ? map : (foldOf(deps).labels.get(id) ?? id);
-}
+/** The id a link resolves to: a label overlay is its map, as the fold resolved it (`output-fold.ts`). */
+export const resolvedId = (deps: OutputToolDeps, id: string): string =>
+  foldOf(deps).labels.get(id) ?? id;

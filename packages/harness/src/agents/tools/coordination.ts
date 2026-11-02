@@ -186,12 +186,12 @@ function mainCloseRefusal(api: AgentsApi, d: AgentLog): string | undefined {
   const open = openWorkers(d, (id) => api.state(d.records.get(id) as AgentRecord) === "working");
   if (open.length > 0)
     return `Workers are still open: ${open.map((r) => r.name).join(", ")}. Close each with close_worker first.`;
-  const stale = undecidedOutOfDate(events);
+  const stale = undecidedOutOfDate(events, api.catalog);
   if (stale.length > 0)
     return `These outputs are out of date and you have not decided them: ${stale.join(", ")}. Keep each with keep_output if it still holds, or have it redone.`;
   if (d.hasUnansweredPerson)
     return "The researcher wrote and you have not answered them: message researcher first.";
-  const pending = pendingFinal(events);
+  const pending = pendingFinal(events, api.catalog);
   if (pending.length > 0)
     return `These final outputs have no version yet: ${pending.join(", ")}. Make them, or mark them missing with change_outputs.`;
   return undefined;
@@ -404,7 +404,7 @@ const changeOutputsTool = (api: AgentsApi): Tool =>
           if (role !== "main") throw new Refusal("Only main changes the final outputs.");
           const id = changeOutputsId(ctx.threadId, ctx.toolCallId);
           if (d.written.has(id)) return text("The final outputs are changed.");
-          const list = outputsFold(api.recorder.events()).list;
+          const list = outputsFold(api.recorder.events(), api.catalog).list;
           const change = { by: "main" as const, ...input };
           if (input.add)
             change.add = [

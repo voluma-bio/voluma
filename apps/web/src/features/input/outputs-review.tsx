@@ -117,7 +117,7 @@ export function OutputsReview({
   });
   const events = useEvents();
   const catalog = useMemo(() => outputCatalogOf(run.workflows[0]?.path), [run.workflows]);
-  const fold = outputsFold(events);
+  const fold = useMemo(() => outputsFold(events, catalog), [events, catalog]);
   const review = useMemo(() => outputsReview(fold, catalog), [fold, catalog]);
   const assets = useMemo(() => reviewAssetsOf(events), [events]);
   const blocks = useMemo(
@@ -401,13 +401,7 @@ export function OutputsReview({
               {panes}
             </div>
             {centre === "run" && (
-              <RunGraphView
-                fold={fold}
-                catalog={catalog}
-                selected={inView?.id}
-                rows={review.rows}
-                onPick={show}
-              />
+              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
             )}
             {centre === "agents" && (
               <RunAgents events={events} fold={fold} live={live} nameOf={nameOf} />
