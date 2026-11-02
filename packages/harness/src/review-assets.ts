@@ -8,7 +8,7 @@
  * Queue: every `output` and `output.published` event in the recorder's view, from the first (a resume reads the whole
  * log), minus the files that already have an `assets.*` event; new
  * outputs join as the recorder stores them (polled, one cheap scan of the new events). One file at a
- * time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session, which
+ * time, in the run's `convert` sandbox (`convertLayout`, from the sandbox session, which
  * creates it at the first file and replaces one the provider ended, running a command it
  * refused once more). A conversion that fails is retried once (not after a timeout or bad
  * arguments, not when stopped) and then recorded; a sandbox that dies or cannot be created is

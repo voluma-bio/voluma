@@ -183,8 +183,8 @@ function lookup(table: readonly SandboxMount[], path: string, access: "read" | "
 
 /**
  * The review-asset converter's sandbox, outside the threads and the same for every loop: reads
- * the evidence, the published versions (`/outputs`, the agent loop's) and the workflow, writes
- * the run's review prefix and the input's conversion cache, no network. The converter imports
+ * the evidence, the published versions (`/outputs`, the agent loop's) and the workflow, writes the
+ * run's review prefix and the input's conversion cache, no network. The converter imports
  * `sidecar` through the run's PYTHONPATH.
  */
 export function convertLayout(o: {
