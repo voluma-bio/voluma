@@ -29,7 +29,19 @@ run agent.
 - On a field with no patella, a box on a small anterior piece returned a 0.06 mm³ sesamoid called "patella".
 - Small structures in the big-bone request cost the patella: Dice 0.95 to 0.86 (the track loses frames and follows the femoral shaft).
 - Trimmed small tracks run 10-20% under the reference; the trim rule (confidence 0.5, unbroken run) was set on this one scan.
-  The "big bones win overlaps" merge was not run in the experiment, which showed a three-piece structure leaking into the patella.
+  In the experiment a three-piece structure leaked into the patella; "big bones win overlaps" was added for that and never tested.
+- Overlap rule of `merge_labels.py`, tested 2026-11-02 on the saved two-request SAM output of both scans (domain HU >= 2500, Dice against
+  OA6's review-07 labels; OA7 has no reference, so classic labels stand in, which are not ground truth). Rules: big wins / small wins / nearest own voxel:
+  - OA7-1L (staging run 8b05ef94): SAM's femur mask covered 32% of each sesamoid. Lateral sesamoid 0.0718 / 0.1067 / 0.0930 mm3 (SAM request 0.1067),
+    medial 0.0642 / 0.0942 / 0.0940; femur 11.059 / 10.994 / 11.008. Against classic, lateral Dice 0.823 / 0.808 / 0.841, medial 0.781 / 0.966 / 0.965.
+    The femur mask also sits on the lower half of the lateral sesamoid, a cut of its own that the nearest rule only halves.
+  - OA6-1RK, on the oriented grid (the saved requests' own grid, not the scan grid): the patella-leaking piece (temp 63, 356,590 voxels, 335,005 of them
+    kept by the patella). Patella Dice 0.941 / 0.805 / 0.942 (small wins: 2.217 -> 1.798 mm3); label 9 0.803 / 0.540 / 0.870; lateral sesamoid
+    0.876 / 0.919 / 0.918; label 12 0.909 / 0.941 / 0.930. Femur and tibia move under 0.002 in every rule.
+  - The nearest rule keeps the leak out because the leaking piece sits inside the patella, so the patella's own voxels are nearer to the
+    contested voxels; the same rule gives a sesamoid its voxels where the femur claim is a thin slab over it. It names no anatomy, and a
+    leak that covers a whole big label hands that label over whole (`big_lost` shows it).
+  - Memory: 1.8 GB peak on OA7-1L (277M voxels, 10 s), 2.3 GB on OA6-1RK (311M voxels), about 7 bytes per voxel; the sandbox has 8 GiB.
 - Repeat requests on one stack agreed at Dice 0.994-0.998.
 
 ## segmentation-check
