@@ -220,7 +220,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
     trail.add(id);
     for (const link of latestOf(id)?.madeFrom ?? []) walk(mapOf(link.id));
   };
-  for (const e of finalEntries) walk(e.id);
+  // A final label overlay is walked as its map, so only the map is ever undecided.
+  for (const e of finalEntries) walk(mapOf(e.id));
 
   const sectionOf = new Map<string, string>();
   for (const s of sectionsOf(list)) for (const o of s.outputs) sectionOf.set(o.id, s.title);
@@ -236,8 +237,10 @@ function compute(events: readonly RunEvent[]): OutputsFold {
     const baseOf = kind?.base ?? (typeof entry?.base === "string" ? entry.base : undefined);
     // A label has no version of its own: its map's version covers it.
     const covered = latest ?? latestOf(id);
+    const missingId = missing.has(id) ? id : mapOf(id);
+    const isMissing = missing.has(missingId);
     const status: OutputStatus = !covered
-      ? missing.has(id)
+      ? isMissing
         ? "missing"
         : "pending"
       : stale
@@ -254,7 +257,7 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       ...(sectionOf.has(id) && { section: sectionOf.get(id) }),
       ...(entry && { entry }),
       status,
-      ...(missing.has(id) && !latest && { missingReason: missing.get(id) }),
+      ...(isMissing && !covered && { missingReason: missing.get(missingId) }),
       outOfDate: stale,
       undecided: stale && trail.has(id),
       versions: vs,
