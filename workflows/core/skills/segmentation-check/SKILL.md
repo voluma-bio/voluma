@@ -10,8 +10,9 @@ description: >
 
 SAM proposes; whoever reports the labels owns them. Code checks gate and eyes confirm: run `label_stats.py` and
 `unlabelled.py` first, then look at what they flag and at the 3D sheet (`visual-check`). Looking alone has passed a
-fragment carrying the wrong label. A labels volume is finished when every label passes the checks below and every
-disagreement the CT could not settle is a To check item that names its region. The workflow's `anatomy.json`
+fragment carrying the wrong label. A labels volume is finished when every flag the checks below raise is corrected
+or is a To check item that names its region, and so is every disagreement the CT could not settle. A flag you looked
+at and could not correct is finished as its To check item: report the labels. The workflow's `anatomy.json`
 holds the label table, the expected volumes and pieces, and which labels must touch which.
 
 ## 1. Each label
