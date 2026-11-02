@@ -253,6 +253,8 @@ export function pgRunQueue(
   modelOverride: string | null,
   /** `DEFAULT_RUN_HARNESS`: the loop of a run whose start names none. */
   defaultHarness: Harness,
+  /** Whether an organization's members may start the agent loop (index.ts). */
+  agentLoopOf: (labId: string) => boolean,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
@@ -348,10 +350,13 @@ export function pgRunQueue(
     if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
-    const harness = starts.harness ?? defaultHarness;
-    // Internal until the agent loop ships.
-    if (harness === "agents" && (caller.guest || starts.keys))
-      throw new HTTPException(403, { message: "The agent loop is not open to guests." });
+    // Internal until the agent loop ships: only allowed organizations (never guests) may ask
+    // for it, and the default loop applies to them alone, so flipping it never fails another
+    // account's run.
+    const loopOpen = agentLoopOf(reader.labId) && !caller.guest;
+    if (starts.harness === "agents" && !loopOpen)
+      throw new HTTPException(403, { message: "The agent loop is not open to this account yet." });
+    const harness = starts.harness ?? (loopOpen ? defaultHarness : "tasks");
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limitsOf(reader.labId), used, { credentials });
