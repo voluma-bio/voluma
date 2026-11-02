@@ -143,7 +143,7 @@ export async function leaveToResearcher(
 }
 
 export function keepOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
-  const { recorder, section } = deps;
+  const { section } = deps;
   return {
     name: "keep_output",
     description:
