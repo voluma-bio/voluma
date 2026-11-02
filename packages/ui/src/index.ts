@@ -85,7 +85,6 @@ export {
 export {
   AppShell,
   ShellHeading,
-  ShellLink,
   ShellPanel,
   type ShellPanelProps,
   type ShellSide,
@@ -118,3 +117,4 @@ export {
 export { Table, type TableColumn, type TableProps } from "./table";
 export { Thumbnail, type ThumbnailProps } from "./thumbnail";
 export { Tooltip, type TooltipProps } from "./tooltip";
+export { INPUT_WORD } from "./words";

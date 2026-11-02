@@ -29,12 +29,13 @@ import {
   groupOf,
   itemHref,
   needsYouOf,
+  placeOfStatus,
   runHref,
   scanStatus,
   shownStatus,
   type TaskState,
 } from "@voluma/run-view";
-import type { Status } from "@voluma/ui";
+import type { SampleGroup, Status } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { measurementsOf } from "../workflow-tasks";
 
@@ -182,7 +183,7 @@ export function segmentOf(scan: StudyScanDetail, output: OutputEntry): Segment {
 }
 
 /** Where a sample sits on the study page and in its `?status=` filter. */
-export type Place = "needs-you" | "running" | "done" | "not-started";
+export type Place = SampleGroup | "not-started";
 
 export const PLACES: { place: Place; title: string }[] = [
   { place: "needs-you", title: "Needs you" },
@@ -192,28 +193,12 @@ export const PLACES: { place: Place; title: string }[] = [
 ];
 
 /**
- * A sample's place, from its status (`scanStatus`), as the Samples tree groups it (`sampleTree`):
- * To check, a run paused for keys and a failed or stopped run need the researcher; a queued run
- * counts as running, since it starts by itself. A sample with no run is not in the tree.
+ * A scan's place on the study page and Compare: its group in the Samples tree (`placeOfStatus`,
+ * which also keeps an example's scans out of Needs you), or Not started with no run, which the
+ * tree leaves out.
  */
-export function placeOf(scan: StudyScanDetail): Place {
-  return scan.runs[0] ? placeOfStatus(scanStatus(scan).status) : "not-started";
-}
-
-/** The place of a sample whose newest run has this status. */
-export function placeOfStatus(status: Status): Place {
-  switch (status) {
-    case "check":
-    case "paused":
-    case "stopped":
-      return "needs-you";
-    case "running":
-    case "checking":
-    case "waiting":
-      return "running";
-    case "done":
-      return "done";
-  }
+export function placeOf(scan: StudyScanDetail, example: boolean): Place {
+  return scan.runs[0] ? placeOfStatus(scanStatus(scan).status, example) : "not-started";
 }
 
 export const placeParam = (value: string | null): Place | null =>

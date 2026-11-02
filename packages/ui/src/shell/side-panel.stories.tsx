@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Box, ListTree, MessageSquare, Sigma } from "lucide-react";
 import { useState } from "react";
 import { SampleTree } from "../sample-tree";
+import { INPUT_WORD } from "../words";
 import { AppShell } from "./shell";
 import { SidePanel } from "./side-panel";
 import { StoryRail } from "./story-rail";
@@ -10,7 +11,7 @@ import { StoryRail } from "./story-rail";
  * **What:** a screen's side panel, one per side: tabs (the left side) or a title with tools (the
  * right side), a seam to resize it, and a fold button. **Why:** the scan and the study share one
  * frame whose sides keep their width across pages. **Where:** the scan page (Conversation and
- * Samples; Final outputs) and the study pages.
+ * Scans; Final outputs) and the study pages.
  *
  * Try: drag a seam (or focus it and use the arrow keys); fold a side with its button, `\\` or `]`,
  * both with F; a folded side is a 28 px strip with its icon and badge, and what is inside stays
@@ -52,7 +53,7 @@ function Page({ theme, waiting }: { theme: "light" | "dark"; waiting?: boolean }
             },
             {
               id: "samples",
-              label: "Samples",
+              label: INPUT_WORD.Many,
               icon: <ListTree />,
               content: (
                 <SampleTree

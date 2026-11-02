@@ -1,9 +1,9 @@
 /**
- * A study (`/studies/:id/*`): loads it once for its two pages (the samples, and Compare), puts
- * "Studies › <study> (› Compare)" and "Next sample that needs you" in the header line, and the
- * Samples tree on the left side (this study open, the lab's other studies below). Pages read the
+ * A study (`/studies/:id/*`): loads it once for its two pages (the scans, and Compare), puts
+ * "Studies › <study> (› Compare)" and "Next scan that needs you" in the header line, and the
+ * scan tree on the left side (this study open, the lab's other studies below). Pages read the
  * study through `useStudy` and render the centre, and a right side if they have one, beside the
- * tree. A study of one has no study page: it opens its scan. While a sample is still running the
+ * tree. A study of one has no study page: it opens its scan. While a scan is still running the
  * study refetches every 5 s.
  */
 import { useQuery } from "@tanstack/react-query";
@@ -16,6 +16,7 @@ import {
   Breadcrumb,
   Button,
   ErrorState,
+  INPUT_WORD,
   LoadingState,
   SampleTree,
   ShellHeading,
@@ -26,7 +27,7 @@ import { ChevronRight, ListTree } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router";
 import { linkTo } from "../link";
-import { byMostToCheck, reviewHref, scanHref } from "./study-model";
+import { byMostToCheck, placeOf, reviewHref, scanHref } from "./study-model";
 
 export type StudyContext = { detail: StudyDetail; workflow: BundledWorkflow; me: Me };
 
@@ -90,12 +91,14 @@ export function StudyLayout() {
   );
 }
 
-/** The header line: where you are, and the next sample that needs you. */
+/** The header line: where you are, and the next scan that needs you. */
 function StudyHeading({ detail }: { detail: StudyDetail }) {
   const { pathname } = useLocation();
   const base = `/studies/${detail.study.id}`;
   const compare = pathname.startsWith(`${base}/compare`);
-  const [next] = byMostToCheck(detail.study.example ? [] : detail.scans);
+  const [next] = byMostToCheck(
+    detail.scans.filter((s) => placeOf(s, detail.study.example) === "needs-you"),
+  );
   const nextHref = next && reviewHref(next);
   return (
     <ShellHeading>
@@ -109,7 +112,7 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
       {nextHref && (
         <Button asChild variant="secondary" size="sm" className="ml-auto">
           <Link to={nextHref}>
-            Next sample that needs you:
+            Next {INPUT_WORD.one} that needs you:
             <span className="font-mono font-semibold">{next.scan.subject}</span>
             <ChevronRight aria-hidden />
           </Link>
@@ -119,38 +122,28 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
   );
 }
 
-/** The left side: the Samples tree, from the lab's study list (the scan page builds the same). */
+/** The left side: the scan tree, from the lab's study list. */
 function SamplesSide({ studyId }: { studyId: string }) {
   const studies = useQuery({
     ...studiesQuery(),
     refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? 5000 : false),
   });
   return (
-    <SidePanel
-      side="left"
-      tab="samples"
-      onTabChange={() => {}}
-      tabs={[
-        {
-          id: "samples",
-          label: "Samples",
-          icon: <ListTree />,
-          content: studies.data ? (
-            <SampleTree
-              studies={sampleTree(studies.data)}
-              studyId={studyId}
-              renderLink={(href, props) => <Link to={href} {...props} />}
-            />
-          ) : studies.isError ? (
-            <p className="m-0 px-4 py-3 text-sm text-muted-foreground">
-              Couldn't load the samples.
-            </p>
-          ) : (
-            <LoadingState label="Loading the samples" rows={4} className="px-3 py-2" />
-          ),
-        },
-      ]}
-    />
+    <SidePanel side="left" title={INPUT_WORD.Many} icon={<ListTree />}>
+      {studies.data ? (
+        <SampleTree
+          studies={sampleTree(studies.data)}
+          studyId={studyId}
+          renderLink={(href, props) => <Link to={href} {...props} />}
+        />
+      ) : studies.isError ? (
+        <p className="m-0 px-4 py-3 text-sm text-muted-foreground">
+          Couldn't load the {INPUT_WORD.many}.
+        </p>
+      ) : (
+        <LoadingState label={`Loading the ${INPUT_WORD.many}`} rows={4} className="px-3 py-2" />
+      )}
+    </SidePanel>
   );
 }
 

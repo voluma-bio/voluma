@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Bot, Box, Eye, FileText, LayoutDashboard, ListChecks, Ruler, Users } from "lucide-react";
-import { useState } from "react";
-import { AppShell, ShellHeading, ShellLink, ShellPanel } from "./shell";
+import { Bot, Box, Eye, FileText, Ruler, Users } from "lucide-react";
+import { AppShell, ShellHeading, ShellPanel } from "./shell";
 import { StoryRail } from "./story-rail";
 
 /**
@@ -10,7 +9,7 @@ import { StoryRail } from "./story-rail";
  * changes. **Where:** every signed-in screen (`SignedIn`). New screens lay out their own sides
  * with `SidePanel` (Shell/SidePanel).
  *
- * This story shows the older docked panels the task review and the study's sections still use:
+ * This story shows the older docked panels the scan page still uses:
  * an icon strip at each edge, up to two panels per side. Try: click a strip button to open its
  * panel, again to close; Shift-click stacks a second panel; drag a side's inner edge to resize,
  * double-click it to fold; `\` and `]` fold a side; F for Full view, Esc to leave.
@@ -29,30 +28,12 @@ function Lorem({ what }: { what: string }) {
 }
 
 function Frame({ theme }: { theme: "light" | "dark" }) {
-  const [page, setPage] = useState("dashboard");
   return (
     <AppShell theme={theme} rail={<StoryRail />}>
       <ShellHeading>
         <span className="text-muted-foreground text-sm">OA7 DMM vs Sham</span>
         <span className="font-medium text-sm">OA7-2, left knee</span>
       </ShellHeading>
-      <ShellLink
-        id="s-dash"
-        group="study"
-        label="Dashboard"
-        icon={<LayoutDashboard />}
-        active={page === "dashboard"}
-        go={() => setPage("dashboard")}
-      />
-      <ShellLink
-        id="s-check"
-        group="study"
-        label="To check"
-        icon={<ListChecks />}
-        count={18}
-        active={page === "check"}
-        go={() => setPage("check")}
-      />
       <ShellPanel
         id="s-report"
         side="left"
@@ -86,7 +67,7 @@ function Frame({ theme }: { theme: "light" | "dark" }) {
       </ShellPanel>
       <div className="grid flex-1 place-items-center bg-[var(--viewer-well)] text-[var(--viewer-chip-fg)]">
         <span className="flex items-center gap-2">
-          <Box className="size-4" /> The main area: {page}
+          <Box className="size-4" /> The main area
         </span>
       </div>
     </AppShell>

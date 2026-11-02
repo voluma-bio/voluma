@@ -1,7 +1,8 @@
 /**
- * The Samples tree: the studies, each one's samples grouped Needs you, Running and Done, and a
- * search above them. A researcher jumps between samples with it without leaving review, so the
- * study page and a scan page show the same tree. Which branches are open is kept across pages
+ * The Samples tree (on screen, `INPUT_WORD.Many`): the studies, each one's samples grouped Needs
+ * you, Running and Done, and a search above them. A researcher jumps between samples with it
+ * without leaving review: the study pages show it on the left, and the scan page's left side is
+ * meant to show the same tree as a tab. Which branches are open is kept across pages
  * and visits; while a search is typed every branch with a match is open. Keys follow the ARIA
  * tree: Up and Down move, Left and Right close and open, Enter opens a sample, Home and End.
  * A row's look is a status glyph, the sample's name and one short line: no dividers.
@@ -10,6 +11,7 @@ import { ChevronRight, Search } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import { cx } from "./cx";
 import { STATUS_WORD, type Status, StatusGlyph } from "./status-mark";
+import { INPUT_WORD } from "./words";
 
 export type SampleGroup = "needs-you" | "running" | "done";
 
@@ -211,8 +213,8 @@ export function SampleTree({ studies, studyId, sampleId, renderLink }: SampleTre
           ref={input}
           type="search"
           value={query}
-          placeholder="Find a sample"
-          aria-label="Find a sample"
+          placeholder={`Find a ${INPUT_WORD.one}`}
+          aria-label={`Find a ${INPUT_WORD.one}`}
           autoComplete="off"
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -232,7 +234,7 @@ export function SampleTree({ studies, studyId, sampleId, renderLink }: SampleTre
         <div
           ref={list}
           role="tree"
-          aria-label="Samples"
+          aria-label={INPUT_WORD.Many}
           onKeyDown={onKeyDown}
           className="pt-0.5 pb-3"
         >
@@ -249,7 +251,7 @@ export function SampleTree({ studies, studyId, sampleId, renderLink }: SampleTre
         </div>
       ) : (
         <p className="m-0 px-3.5 py-2 text-muted-foreground text-sm">
-          {query ? `No sample matches “${query.trim()}”` : "No samples yet"}
+          {query ? `No ${INPUT_WORD.one} matches “${query.trim()}”` : `No ${INPUT_WORD.many} yet`}
         </p>
       )}
     </div>

@@ -9,7 +9,16 @@
 import { runThumbnailUrl } from "@voluma/api-client";
 import type { StudyScanDetail } from "@voluma/contracts/study";
 import { kneeOf, liveStatus, needsYouOf, plural, scanStatus, useNow } from "@voluma/run-view";
-import { Button, Count, cx, PageHead, SidePanel, StatusMark, Thumbnail } from "@voluma/ui";
+import {
+  Button,
+  Count,
+  cx,
+  INPUT_WORD,
+  PageHead,
+  SidePanel,
+  StatusMark,
+  Thumbnail,
+} from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight, PanelRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
@@ -20,6 +29,7 @@ import {
   hasBar,
   kneeWord,
   PLACES,
+  type Place,
   placeOf,
   placeParam,
   reviewHref,
@@ -43,7 +53,7 @@ export function StudyPage() {
   const knees = detail.scans.some((s) => kneeOf(s) !== null);
   const groups = PLACES.map((p) => ({
     ...p,
-    scans: detail.scans.filter((s) => placeOf(s) === p.place),
+    scans: detail.scans.filter((s) => placeOf(s, detail.study.example) === p.place),
   })).filter((g) => g.scans.length > 0 && (!only || g.place === only));
 
   return (
@@ -52,21 +62,23 @@ export function StudyPage() {
         <PageHead
           className="border-b-0 bg-transparent"
           title={detail.study.name}
-          subtitle={`${workflow.name} · ${plural(detail.scans.length, "sample")}`}
+          subtitle={`${workflow.name} · ${plural(detail.scans.length, INPUT_WORD.one, INPUT_WORD.many)}`}
         />
         {only && (
           <p className="m-0 flex items-baseline gap-3 px-6 text-sm text-muted-foreground">
             Showing only {PLACES.find((p) => p.place === only)?.title}.
             <Button asChild variant="link">
               <Link to="?" replace>
-                Show every sample
+                Show every {INPUT_WORD.one}
               </Link>
             </Button>
           </p>
         )}
         <div className="grid gap-6 px-4 pt-2 pb-8">
           {groups.length === 0 ? (
-            <p className="m-0 px-2 text-sm text-muted-foreground">No sample is here now.</p>
+            <p className="m-0 px-2 text-sm text-muted-foreground">
+              No {INPUT_WORD.one} is here now.
+            </p>
           ) : (
             groups.map((g) => (
               <section key={g.place} aria-labelledby={`place-${g.place}`} className="grid gap-1">
@@ -82,6 +94,7 @@ export function StudyPage() {
                     <SampleRow
                       key={scan.scan.inputId}
                       scan={scan}
+                      place={g.place}
                       workflow={workflow}
                       sections={sections}
                       knees={knees}
@@ -109,18 +122,20 @@ export function StudyPage() {
 
 function SampleRow({
   scan,
+  place,
   workflow,
   sections,
   knees,
   now,
 }: {
   scan: StudyScanDetail;
+  place: Place;
   workflow: BundledWorkflow;
   sections: Section[];
   knees: boolean;
   now: number;
 }) {
-  const href = placeOf(scan) === "needs-you" ? reviewHref(scan) : scanHref(scan);
+  const href = place === "needs-you" ? reviewHref(scan) : scanHref(scan);
   const knee = kneeOf(scan);
   const changed = changedAt(scan);
   const about = [scan.scan.group, knees && knee ? `${kneeWord(knee)} knee` : null]

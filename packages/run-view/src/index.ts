@@ -49,7 +49,7 @@ export {
   useRunStore,
   useThreads,
 } from "./run-store";
-export { sampleTree } from "./samples";
+export { placeOfStatus, sampleTree } from "./samples";
 export {
   groupNames,
   groupOf,
