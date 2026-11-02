@@ -60,9 +60,12 @@ import { type PaneCamera, type Probe, useSliceGestures } from "./slice-gestures"
 import { tokenColor } from "./token-color";
 import { volumeLevel } from "./volume";
 
-/** The colour token of the plane holding `axis` constant, when the caller gives none. */
+/**
+ * The colour token of the plane holding array axis `axis` constant, when the caller gives none:
+ * the task review's fixed reading, z axial, y sagittal, x coronal.
+ */
 export const axisToken = (axis: Axis) =>
-  axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x";
+  axis === 0 ? "--plane-axial" : axis === 1 ? "--plane-sagittal" : "--plane-coronal";
 
 /** How far out the tilt handles sit, of the pane's half size. */
 const HANDLE_REACH = 0.85;

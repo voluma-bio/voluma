@@ -60,11 +60,12 @@ where it is used.
 - **Labels show only for the selection.** Everything else stays unlabelled.
 - **Bone renders ivory by default** (`--bone`); structure label colours
   (`--label-*`) appear only with the Labels toggle.
-- **Plane colours follow the anatomy on every grid**: coronal red, sagittal green, axial blue,
+- **Plane colours follow the anatomy on every grid**: coronal red, sagittal green, axial blue
+  (`--plane-coronal`, `--plane-sagittal`, `--plane-axial`),
   whether the scan sits on its own grid or the tibia's. A tilted plane (GP) takes the colour of
   the anatomical plane its normal is nearest. The solids are made for the dark image wells and
   fail 4.5:1 on light surfaces, so text in the chrome (an axis letter, a mark's tag) takes the
-  matching text ink from `tokens.css`.
+  matching `--plane-*-text` ink.
 - Rulers are `--ruler`; a ruler being corrected is `--ruler-edit`; a landmark
   more than 0.03 mm off the surface is `--landmark-warn`.
 - The 3D and slice views never remount when a panel resizes or folds.

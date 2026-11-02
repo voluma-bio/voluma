@@ -19,10 +19,10 @@ const roles: [string, string][] = [
   ["mark-mine", "Your marks on the scan"],
   ["mark-mine-text", "Your mark tags in text"],
   ["mark-ai", "The AI's marks on the scan"],
-  ["axis-x", "Coronal plane (XZ): its pane, chip and crosshair"],
-  ["axis-y", "Sagittal plane (YZ)"],
-  ["axis-z", "Axial plane (XY)"],
-  ["axis-x-text", "Coronal in text on a panel"],
+  ["plane-coronal", "Coronal plane (XZ): its pane, chip and crosshair"],
+  ["plane-sagittal", "Sagittal plane (YZ)"],
+  ["plane-axial", "Axial plane (XY)"],
+  ["plane-coronal-text", "Coronal in text on a panel"],
 ];
 
 export function Swatches() {

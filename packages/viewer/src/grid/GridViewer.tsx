@@ -62,9 +62,9 @@ const NO_MARKS: readonly ShownMark[] = [];
 
 /** Each slice plane keeps its axis colour (DESIGN.md): axial z, sagittal y, coronal x. */
 const AXIS_INK: Record<string, string> = {
-  axial: "text-axis-z-text",
-  sagittal: "text-axis-y-text",
-  coronal: "text-axis-x-text",
+  axial: "text-plane-axial-text",
+  sagittal: "text-plane-sagittal-text",
+  coronal: "text-plane-coronal-text",
 };
 
 export function GridViewer({

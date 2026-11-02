@@ -134,22 +134,22 @@ const VIEW_ORDER: readonly QuadView[] = ["3d", "xy", "xz", "yz", "gp"];
 /** Literal class names, so Tailwind sees them. */
 const ANATOMY: Record<Anatomy, { token: string; ring: string; chip: string; swatch: string }> = {
   coronal: {
-    token: "--axis-x",
-    ring: "inset-ring-axis-x",
-    chip: "bg-axis-x text-viewer-well",
-    swatch: "bg-axis-x",
+    token: "--plane-coronal",
+    ring: "inset-ring-plane-coronal",
+    chip: "bg-plane-coronal text-viewer-well",
+    swatch: "bg-plane-coronal",
   },
   sagittal: {
-    token: "--axis-y",
-    ring: "inset-ring-axis-y",
-    chip: "bg-axis-y text-viewer-well",
-    swatch: "bg-axis-y",
+    token: "--plane-sagittal",
+    ring: "inset-ring-plane-sagittal",
+    chip: "bg-plane-sagittal text-viewer-well",
+    swatch: "bg-plane-sagittal",
   },
   axial: {
-    token: "--axis-z",
-    ring: "inset-ring-axis-z",
-    chip: "bg-axis-z text-viewer-well",
-    swatch: "bg-axis-z",
+    token: "--plane-axial",
+    ring: "inset-ring-plane-axial",
+    chip: "bg-plane-axial text-viewer-well",
+    swatch: "bg-plane-axial",
   },
 };
 const NEUTRAL = {
