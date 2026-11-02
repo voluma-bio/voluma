@@ -26,3 +26,11 @@
   `apps/web/src/features/scan/scan-header.tsx`). Home and the dashboard list the waiting run and link
   to it, so a guest watching a batch still opens each scan. Move the once-per-wait send into a hook
   here and use it from both features.
+- Outputs review (`outputs-model.ts`): `report_output` fills only `detail.as`. Until it also writes
+  `affine` (spacing), `offsetZyx` (a cropped mask), `axis` (a surface; without it the converter skips
+  the file), `dtype` and `unit` (an HU scan converted to int16) and `points` (a point or line overlay),
+  scenes are drawn in voxel units, surfaces are not converted and rulers are listed as "not drawn yet".
+- Outputs review: pick the layout by the run's pin too (`run.harness === "agents"`, am-shell) so an
+  agents run opens on its outputs before its first `outputs.changed`; today the page shows the task
+  review for that moment.
+

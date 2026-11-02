@@ -112,9 +112,10 @@ function trailOf(fold: OutputsFold, id: string): { output: string; v: OutputVers
     const latest = fold.byId.get(at)?.latest;
     if (!latest) return;
     out.push({ output: at, v: latest });
-    for (const link of latest.madeFrom) walk(link.id);
+    // A link to a label overlay (a bone) means its map's version.
+    for (const link of latest.madeFrom) walk(fold.labels.get(link.id) ?? link.id);
   };
-  walk(id);
+  walk(fold.labels.get(id) ?? id);
   return out;
 }
 

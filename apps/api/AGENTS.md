@@ -155,6 +155,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
   have null summaries. Review mutations return/refetch snapshots; execution SSE closes
   at run end and does not continuously deliver human review changes.
+- `POST /runs/:runId/tocheck/accept` (a run of the agent loop) writes `tocheck.resolved` through the
+  same `decide`, validated against `results.outputs` (`outputsFold`, part of `reviewState`): the
+  output, version and item must exist; an item already resolved writes nothing; examples are 403.
+  It is allowed while the run goes: the version it judges never changes.
 - One loader, `resultsLoader()` (`pg-runs.ts`), serves the run and study reads and Review's `RunRecords.load`
   and `decide`. It memoizes the run's fold (`{results, correcting, open, failed}`), including
   `reviewState(log)`, up to 250,000 folded events in total (about 20 MB; least recently read out
