@@ -1,5 +1,9 @@
 # mouse-oa TODO
 
+- **`femoral_frame.py`'s femur-length gate sits at the edge of real scans.** `MIN_FEMUR_MM` 4.5 was set from two scans; femur
+  length along the shaft on threshold-split labels of five lab scans: OA6-2RK 5.86, OA6-1RK 5.31, OA7-1L 5.19, OA7-4R 5.14,
+  OA8-17L 4.57 mm. A scan framed a little lower stops the femoral step with a To check. Next: fit the shaft on narrow
+  diaphysis slices so a shorter stub still gives the right axis, then lower the gate; check on the OA8 series.
 - **`tibia_frame.py` on flexed or bowed tibiae (unconfirmed).** Preparing 17 lab scans for the growth-plate dataset, 4 gave
   oblique aligned grids (OA7-5L, OA7-6L, OA7-8L, OA8-1R: shaft leaving the grid, plateau sloping steeply across coronal
   sections, no clean plate level). Their tibia labels came from a quick threshold-and-erosion split
