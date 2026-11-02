@@ -106,7 +106,7 @@ export function toldMarks(events: readonly RunEvent[], by: string): Map<string, 
 }
 
 /** Key order is not meaning: stored JSON may come back reordered. */
-const canon = (v: unknown): string =>
+export const canon = (v: unknown): string =>
   JSON.stringify(v, (_k, x) =>
     x && typeof x === "object" && !Array.isArray(x)
       ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)))
