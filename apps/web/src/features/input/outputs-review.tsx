@@ -437,6 +437,11 @@ export function OutputsReview({
                   views={allViews}
                   live={live}
                   nameOf={nameOf}
+                  checkTitle={(t) =>
+                    fold.byId.get(t.output)?.versions.find((v) => v.version === t.version)?.toCheck[
+                      t.item
+                    ]?.title
+                  }
                   message={message}
                   answers={answers}
                   markError={runMarks.error}

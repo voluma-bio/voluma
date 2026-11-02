@@ -50,6 +50,7 @@ export function MainConversation({
   views,
   live,
   nameOf,
+  checkTitle,
   message,
   answers,
   markError,
@@ -61,6 +62,8 @@ export function MainConversation({
   /** The run is queued or running: main is at work on what it was sent. */
   live: boolean;
   nameOf: (id: string) => string;
+  /** A To check item's title, by its place. */
+  checkTitle: (item: { output: string; version: number; item: number }) => string | undefined;
   message: ReturnType<typeof useMainMessage>;
   answers: ReturnType<typeof useAnswers>;
   markError: string | undefined;
@@ -136,8 +139,13 @@ export function MainConversation({
                     {m.text && <p className="text-sm whitespace-pre-wrap">{m.text}</p>}
                     {(m.attached.length > 0 || m.toCheck || m.output) && (
                       <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                        {m.output && <span>sent with {nameOf(m.output)}</span>}
-                        {m.toCheck && <span>on a To check of {nameOf(m.toCheck.output)}</span>}
+                        {m.toCheck && (
+                          <span className="w-full">
+                            About{" "}
+                            {checkTitle(m.toCheck) ?? `a To check of ${nameOf(m.toCheck.output)}`}
+                          </span>
+                        )}
+                        {m.output && <span>looking at {nameOf(m.output)}</span>}
                         {m.attached.map((a) => {
                           const id = typeof a.mark.id === "string" ? a.mark.id : undefined;
                           const word = CHANGE_WORD[a.change];
