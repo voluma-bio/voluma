@@ -319,6 +319,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       config: options.config,
       providerError: options.providerError,
       files: options.files,
+      history: options.history,
       evidence: options.evidence,
       outputs: options.outputs,
       publish: options.publish,

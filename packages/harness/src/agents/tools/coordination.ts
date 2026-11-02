@@ -53,9 +53,13 @@ export interface AgentsApi {
     name: string;
     brief: string;
     skills: string[];
+    from?: string;
+    blind?: string;
     spawnedBy: string;
     parentThreadId: string;
   }): Promise<void>;
+  /** Renders the closed worker's stored history now; the function it returns writes `/work/<name>/transcript.md`. */
+  prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
   /** Stops a running thread (its end is stored first). */
   abort(threadId: string): void;
   /** Rewrites `/run/*.yaml`; awaited, so the caller's next call sees them. */
@@ -100,6 +104,14 @@ const byName = (d: AgentLog, name: string) =>
 const names = (d: AgentLog) =>
   [...d.records.values()].filter((r) => r.place === "worker").map((r) => r.name);
 
+/** The workers `name` was started from, nearest first: its `from`, that one's `from`, and so on. */
+function lineage(d: AgentLog, name: string): string[] {
+  const chain: string[] = [];
+  for (let r = byName(d, name); r?.from && !chain.includes(r.from); r = byName(d, r.from))
+    chain.push(r.from);
+  return chain;
+}
+
 const messageTool = (api: AgentsApi): Tool =>
   define({
     name: "message",
@@ -129,6 +141,11 @@ const messageTool = (api: AgentsApi): Tool =>
               throw new Refusal(
                 `${to} is ${state} and takes no more messages; start a new worker.`,
               );
+            const sender = byName(d, name);
+            if (sender?.blind && to !== "main")
+              throw new Refusal("You work blind: you message main only.");
+            if (target.blind && role !== "main")
+              throw new Refusal(`${to} works blind and takes messages from main only.`);
           }
           await api.recorder.append(ctx.threadId, "agent.message", { from, to, text: body }, id);
           api.changed();
@@ -197,7 +214,7 @@ const startWorkerTool = (api: AgentsApi): Tool =>
   define({
     name: "start_worker",
     description:
-      "Start a worker: a colleague with its own sandbox and its own context that keeps what it learns. Give it a name and a brief that scopes what it owns. `skills` names extra skills to load into its first message.",
+      "Start a worker: a colleague with its own sandbox and its own context that keeps what it learns. Give it a name and a brief that scopes what it owns. `skills` names extra skills to load into its first message. `from` names a closed worker to carry on from: the new worker gets its note, its folder and its conversation (`/work/<name>/transcript.md`). `blind` names a worker whose reasoning the new worker must not see: it reads only its own folder and exchanges messages with main only; its brief is your question and where the published outputs are, never what the other worker concluded. `from` cannot name the blind worker or one started from it.",
     input: z.object({
       name: z
         .string()
@@ -205,10 +222,18 @@ const startWorkerTool = (api: AgentsApi): Tool =>
         .describe("Lowercase letters, digits and dashes; never reused in a run."),
       brief: z.string().min(1),
       skills: z.array(z.string().min(1)).optional(),
+      from: z.string().min(1).optional(),
+      blind: z.string().min(1).optional(),
     }),
-    execute: ({ name, brief, skills = [] }, ctx) =>
-      run(() =>
-        api.section(async () => {
+    execute: ({ name, brief, skills = [], from, blind }, ctx) =>
+      run(async () => {
+        // A closed worker's history no longer changes: render it before the lock, write it inside.
+        const closed = from ? byName(api.log(), from) : undefined;
+        const writeTranscript =
+          closed?.place === "worker" && api.state(closed) === "closed"
+            ? await api.prepareTranscript(closed)
+            : undefined;
+        return api.section(async () => {
           const { role, d } = caller(api, ctx);
           if (role !== "main") throw new Refusal("Only main starts workers: message main.");
           const workerId = threadIdOf(api.runId, name);
@@ -222,6 +247,22 @@ const startWorkerTool = (api: AgentsApi): Tool =>
           const unknown = skills.find((s) => !api.skills.includes(s));
           if (unknown)
             throw new Refusal(`No skill is named ${unknown}. Skills: ${api.skills.join(", ")}.`);
+          const worker = (n: string) => {
+            const r = byName(d, n);
+            if (!r || r.place !== "worker")
+              throw new Refusal(`No worker is named ${n}. Workers: ${names(d).join(", ")}.`);
+            return r;
+          };
+          if (blind) worker(blind);
+          const source = from ? worker(from) : undefined;
+          if (source && api.state(source) !== "closed")
+            throw new Refusal(
+              `${from} is ${api.state(source)}: start from a closed worker (close_worker it first).`,
+            );
+          if (from && blind && (from === blind || lineage(d, from).includes(blind)))
+            throw new Refusal(
+              `${from} ${from === blind ? "is the worker the new one is blind to" : `was started from ${blind}`}: its folder and conversation would show the new worker what it must not see.`,
+            );
           const open = openWorkers(
             d,
             (id) => api.state(d.records.get(id) as AgentRecord) === "working",
@@ -237,18 +278,21 @@ const startWorkerTool = (api: AgentsApi): Tool =>
               `${open.length} workers are open (${list}), the most allowed. Close one with close_worker first.`,
             );
           }
+          await writeTranscript?.();
           await api.startWorker({
             name,
             brief,
             skills,
+            ...(from && { from }),
+            ...(blind && { blind }),
             spawnedBy: ctx.toolCallId,
             parentThreadId: ctx.threadId,
           });
           return text(
             `Started ${name}. It begins with your brief; its reports and messages arrive in your next delivery.`,
           );
-        }),
-      ),
+        });
+      }),
   });
 
 const closeWorkerTool = (api: AgentsApi): Tool =>

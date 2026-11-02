@@ -29,6 +29,9 @@ export interface AgentRecord extends ThreadBase {
   /** The thread that started it and the tool call that did (a worker's brief and skills are read back from that call). */
   parentThreadId: string | null;
   spawnedBy: string | undefined;
+  /** The closed worker it started from, and the worker it is blind to (names), from its first `thread.started`. */
+  from: string | undefined;
+  blind: string | undefined;
   endedTime: string;
   /** The turn's input came from main (the brief, or a message from main) and it said nothing since: `silent` if the turn ends so. */
   fromMain: boolean;
@@ -99,6 +102,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
       place: base.place === "main" ? "main" : "worker",
       parentThreadId: started.parentThreadId,
       spawnedBy: prev?.spawnedBy ?? started.spawnedBy,
+      from: prev?.from ?? started.from,
+      blind: prev?.blind ?? started.blind,
       startedAt: -1,
       endedAt: prev?.endedAt ?? -1,
       closeAt: prev?.closeAt,
