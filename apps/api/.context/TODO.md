@@ -44,3 +44,6 @@
 - **Copied runs read the source's scratch images.** `seed:example` copies `pi_messages` verbatim, and
   history rows hold R2 image keys under the source run's `runs/<runId>/scratch/…`. Fine for a read-only
   example; give a copy its own keys (or resolve them per run) before an example can be rerun or reopened.
+- **View snapshots on an example run.** Since #435 every org reads example runs, and `POST /review/runs/:id/snapshots` checks only readability. So any reader can save a snapshot on the example, and every reader lists them, `by` included, guests too. Refuse saves on `run.example`, or list only the caller's own on an example. No UI calls these endpoints yet.
+- **The example on a lab's Home.** `studyStatus` takes no `example` input, so the example's row in "Your studies" can show "N to check" that a member can't act on. Show a neutral "Example" chip instead.
+- **Example studies hold only reference inputs.** Reading a study reads every input in it. `seed:example` and `import:run` should assert that an example study has only the reference input.
