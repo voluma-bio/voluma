@@ -91,6 +91,7 @@ export {
   type ShellSide,
   useFullView,
   useOpenPanel,
+  useSideFold,
 } from "./shell/shell";
 export { SidePanel, type SidePanelProps, type SidePanelTab } from "./shell/side-panel";
 export {
