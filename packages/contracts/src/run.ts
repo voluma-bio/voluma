@@ -143,7 +143,14 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import { inputIdSchema, modelRefSchema, runIdSchema, segmentSchema, studyIdSchema } from "./ids";
+import {
+  harnessSchema,
+  inputIdSchema,
+  modelRefSchema,
+  runIdSchema,
+  segmentSchema,
+  studyIdSchema,
+} from "./ids";
 import { relativePathSchema } from "./r2";
 import { reviewSummarySchema } from "./review";
 import { workflowPinSchema } from "./workflow";
@@ -264,6 +271,13 @@ export const runSchema = z
      */
     model: modelRefSchema.optional(),
     /**
+     * The loop that drives the run, decided by the API when the run is created (the request's
+     * `harness`, else the API's default) and pinned by the runner on the root thread at the
+     * first claim. Absent on runs made before the choice existed, and means `tasks`. A runner
+     * that predates the field drops it on parse and runs the task loop.
+     */
+    harness: harnessSchema.optional(),
+    /**
      * A shared, read-only run every caller in the org can read, even under
      * `self`, set only by seeding (see the header). It always reads its org's
      * reference scan.
@@ -342,6 +356,8 @@ export const startRunRequestSchema = z.object({
   keys: visitorKeysSchema.optional(),
   /** One of `GET /run/models` for this run's credentials; absent: that list's default. Another is refused with 400. */
   model: modelRefSchema.optional(),
+  /** The loop that drives the run; absent: the API's default (`DEFAULT_RUN_HARNESS`, `tasks` unless set). */
+  harness: harnessSchema.optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
 

@@ -34,6 +34,7 @@ import {
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { RunLayout, ThreadLayout } from "./layout";
+import { loopShell, type Section, type Step } from "./loop-shell";
 import {
   agentsList,
   answerText,
@@ -117,6 +118,8 @@ export interface RunLoopOptions {
   rootThreadId: string;
   recorder: Recorder;
   runtime: TaskRuntime;
+  /** The run's lock, the one the runtime holds. */
+  section: Section;
   threads: Threads;
   layout: RunLayout;
   /** The role files, skills and task files that write each thread's system prompt and first message. */
@@ -146,44 +149,26 @@ export interface RunLoopOptions {
 /** How many more checks than the attempts' own the main agent may start by replacing a failed one (`stop_worker`). */
 const CHECK_REPLACEMENTS = 2;
 
-/** How long the main agent gets to end its turn after the run ended. */
-const MAIN_GRACE_MS = 15_000;
-
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 const RUNTIME: UserSender = { kind: "runtime" };
-
-/** What a step found: something done, nothing to do until the log changes, or the run is over. */
-type Step = "acted" | "idle" | "done";
 
 export async function runLoop(o: RunLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
   const config = { ...LOOP_DEFAULTS, ...o.config };
-  let failure: unknown;
   /** Threads whose refusal as unresumable the loop has dealt with. */
   const dealtWith = new Set<string>();
 
-  // A change of the run (a thread settled, a main tool wrote) wakes the loop; a change that
-  // lands during a step is seen by the next one because the loop compares versions.
-  let version = 0;
-  let waiters: (() => void)[] = [];
-  const nudge = () => {
-    version++;
-    for (const wake of waiters.splice(0)) wake();
-  };
-  async function sleep(seen: number) {
-    if (version !== seen || signal?.aborted) return;
-    await new Promise<void>((resolve) => {
-      const done = () => {
-        signal?.removeEventListener("abort", done);
-        waiters = waiters.filter((w) => w !== done);
-        resolve();
-      };
-      signal?.addEventListener("abort", done, { once: true });
-      waiters.push(done);
-    });
-  }
-
   const derive = () => threadLog(recorder.events());
+  const shell = loopShell({
+    rootThreadId: root,
+    recorder,
+    threads,
+    section: o.section,
+    startup: runtime.start,
+    log: derive,
+    stop: runtime.stop,
+    signal,
+  });
   const stateOf = (r: ThreadRecord | undefined): ThreadState | undefined =>
     threadState(r, threads.running(r?.id ?? ""));
 
@@ -321,9 +306,8 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
    */
   async function begin(spec: ThreadSpec & Lineage, startedEventId: string, spawnedBy?: string) {
     const { name, role, parentThreadId, attemptId, ...start } = spec;
-    await recorder.append(
-      spec.threadId,
-      "thread.started",
+    await shell.begin(
+      start,
       {
         name,
         parentThreadId,
@@ -336,11 +320,6 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       },
       startedEventId,
     );
-    threads.start(start);
-    void threads
-      .idle(spec.threadId)
-      .then(() => recorder.flush())
-      .then(nudge, nudge);
   }
 
   /** Resumes a thread that is not running, from its History, with a message. Never a stopped one. */
@@ -441,7 +420,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       await startCheck(d, taskId);
       return true;
     },
-    changed: nudge,
+    changed: shell.nudge,
   };
 
   /** Whether the main agent is still in charge of nothing but waiting: no worker or checker runs. */
@@ -768,64 +747,5 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     return "idle";
   }
 
-  const fail = (error: unknown) => {
-    failure ??= error;
-    threads.abortAll();
-  };
-
-  /** Whether the run has failed: a step error, a thread refused or thrown, an event given up on. */
-  function failed(): boolean {
-    const cause = threads.failure() ?? recorder.failure();
-    if (cause !== undefined) fail(cause);
-    return failure !== undefined;
-  }
-
-  /**
-   * Stores the end of every thread that has none (append-first), then aborts the running ones.
-   * The main agent is left to finish its turn first (`finish_run` ended it), so a finished run
-   * does not show it as cancelled; it is stopped if it takes more than `MAIN_GRACE_MS`.
-   */
-  async function stopAll() {
-    const stopThreads = (spare?: string) =>
-      runtime.section(async () => {
-        for (const r of derive().threads.values()) {
-          if (r.id !== spare && (!r.end || threads.running(r.id))) {
-            await runtime.stop(r.id, `${root}:end:${r.id}`);
-          }
-        }
-      });
-    const main = derive().main;
-    await stopThreads(main && threads.running(main) ? main : undefined);
-    if (main && threads.running(main)) {
-      await Promise.race([threads.idle(main), new Promise((r) => setTimeout(r, MAIN_GRACE_MS))]);
-      await recorder.flush();
-      await stopThreads();
-    }
-  }
-
-  try {
-    if (!signal?.aborted) await runtime.start();
-    while (!signal?.aborted && !failed()) {
-      const seen = version;
-      const next = await runtime.section(step);
-      if (next === "done") break;
-      if (next === "acted") continue;
-      await sleep(seen);
-    }
-    if (!signal?.aborted && !failed()) await stopAll();
-  } catch (error) {
-    fail(error);
-  }
-  while (threads.active()) await threads.anyIdle();
-  await recorder.flush();
-  failed();
-  if (failure !== undefined) {
-    const error = failure instanceof Error ? failure.message : String(failure);
-    if (!signal?.aborted) recorder.emit(root, "thread.ended", { status: "failed", error });
-    throw failure;
-  }
-  // A runtime abort writes no end, like a crash: the next claim resumes the root as well.
-  if (!signal?.aborted && !derive().root.endedThisClaim) {
-    recorder.emit(root, "thread.ended", { status: "completed" });
-  }
+  await shell.run(step);
 }
