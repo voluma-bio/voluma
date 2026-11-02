@@ -2,7 +2,9 @@
  * `report_output` of the agent loop: publishes one version of an output. The named files are
  * copied from the agent's `/work/<name>/` to the version's folder, `outputs/<id>/<toolCallId>/`
  * (read-only to agents), and hashed on the way; then the `output.published` event records the version,
- * its folder, files, `madeFrom`, evidence and To check items (`output.published`).
+ * its folder, files, `madeFrom`, evidence and To check items (`output.published`); then each
+ * source is deleted and a `<file>.removed.txt` pointer to the published copy is left beside it,
+ * so a published file is stored once.
  *
  * Checked against the catalog before anything is copied: the kind, a value's unit, the links
  * (each names a published version; a value is `on` the overlays the catalog lists, an overlay has
@@ -15,9 +17,11 @@
  * migration of the API's events table for a rule this section already keeps.
  *
  * A repeated or interrupted call (same tool call id): the event id is derived from the call, so
- * a call whose event is stored answers from it and copies nothing; one cut off during the copy
- * finds nothing, copies to the same keys again and writes the event. Files copied by a call that
- * never reached its event stay in the bucket, and no event names them.
+ * a call whose event is stored answers from it and copies nothing (it only finishes the move,
+ * from the names in the event, so the source need not exist any more); one cut off during the
+ * copy still finds its sources, copies to the same keys again and writes the event. The sources
+ * go only after the event. Files copied by a call that never reached its event stay in the
+ * bucket, and no event names them.
  */
 
 import { madeFromSchema, toCheckItemSchema } from "@voluma/contracts/agent-events";
@@ -27,6 +31,7 @@ import {
   outputKindSchema,
   outputRefSchema,
 } from "@voluma/contracts/output-catalog";
+import { OUTPUTS_MOUNT } from "@voluma/contracts/output-fold";
 import { relativePathSchema, versionPath, versionPrefix } from "@voluma/contracts/r2";
 import { z } from "zod";
 import { EvidenceNotFound, EvidenceRefused } from "../../ports/evidence";
@@ -93,18 +98,51 @@ interface Plan {
   provisional?: true;
   /** How the review converter reads the file (`detail.as`), when the catalog says. */
   detail?: Record<string, unknown>;
+  /** The listed overlay's shape, when the catalog fixes it. */
+  shape?: string;
 }
 
 const SHAPE_AS = { labels: "labels", mask: "mask", surface: "surface" } as const;
 
 /** The converter's representation of a listed output, where the catalog fixes it. */
-function detailOf(entry: OutputEntry): Pick<Plan, "detail"> {
+function detailOf(entry: OutputEntry): Pick<Plan, "detail" | "shape"> {
   if (entry.kind === "base") return { detail: { as: "image" } };
   const as =
     entry.kind === "overlay" && entry.shape
       ? SHAPE_AS[entry.shape as keyof typeof SHAPE_AS]
       : undefined;
-  return as ? { detail: { as } } : {};
+  return as ? { detail: { as }, shape: as } : {};
+}
+
+/**
+ * What the review converter reads of a `.npy` that the sidecar beside it (`<name>.json`,
+ * `workflows/core/skills/*\/resources/sidecar.py`) states: `dtype`; `gridId` of the grid it lives
+ * on; a surface's `axis`; a base's `unit`. Nothing is refused for a missing sidecar.
+ */
+async function detailFromSidecar(
+  deps: OutputToolDeps,
+  kind: OutputKind,
+  shape: string | undefined,
+  key: string,
+  signal: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const text = await deps.publish.read(key, { signal });
+  let side: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = text === undefined ? undefined : JSON.parse(text);
+    if (parsed && typeof parsed === "object") side = parsed as Record<string, unknown>;
+  } catch {}
+  const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  const unit = str(side.units) ?? str(side.unit);
+  const dtype = str(side.dtype);
+  const gridId = str(side.grid_id);
+  return {
+    ...(dtype && { dtype }),
+    ...(gridId && { gridId }),
+    ...(shape === "surface" &&
+      typeof side.surface_axis === "number" && { axis: side.surface_axis }),
+    ...(kind === "base" && unit && { unit }),
+  };
 }
 
 const KEYS: Record<OutputKind, string> = {
@@ -221,7 +259,7 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
   return {
     name: "report_output",
     description:
-      "Publish one version of an output: a value, or the files that make it. The files are copied out of your /work folder into /outputs/<id>/<version>/, which nobody can change, and recorded with what you made it from. Reporting an id again publishes a new version; the old one stays. Everything you cite in madeFrom must already be published.",
+      "Publish one version of an output: a value, or the files that make it. The files are moved out of your /work folder into /outputs/<id>/<toolCallId>/, which nobody can change, and recorded with what you made it from. Reporting an id again publishes a new version; the old one stays. Everything you cite in madeFrom must already be published.",
     input: inputSchema,
     execute: (input, ctx) =>
       result(async () => {
@@ -230,12 +268,32 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           const e = eventById(deps, id);
           return e?.type === "output.published" ? e.payload : undefined;
         };
+        const layout = deps.layoutOf(ctx.threadId);
+        // The move's second half. The source is gone once the event is stored, so a repeat works
+        // from the event's names alone; the pointer goes first, so a source is never without one.
+        const finishMove = async (p: OutputEvent) => {
+          const moved = [
+            ...(p.files ?? []).map((f) => f.name),
+            ...(p.evidence ?? []).map((e) => e.name),
+          ];
+          for (const name of moved) {
+            const key = layout.keyOf(`${layout.dir}/${name.replace(/^evidence\//, "")}`, "write");
+            await deps.publish.write(
+              `${key}.removed.txt`,
+              `${name.split("/").pop()} was removed from this folder to save storage.\n` +
+                `Its published copy is ${OUTPUTS_MOUNT}/${p.path}/${name} (output ${p.outputId}, version ${p.version}).\n`,
+            );
+            await deps.publish.remove(key);
+          }
+        };
         const done = stored();
-        if (done) return answerOf(done);
+        if (done) {
+          await finishMove(done);
+          return answerOf(done);
+        }
 
         const caller = callerOf(deps, ctx.threadId);
         const plan = planOf(deps, caller, input);
-        const layout = deps.layoutOf(ctx.threadId);
         const publishFile = async (named: string, folder: "" | "evidence/") => {
           const path = layout.resolve(named);
           const rel = inOwnFolder(layout.dir, path, "The file");
@@ -264,6 +322,16 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
               "evidence/ is where the evidence of a version goes; give the file another path.",
             );
 
+        const first = layout.resolve(input.files?.[0] ?? "");
+        const sidecar = first.endsWith(".npy")
+          ? await detailFromSidecar(
+              deps,
+              plan.kind,
+              plan.shape,
+              layout.keyOf(`${first.slice(0, -4)}.json`, "read"),
+              ctx.signal,
+            )
+          : {};
         const [files, evidence] = await Promise.all([
           Promise.all((input.files ?? []).map((f) => publishFile(f, ""))),
           Promise.all(input.evidence.map((f) => publishFile(f, "evidence/"))),
@@ -271,7 +339,10 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
 
         return section(async () => {
           const again = stored();
-          if (again) return answerOf(again);
+          if (again) {
+            await finishMove(again);
+            return answerOf(again);
+          }
           const version = nextVersion(deps, input.id);
           const path = versionPath(input.id, ctx.toolCallId);
           const value = input.value;
@@ -287,11 +358,14 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
             ...(evidence.length > 0 && { evidence }),
             ...(input.toCheck && { toCheck: input.toCheck }),
             ...((input.provisional || plan.provisional) && { provisional: true }),
-            ...(plan.detail && { detail: plan.detail }),
+            ...((plan.detail || Object.keys(sidecar).length > 0) && {
+              detail: { ...sidecar, ...plan.detail },
+            }),
           };
           await recorder.append(ctx.threadId, "output.published", payload, id);
           deps.changed();
           await deps.refreshRunFiles();
+          await finishMove(payload);
           return answerOf(payload);
         });
       }),

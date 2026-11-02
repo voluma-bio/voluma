@@ -13,6 +13,8 @@ import {
 import type { Publish } from "@voluma/harness/ports/publish";
 import type { ObjectStore } from "@voluma/object-store";
 
+const MAX_SMALL_BYTES = 1024 * 1024;
+
 export function storePublish(store: ObjectStore): Publish {
   return {
     async copy(from, to, { hash, signal } = {}) {
@@ -33,5 +35,15 @@ export function storePublish(store: ObjectStore): Publish {
       await store.copy(from, to, { ifMatch: head.etag, signal });
       return sha256;
     },
+    async read(key, { signal } = {}) {
+      const head = await store.head(key, { signal });
+      if (!head) return undefined;
+      if (head.size > MAX_SMALL_BYTES) throw new EvidenceRefused(`${key} is not a small file.`);
+      return new Response((await store.get(key, { ifMatch: head.etag, signal })).body).text();
+    },
+    async write(key, text, { signal } = {}) {
+      await store.put(key, new TextEncoder().encode(text), { contentType: "text/plain", signal });
+    },
+    remove: (key) => store.delete([key]),
   };
 }
