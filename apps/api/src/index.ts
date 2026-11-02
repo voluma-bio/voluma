@@ -250,7 +250,7 @@ app.route(
   createReview({
     runs: runRecords,
     snapshots: pgSnapshots(db),
-    messages: { check: queue.checkMessage, send: queue.sendMessage },
+    messages: { check: queue.checkMessage, send: queue.sendMessage, answer: queue.answerApproval },
     store,
   }),
 );

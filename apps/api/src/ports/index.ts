@@ -10,7 +10,7 @@
  * adapters/. Only index.ts constructs adapters.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import type { PersonMessage } from "@voluma/contracts/messages";
+import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
@@ -76,13 +76,21 @@ export type RunMessages = {
     reader: Reader,
     caller: Caller,
     runId: string,
-    msg: { id: string; payload: PersonMessage },
+    msg: { id: string; payload: PersonMessage; markIds?: string[] },
   ): Promise<MessageSent>;
   /** Judges again under the queue lock and stores it, reopening a finished run. */
   send(
     reader: Reader,
     caller: Caller,
     runId: string,
-    msg: { id: string; payload: PersonMessage },
+    msg: { id: string; payload: PersonMessage; markIds?: string[] },
   ): Promise<MessageSent>;
+  /** Stores the researcher's yes or no to a held call, reopening a finished run (`answerApproval`). */
+  answer(
+    reader: Reader,
+    caller: Caller,
+    runId: string,
+    requestId: string,
+    body: AnswerApprovalRequest,
+  ): Promise<void>;
 };

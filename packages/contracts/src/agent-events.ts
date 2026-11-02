@@ -297,6 +297,8 @@ export const markPlacedSchema = z.looseObject({
  * does not oblige a migration of stored messages; it carries only what the notice to main needs.
  */
 export const attachedMarkSchema = z.looseObject({
+  /** The mark's id: how a later message finds what main was last told of it (`was`). */
+  id: z.uuid().optional(),
   output: outputRefSchema,
   tag: nonEmpty,
   volume: nonEmpty,
@@ -310,10 +312,11 @@ export const attachedMarkSchema = z.looseObject({
 export const attachedWasSchema = attachedMarkSchema.pick({ world: true, plane: true });
 
 /**
- * A mark attached to a researcher's message. `change`: `delete` (a `mark.deleted` follows its last
- * `mark.placed`), `move` (an earlier `mark.placed` of this id exists) or `place`. `was` is the state
- * main last saw, for a move of the researcher's own mark. `version` is the output's latest version
- * when the message was sent.
+ * A mark attached to a researcher's message, as `changeOf` (review-state.ts) judges it against
+ * what that person's previous messages froze: `place` (never told, or placed again after a told
+ * delete), `move` (a told mark's position, plane or shape changed; `was` is the state main last
+ * saw) or `delete` (a told mark deleted since). A told mark unchanged is not attached at all.
+ * `version` is the output's latest version when the message was sent.
  */
 export const attachedSchema = z.object({
   change: z.enum(["place", "move", "delete"]),

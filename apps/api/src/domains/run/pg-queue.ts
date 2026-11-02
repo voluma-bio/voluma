@@ -11,7 +11,7 @@
  */
 import { randomBytes } from "node:crypto";
 import type { Harness } from "@voluma/contracts/ids";
-import type { PersonMessage } from "@voluma/contracts/messages";
+import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
@@ -33,14 +33,17 @@ import {
   type Usage,
   usage,
 } from "./admission";
+import { lateResearcherWrite } from "./agent-review";
 import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
 import {
+  answerApproval,
   decideMessage,
   endCorrection,
   GUEST_KEYS_MESSAGE,
   messageRefusal,
   messageTargetOf,
   openCorrection,
+  reopen,
 } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
@@ -79,7 +82,7 @@ export class RunEnded extends Error {
 }
 
 export type RunnerReport =
-  | { kind: "ended"; outcome: "completed" | "failed"; error?: string }
+  | { kind: "ended"; outcome: "completed" | "failed"; error?: string; readSeq?: number }
   | { kind: "released"; reason: ReleaseReason };
 
 export type Claimed = {
@@ -228,6 +231,37 @@ async function endUnfinished(
       error: correcting ? null : (error ?? null),
     })
     .where(eq(runs.id, runId));
+}
+
+/**
+ * The first researcher write the ending claim never saw (`lateResearcherWrite`), from raw columns:
+ * the payload is read only of `thread.started`, in JS, as a json operator would fail on `\u0000`.
+ */
+async function lateWrite(tx: Tx, runId: string, readSeq: number | undefined) {
+  const rows = await tx
+    .select({
+      id: events.id,
+      type: events.type,
+      seq: events.seq,
+      threadId: events.threadId,
+      payload: sql<unknown>`CASE WHEN ${events.type} = 'thread.started' THEN ${events.payload} END`,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.runId, runId),
+        inArray(events.type, [
+          "thread.started",
+          "thread.ended",
+          "run.reopened",
+          "person.message",
+          "approval.given",
+          "approval.declined",
+        ]),
+      ),
+    )
+    .orderBy(asc(events.seq));
+  return lateResearcherWrite(rows, readSeq);
 }
 
 /** A run's error when its org is gone from config: a clause read after "The run stopped: ". */
@@ -517,7 +551,7 @@ export function pgRunQueue(
       reader: Reader,
       caller: { userId: string; guest: boolean },
       runId: string,
-      msg: { id: string; payload: PersonMessage },
+      msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) =>
       db.transaction((tx) =>
         decideMessage(tx, messageContext(reader), reader, caller, runId, msg, false),
@@ -528,13 +562,27 @@ export function pgRunQueue(
       reader: Reader,
       caller: { userId: string; guest: boolean },
       runId: string,
-      msg: { id: string; payload: PersonMessage },
+      msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) {
       const result = await locked((tx) =>
         decideMessage(tx, messageContext(reader), reader, caller, runId, msg, true),
       );
       if (!result.duplicate) notifier.notify(runId);
       return result;
+    },
+
+    /** Stores a yes or no to a held call, reopening the run if it had ended; never through admission. */
+    async answerApproval(
+      reader: Reader,
+      caller: { userId: string; guest: boolean },
+      runId: string,
+      requestId: string,
+      body: AnswerApprovalRequest,
+    ) {
+      const { duplicate } = await locked((tx) =>
+        answerApproval(tx, messageContext(reader), reader, caller, runId, requestId, body),
+      );
+      if (!duplicate) notifier.notify(runId);
     },
 
     /**
@@ -700,10 +748,14 @@ export function pgRunQueue(
         } else if (report.outcome === "failed") {
           await endUnfinished(tx, runId, "failed", report.error);
         } else {
-          await tx
-            .update(runs)
-            .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
-            .where(eq(runs.id, runId));
+          // The researcher wrote while the claim was ending: the run goes back to the queue.
+          const late = run.harness === "agents" ? await lateWrite(tx, runId, report.readSeq) : null;
+          // A reopen already stored for that write cannot queue the run again: it would loop.
+          if (!late || !(await reopen(tx, runId, late, run.startedBy)))
+            await tx
+              .update(runs)
+              .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
+              .where(eq(runs.id, runId));
         }
       });
       notifier.notify(runId);
