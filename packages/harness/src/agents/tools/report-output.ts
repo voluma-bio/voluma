@@ -418,7 +418,12 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           return { payload, fresh: true };
         });
         if (fresh) await deps.refreshRunFiles();
-        await finishMove(payload);
+        // The version is published: a failed move must not turn the answer into an error, or the
+        // agent reports again and makes a second version. The sources stay in /work, and a repeat
+        // of this call finishes the move.
+        await finishMove(payload).catch((error) => {
+          console.error(`report_output ${id}: moving the sources failed: ${String(error)}`);
+        });
         return answerOf(payload);
       }),
   };
