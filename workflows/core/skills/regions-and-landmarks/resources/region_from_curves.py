@@ -29,7 +29,7 @@ def other_axes(axis):
     return [i for i in range(3) if i != axis]
 
 
-def surface_from_curves(spec, shape, unsupported_ok=None):
+def surface_from_curves(spec, shape, has_bone=None):
     """Height map H[slice, other] (voxel index along the height axis) from polylines [row, col], one per slice.
 
     Each polyline is read as height = f(position along the other in-plane axis), interpolated linearly, constant
@@ -38,8 +38,10 @@ def surface_from_curves(spec, shape, unsupported_ok=None):
     and support[slice, other]: how far H at that column is from the points that feed it, in voxels: the span of the straight
     bridge it lies on, along the other axis within a slice (0 at a point, the distance to the end point where a curve is held
     constant) and across slices (the span between the two traced slices it is interpolated between, or the distance to the
-    first or last one where it is held), whichever is larger. `unsupported_ok` (bool, slice x other) names columns a traced slice
-    need not support, where the structure the surface describes is absent on that slice: they count 0 within the slice.
+    first or last one where it is held), whichever is larger. `has_bone(k, h)` (optional) says on traced slice k, for the
+    heights h of that slice's curve along the other axis, where the structure the surface describes exists; a bridge that
+    crosses columns without it (a notch) is held from the nearer of its two end points, since nothing there says what the
+    surface does.
     """
     axis = spec['axis']
     rows_ax, cols_ax = other_axes(axis)
@@ -62,9 +64,13 @@ def surface_from_curves(spec, shape, unsupported_ok=None):
         o = o[order]
         i = np.searchsorted(o, pos)
         inside = (i > 0) & (i < len(o))
-        span = o[np.minimum(i, len(o) - 1)] - o[np.maximum(i - 1, 0)]
-        d = np.where(np.isin(pos, o), 0, np.where(inside, span, np.abs(pos - np.clip(pos, o[0], o[-1]))))
-        reach.append(d if unsupported_ok is None else np.where(unsupported_ok[k], 0, d))
+        a, b = o[np.maximum(i - 1, 0)], o[np.minimum(i, len(o) - 1)]
+        wide = b - a
+        if has_bone is not None:
+            absent = np.concatenate([[0], np.cumsum(~has_bone(k, per_slice[-1]))])
+            first, last = np.clip(np.floor(a), 0, len(pos) - 1).astype(int), np.clip(np.ceil(b), 0, len(pos) - 1).astype(int)
+            wide = np.where(absent[last + 1] - absent[first] > 0, np.minimum(pos - a, b - pos), wide)
+        reach.append(np.where(np.isin(pos, o), 0, np.where(inside, wide, np.abs(pos - np.clip(pos, o[0], o[-1])))))
     per_slice = np.array(per_slice)
     rows = np.arange(shape[axis])
     below = np.searchsorted(levels, rows, side='right') - 1  # last traced slice at or before each slice

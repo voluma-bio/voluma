@@ -21,10 +21,10 @@ end and on the sections with no span. The spans, the V range and what ended each
 flagged stretch. Copy both keys into your annotations.json. The flagged stretches are in `plate-faces.json` (`stretches`:
 {"<V>": [{"u": [first U, last U], "why": [tests that fired]}]}): where to look hardest and to retrace, by adding your points to the
 section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold the faces to one rule, flagged or not: every (V, U) column where the tibia exists at plate level (the tibia
-between the section's lowest and highest curve points, widened by `max_gap_um`) is traced: the surface bridges or holds no bone column over more than `max_gap_um`: points on a section at most that far apart along U, neighbouring sections at
+within `max_gap_um` of the surface's own height there) is traced: the surface bridges or holds no bone column over more than `max_gap_um`: points on a section at most that far apart along U, neighbouring sections at
 most that far apart in V, and a curve's end or the first or last section at most that short of a bone column (a surface is linear between points and held constant past them, so an
-untraced stretch is a straight bridge, wrong geometry however the plate looks there; columns with no tibia at plate level, such as the
-notch between the condyles at the front, are not demanded),
+untraced stretch is a straight bridge, wrong geometry however the plate looks there; a column with no tibia at plate level, such as in the
+notch between the condyles at the front, is not itself demanded, but a bridge across such columns is measured from the nearer of its two points),
 and no point more than `off_tibia_margin_um` off the tibia mask. Look at every flagged stretch and retrace it wherever it is wrong, and add points wherever a gap
 wider than `max_gap_um` is open; that the points lie on the plate is for you to see, not for the rule. Your points and the proposed ones count alike.
 Where the plate is destroyed, mark the U range where it is gone, on every traced section it reaches, in your annotations as `plate_eroded`:

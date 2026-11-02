@@ -186,19 +186,22 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
     """Refuse a face that leaves tibia at plate level untraced: a bone column whose `support` (surface_from_curves: the span of the
     straight bridge its W lies on, along U within a section and along V between the two sections it is interpolated between, or
     its distance from the end point or end section where it is held constant) exceeds the spec's `max_gap_um` (entry plate-faces).
-    Columns with no tibia at plate level (the notch between the condyles) are not demanded. "At plate level" is the tibia between
-    the section's lowest and highest curve points, widened by the gap, so an epiphysis that overhangs the plate is not demanded.
+    "At plate level" is the tibia within the gap of the surface's own W at that column; a column without it (the notch between the
+    condyles) is not checked. A bridge that crosses such columns on its section is held from the nearer of its end points.
     The stop names each row range and the uncovered U ranges."""
     gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
     um = vox * 1000
-    slices = {int(k): np.asarray(pts, float) for k, pts in ann[key]['slices'].items()}
-    levels = sorted(slices)
-    rows = np.arange(tib.shape[1])
-    wlo = np.interp(rows, levels, [slices[v][:, 0].min() for v in levels]) - gap
-    whi = np.interp(rows, levels, [slices[v][:, 0].max() for v in levels]) + gap
-    plate = np.array([tib[max(int(wlo[v]), 0) : int(whi[v]) + 1, v].any(0) for v in rows])  # (V, U) tibia columns at plate level
-    # A traced section need not support a column where the tibia is absent on it: the other section the row is interpolated between must.
-    *_, support = surface_from_curves(ann[key], tib.shape, ~plate)  # callers have run traced_surface, so the spec is valid
+    levels = sorted(int(k) for k in ann[key]['slices'])
+    cum = np.concatenate([np.zeros((1, *tib.shape[1:]), np.uint16), np.cumsum(tib, axis=0, dtype=np.uint16)])  # tibia voxels above each W, per (V, U)
+
+    def near_tibia(v, w):
+        """Bool over U: tibia on section(s) v within the gap of W `w`."""
+        lo, hi = np.clip(np.floor(w - gap), 0, tib.shape[0]).astype(int), np.clip(np.floor(w + gap) + 1, 0, tib.shape[0]).astype(int)
+        u = np.arange(tib.shape[2])
+        return cum[hi, v, u] > cum[lo, v, u]
+
+    H, *_, support = surface_from_curves(ann[key], tib.shape, near_tibia)  # callers have run traced_surface, so the spec is valid
+    plate = np.array([near_tibia(v, H[v]) for v in range(tib.shape[1])])
     missing = plate & (support > gap)
     labels, count = ndi.label(missing)
     if count:
