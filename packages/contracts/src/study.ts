@@ -143,8 +143,6 @@ export const studySummarySchema = studySchema.extend({
   inputCount: z.number().int().nonnegative(),
   /** Inputs with a completed run, whether or not it is the newest. */
   inputsCompleted: z.number().int().nonnegative(),
-  /** What needs a person on each input (`inputNeedsYou`), summed. */
-  needsYou: z.number().int().nonnegative(),
   /** The latest of the study's creation and its runs' creation, start and end. */
   lastActivityAt: z.iso.datetime(),
   /** Each input's newest run, newest first; an input with no run is absent. */
