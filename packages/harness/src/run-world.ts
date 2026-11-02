@@ -379,6 +379,7 @@ export function world(o: WorldOptions) {
     const rec = recorder(store as never, RUN, () => {}, [...stored]);
     const supervised = superviseRun({
       runId: RUN,
+      harness: "tasks",
       prepare: async () => ({
         definition,
         plan: o.plan,

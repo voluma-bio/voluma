@@ -253,6 +253,9 @@ An agent in its own worktree tries a workflow change on the real system like thi
    one cheap model for every role; `RUNNER_THINKING` as usual). Agents test on `deepseek/deepseek-v4-pro` or
    `meta/muse-spark-1.3-contributor` only, never on wonder, and never start a run on staging (Jimmy;
    `deepseek/deepseek-flash` is too slow for a full run). Meta SAM is the only Meta call here, about $0.10 each.
+   `RUN_HARNESS` (`tasks`, the default, or `agents`) picks the loop a *new* run starts on; a run keeps the
+   loop on its root `thread.started` (`pinOf`). `agents` is not built yet: such a run ends failed with
+   "the agent loop is not built yet".
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
    follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
