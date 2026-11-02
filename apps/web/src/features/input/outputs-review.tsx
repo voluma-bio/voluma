@@ -258,10 +258,11 @@ export function OutputsReview({
         const m = marks.find((x) => x.id === edit.id);
         if (!m || m.theirs) return;
         kept.place({ ...m, mark: edit.mark, plane });
-        say(`I moved ${m.tag}.`);
-      } else if (add(edit.mark, volumeId, gridKey, edit.id, plane)) {
+        say(m.id, `I moved ${m.tag}.`);
+      } else {
+        const id = add(edit.mark, volumeId, gridKey, edit.id, plane);
         const name = nameOf(edit.id);
-        say(`I moved an end of ${/ruler/i.test(name) ? "the " : ""}${name}.`);
+        if (id) say(id, `I moved an end of ${/ruler/i.test(name) ? "the " : ""}${name}.`);
       }
     },
     [nameOf],
@@ -273,8 +274,10 @@ export function OutputsReview({
       const m = marks.find((x) => x.id === id);
       if (!m || m.theirs) return;
       kept.erase(id);
-      if (!run.example && !runMarks.changes.some((c) => c.id === id && c.change === "place"))
-        say(`I deleted ${m.tag}.`);
+      if (run.example) return;
+      // A mark main never saw just goes, with any line about it.
+      const unseen = runMarks.changes.some((c) => c.id === id && c.change === "place");
+      say(id, unseen ? null : `I deleted ${m.tag}.`);
     },
     [run.example, runMarks.changes],
   );
@@ -438,7 +441,13 @@ export function OutputsReview({
                   answers={answers}
                   markError={runMarks.error}
                   onMark={marking.select}
-                  onDiscard={run.example ? exampleMarks.erase : runMarks.discard}
+                  onDiscard={(id) => {
+                    if (run.example) exampleMarks.erase(id);
+                    else {
+                      runMarks.discard(id);
+                      message.say(id, null);
+                    }
+                  }}
                 />
               ),
             },

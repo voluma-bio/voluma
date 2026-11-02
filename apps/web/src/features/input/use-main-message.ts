@@ -88,8 +88,8 @@ export function useMainMessage({
   onSent: () => void;
 }) {
   const [text, setText] = useDraft(`voluma:main-draft:${run.id}`);
-  // The words the page wrote for an edit: replaced or added to only while the box holds just them.
-  const written = useRef("");
+  // The lines the page wrote for edits, by mark: the box is rewritten only while it holds just them.
+  const written = useRef(new Map<string, string>());
   const [about, setAbout] = useState<About>();
   const [withPicture, setWithPicture] = useState(true);
   // The changes a sent message carried leave the composer before its event is back on the stream.
@@ -111,7 +111,7 @@ export function useMainMessage({
     },
     onSuccess: ({ eventId, marks, unseen }) => {
       setText("");
-      written.current = "";
+      written.current = new Map();
       setAbout(undefined);
       setUnseen(unseen);
       setSent({ eventId, marks });
@@ -185,15 +185,19 @@ export function useMainMessage({
   };
 
   /**
-   * Puts a line about an edit in the box ("I moved P1."): into an empty box, or under the lines
-   * the page wrote before; never over the researcher's own words.
+   * Puts a line about an edit of mark `id` in the box ("I moved P1."), or takes it out (`null`, the
+   * edit undone): only while the box is empty or holds just the page's lines, never over the
+   * researcher's own words.
    */
-  const say = (line: string) =>
+  const say = (id: string, line: string | null) =>
     setText((had) => {
-      if (had.trim() && had !== written.current) return had;
-      const next = had.trim() ? `${had}\n${line}` : line;
+      const lines = written.current;
+      if (had.trim() && had !== [...lines.values()].join("\n")) return had;
+      const next = new Map(lines);
+      next.delete(id);
+      if (line) next.set(id, line);
       written.current = next;
-      return next;
+      return [...next.values()].join("\n");
     });
 
   return {

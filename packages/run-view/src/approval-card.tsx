@@ -35,7 +35,6 @@ export type ApprovalCardProps = {
 const SETTLED = {
   done: { status: "done", label: "Done" },
   refused: { status: "stopped", label: "Couldn't be done" },
-  withdrawn: { status: "stopped", label: "Withdrawn" },
 } as const;
 
 export function ApprovalCard({
@@ -60,6 +59,9 @@ export function ApprovalCard({
         <h3 className="font-semibold">{title}</h3>
         {open ? (
           <span className="text-xs text-muted-foreground">waits for your answer</span>
+        ) : settled?.outcome === "withdrawn" ? (
+          // Not a failure: main moved on without it.
+          <span className="text-xs text-muted-foreground">withdrawn</span>
         ) : settled ? (
           <StatusMark
             status={SETTLED[settled.outcome].status}
