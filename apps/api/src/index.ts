@@ -93,12 +93,13 @@ const db = drizzle(client, { casing: "snake_case" });
 
 // The organizations and what each may run. Members sign in to `members`; the guest
 // organization (auth.ts) is separate, and unset means the sign-in wall.
-const labOrganizationId = required("WORKOS_LAB_ORGANIZATION_ID");
 const members = [
   {
-    id: labOrganizationId,
+    id: required("WORKOS_LAB_ORGANIZATION_ID"),
     scope: "lab" as const,
     limits: limitsFromEnv("LAB"),
+    // The agent loop is internal until it ships: only the lab's members may start it.
+    agentLoop: true,
   },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
     ? [
@@ -106,16 +107,26 @@ const members = [
           id: process.env.WORKOS_JUDGES_ORGANIZATION_ID,
           scope: "self" as const,
           limits: limitsFromEnv("JUDGES"),
+          agentLoop: false,
         },
       ]
     : []),
 ];
 const guest = process.env.GUEST_ORGANIZATION_ID
-  ? { id: process.env.GUEST_ORGANIZATION_ID, scope: guestScope(), limits: limitsFromEnv("DEMO") }
+  ? {
+      id: process.env.GUEST_ORGANIZATION_ID,
+      scope: guestScope(),
+      limits: limitsFromEnv("DEMO"),
+      agentLoop: false,
+    }
   : null;
 // An org missing here is no longer configured: its queued runs fail and its running ones stop.
 const limits: ReadonlyMap<string, Limits> = new Map(
   [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.limits]),
+);
+
+const agentLoop: ReadonlyMap<string, boolean> = new Map(
+  [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.agentLoop]),
 );
 
 const auth = createAuth({
@@ -155,7 +166,7 @@ const queue = pgRunQueue(
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
   harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "tasks"),
-  labOrganizationId,
+  (labId) => agentLoop.get(labId) === true,
 );
 const eventLog = pgEventLog(db, notifier);
 
