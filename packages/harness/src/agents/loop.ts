@@ -23,8 +23,12 @@ import {
   silentMinutes,
   stalledMinutes,
 } from "@voluma/contracts/agents";
-import { labelOverlaysUnder, refuseOutputsChange } from "@voluma/contracts/final-outputs";
-import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
+import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
+import {
+  labelMapsOf,
+  type OutputCatalog,
+  type OutputEntry,
+} from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "@voluma/contracts/thread-records";
@@ -129,15 +133,14 @@ interface AgentLoopOptions {
 
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
-/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen, with the label overlays they rest on. */
+/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
 export function openingOutputs(
   catalog: readonly OutputEntry[],
   selected: readonly string[] | undefined,
 ) {
-  const chosen = selected
+  return selected
     ? catalog.filter((e) => selected.includes(e.id))
     : catalog.filter((e) => e.selectable);
-  return [...chosen, ...labelOverlaysUnder(catalog, chosen)];
 }
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
@@ -292,6 +295,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         by: "runner" as const,
         reason: "The outputs the researcher chose for this run.",
         add: entries,
+        labels: labelMapsOf(o.catalog),
       };
       const why = refuseOutputsChange(undefined, change, o.catalog);
       if (why) throw new Error(`the run's opening outputs were refused: ${why}`);
