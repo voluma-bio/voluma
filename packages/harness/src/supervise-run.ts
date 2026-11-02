@@ -44,7 +44,7 @@ import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import type { PlanTask } from "./task-runtime";
 import { type TasksWireOptions, tasksWire } from "./tasks-wire";
-import { threadIdOf } from "./thread-id";
+import { ROOT_NAME, threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
 import { type Threads, threads } from "./threads";
 
@@ -140,8 +140,6 @@ export interface Supervised {
   /** Stops the conversion and destroys every sandbox. */
   close(): Promise<void>;
 }
-
-const ROOT_NAME = "supervisor";
 
 /** What a run began on, read from its root's `thread.started`: the sandbox image and the loop. */
 export interface Pin {

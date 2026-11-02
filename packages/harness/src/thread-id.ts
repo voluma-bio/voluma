@@ -9,6 +9,9 @@ import { createHash } from "node:crypto";
 /** Fixed namespace for thread ids; changing it changes every id minted afterwards. */
 const THREAD_NAMESPACE = "6f1c6d0e-7a53-4e0b-9c52-3b0a2f4d8e17";
 
+/** The name of every run's root thread. */
+export const ROOT_NAME = "supervisor";
+
 /** `uuid5(THREAD_NAMESPACE, "<runId>.<name>")`: opaque, and unique per run because names are. */
 export function threadIdOf(runId: string, name: string): string {
   const hash = createHash("sha1")

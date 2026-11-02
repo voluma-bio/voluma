@@ -654,7 +654,11 @@ export function pgRunQueue(
             sandboxSeconds: sql`${runs.sandboxSeconds} + ${used.sandboxSeconds}`,
           })
           .where(eq(runs.id, runId));
-        return { stop: false };
+        const [last] = await tx
+          .select({ seq: sql<number>`coalesce(max(${events.seq}), 0)` })
+          .from(events)
+          .where(eq(events.runId, runId));
+        return { stop: false, lastSeq: last?.seq ?? 0 };
       }),
 
     /**
