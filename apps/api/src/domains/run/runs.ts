@@ -44,7 +44,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   const userOf = (principal: Principal) => (principal.kind === "user" ? principal : undefined);
 
   app.post("/runs", requireUser, async (c) => {
-    const { studyId, inputId, selectedOutputs, notes, keys, model } = await parseJson(
+    const { studyId, inputId, selectedOutputs, notes, keys, model, harness } = await parseJson(
       c,
       startRunRequestSchema,
     );
@@ -57,6 +57,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
       notes,
       keys,
       model,
+      harness,
     });
     return c.json(result.run satisfies Run);
   });

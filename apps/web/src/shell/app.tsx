@@ -5,10 +5,9 @@
  * shown in Storybook (apps/storybook), not in the app.
  */
 import { Button } from "@voluma/ui";
-import { createBrowserRouter, Link } from "react-router";
+import { createBrowserRouter, Link, Navigate } from "react-router";
 import { RouterProvider } from "react-router/dom";
 import { scanRoutes } from "../features/scan";
-import { settingsRoutes } from "../features/settings";
 import { studyRoutes } from "../features/study";
 import { SignedIn } from "./signed-in";
 
@@ -18,7 +17,8 @@ const router = createBrowserRouter([
     children: [
       ...studyRoutes,
       ...scanRoutes,
-      ...settingsRoutes,
+      // The old Settings page: the theme and account now live in the rail's Settings.
+      { path: "settings", element: <Navigate to="/" replace state={{ openSettings: true }} /> },
       { path: "*", element: <NotFound /> },
     ],
   },
@@ -33,7 +33,7 @@ function NotFound() {
     <div className="grid flex-1 place-content-center gap-2 text-center">
       <h1 className="text-2xl font-semibold">Page not found</h1>
       <Button asChild variant="link" className="justify-self-center">
-        <Link to="/">Go to Home</Link>
+        <Link to="/">Go to Studies</Link>
       </Button>
     </div>
   );

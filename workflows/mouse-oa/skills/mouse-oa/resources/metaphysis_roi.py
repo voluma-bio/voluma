@@ -2,7 +2,8 @@
 
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
 it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `start_um` below it, and
-there is no thickness fallback. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
+there is no thickness fallback. A curve point more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused,
+naming the section, and so is a face that leaves bone at plate level untraced (over a section's bone, points more than `max_gap_um` of the spec apart or the first or last point more than that short of the bone's ends; over the rows with tibia at plate level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count). The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
 ROI-3 is the slab between `start_um` and `start_um + length_um` below that face (measured along W), inside the filled tibial
 cross-section, at least `cortex + cortex_clearance_um` from its outer edge. Those, and `cortex_search_factor`, come from the spec
@@ -15,9 +16,13 @@ It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, 
 `morphometry.py trabecular --output roi-metaphyseal` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on cortex.npy with the distal face as --surface.
 
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
-or from another grid is refused). This script reads one key; any other key is refused, and so is a value of the wrong form or an index outside the grid:
+or from another grid is refused). This script reads these keys; any other unknown key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_distal_curves  required: the distal face of the growth-plate band (the side facing the shaft), curves (below),
                               traced on the coronal sections of tibia-hu.npy
+  plate_eroded                optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
+                              of the curve, any U range (integers, first <= last). It never replaces points: the section's distal curve
+                              must reach both ends of every marked range, or the script stops naming the section and U range;
+                              inside a marked range its points follow the remaining bone
 Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
 V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
 is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
@@ -30,6 +35,12 @@ inside the tibia: the band between them cannot be thinner than nothing. Where bo
 wrong; where either is held constant past its curves' ends it means the curves must reach further, and the message says
 which face and sections. It also stops on an empty ROI-3.
 
+Eroded ranges. Inside a range marked eroded (on both sections either side of a row along V) the faces may meet or cross: the
+check above does not apply, because the plate there is gone and both curves follow the remaining bone. ROI-3 is cut as everywhere
+else, `start_um` below the traced distal face, so in an eroded stretch it lies below the remaining bone, not below a plate. The
+eroded stretches and the fraction of the tibia's footprint they cover are in the result record (`eroded_stretches`,
+`plate-eroded-fraction`): report them, they say how much of ROI-3 is not measured from a plate.
+
 Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sidecar
         <out>/cortex.npy  the cortex mask for Ct.Th, bool, with its sidecar
         <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, NaN off the tibia's footprint, with its sidecar (a surface object)
@@ -37,7 +48,9 @@ Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sideca
         <out>/roi3.json  the result record: the parameters used and the cortex estimate (cortex_estimate_mm, cortex_mm_used, threshold);
                          `objects` holds roi-metaphyseal, cortex and growth-plate-distal-face
         <out>/qc-roi3.jpg, qc-roi3-axial.jpg  coronal and axial sections: ROI-3 cyan, cortex orange (coronal: the distal face magenta)
-Prints: one JSON line {out, values, objects, qc (the two images), roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
+        <out>/qc-faces-<n>.jpg  the distal face (magenta) and the proximal one (orange) as delivered, the surfaces this script cut with, on every traced
+                         section: the sheets to open every one of
+Prints: one JSON line {out, values, objects, qc (the QC images), roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels, eroded_stretches}
 Example: python metaphysis_roi.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -48,16 +61,24 @@ import numpy as np
 import objects
 import sidecar
 import viewlib as vl
-from annotations import load_annotations, need, traced_surface
+from annotations import (
+    eroded_marks,
+    load_annotations,
+    need,
+    refuse_gaps,
+    refuse_off_tibia,
+    traced_surface,
+)
 from envelope import close_and_fill, footprint
+from face_qc import delivered_faces
 from scipy import ndimage as ndi
 
 ROI_ID = 'roi-metaphyseal'  # the spec entry this script reads
 CORTEX_SPAN_MM = 1.3  # shaft length past the deepest distal-face point along W: Ct.Th is asked at up to 1 mm
 
 
-def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox):
-    """Stop when the distal face is not below the proximal one, inside the tibia over the V range both faces cover.
+def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox, eroded):
+    """Stop when the distal face is not below the proximal one, inside the tibia over the V range both faces cover, except where `eroded`.
 
     `dv` and `pv` say where each face comes from traced points; elsewhere it is the nearest trace held constant. A crossing
     between two traced points is a wrong point (retrace lower or higher). A crossing where either face is held constant is
@@ -73,13 +94,14 @@ def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox):
                                     for v, miss in ((plo, dlo > plo), (phi, dhi < phi)) if miss))
     on_bone = footprint(tib)
     vs = np.arange(gd.shape[0])[:, None]
-    cross = (gd <= prox) & on_bone & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
+    cross = (gd <= prox) & on_bone & ~eroded & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
     bad = cross & pv & dv
     if bad.any():
         vi, ui = np.nonzero(bad)
         sidecar.fail(f'the traced distal face lies at or above the proximal face at {int(bad.sum())} traced (V, U) positions, '
                      f'V={vi.min()}..{vi.max()}, U={ui.min()}..{ui.max()} (worst {float((prox - gd)[bad].max()) * vox * 1000:.0f} um): '
-                     'retrace the distal face lower, or the proximal face higher, on sections in that V range')
+                     'retrace the distal face lower, or the proximal face higher, on sections in that V range; where the plate is gone there, '
+                     'mark the U range where the plate is gone in "plate_eroded" (on the traced sections either side, flagged or not) and trace the remaining bone there')
     needs = []
     for name, known in (('distal', dv), ('proximal', pv)):
         held = cross & ~known
@@ -146,7 +168,10 @@ def main():
     if prox.shape != gd.shape:
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
     dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
-    check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox)
+    refuse_off_tibia(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
+    refuse_gaps(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
+    eroded, plate = eroded_marks(ann, 'growth_plate_distal_curves', h.shape, footprint(tib))
+    check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox, eroded)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
     w0 = max(int(np.floor(gd.min())), 0)
@@ -192,11 +217,17 @@ def main():
         vl.slice_sheet(out / 'qc-roi3-axial.jpg', h, overlays, 0, ws, window, cols=2, axis_names=('W', 'V', 'U'), voxel_mm=vox,
                        titles=[f'axial W={k}: ROI-3 cyan, cortex orange' for k in ws]),
     ]
+    qc += delivered_faces(out, h, tib, [('distal face', 'magenta', gd, dv), ('proximal face', 'orange', prox, np.load(a.proximal_valid))],
+                          [int(k) for k in gd_spec['slices']], sidecar.protocol(a.spec, 'plate-faces', 'qc_panels')['qc_panels'], window, vox)
+    values = {'plate-eroded-fraction': sidecar.value(
+        plate['eroded_fraction'], 'fraction', 'share of the tibia\'s (V, U) footprint, over the V range of the traced distal face, that the worker marked eroded in plate_eroded: '
+        'ROI-3 there starts below the remaining bone, not below a plate', kind='diagnostic')}
     sidecar.emit_values(
         out / 'roi3.json',
-        {},
-        params,
+        values,
+        dict(params, eroded_stretches=plate['eroded_stretches']),
         objects=placed,
+        eroded_stretches=plate['eroded_stretches'],
         qc=qc,
         roi3_tissue=str(out / 'roi3-tissue.npy'),
         cortex=str(out / 'cortex.npy'),

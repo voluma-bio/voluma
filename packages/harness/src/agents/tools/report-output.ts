@@ -32,7 +32,12 @@ import {
   outputRefSchema,
 } from "@voluma/contracts/output-catalog";
 import { OUTPUTS_MOUNT } from "@voluma/contracts/output-fold";
-import { relativePathSchema, versionPath, versionPrefix } from "@voluma/contracts/r2";
+import {
+  outputsPrefix,
+  relativePathSchema,
+  versionPath,
+  versionPrefix,
+} from "@voluma/contracts/r2";
 import { z } from "zod";
 import { EvidenceNotFound, EvidenceRefused } from "../../ports/evidence";
 import type { Tool } from "../../tools/tool";
@@ -52,7 +57,7 @@ import { Refusal, result } from "./refusal";
 
 const inputSchema = z.object({
   id: outputRefSchema.describe(
-    "The output's id from /run/final-outputs.yaml or /run/outputs.yaml. One the workflow does not list is <your name>/<id>, and then kind (and base for an overlay, unit for a value) is required.",
+    "The output's id from /run/final-outputs.yaml or /run/outputs.yaml. The ids of the workflow's outputs.yaml (under /workflow) are used as they are, listed in the final outputs or not. One it does not list is <your name>/<id>, and then kind (and base for an overlay, unit for a value) is required.",
   ),
   value: z.number().finite().optional().describe("The number, for an output of kind value."),
   unit: z
@@ -118,7 +123,7 @@ function detailOf(entry: OutputEntry): Pick<Plan, "detail" | "shape"> {
  * What the review converter reads of a `.npy` that the sidecar beside it (`<name>.json`,
  * `workflows/core/skills/*\/resources/sidecar.py`) states: `dtype`; `gridId` of the grid it lives
  * on; `affine` (voxel (x, y, z) to mm, diagonal from `spacing_zyx_mm`: the sidecar knows no
- * rotation); a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is
+ * rotation), read from the caller's latest published copy when an earlier report moved it away; a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is
  * refused for a missing sidecar.
  */
 async function detailFromSidecar(
@@ -126,9 +131,17 @@ async function detailFromSidecar(
   kind: OutputKind,
   shape: string | undefined,
   key: string,
+  publishedKey: string | undefined,
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  const text = await deps.publish.read(key, { signal });
+  // A sidecar over the read limit is as good as missing.
+  const readOrMissing = (k: string) =>
+    deps.publish.read(k, { signal }).catch((error: unknown) => {
+      if (error instanceof EvidenceRefused) return undefined;
+      throw error;
+    });
+  const text =
+    (await readOrMissing(key)) ?? (publishedKey ? await readOrMissing(publishedKey) : undefined);
   let side: Record<string, unknown> = {};
   try {
     const parsed: unknown = text === undefined ? undefined : JSON.parse(text);
@@ -164,6 +177,20 @@ async function detailFromSidecar(
   };
 }
 
+/**
+ * Where the caller's latest published copy of `rel` is, for a sidecar already moved out of the
+ * folder: a file reported on its own (the scan's `hu.json`) is gone before the array it describes
+ * is reported.
+ */
+function publishedCopy(deps: OutputToolDeps, caller: Caller, rel: string): string | undefined {
+  const latest = [...foldOf(deps).byId.values()]
+    .flatMap((o) => o.versions)
+    .filter((v) => v.by === caller.name && v.files.some((f) => f.name === rel))
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .at(-1);
+  return latest && `${outputsPrefix(deps.runId)}${latest.path}/${rel}`;
+}
+
 const KEYS: Record<OutputKind, string> = {
   base: "a base",
   overlay: "an overlay",
@@ -192,6 +219,10 @@ function planOf(deps: OutputToolDeps, caller: Caller, input: ReportOutputInput):
     };
   } else {
     const [owner, own, ...rest] = id.split("/");
+    if (own && deps.catalog.some((e) => e.id === own))
+      throw new Refusal(
+        `${own} is an output of this workflow: report it as ${own}, not ${id}. The workflow's outputs.yaml (under /workflow) lists every id.`,
+      );
     if (!own || rest.length > 0 || owner !== caller.folder)
       throw new Refusal(
         `${id} is not an output of this workflow. To report one it does not list, name it ${caller.folder}/<id> and give its kind (base too for an overlay, unit for a value).`,
@@ -342,12 +373,14 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
             );
 
         const first = layout.resolve(input.files?.[0] ?? "");
+        const sidecarPath = `${first.slice(0, -4)}.json`;
         const sidecar = first.endsWith(".npy")
           ? await detailFromSidecar(
               deps,
               plan.kind,
               plan.shape,
-              layout.keyOf(`${first.slice(0, -4)}.json`, "read"),
+              layout.keyOf(sidecarPath, "read"),
+              publishedCopy(deps, caller, inOwnFolder(layout.dir, sidecarPath, "The sidecar")),
               ctx.signal,
             )
           : {};
@@ -356,12 +389,11 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           Promise.all(input.evidence.map((f) => publishFile(f, "evidence/"))),
         ]);
 
-        return section(async () => {
+        // The section holds only the decision and the append; the R2 moves run after it, so other
+        // agents' tools are not held behind them. `finishMove` is idempotent and event-first.
+        const { payload, fresh } = await section(async () => {
           const again = stored();
-          if (again) {
-            await finishMove(again);
-            return answerOf(again);
-          }
+          if (again) return { payload: again, fresh: false };
           const version = nextVersion(deps, input.id);
           const path = versionPath(input.id, ctx.toolCallId);
           const value = input.value;
@@ -383,10 +415,11 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           };
           await recorder.append(ctx.threadId, "output.published", payload, id);
           deps.changed();
-          await deps.refreshRunFiles();
-          await finishMove(payload);
-          return answerOf(payload);
+          return { payload, fresh: true };
         });
+        if (fresh) await deps.refreshRunFiles();
+        await finishMove(payload);
+        return answerOf(payload);
       }),
   };
 }

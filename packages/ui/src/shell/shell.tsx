@@ -1,7 +1,11 @@
 /**
- * The app shell: one frame on every screen. A header line across the top; an icon strip at each
- * edge; up to two docked panels per side between the strip and the main area. Panels push the
- * main area aside, never float over it, so the 3D views are never covered.
+ * The app shell: one frame on every screen. A header line across the top, the rail (`Rail`) at
+ * the far left, and the main area. A screen lays out its own side panels (`SidePanel`): the shell
+ * keeps each side's width and whether it is folded, so both carry across pages.
+ *
+ * The scan page still declares docked panels with `ShellPanel`, which put a labelled icon strip
+ * at each edge with up to two panels per side; they go when it moves to `SidePanel`. Panels push the main area aside,
+ * never float over it, so the 3D views are never covered.
  *
  * A screen declares its panels by rendering `<ShellPanel>` anywhere inside its own tree: the panel
  * puts its button on the strip and, while open, portals its content into the dock. Rendering from
@@ -9,10 +13,10 @@
  * The main area (`children`) is rendered once and never remounts when panels open, close or
  * resize, so a viewer inside it keeps its state.
  *
- * Keys: `\` and `]` fold the left and right side, F toggles Full view (both sides folded), Esc
- * leaves it, and each panel may claim one key. Shift-click on a strip button stacks a second panel
- * on that side. Widths and the stacked split persist in localStorage; each visit opens the
- * screen's default panels.
+ * Keys: `\` and `]` fold the left and right side; F folds both, or unfolds both if either is
+ * folded; Esc unfolds both when both are folded (Full view). Each docked panel may claim one key,
+ * and Shift-click on a strip button stacks a second panel on that side. Widths and the stacked
+ * split persist in localStorage; each visit opens the screen's default panels unfolded.
  */
 import { X } from "lucide-react";
 import {
@@ -56,8 +60,6 @@ type Registration = Omit<ShellPanelProps, "children" | "tools" | "icon"> & {
    * strip reads the latest on its next render. */
   icon: { current: ReactNode };
   order: number;
-  /** A strip button that goes somewhere instead of opening a panel (`ShellLink`). */
-  link?: { active: boolean; go(): void };
 };
 
 type Layout = {
@@ -116,12 +118,12 @@ type ShellState = {
   isOpen(id: string): boolean;
   toggle(reg: Registration, stack: boolean): void;
   open(id: string): void;
-  /** Full view: both sides folded, the panels' layout kept for when it ends. */
-  full: boolean;
-  setFull(full: boolean): void;
+  /** Which sides are folded: a `SidePanel` shows as its strip, a docked panel hides. */
+  folded: Record<ShellSide, boolean>;
+  fold(side: ShellSide | "both", folded: boolean): void;
 };
 
-const ShellContext = createContext<ShellState | null>(null);
+export const ShellContext = createContext<ShellState | null>(null);
 const HeadingContext = createContext<HTMLElement | null>(null);
 
 let nextOrder = 0;
@@ -129,46 +131,52 @@ let nextOrder = 0;
 /** Registering the same panel again is a no-op, so a screen's re-render does not re-render the shell. */
 function sameRegistration(a: Registration | undefined, b: Registration) {
   if (!a) return false;
-  const { link: linkA, ...restA } = a;
-  const { link: linkB, ...restB } = b;
-  return (
-    Object.keys(restB).every(
-      (k) => restA[k as keyof typeof restA] === restB[k as keyof typeof restB],
-    ) && linkA?.active === linkB?.active
-  );
+  return Object.keys(b).every((k) => a[k as keyof Registration] === b[k as keyof Registration]);
 }
 
 export function AppShell({
-  logo,
-  account,
+  rail,
   theme,
   children,
 }: {
-  /** The mark at the left of the header line, linking home. */
-  logo: ReactNode;
-  /** The right end of the header line. */
-  account: ReactNode;
+  /** The app's rail (`Rail`), at the far left under the header line. */
+  rail: ReactNode;
   /** The whole frame's theme, chosen by the app; image wells use their own viewer tokens. */
   theme: "light" | "dark";
   children: ReactNode;
 }) {
   const [regs, setRegs] = useState<Map<string, Registration>>(() => new Map());
   const [layout, setLayout] = useState(loadLayout);
-  const [full, setFull] = useState(false);
+  const [folded, setFolded] = useState<Record<ShellSide, boolean>>({ left: false, right: false });
+  const fold = useCallback((side: ShellSide | "both", value: boolean) => {
+    setFolded((f) =>
+      side === "both"
+        ? f.left === value && f.right === value
+          ? f
+          : { left: value, right: value }
+        : f[side] === value
+          ? f
+          : { ...f, [side]: value },
+    );
+  }, []);
+  const full = folded.left && folded.right;
   const [slots, setSlots] = useState<Record<string, HTMLElement | null>>({});
   const [heading, setHeading] = useState<HTMLElement | null>(null);
   const frame = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState(0);
   const hasLeftStrip = [...regs.values()].some((r) => r.side === "left");
   const hasRightStrip = [...regs.values()].some((r) => r.side === "right");
+  // Observing again when a strip comes or goes measures the edges anew; the frame's own size
+  // doesn't change then.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on purpose, see above
   useEffect(() => {
     const el = frame.current;
     if (!el) return;
     const observer = new ResizeObserver(() => {
-      const strips = [hasLeftStrip && el.firstElementChild, hasRightStrip && el.lastElementChild];
+      // The rail and the strips; a screen's own side panels sit inside main.
+      const edges = [...el.querySelectorAll(":scope > [data-shell-edge]")];
       setAvailable(
-        el.clientWidth -
-          strips.reduce((sum, child) => sum + (child ? child.getBoundingClientRect().width : 0), 0),
+        el.clientWidth - edges.reduce((sum, edge) => sum + edge.getBoundingClientRect().width, 0),
       );
     });
     observer.observe(el);
@@ -179,7 +187,7 @@ export function AppShell({
   layoutRef.current = layout;
   // A drag changes the layout on every pointermove; it is saved once, when the pointer goes up.
   const dragging = useRef(false);
-  // Full view only hides the saved layout; it never changes which panels are open.
+  // Folding only hides the docked panels; it never changes which are open.
   useEffect(() => {
     if (!dragging.current) saveLayout(layout);
   }, [layout]);
@@ -190,32 +198,32 @@ export function AppShell({
 
   const shown = useMemo(
     () => ({
-      left: full ? [] : layout.open.left.filter((id) => regs.has(id)),
-      right: full ? [] : layout.open.right.filter((id) => regs.has(id)),
+      left: folded.left ? [] : layout.open.left.filter((id) => regs.has(id)),
+      right: folded.right ? [] : layout.open.right.filter((id) => regs.has(id)),
     }),
-    [layout.open, regs, full],
+    [layout.open, regs, folded],
   );
 
   const mounted = useRef(new Set<string>());
-  const lastOpen = useRef<Layout["open"]>({ left: [], right: [] });
-  const register = useCallback((reg: Registration) => {
-    setRegs((prev) =>
-      sameRegistration(prev.get(reg.id), reg) ? prev : new Map(prev).set(reg.id, reg),
-    );
-    if (mounted.current.has(reg.id)) return;
-    mounted.current.add(reg.id);
-    if (reg.defaultOpen) {
-      setFull(false);
-      setLayout((l) => ({
-        ...l,
-        open: { ...l.open, [reg.side]: [...l.open[reg.side], reg.id].slice(-2) },
-      }));
-    }
-  }, []);
+  const register = useCallback(
+    (reg: Registration) => {
+      setRegs((prev) =>
+        sameRegistration(prev.get(reg.id), reg) ? prev : new Map(prev).set(reg.id, reg),
+      );
+      if (mounted.current.has(reg.id)) return;
+      mounted.current.add(reg.id);
+      if (reg.defaultOpen) {
+        fold(reg.side, false);
+        setLayout((l) => ({
+          ...l,
+          open: { ...l.open, [reg.side]: [...l.open[reg.side], reg.id].slice(-2) },
+        }));
+      }
+    },
+    [fold],
+  );
   const unregister = useCallback((id: string) => {
     mounted.current.delete(id);
-    for (const side of ["left", "right"] as const)
-      lastOpen.current[side] = lastOpen.current[side].filter((panel) => panel !== id);
     setLayout((l) =>
       l.open.left.includes(id) || l.open.right.includes(id)
         ? {
@@ -236,10 +244,9 @@ export function AppShell({
 
   const toggle = useCallback(
     (reg: Registration, stack: boolean) => {
-      if (reg.link) return reg.link.go();
-      setFull(false);
+      fold(reg.side, false);
       setLayout((l) => {
-        const open = full ? [] : l.open[reg.side];
+        const open = folded[reg.side] ? [] : l.open[reg.side];
         const next = open.includes(reg.id)
           ? open.filter((id) => id !== reg.id)
           : stack
@@ -251,24 +258,8 @@ export function AppShell({
         };
       });
     },
-    [full],
+    [fold, folded],
   );
-
-  const foldSide = useCallback((side: ShellSide) => {
-    // A side that never had a panel open has nothing to fold.
-    if (!layoutRef.current.open[side].length && !lastOpen.current[side].length) return;
-    setFull(false);
-    setLayout((l) => {
-      if (l.open[side].length) lastOpen.current[side] = l.open[side];
-      const next = l.open[side].length ? [] : lastOpen.current[side];
-      return {
-        ...l,
-        open: { ...l.open, [side]: next },
-      };
-    });
-  }, []);
-
-  const toggleFull = useCallback(() => setFull((value) => !value), []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -280,15 +271,15 @@ export function AppShell({
         target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
       )
         return;
-      if (event.key === "\\") foldSide("left");
-      else if (event.key === "]") foldSide("right");
+      if (event.key === "\\") fold("left", !folded.left);
+      else if (event.key === "]") fold("right", !folded.right);
       else if (event.key === "Escape") {
         // Esc belongs to an open menu, popover or dialog first.
         if (!full || event.defaultPrevented) return;
         if (target.closest("[role=menu], [role=dialog], [data-radix-popper-content-wrapper]"))
           return;
-        toggleFull();
-      } else if (event.key.toLowerCase() === "f") toggleFull();
+        fold("both", false);
+      } else if (event.key.toLowerCase() === "f") fold("both", !(folded.left || folded.right));
       else {
         const reg = [...regs.values()].find((r) => r.shortcut === event.key.toLowerCase());
         if (!reg) return;
@@ -298,26 +289,29 @@ export function AppShell({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [foldSide, toggleFull, toggle, regs, full]);
+  }, [fold, folded, toggle, regs, full]);
 
   // A screen opens one of its panels: it joins what is open on its side, as Shift-click stacks
-  // it. From Full view it brings the saved layout back with the panel added. Stable, so a
+  // it, and unfolds that side. Stable, so a
   // screen's callbacks built on it don't change when panels do.
   const regsRef = useRef(regs);
   regsRef.current = regs;
-  const open = useCallback((id: string) => {
-    const reg = regsRef.current.get(id);
-    if (!reg || reg.link) return;
-    setFull(false);
-    setLayout((l) =>
-      l.open[reg.side].includes(id)
-        ? l
-        : {
-            ...l,
-            open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) },
-          },
-    );
-  }, []);
+  const open = useCallback(
+    (id: string) => {
+      const reg = regsRef.current.get(id);
+      if (!reg) return;
+      fold(reg.side, false);
+      setLayout((l) =>
+        l.open[reg.side].includes(id)
+          ? l
+          : {
+              ...l,
+              open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) },
+            },
+      );
+    },
+    [fold],
+  );
 
   const state = useMemo<ShellState>(
     () => ({
@@ -327,10 +321,10 @@ export function AppShell({
       isOpen: (id) => shown.left.includes(id) || shown.right.includes(id),
       toggle,
       open,
-      full,
-      setFull,
+      folded,
+      fold,
     }),
-    [register, unregister, slots, shown, toggle, open, full],
+    [register, unregister, slots, shown, toggle, open, folded, fold],
   );
 
   // One stable ref callback per panel: a new callback each render would detach and reattach the
@@ -394,7 +388,7 @@ export function AppShell({
         split={layout.split[side]}
         onResize={(w) => resize(side, w)}
         onSplit={(s) => setLayout((l) => ({ ...l, split: { ...l.split, [side]: s } }))}
-        onFold={() => foldSide(side)}
+        onFold={() => fold(side, true)}
         onDragging={onDragging}
       >
         {shown[side].map((id) => {
@@ -420,6 +414,7 @@ export function AppShell({
     if (!items.length) return null;
     return (
       <nav
+        data-shell-edge
         aria-label={side === "left" ? "Sections" : "Tools"}
         className={cx(
           "flex w-[var(--strip-w)] shrink-0 flex-col items-stretch gap-1 bg-card py-2",
@@ -434,7 +429,7 @@ export function AppShell({
             {items
               .filter((r) => (r.group ?? "") === g)
               .map((r) => {
-                const active = r.link ? r.link.active : shown[side].includes(r.id);
+                const active = shown[side].includes(r.id);
                 return (
                   <button
                     key={r.id}
@@ -443,8 +438,7 @@ export function AppShell({
                       else triggers.current.delete(r.id);
                     }}
                     type="button"
-                    aria-pressed={r.link ? undefined : active}
-                    aria-current={r.link?.active ? "page" : undefined}
+                    aria-pressed={active}
                     title={r.shortcut ? `${r.label} (${r.shortcut.toUpperCase()})` : r.label}
                     onClick={(e) => toggle(r, e.shiftKey)}
                     className={cx(
@@ -474,12 +468,11 @@ export function AppShell({
     <ShellContext.Provider value={state}>
       <HeadingContext.Provider value={heading}>
         <div data-theme={theme} className="flex h-dvh flex-col bg-background text-foreground">
-          <header className="flex h-[var(--header-h)] shrink-0 items-center gap-3 border-b border-border bg-card pr-3">
-            <div className="flex shrink-0 items-center pl-4">{logo}</div>
+          <header className="flex h-[var(--header-h)] shrink-0 items-center border-b border-border bg-card px-3.5">
             <div ref={setHeading} className="flex min-w-0 flex-1 items-center gap-3" />
-            {account}
           </header>
           <div ref={frame} className="flex min-h-0 flex-1">
+            {rail}
             {strip("left")}
             {dock("left")}
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-card">
@@ -652,6 +645,20 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
     : null;
 }
 
+/** Whether Full view is on (both sides folded), and a way for the screen to turn it on or off. */
+export function useFullView(): [boolean, (full: boolean) => void] {
+  const shell = useContext(ShellContext);
+  if (!shell) throw new Error("useFullView must be used inside AppShell");
+  return [shell.folded.left && shell.folded.right, (full) => shell.fold("both", full)];
+}
+
+/** Whether one side is folded, and a way for the screen to fold or unfold it. */
+export function useSideFold(side: ShellSide): [boolean, (folded: boolean) => void] {
+  const shell = useContext(ShellContext);
+  if (!shell) throw new Error("useSideFold must be used inside AppShell");
+  return [shell.folded[side], (folded) => shell.fold(side, folded)];
+}
+
 /** Opens a panel of this screen by id, beside what is open on its side. */
 export function useOpenPanel(): (id: string) => void {
   const shell = useContext(ShellContext);
@@ -659,56 +666,8 @@ export function useOpenPanel(): (id: string) => void {
   return shell.open;
 }
 
-/** Whether Full view is on (F), and a way for the screen to turn it on or off. */
-export function useFullView(): [boolean, (full: boolean) => void] {
-  const shell = useContext(ShellContext);
-  if (!shell) throw new Error("useFullView must be used inside AppShell");
-  return [shell.full, shell.setFull];
-}
-
 /** What the header line says about this screen: where you are, and its one-line facts. */
 export function ShellHeading({ children }: { children: ReactNode }) {
   const slot = useContext(HeadingContext);
   return slot ? createPortal(children, slot) : null;
-}
-
-/** A strip button that goes to a page (a study section, Home) rather than opening a panel. */
-export function ShellLink({
-  id,
-  side = "left",
-  group,
-  label,
-  icon: iconNode,
-  count,
-  shortcut,
-  active,
-  go,
-}: Pick<ShellPanelProps, "id" | "group" | "label" | "icon" | "count" | "shortcut"> & {
-  side?: ShellSide;
-  active: boolean;
-  go(): void;
-}) {
-  const shell = useContext(ShellContext);
-  if (!shell) throw new Error("ShellLink must be rendered inside AppShell");
-  const order = useRef(nextOrder++).current;
-  const { register, unregister } = shell;
-  const goRef = useRef(go);
-  goRef.current = go;
-  const icon = useRef(iconNode);
-  icon.current = iconNode;
-  useEffect(() => {
-    register({
-      id,
-      side,
-      group,
-      label,
-      icon,
-      count,
-      shortcut,
-      order,
-      link: { active, go: () => goRef.current() },
-    });
-  }, [register, id, side, group, label, count, shortcut, order, active]);
-  useEffect(() => () => unregister(id), [unregister, id]);
-  return null;
 }

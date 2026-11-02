@@ -37,8 +37,15 @@ export const runPrefix = (runId: string) => `runs/${seg(runId)}/`;
  */
 export const workflowSnapshotPrefix = (runId: string) => `${runPrefix(runId)}workflow/`;
 export const scratchPrefix = (runId: string) => `${runPrefix(runId)}scratch/`;
-/** The agent model's per-agent working folders; a sandbox mounts only its own `<folder>/` read-write at `/work/<folder>`. */
-export const workPrefix = (runId: string) => `${runPrefix(runId)}work/`;
+/**
+ * The agent model's per-agent working folders; a sandbox mounts only its own `<folder>/` read-write at `/work/<folder>`.
+ * Top-level, not under `runPrefix`, so a lifecycle rule on `work/` (7 days) expires it and nothing else: what must
+ * outlive it is a published version (`outputs/`) or a `notesKey` copy.
+ */
+export const workPrefix = (runId: string) => `work/${seg(runId)}/`;
+/** An agent's NOTES.md (main's plan.md), copied here when it closes so it outlives `workPrefix`. */
+export const notesKey = (runId: string, folder: string, file: "NOTES.md" | "plan.md") =>
+  `${runPrefix(runId)}notes/${seg(folder)}/${file}`;
 /** `/run/final-outputs.yaml` and `/run/outputs.yaml`, written from the events; mounted read-only at `/run`. */
 export const runFilesPrefix = (runId: string) => `${runPrefix(runId)}run/`;
 /** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
@@ -52,10 +59,11 @@ export const outputsBackupPrefix = (runId: string, reopenId: string) =>
   `${runPrefix(runId)}corrections/${seg(reopenId)}/`;
 /**
  * A published output version's folder (the agent model), `<id>/<toolCallId>` under `outputs/`, `id` being
- * a catalog id or `<worker>/<id>`. Keyed by the tool call so a repeated call writes the same keys.
+ * a catalog id or `<worker>/<id>`. Keyed by the tool call so a repeated call writes the same keys. A provider's
+ * call id may hold a `|` (OpenAI Responses: `call_x|fc_x`), which a shell would take for a pipe: the folder name keeps only shell-safe characters.
  */
 export const versionPath = (outputId: string, toolCallId: string) =>
-  `${outputId.split("/").map(seg).join("/")}/${seg(toolCallId)}`;
+  `${outputId.split("/").map(seg).join("/")}/${seg(toolCallId.replace(/[^\w.-]/g, "_"))}`;
 export const versionPrefix = (runId: string, outputId: string, toolCallId: string) =>
   `${outputsPrefix(runId)}${versionPath(outputId, toolCallId)}/`;
 export const taskOutputPrefix = (runId: string, task: string) =>
@@ -104,6 +112,14 @@ export const reviewAssetKey = (runId: string, sha256: string, path: string) =>
   `${reviewAssetPrefix(runId)}${sha256Schema.parse(sha256)}/${rel(path)}`;
 
 /**
+ * The run's picture for lists: one small WebP the review domain renders once from the run's
+ * converted scan (`GET /api/review/runs/:runId/thumbnail`). Keyed by the run's `generation`, so a
+ * re-seeded example or a run imported into a worktree (same id, new generation) renders its own.
+ */
+export const runThumbnailKey = (runId: string, generation: string) =>
+  `${runPrefix(runId)}thumbnail-${seg(generation)}.webp`;
+
+/**
  * Completed conversions reused by runs of one input. Outside `inputPrefix`: raw inputs
  * stay immutable and agents never mount this writable cache. The converter partitions it
  * by its code, conversion mode and source hash; geometry remains in each run's outputs.
@@ -117,18 +133,29 @@ export const referenceInputId = (labId: string) => `reference-${labId}`;
 export const referencePrefix = (part: "scan" | "run") => `reference/OA6-1RK/${part}/`;
 
 /**
- * A stored pointer to a file in R2: an `evidenceKey`, or a key under the
- * reference run (whose files are already immutable). Review data stores full
+ * A stored pointer to a file in R2: an `evidenceKey`, a published version's file
+ * (`versionPrefix`: the agent model stores each version once, there is no evidence copy),
+ * or a key under the reference run (whose files are already immutable). Review data stores full
  * keys of this form, never paths relative to some root.
  */
 export const storedKeySchema = z.string().refine(
   (k) => {
     const evidence = /^runs\/([^/]+)\/evidence\/([0-9a-f]{64})$/.exec(k);
     if (evidence) return segmentSchema.safeParse(evidence[1]).success;
+    const version = /^runs\/([^/]+)\/outputs\/(.+)$/.exec(k);
+    // `<id>/<toolCallId>/<file>` at least; `<worker>/<id>` ids and `evidence/` subfolders make it longer.
+    if (version) {
+      const [, id = "", path = ""] = version;
+      return (
+        segmentSchema.safeParse(id).success &&
+        relativePathSchema.safeParse(path).success &&
+        path.split("/").length >= 3
+      );
+    }
     const ref = referencePrefix("run");
     return k.startsWith(ref) && relativePathSchema.safeParse(k.slice(ref.length)).success;
   },
-  { message: "must be an evidence key or a reference-run key" },
+  { message: "must be an evidence key, a published version file or a reference-run key" },
 );
 
 /**

@@ -384,6 +384,13 @@ export const reviewAssetUrl = (runId: string, sha256: string, path: string) =>
     .map(encodeURIComponent)
     .join("/")}`;
 
+/**
+ * A small picture of the run for lists and cards, made once from its first converted image
+ * volume. 200 WebP; 204 while the run has none yet; 404: unreadable run; 503: no file storage.
+ */
+export const runThumbnailUrl = (runId: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/thumbnail`;
+
 /** Prepared snapshot API: keep body.id unchanged when retrying a failed or interrupted save. */
 export async function createReviewSnapshot(
   runId: string,

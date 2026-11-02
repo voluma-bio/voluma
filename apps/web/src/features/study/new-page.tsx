@@ -246,6 +246,10 @@ export function NewPage() {
         start: table.filter((r) => startIds.includes(r.id)).map((r) => (r.input as Input).id),
         keys,
         model,
+        // Hidden switch for the agent loop (no UI): /new?harness=agents.
+        ...(new URLSearchParams(location.search).get("harness") === "agents" && {
+          harness: "agents" as const,
+        }),
       };
       // A deploy's reload waits for the answer: leaving mid-request would hide whether it started.
       const release = holdLeave();
@@ -286,7 +290,7 @@ export function NewPage() {
   return (
     <div className="shrink-0">
       <ShellHeading>
-        <Breadcrumb trail={[{ label: "Home", to: linkTo("/") }]} current="Run on new scans" />
+        <Breadcrumb trail={[{ label: "Studies", to: linkTo("/") }]} current="Run on new scans" />
       </ShellHeading>
       <PageHead title="Run on new scans" />
       <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-6 pb-16 max-[760px]:px-4">

@@ -1,8 +1,8 @@
 ---
 name: microct-core
 description: >
-  Load at the start of every micro-CT task, after the workflow's own skill: the grid, sidecar and result-record
-  contract every script shares, the files later tasks look for, the two thresholds, the scan's notes that
+  Load at the start of every micro-CT step, after the workflow's own skill: the grid, sidecar and result-record
+  contract every script shares, the files later steps look for, the two thresholds, the scan's notes that
   outrank your expectation of the anatomy, and how to word anything a researcher will read.
 ---
 
@@ -37,7 +37,7 @@ Say "the AI" for the one that did the work, "a second AI check" for the check, a
   place something write it as `objects` in their result record; `quad_view.py --objects <record>.json` draws it. Every
   structure, surface and annotation is reported on the grid `outputs.json` declares for it, in voxel indices, never
   world mm (a point or line end may be fractional).
-- The names later tasks look for in `/outputs/<task>/`: `hu.npy`, `hu.json`, `scan-notes.md`, `pieces.md`,
+- The file names later steps look for: `hu.npy`, `hu.json`, `scan-notes.md`, `pieces.md`,
   and the rough orientation `frame.json`, `oriented.npy`, `keyframe.jpg` (intake); `labels.npy`, the final labels on the scan grid
   (segmentation). Working files go in `$SCRATCH`.
 - An **account file** (`pieces.md`, `small-structures.md`) is prose a researcher and a check can read, opened by a
@@ -70,6 +70,6 @@ cause in the data, the mask, the threshold or the method; never in a number adju
 
 ## The scan's notes outrank your expectation
 
-`/outputs/intake/scan-notes.md` is the researcher's account of the scan: what is in the field, what is absent or
-cut off, and facts that change how a number is read. Read it at the start of every task after intake that names a structure
+Intake's `scan-notes.md` is the researcher's account of the scan: what is in the field, what is absent or
+cut off, and facts that change how a number is read. Read it at the start of every step after intake that names a structure
 or picks a threshold. The CT overrules it only with a render you cite.

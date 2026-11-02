@@ -13,13 +13,11 @@ import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { MAX_MARKS } from "@voluma/contracts/messages";
-import { outputsFold } from "@voluma/contracts/output-fold";
 import type { ReviewRun, Revision } from "@voluma/contracts/review";
 import type { RunRead } from "@voluma/contracts/run";
 import {
   DisclosureProvider,
   haltOf,
-  isAgentsRun,
   isLive,
   type NeedItem,
   RunStoreProvider,
@@ -59,7 +57,6 @@ import {
   useMarking,
   type YourMark,
 } from "./marks-panel";
-import { OutputsReview } from "./outputs-review";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { StudyDock } from "./study-dock";
@@ -68,6 +65,10 @@ import { useRunStream } from "./use-run-stream";
 import { ViewPanel } from "./view-panel";
 
 // three.js and the zarr reader load only once there is a task to show.
+// Lazy: it brings the workflow's output catalog, parsed on import, which a task run's page never needs.
+const OutputsReview = lazy(() =>
+  import("./outputs-review").then((m) => ({ default: m.OutputsReview })),
+);
 const TaskViewer = lazy(() => import("./viewer").then((m) => ({ default: m.TaskViewer })));
 
 /** Keyed on the run: nothing of one run's stream, selection or decisions carries over. */
@@ -114,7 +115,7 @@ function Scan({ runId }: { runId: string }) {
             ? "It may have been removed, or it belongs to another lab."
             : "Check your connection, then try again."}{" "}
           <Button asChild variant="link">
-            <Link to="/">Go to Home</Link>
+            <Link to="/">Go to Studies</Link>
           </Button>
         </ErrorState>
       </div>
@@ -133,8 +134,8 @@ type ReviewProps = {
 };
 
 /**
- * The run's stream, and the review it opens in: a run of the agent loop on its outputs, any other
- * in today's per-task review.
+ * The run's stream, and the review it opens in: a run of the agent loop (`run.harness`) on its
+ * outputs, any other in today's per-task review.
  */
 function ScanStream({ run, stale, refetchRun }: Omit<ReviewProps, "reopen">) {
   const [reopened, setReopened] = useState(0);
@@ -144,11 +145,12 @@ function ScanStream({ run, stale, refetchRun }: Omit<ReviewProps, "reopen">) {
     going: run.state.status !== "ended",
     onClosed: refetchRun,
   });
-  const events = useEvents();
   const reopen = useCallback(() => setReopened((n) => n + 1), []);
   const props = { run, stale, refetchRun, reopen };
-  return isAgentsRun(outputsFold(events)) ? (
-    <OutputsReview {...props} />
+  return run.harness === "agents" ? (
+    <Suspense fallback={<LoadingState label="Loading the review" rows={4} />}>
+      <OutputsReview {...props} />
+    </Suspense>
   ) : (
     <ScanReview {...props} />
   );

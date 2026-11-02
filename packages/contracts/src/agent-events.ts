@@ -3,7 +3,7 @@
  * the design is `event-log.md` of the agent-model work). Nothing writes or reads most of them
  * yet: they are in the log's vocabulary first so every deployed parser accepts them before any
  * writer exists. The API writes `tocheck.resolved`, `approval.given`, `approval.declined` and
- * `view.saved`; the runner writes the rest. Who an event is about is its envelope's thread.
+ * `view.saved`, `mark.placed` and `mark.deleted`; the runner writes the rest. Who an event is about is its envelope's thread.
  *
  * Stored payloads never embed an authoring schema (`outputs.yaml`'s entries): a change to the
  * schema would then stop stored events parsing. Entries are kept loose here and checked strictly
@@ -97,7 +97,8 @@ export const outputPublishedSchema = z
 
 /**
  * A message between agents or to the researcher. `from` and `to` are `main`, a worker's name or
- * `researcher`. `show` points the researcher at an output, optionally in a view.
+ * `researcher`. `show` would point the researcher at an output, optionally in a view; no tool
+ * writes it and no screen reads it yet.
  */
 export const agentMessageSchema = z.object({
   from: nonEmpty,
@@ -186,3 +187,57 @@ export const skillLoadedSchema = z.object({ name: nonEmpty, cause: nonEmpty });
 
 /** The researcher saved a view of an output; `view` is the `.view.json` format. Written by the API. */
 export const viewSavedSchema = z.object({ output: outputRefSchema, view: viewSchema });
+
+const vec3 = z.tuple([z.number(), z.number(), z.number()]);
+
+/**
+ * What a mark is, in the grid's voxels (z, y, x) as the viewer draws it: a point (with a note, or
+ * the value a probe read), a box, a ruler, an angle or an outline. Loose, so a kind can grow.
+ */
+const markShapeSchema = z.union([
+  z.looseObject({
+    point: vec3,
+    note: z.string().optional(),
+    probe: z
+      .looseObject({
+        value: z.number(),
+        unit: z.string().nullable(),
+        approx: z.boolean(),
+        inside: z.array(z.string()),
+      })
+      .optional(),
+  }),
+  z.looseObject({ box: z.object({ min: vec3, max: vec3 }) }),
+  z.looseObject({ line: z.object({ aZyx: vec3, bZyx: vec3, lengthMm: z.number() }) }),
+  z.looseObject({
+    angle: z.object({ aZyx: vec3, vertexZyx: vec3, bZyx: vec3, degrees: z.number() }),
+  }),
+  z.looseObject({ outline: z.object({ zyx: z.array(vec3), areaMm2: z.number() }) }),
+]);
+
+/**
+ * A mark the researcher placed or changed, written by the API (`by` is the caller). The mark is
+ * the researcher's, not an output. `id` is the client's: a later `mark.placed` with the same id
+ * from the same person replaces the mark (a note typed, a mark moved), and `mark.deleted` removes
+ * it. To send a mark to main as a correction, `world` and `plane` say where it is without the
+ * viewer: `world` holds the mark's vertices in mm (x, y, z), in the order of `mark`'s own
+ * (a point's one; a line's a, b; an angle's a, vertex, b; a box's min, max; an outline's), mapped
+ * through the affine of image volume `volume`, the grid it was drawn on. `gridKey` is the
+ * viewer's identity of that image's bytes: a redo that replaces the image leaves the mark unshown.
+ * `plane` is the pane's frame in that grid's mm (z, y, x): `view` is "xy", "xz", "yz" or "gp",
+ * with the pane's unit `normal`, `right` and `down`; null for a mark made in 3D.
+ */
+export const markPlacedSchema = z.looseObject({
+  id: z.uuid(),
+  output: outputRefSchema,
+  tag: nonEmpty,
+  volume: nonEmpty,
+  gridKey: nonEmpty,
+  mark: markShapeSchema,
+  world: z.array(vec3),
+  plane: z
+    .looseObject({ view: z.enum(["xy", "xz", "yz", "gp"]), normal: vec3, right: vec3, down: vec3 })
+    .nullable(),
+  by: userIdSchema,
+});
+export const markDeletedSchema = z.object({ id: z.uuid(), by: userIdSchema });

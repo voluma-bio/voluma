@@ -42,6 +42,7 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
         notes: body.notes,
         keys: body.keys,
         model: body.model,
+        harness: body.harness,
       },
     });
     const detail = await studies.get(reader, result.studyId);

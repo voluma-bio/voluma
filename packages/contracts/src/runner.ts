@@ -97,6 +97,7 @@
  * values from every error it reports (`run.ts`).
  */
 import { z } from "zod";
+import { harnessSchema } from "./ids";
 import { runSchema, visitorKeysSchema } from "./run";
 
 /**
@@ -141,6 +142,11 @@ export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
+  /**
+   * The loops this runner can run. The claim hands out only a run whose loop is listed, so a run
+   * a runner cannot serve is never claimed and given back. Absent: `["tasks"]` (an older runner).
+   */
+  harnesses: z.array(harnessSchema).min(1).optional(),
 });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
