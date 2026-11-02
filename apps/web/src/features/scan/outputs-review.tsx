@@ -2,7 +2,7 @@
  * The scan review of a run of the agent loop (Q24, mockup C), in the shell's two side panels. The
  * left side's tabs: the conversation with the run's main AI (the default; read-only until
  * researchers can write to it on this kind of run, badged while main waits on an approval) and
- * Samples (the shared tree). In the centre the output in view on four panes (`QuadViewer`) with
+ * the scans (the shared tree, named by `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with
  * the tool bar docked under them, or a file output, the whole run's graph (W) or the run's agents
  * in the panes' place. On the right, Final outputs: the picked value opens in place with what it
  * rests on. Everything comes from the run's stream as it arrives: the output fold
@@ -43,6 +43,7 @@ import {
   EmptyState,
   ErrorState,
   IconButton,
+  INPUT_WORD,
   LoadingState,
   Menu,
   MenuItem,
@@ -372,7 +373,7 @@ export function OutputsReview({
             },
             {
               id: "samples",
-              label: "Samples",
+              label: INPUT_WORD.Many,
               icon: <ListTree />,
               content: <Samples studyId={run.studyId} runId={run.id} />,
             },
@@ -862,7 +863,7 @@ function waitingApprovals(events: readonly RunEvent[]): number {
   return open.size;
 }
 
-/** The Samples tab: every study's samples, this run's study open and this sample highlighted. */
+/** The scans tab: every study's scans, this run's study open and this scan highlighted. */
 function Samples({ studyId, runId }: { studyId: string; runId: string }) {
   const studies = useQuery(studiesQuery());
   const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);
@@ -870,13 +871,14 @@ function Samples({ studyId, runId }: { studyId: string; runId: string }) {
     return (
       <ErrorState
         className="m-3"
-        title="Couldn't load the samples"
+        title={`Couldn't load the ${INPUT_WORD.many}`}
         onRetry={() => void studies.refetch()}
       >
         Check your connection, then try again.
       </ErrorState>
     );
-  if (!studies.data) return <LoadingState label="Loading the samples" rows={4} className="m-3" />;
+  if (!studies.data)
+    return <LoadingState label={`Loading the ${INPUT_WORD.many}`} rows={4} className="m-3" />;
   return (
     <SampleTree
       studies={tree}
