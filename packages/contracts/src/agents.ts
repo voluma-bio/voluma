@@ -343,19 +343,20 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   return value;
 }
 
-/** A held call the researcher has not answered: requested, with no `approval.given`, `approval.declined` or `approval.settled` for its tool call. */
-export function openApprovals(events: readonly RunEvent[]): Payload<"approval.requested">[] {
-  const open = new Map<string, Payload<"approval.requested">>();
-  for (const e of events) {
-    if (e.type === "approval.requested") open.set(e.payload.toolCallId, e.payload);
-    else if (
-      e.type === "approval.given" ||
-      e.type === "approval.declined" ||
-      e.type === "approval.settled"
-    )
-      open.delete(e.payload.toolCallId);
-  }
-  return [...open.values()];
+/**
+ * A held call the researcher has not answered: an `approval.requested` whose log holds neither
+ * its answer (`<request id>:answer`, `approval.given` or `approval.declined`) nor
+ * `<request id>:settled`. `requestId` is the request event's id, the one the answer route takes.
+ */
+export function openApprovals(
+  events: readonly RunEvent[],
+): (Payload<"approval.requested"> & { requestId: string })[] {
+  const ids = new Set(events.map((e) => e.id));
+  return events.flatMap((e) =>
+    e.type === "approval.requested" && !ids.has(`${e.id}:answer`) && !ids.has(`${e.id}:settled`)
+      ? [{ requestId: e.id, ...e.payload }]
+      : [],
+  );
 }
 
 const idOf = (idByName: Map<string, string>, name: string) => idByName.get(name) ?? "";

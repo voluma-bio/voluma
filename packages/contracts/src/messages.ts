@@ -301,7 +301,7 @@ export type SendRunMessageResponse = z.infer<typeof sendRunMessageResponseSchema
  * The researcher answers a held call: `POST /api/review/runs/:runId/approvals/:requestId`, answered
  * 200 `{}`. `requestId` is the id of the `approval.requested` event (`<threadId>:approval:<toolCallId>`,
  * so encode it in the path). The API writes `approval.given` ("yes") or `approval.declined` ("no")
- * under one id per request: the same answer twice is 200 with nothing written, a different one 409;
+ * under the id `<request id>:answer`: the same answer twice is 200 with nothing written, a different one 409;
  * 404 for no open request. `text` is the researcher's words.
  */
 export const answerApprovalRequestSchema = z.object({
