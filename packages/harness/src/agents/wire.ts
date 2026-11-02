@@ -61,7 +61,13 @@ export function agentsWire(o: AgentsWireOptions) {
     return record;
   };
   const forAgent = (name: string, role: "main" | "worker"): ThreadLayout =>
-    layout.forAgent({ name, role, tools: roles[role]?.tools ?? [] });
+    layout.forAgent({
+      name,
+      role,
+      tools: roles[role]?.tools ?? [],
+      // A sandbox mounts the folders of the agents that exist when it is created; a new one is seen after the idle timeout.
+      peers: [...agentLog(recorder.events()).records.values()].map((r) => r.name),
+    });
   return {
     convert: layout.convert,
     sandboxOf: (threadId: string): ThreadLayout => {

@@ -425,6 +425,9 @@ export function world(o: WorldOptions) {
         copy: async () => {
           throw new Error("these runs publish no output versions");
         },
+        read: async () => undefined,
+        write: async () => {},
+        remove: async () => {},
       },
       outputs: {
         backup: async () => {},
