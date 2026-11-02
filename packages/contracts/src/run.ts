@@ -237,6 +237,15 @@ export const providerCallsSchema = z.object({
 export type ProviderCalls = z.infer<typeof providerCallsSchema>;
 
 /**
+ * Whether a run's review is the task loop's: a completed run of it has a review summary. A run of
+ * the agent loop has none (its outputs are the review), nor has one that has not completed.
+ */
+export const hasTaskReview = (run: {
+  state: { status: string; outcome?: string };
+  harness?: "tasks" | "agents";
+}) => run.state.status === "ended" && run.state.outcome === "completed" && run.harness !== "agents";
+
+/**
  * While a run is live (queued, running, awaiting keys): the tasks of its current plan that
  * are finished (done or to check) out of all of them. Null before the plan is written and
  * once the run has ended (its state and `review` say the rest).
@@ -297,15 +306,17 @@ export const runSchema = z
     }),
     /** Gateway request counts and known costs, not SAM-operation counts. */
     providerCalls: providerCallsSchema,
-    /** Latest successfully completed results and their human review progress; null otherwise. */
+    /**
+     * Latest successfully completed results and their human review progress; null otherwise,
+     * and null for a run of the agent loop (`harness: "agents"`), whose review is its outputs.
+     */
     review: reviewSummarySchema.nullable(),
     tasks: runTasksSchema,
   })
-  .refine(
-    (run) =>
-      (run.state.status === "ended" && run.state.outcome === "completed") === (run.review !== null),
-    { path: ["review"], message: "only successfully completed runs have review progress" },
-  );
+  .refine((run) => (hasTaskReview(run) ? run.review !== null : run.review === null), {
+    path: ["review"],
+    message: "only successfully completed runs of the task loop have review progress",
+  });
 export type Run = z.infer<typeof runSchema>;
 
 /**
@@ -319,6 +330,8 @@ export function acceptRefusal(
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
   if (run.state.status !== "ended")
     return { status: 409, message: "You can decide once the run finishes." };
+  if (run.review === null && run.state.outcome === "completed")
+    return { status: 409, message: "This run has no task checks to accept." };
   if (run.review === null)
     return { status: 409, message: "This run didn't finish, so there is nothing to accept." };
   return null;
