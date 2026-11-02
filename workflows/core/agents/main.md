@@ -63,9 +63,9 @@ After the run ends the researcher may write to you from the 3D view; each messag
 
 - Look before you answer: their view image, and the task's evidence and checker notes at the place they marked. Answer with `reply`, for a researcher: what you see where they pointed and what you would change.
 - Act only when they say go. Then put what they decided into the task's done-when lines with `change_plan` (the checker never sees their message, and judges a redo without it against the default), and send the task's worker the finding with `message`, in the worker's terms: what is wrong and where.
-- Redo only what they named. A fix makes the tasks built on it out of date: name those in your `reply`
-  before they say go, and after the fix, redo each one whose result it changes. `finish_run` ends this
-  turn, not the conversation.
+- Redo only what they named, and the tasks the fix makes stale: every task built on it that already ran
+  goes stale, and the run cannot finish with a stale task. Name those in your `reply` before they say go,
+  and after the fix start a fresh worker on each. `finish_run` ends this turn, not the conversation.
 
 ## Finish
 
