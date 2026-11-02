@@ -126,7 +126,13 @@ and check threads.
   `append`, and an event joins the view (`events()`) only once the store has acknowledged it, in
   delivery order. The view is always a prefix of the store, so `recorder(..., stored)` on a
   resume holds exactly the view the run had. A retrying `emit` holds back every later event,
-  because nothing should be decided past a gap in the record.
+  because nothing should be decided past a gap in the record. The API also writes into a running
+  claim (marks, saved views, `tocheck.resolved`): `POST /events` answers the stored `seq`, the
+  recorder reads any events below it into the view before its own event, and the heartbeat's
+  `lastSeq` makes it pull the tail, so the view stays a gapless prefix and a delivery cursor
+  (a position in the list) never passes an unseen event; a read that runs out of retries stops the
+  claim like a failed write, and the next claim resumes. An API from before this answers 204 and
+  no `lastSeq`; the runner then numbers events as it did.
 - **The checklist is a fold.** `task-runtime.ts` writes the `task`, `checkpoint`, `output`,
   `attempt.opened` and `revision.started` events a thread's tool call causes, under
   `@voluma/contracts/task-tools`. Its only view of the run is `fold(recorder.events())` (folded

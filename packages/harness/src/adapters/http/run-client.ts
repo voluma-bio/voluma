@@ -15,15 +15,23 @@
  * the run is already stopping (released, not failed) when the caller sees it. A failed event
  * append is the port's `EventLogUnavailable`; a lease loss or a 4xx passes through. History
  * writes are idempotent on the server (an idx repeated with the same content is a no-op), and a
- * 409 on one is the port's `HistoryConflict`. `storedEvents` is the resume read, paged
- * (`@voluma/contracts/events`).
+ * 409 on one is the port's `HistoryConflict`. `eventsAfter` is the read of the stored events (the
+ * resume read from 0, the recorder's gap fill and tail pull), paged (`@voluma/contracts/events`): an event that
+ * does not parse is skipped (the next page starts after its seq), and a read that runs out of retries calls
+ * `policy.onUnreachable` and throws `EventLogUnavailable`, like a write. An append
+ * answers with the stored seq; a 204 (an API from before that) answers none.
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt, cut at HEARTBEAT_ATTEMPT_MS: the caller keeps the usage and resends it if this throws.
  * `report` ends or releases the run, with the last event seq it read; a 409 means the server ended the run first or the lease
  * is no longer ours, so it returns false (the caller logs that nothing was stored). A network failure is retried for REPORT_BUDGET_MS; the
  * lease expires on its own after that.
  */
-import { type EventInput, type RunEvent, runEventsResponseSchema } from "@voluma/contracts/events";
+import {
+  appendEventResponseSchema,
+  type EventInput,
+  type RunEvent,
+  runEventSchema,
+} from "@voluma/contracts/events";
 import { type HistoryRow, historyResponseSchema } from "@voluma/contracts/history";
 import {
   type HeartbeatResponse,
@@ -33,6 +41,7 @@ import {
   type Usage,
 } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
+import { z } from "zod";
 import { errorText } from "../../error-text";
 import { type EventLog, EventLogUnavailable } from "../../ports/event-log";
 import { type History, HistoryConflict } from "../../ports/history";
@@ -40,12 +49,16 @@ import { LeaseLost } from "../../ports/lease-lost";
 import { type Endpoint, HttpError, postJson, send } from "./request";
 
 const READ_BUDGET_MS = 60_000;
+/** A page of stored events; each event is parsed on its own, so one the runner cannot read costs only itself. */
+const pageSchema = z.object({
+  events: z.array(z.looseObject({ seq: z.number().int() })),
+  more: z.boolean(),
+});
 /** Short, so a heartbeat lost to a dead connection is retried in seconds (`lease.ts`). */
 const HEARTBEAT_ATTEMPT_MS = 5_000;
 const REPORT_BUDGET_MS = 60_000;
 
 export interface RunClient extends EventLog, History {
-  storedEvents(): Promise<RunEvent[]>;
   heartbeat(usage: Usage): Promise<HeartbeatResponse>;
   /** True when the server stored the report; false on a 409 (the run ended first, or the lease is gone). */
   report(report: ReportRequest["report"]): Promise<boolean>;
@@ -86,13 +99,15 @@ export function runClient(
   }
   const post = (path: string, body: unknown, retry?: Parameters<typeof send>[3]) =>
     guarded(() => postJson(endpoint, path, body, { leaseToken, retry, redact }));
-  const get = (path: string) =>
-    guarded(() => send(endpoint, path, { leaseToken }, { forMs: READ_BUDGET_MS }));
+  const get = (path: string, onGiveUp?: (firstFailureAt: number) => void) =>
+    guarded(() => send(endpoint, path, { leaseToken }, { forMs: READ_BUDGET_MS, onGiveUp }));
 
   return {
     async append(event: EventInput) {
       try {
-        await post(`${runPath}/events`, event, writes);
+        const response = await post(`${runPath}/events`, event, writes);
+        if (response.status === 204) return undefined;
+        return appendEventResponseSchema.parse(await response.json()).seq;
       } catch (error) {
         const refused =
           error instanceof LeaseLost || (error instanceof HttpError && error.status < 500);
@@ -100,15 +115,28 @@ export function runClient(
         throw new EventLogUnavailable(errorText(error), { cause: error });
       }
     },
-    /** Every stored event of the run, oldest first: what a resumed run starts its recorder with. */
-    async storedEvents() {
+    async eventsAfter(after, upTo = Number.POSITIVE_INFINITY) {
       const events: RunEvent[] = [];
-      for (let more = true; more; ) {
-        const after = events.at(-1)?.seq ?? 0;
-        const response = await get(`${runPath}/events?after=${after}`);
-        const page = runEventsResponseSchema.parse(await response.json());
-        events.push(...page.events);
-        more = page.more;
+      // Each page starts after the last seq read, not after a count: a page can have holes.
+      for (let cursor = after, more = true; more && cursor < upTo; ) {
+        let page: z.infer<typeof pageSchema>;
+        try {
+          const response = await get(`${runPath}/events?after=${cursor}`, policy.onUnreachable);
+          page = pageSchema.parse(await response.json());
+        } catch (error) {
+          if (error instanceof LeaseLost || (error instanceof HttpError && error.status < 500)) {
+            throw error;
+          }
+          throw new EventLogUnavailable(errorText(error), { cause: error });
+        }
+        for (const raw of page.events) {
+          if (raw.seq > upTo) continue;
+          const event = runEventSchema.safeParse(raw);
+          if (event.success) events.push(event.data);
+          else console.error(`event ${raw.seq} skipped, it does not parse: ${event.error.message}`);
+        }
+        cursor = page.events.at(-1)?.seq ?? cursor;
+        more = page.more && page.events.length > 0;
       }
       return events;
     },

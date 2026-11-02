@@ -184,6 +184,11 @@ export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
+  /**
+   * The run's highest event `seq`, when the server answered a live claim. The runner reads the events past
+   * its view (`recorder.ts`); absent from an API from before the pull.
+   */
+  lastSeq: z.number().int().nonnegative().optional(),
 });
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
@@ -194,6 +199,11 @@ export const reportRequestSchema = z.object({
       outcome: z.enum(["completed", "failed"]),
       /** Why a `failed` run failed, redacted of key values; absent otherwise. */
       error: z.string().optional(),
+      /**
+       * The last event `seq` in the runner's view when it decided the end. Optional: an older
+       * runner does not send it.
+       */
+      readSeq: z.number().int().nonnegative().optional(),
     }),
     /** The runner stops the run and gives up its lease: a shutdown, a self-stop or a loop stall. */
     z.object({

@@ -17,6 +17,9 @@
  * retry cannot fix) stops the run as `refused`, which counts too: skew that clears after a deploy
  * costs one strike, a body that is refused every time ends the run at the limit. Only a window in
  * which no call got an answer is a plain `self-stop`.
+ *
+ * The heartbeat answer also carries the run's last event `seq` (`lastSeq`, absent from an older API);
+ * `onLastSeq` hands it to whoever pulls the events the API wrote. Its failure is that caller's to log: it never fails the heartbeat.
  */
 import { HEARTBEAT_SECONDS, type ReleaseReason, SELF_STOP_SECONDS } from "@voluma/contracts/runner";
 import { HttpError } from "@voluma/harness/adapters/http/request";
@@ -39,9 +42,10 @@ export function holdLease(options: {
   onStop(reason: StopReason): void;
   /** Milliseconds of each acknowledged heartbeat, send to answer (`telemetry.ts`). */
   onRoundTrip(ms: number): void;
+  onLastSeq?(seq: number): void;
   log(line: string): void;
 }) {
-  const { client, meter, onStop, onRoundTrip, log } = options;
+  const { client, meter, onStop, onRoundTrip, onLastSeq, log } = options;
   let inFlight: Promise<void> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let halted = false;
@@ -61,12 +65,13 @@ export function holdLease(options: {
     const stalledAtSend = soloStalledMs();
     const usage = meter.take();
     try {
-      const { stop } = await client.heartbeat(usage);
+      const { stop, lastSeq } = await client.heartbeat(usage);
       onRoundTrip(Date.now() - sentAt);
       acknowledgedAt = Date.now();
       clearTimeout(deadline);
       deadline = arm(sentAt, stalledAtSend);
       if (stop) onStop("stop");
+      else if (lastSeq !== undefined) onLastSeq?.(lastSeq);
     } catch (error) {
       meter.restore(usage);
       // A lost lease already stopped the run: the client reports it (`onLeaseLost`).

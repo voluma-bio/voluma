@@ -174,19 +174,27 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
     checkLease: (runId: string, leaseToken: string) =>
       db.transaction((tx) => assertLease(tx, runId, leaseToken)),
 
-    /** Throws `LeaseLost`. */
+    /** The event's stored seq, for a repeated id the seq it has. Throws `LeaseLost`. */
     async append(event: EventInput, leaseToken: string) {
-      await db.transaction(async (tx) => {
+      const seq = await db.transaction(async (tx) => {
         await eventLock(tx, event.runId);
         await assertLease(tx, event.runId, leaseToken);
-        const inserted = await insertEvent(tx, event);
-        if (inserted.length === 0) return;
-        const [row] = inserted;
-        if (row && isProgress(event)) {
+        const [row] = await insertEvent(tx, event);
+        if (!row) {
+          const [stored] = await tx
+            .select({ seq: events.seq })
+            .from(events)
+            .where(and(eq(events.runId, event.runId), eq(events.id, event.id)));
+          if (!stored) throw new Error(`event ${event.id} is neither inserted nor stored`);
+          return stored.seq;
+        }
+        if (isProgress(event)) {
           await tx.update(runs).set({ lastProgressSeq: row.seq }).where(eq(runs.id, event.runId));
         }
+        return row.seq;
       });
       notifier.notify(event.runId);
+      return seq;
     },
   };
 }
