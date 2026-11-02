@@ -183,9 +183,10 @@ def refuse_off_tibia(ann, key, tib, spec_path, vox):
 
 
 def refuse_gaps(ann, key, tib, spec_path, vox):
-    """Refuse a face that leaves tibia at plate level untraced. Every (V, U) column where the tibia exists there must be within the spec's
-    `max_gap_um` (entry plate-faces) of a traced point, along U on a traced section and along V from a section that has such a point
-    at that U. A surface is linear between a curve's points and between sections, and held constant past their ends, so an uncovered
+    """Refuse a face that leaves tibia at plate level untraced. Along U, neighbouring points on a section lie at most the spec's
+    `max_gap_um` (entry plate-faces) apart over bone columns (a span over columns with no tibia at plate level does not count) and the
+    first and last lie within it of the bone's ends; along V, every bone column at plate level lies within `max_gap_um` of a traced
+    section that covers that U. A surface is linear between a curve's points and between sections, and held constant past their ends, so an uncovered
     column is a straight bridge over whatever the plate does there. Columns with no tibia at plate level (the notch between the
     condyles) are not demanded. "At plate level" is the tibia between the section's lowest and highest curve points, widened by the
     gap, so an epiphysis that overhangs the plate is not demanded. The stop names each row range and the uncovered U ranges."""
@@ -197,14 +198,23 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
     rows = np.arange(tib.shape[1])
     wlo = np.interp(rows, levels, [slices[v][:, 0].min() for v in levels]) - gap
     whi = np.interp(rows, levels, [slices[v][:, 0].max() for v in levels]) + gap
-    near = {s: (np.abs(cols[:, None] - slices[s][:, 1][None]).min(1) <= gap) for s in levels}  # traced point within the gap in U
-    missing = np.zeros(tib.shape[1:], bool)  # (V, U) columns of tibia at plate level with no traced point in reach
+    plate = lambda v: tib[max(int(wlo[v]), 0) : int(whi[v]) + 1, v].any(0)  # tibia columns at plate level on row v
+    reach = {}  # section -> bool U: columns it traces. Not: bone in a span over the gap between neighbouring points, or past an end by over the gap
+    for s in levels:
+        us = np.sort(slices[s][:, 1])
+        i = np.searchsorted(us, cols)
+        prev = us[np.maximum(i - 1, 0)]
+        nxt = us[np.minimum(i, len(us) - 1)]
+        inside = (i > 0) & (i < len(us))
+        ends = np.minimum(np.abs(cols - prev), np.abs(nxt - cols)) <= gap
+        reach[s] = np.where(inside, (nxt - prev <= gap) | ~plate(s), ends)
+    missing = np.zeros(tib.shape[1:], bool)  # (V, U) columns of tibia at plate level with no traced section in reach
     for v in rows:
         covered = np.zeros(tib.shape[2], bool)
         for s in levels:
             if abs(s - v) <= gap:
-                covered |= near[s]
-        missing[v] = tib[max(int(wlo[v]), 0) : int(whi[v]) + 1, v].any(0) & ~covered
+                covered |= reach[s]
+        missing[v] = plate(v) & ~covered
     labels, count = ndi.label(missing)
     if count:
         boxes = sorted((sl[0].start, sl[0].stop - 1, sl[1].start, sl[1].stop - 1, int((labels[sl] == i + 1).sum())) for i, sl in enumerate(ndi.find_objects(labels)))
