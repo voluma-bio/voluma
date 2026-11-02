@@ -45,5 +45,5 @@
   history rows hold R2 image keys under the source run's `runs/<runId>/scratch/…`. Fine for a read-only
   example; give a copy its own keys (or resolve them per run) before an example can be rerun or reopened.
 - **View snapshots on an example run.** Since #435 every org reads example runs, and `POST /review/runs/:id/snapshots` checks only readability. So any reader can save a snapshot on the example, and every reader lists them, `by` included, guests too. Refuse saves on `run.example`, or list only the caller's own on an example. No UI calls these endpoints yet.
-- **The example on Studies.** The example study's row and its sample read "1 need you" / "N to check", which a member can't act on (`features/study/studies-page.tsx` counts places from `runStatus`). Show a neutral "Example" mark instead.
+- **The example on Studies.** Its sample counts as Done (#454), but its progress mark and the Samples tree's glyph are still amber To check, which nobody can act on. A neutral "Example" mark would read better.
 - **Example studies hold only reference inputs.** Reading a study reads every input in it. `seed:example` and `import:run` should assert that an example study has only the reference input.
