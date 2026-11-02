@@ -22,6 +22,7 @@ import {
   runStatus,
   scanStatus,
   useNow,
+  whenText,
 } from "@voluma/run-view";
 import {
   Breadcrumb,
@@ -42,7 +43,7 @@ import { workflowById } from "@voluma/workflow/bundled";
 import { ChevronRight, Info, Plus } from "lucide-react";
 import { type KeyboardEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { PLACES, type Place, placeOf, whenText } from "./study/study-model";
+import { PLACES, type Place, placeOf } from "./study/study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study/study-side";
 
 const LIVE = 5000;

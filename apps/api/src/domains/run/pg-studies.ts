@@ -110,6 +110,7 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
         inputName: run.input.name,
         state: run.state,
         tasks: run.tasks,
+        ...(run.outputs && { outputs: run.outputs }),
         review: run.review && {
           acceptable: run.review.acceptable,
           needsYou: run.review.needsYou,

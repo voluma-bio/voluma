@@ -16,7 +16,7 @@
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, acceptToCheck, saveView } from "@voluma/api-client";
-import { studiesQuery, studyQuery } from "@voluma/api-client/query";
+import { studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
@@ -30,8 +30,8 @@ import {
   outputBlocks,
   outputName,
   outputsReview,
+  restsOnChain,
   reviewAssetsOf,
-  sampleTree,
   shownOf,
   trailOf,
   undrawn,
@@ -41,13 +41,11 @@ import {
   Button,
   Chip,
   EmptyState,
-  ErrorState,
   IconButton,
   INPUT_WORD,
   LoadingState,
   Menu,
   MenuItem,
-  SampleTree,
   SidePanel,
   StatusMark,
   useFoldWhile,
@@ -84,13 +82,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useOutletContext, useSearchParams } from "react-router";
+import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { describe, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
-import { FinalOutputs, needingYou, OUTPUT_STATUS } from "./outputs-panel";
+import { FinalOutputs, needingYou, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
+import { Samples } from "./samples-tab";
 import { RunAlert, ScanHeading } from "./scan-header";
 import type { Accepting } from "./version-report";
 
@@ -199,7 +198,16 @@ export function OutputsReview({
     },
     [listed, restingOn, select],
   );
-  const inView = trailOpen ?? selected;
+  const live = run.state.status !== "ended";
+  // While the run goes, a value not in yet shows the nearest link of its chain that is.
+  const standIn =
+    live && !trailOpen && selected && !selected.state.latest
+      ? restsOnChain(catalog, fold, selected.id)
+          .flat()
+          .map((l) => review.rows.get(l.id))
+          .find((r) => r?.state.latest)
+      : undefined;
+  const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
   const centre: Centre | undefined =
     centreParam === "run" || centreParam === "agents" ? centreParam : undefined;
@@ -214,7 +222,6 @@ export function OutputsReview({
   const needing = needingYou(review).size;
   const [leftTab, setLeftTab] = useState("conversation");
   const waiting = useMemo(() => waitingApprovals(events), [events]);
-  const live = run.state.status !== "ended";
   const runMarks = useRunMarks({
     run,
     me: me.userId,
@@ -287,12 +294,18 @@ export function OutputsReview({
   }, [select, toggleRun]);
 
   let panes: React.ReactNode;
-  if (!inView)
+  if (live && !inView?.state.latest)
     panes = (
       <Centered>
-        <EmptyState title="No outputs yet">
-          {live ? "The outputs appear once the AI has set them up." : undefined}
+        <EmptyState title="The run is going">
+          The AI's plan is in the conversation. What it makes shows here as it is published.
         </EmptyState>
+      </Centered>
+    );
+  else if (!inView)
+    panes = (
+      <Centered>
+        <EmptyState title="No outputs were recorded" />
       </Centered>
     );
   else if (!inView.state.latest)
@@ -305,8 +318,7 @@ export function OutputsReview({
               : `${inView.name} isn't reported yet`
           }
         >
-          {inView.state.missingReason ??
-            (live ? "It shows here once the AI reports it." : "The run ended without it.")}
+          {inView.state.missingReason ?? "The run ended without it."}
         </EmptyState>
       </Centered>
     );
@@ -345,11 +357,7 @@ export function OutputsReview({
 
   return (
     <>
-      <ScanHeading
-        run={run}
-        study={study.data}
-        progress={{ ...review.progress, noun: "outputs reported" }}
-      />
+      <ScanHeading run={run} study={study.data} />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"
@@ -383,6 +391,7 @@ export function OutputsReview({
           <RunAlert run={run} userId={me.userId} stale={stale} />
           <SceneBar
             centre={centre}
+            live={live}
             root={selected}
             inView={inView}
             trailOpen={!!trailOpen}
@@ -409,20 +418,28 @@ export function OutputsReview({
         <SidePanel
           side="right"
           title="Final outputs"
+          meta={
+            live && review.progress.total > 0
+              ? `${review.progress.done} of ${review.progress.total} in`
+              : undefined
+          }
           icon={<Sigma />}
           badge={needing || undefined}
           badgeLabel={`${needing} need you`}
           tools={
             <>
-              <Button
-                size="sm"
-                variant={onlyNeeds ? "secondary" : "ghost"}
-                aria-pressed={onlyNeeds}
-                disabled={needing === 0 && !onlyNeeds}
-                onClick={() => setOnlyNeeds(!onlyNeeds)}
-              >
-                Needs you <span className="font-semibold">{needing}</span>
-              </Button>
+              {/* While the run goes, only once something needs you: the head also counts what is in. */}
+              {(!live || needing > 0 || onlyNeeds) && (
+                <Button
+                  size="sm"
+                  variant={onlyNeeds ? "secondary" : "ghost"}
+                  aria-pressed={onlyNeeds}
+                  disabled={needing === 0 && !onlyNeeds}
+                  onClick={() => setOnlyNeeds(!onlyNeeds)}
+                >
+                  Needs you <span className="font-semibold">{needing}</span>
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant={centre === "run" ? "secondary" : "ghost"}
@@ -444,6 +461,8 @@ export function OutputsReview({
             onOpen={(id) => select({ trail: id, item: null, centre: null })}
             onlyNeeds={onlyNeeds}
             live={live}
+            waiting={run.state.status === "queued" || run.state.status === "awaiting-keys"}
+            catalog={catalog}
             runId={run.id}
             events={events}
             fold={fold}
@@ -464,6 +483,7 @@ export function OutputsReview({
 /** Above the centre: what it shows, and the way to the whole run and the agents and back. */
 function SceneBar({
   centre,
+  live,
   root,
   inView,
   trailOpen,
@@ -475,6 +495,7 @@ function SceneBar({
   onView,
 }: {
   centre: Centre | undefined;
+  live: boolean;
   root: OutputRow | undefined;
   inView: OutputRow | undefined;
   trailOpen: boolean;
@@ -502,7 +523,7 @@ function SceneBar({
       </header>
     );
   if (!inView || !root) return null;
-  const { status, word } = OUTPUT_STATUS[inView.state.status];
+  const { status, word } = statusOf(inView, live);
   // A reported value can still rest on something to check.
   const inherited =
     !trailOpen &&
@@ -861,32 +882,6 @@ function waitingApprovals(events: readonly RunEvent[]): number {
     else if (e.type === "approval.given" || e.type === "approval.declined")
       open.delete(e.payload.toolCallId);
   return open.size;
-}
-
-/** The Samples tab (`INPUT_WORD`): every study's samples, this run's study open and its sample highlighted. */
-function Samples({ studyId, runId }: { studyId: string; runId: string }) {
-  const studies = useQuery(studiesQuery());
-  const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);
-  if (studies.isError)
-    return (
-      <ErrorState
-        className="m-3"
-        title={`Couldn't load the ${INPUT_WORD.many}`}
-        onRetry={() => void studies.refetch()}
-      >
-        Check your connection, then try again.
-      </ErrorState>
-    );
-  if (!studies.data)
-    return <LoadingState label={`Loading the ${INPUT_WORD.many}`} rows={4} className="m-3" />;
-  return (
-    <SampleTree
-      studies={tree}
-      studyId={studyId}
-      sampleId={runId}
-      renderLink={(href, props) => <Link to={href} {...props} />}
-    />
-  );
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

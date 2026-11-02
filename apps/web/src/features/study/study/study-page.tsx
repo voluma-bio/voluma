@@ -8,7 +8,15 @@
  */
 import { runThumbnailUrl } from "@voluma/api-client";
 import type { StudyScanDetail } from "@voluma/contracts/study";
-import { kneeOf, liveStatus, needsYouOf, plural, scanStatus, useNow } from "@voluma/run-view";
+import {
+  kneeOf,
+  liveStatus,
+  needsYouOf,
+  plural,
+  scanStatus,
+  useNow,
+  whenText,
+} from "@voluma/run-view";
 import {
   Button,
   Count,
@@ -39,7 +47,6 @@ import {
   segmentOf,
   stoppedLine,
   waitsOn,
-  whenText,
 } from "./study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study-side";
 

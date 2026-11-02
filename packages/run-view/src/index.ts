@@ -13,6 +13,7 @@ export { ThreadNavigationProvider } from "./chat/thread-navigation";
 export { TaskInfo } from "./info";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
+export { type ChainLink, restsOnChain } from "./outputs-chain";
 export {
   itemsOfVersion,
   type OutputItem,
@@ -65,6 +66,7 @@ export {
   runHref,
   runStatus,
   scanLabel,
+  whenText,
 } from "./run-status";
 export {
   RunStoreProvider,

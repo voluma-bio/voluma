@@ -7,23 +7,32 @@
  * same list. A row there frames the panes on that output and opens its report under it. The
  * whole run's graph (W) is the place for what rests on an output. Lists separate by spacing.
  *
- * Data: `outputsReview` and `trailOf` (`@voluma/run-view`); review.md "Panels and views".
+ * While the run goes, the panel also says that it is going and what the AI is doing now
+ * (`RunNews`), each value's "rests on" chain ticks off as its links are published
+ * (`restsOnChain`), and "Other outputs so far" lists what else is published. Once the run ends
+ * none of that shows: the panel is the review.
+ *
+ * Data: `outputsReview`, `trailOf` and `restsOnChain` (`@voluma/run-view`); review.md "Panels and
+ * views".
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import type { LinkRole } from "@voluma/contracts/output-catalog";
+import type { LinkRole, OutputCatalog } from "@voluma/contracts/output-catalog";
 import type { OutputStatus, OutputsFold } from "@voluma/contracts/output-fold";
 import {
+  type ChainLink,
   itemsOfVersion,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
   ROLE_WORD,
+  restsOnChain,
   type TrailRow,
   trailOf,
 } from "@voluma/run-view";
 import { cx, EmptyState, type Status, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { RunNews } from "./run-news";
 import { type Accepting, clockOf, Items, Report, VersionLine } from "./version-report";
 
 /** Each output status on the shared status marks, in the design's words. */
@@ -34,6 +43,12 @@ export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string 
   missing: { status: "stopped", word: "Missing" },
   "out-of-date": { status: "paused", word: "Out of date" },
 };
+
+/** A row's status; while the run goes, nothing published yet reads "not yet". */
+export const statusOf = (row: OutputRow, live: boolean) =>
+  live && row.state.status === "pending"
+    ? { ...OUTPUT_STATUS.pending, word: "not yet" }
+    : OUTPUT_STATUS[row.state.status];
 
 const needsYou = (r: OutputRow) => r.items.some((i) => !i.resolved);
 
@@ -51,7 +66,11 @@ export type FinalOutputsProps = {
   onOpen: (id: string | null) => void;
   /** Only the values that need you. */
   onlyNeeds: boolean;
+  /** The run has not ended: the panel adds what a run going shows. */
   live: boolean;
+  /** Queued or held for keys. */
+  waiting: boolean;
+  catalog: OutputCatalog;
   runId: string;
   events: readonly RunEvent[];
   fold: OutputsFold;
@@ -62,13 +81,40 @@ export type FinalOutputsProps = {
 };
 
 export function FinalOutputs(props: FinalOutputsProps) {
+  const { review, live, catalog, fold, open } = props;
+  // While the run goes: each final output's chain, and the published outputs neither a final
+  // output nor on a chain (an output on a chain shows there, and under the value when opened).
+  const { chains, others } = useMemo(() => {
+    if (!live) return { chains: new Map<string, ChainLink[][]>(), others: [] };
+    const finals = [...review.rows.values()].filter((r) => r.state.final);
+    const chains = new Map(finals.map((r) => [r.id, restsOnChain(catalog, fold, r.id)]));
+    const onChain = new Set([...chains.values()].flat(2).map((l) => l.id));
+    const others = [...review.rows.values()].filter(
+      (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
+    );
+    return { chains, others };
+  }, [live, review, catalog, fold]);
+  // An output open from Other outputs opens there, not also under the value.
+  const openOther = others.some((r) => r.id === open);
+  return (
+    <>
+      {live && <RunNews events={props.events} waiting={props.waiting} />}
+      <Values {...props} open={openOther ? undefined : open} chains={chains} />
+      {others.length > 0 && <OtherOutputs {...props} rows={others} />}
+    </>
+  );
+}
+
+type ValuesProps = FinalOutputsProps & { chains: Map<string, ChainLink[][]> };
+
+function Values(props: ValuesProps) {
   const { review, selected, onlyNeeds, live } = props;
   const { sections, undeclared } = review;
   if (sections.length === 0 && undeclared.length === 0)
     return (
       <div className="p-4">
-        <EmptyState title={live ? "No outputs yet" : "No outputs were recorded"}>
-          {live ? "The outputs appear once the AI has set them up." : undefined}
+        <EmptyState title={live ? "No outputs listed yet" : "No outputs were recorded"}>
+          {live ? "The final outputs show here once the AI has set them up." : undefined}
         </EmptyState>
       </div>
     );
@@ -103,7 +149,7 @@ function Section({
   needing,
   opens,
   ...props
-}: FinalOutputsProps & {
+}: ValuesProps & {
   title: string;
   rows: OutputRow[];
   needing: Set<string>;
@@ -113,6 +159,8 @@ function Section({
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const open = toggled && toggled.when === opens ? toggled.open : opens;
   const toCheck = rows.filter((r) => needing.has(r.id)).length;
+  // A tick only once every row has a version; how many are in is the panel head's.
+  const notIn = rows.filter((r) => !r.state.latest).length;
   const first = rows.find((r) => r.value);
   return (
     <section aria-label={title} className="grid">
@@ -141,7 +189,7 @@ function Section({
               <StatusGlyph status="check" />
               <span className="text-check">{toCheck} to check</span>
             </>
-          ) : (
+          ) : notIn > 0 ? null : (
             <>
               <StatusGlyph status="done" />
               <span className="text-muted-foreground">{rows.length}</span>
@@ -156,7 +204,8 @@ function Section({
               <Opened key={r.id} row={r} {...props} />
             ) : (
               <li key={r.id}>
-                <ValueRow row={r} onSelect={() => props.onSelect(r.id)} />
+                <ValueRow row={r} live={props.live} onSelect={() => props.onSelect(r.id)} />
+                <ChainLine chain={props.chains.get(r.id)} nameOf={props.nameOf} />
               </li>
             ),
           )}
@@ -168,17 +217,19 @@ function Section({
 
 function ValueRow({
   row,
+  live,
   selected = false,
   bar = false,
   onSelect,
 }: {
   row: OutputRow;
+  live: boolean;
   selected?: boolean;
   /** The selection's blue bar: while nothing under it is open. */
   bar?: boolean;
   onSelect: () => void;
 }) {
-  const { status, word } = OUTPUT_STATUS[row.state.status];
+  const { status, word } = statusOf(row, live);
   const ref = useScrolledTo(selected);
   return (
     <button
@@ -232,7 +283,7 @@ function useScrolledTo(active: boolean) {
 const ROLE_ORDER: LinkRole[] = ["on", "context", "input", "base"];
 
 /** The value open in place: what it is, its version, report and items, and what it rests on. */
-function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
+function Opened({ row, ...props }: ValuesProps & { row: OutputRow }) {
   const { fold, open, nameOf } = props;
   const [report, setReport] = useState(false);
   const trail = useMemo(() => trailOf(fold, row.id), [fold, row.id]);
@@ -246,7 +297,15 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
   const further = trail.filter((r) => r.depth > 1);
   return (
     <li className="grid grid-cols-[minmax(0,1fr)] bg-select-tint pb-2.5">
-      <ValueRow row={row} selected bar={!open} onSelect={() => props.onOpen(null)} />
+      <ValueRow
+        row={row}
+        live={props.live}
+        selected
+        bar={!open}
+        onSelect={() => props.onOpen(null)}
+      />
+      {/* Before its trail is published, what it will rest on. */}
+      {restsOn.length === 0 && <ChainLine chain={props.chains.get(row.id)} nameOf={nameOf} />}
       <div className="grid grid-cols-[minmax(0,1fr)] gap-2 pr-3 pl-9">
         {row.description && <p className="m-0 text-muted-foreground text-sm">{row.description}</p>}
         {latest ? (
@@ -263,7 +322,7 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
           </VersionLine>
         ) : (
           <p className="m-0 text-muted-foreground text-xs">
-            {row.state.missingReason ?? OUTPUT_STATUS[row.state.status].word}
+            {row.state.missingReason ?? statusOf(row, props.live).word}
           </p>
         )}
         {row.provisional && (
@@ -420,5 +479,88 @@ function TrailItem({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * "rests on ○ Patella ‹ ○ Bone labels ‹ ✓ Scan": the chain a value is computed on, nearest first,
+ * each link hollow until a version of it is published. Several at one step read "A, B".
+ */
+function ChainLine({
+  chain,
+  nameOf,
+}: {
+  chain: ChainLink[][] | undefined;
+  nameOf: (id: string) => string;
+}) {
+  if (!chain || chain.length === 0) return null;
+  return (
+    <p className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pr-3 pb-1 pl-10 text-muted-foreground text-xs">
+      <span className="mr-0.5">rests on</span>
+      {chain.map((step, i) => (
+        <Fragment key={step.map((l) => l.id).join()}>
+          {i > 0 && (
+            <span aria-hidden className="text-fg-subtle">
+              ‹
+            </span>
+          )}
+          {step.map((link, j) => {
+            const { status, word } = link.status
+              ? OUTPUT_STATUS[link.status]
+              : { status: "waiting" as const, word: "not yet" };
+            return (
+              <span key={link.id} className="inline-flex items-center gap-1">
+                <span title={word}>
+                  <StatusGlyph status={status} className="size-3" />
+                  <span className="sr-only">{word}</span>
+                </span>
+                {nameOf(link.id)}
+                {j < step.length - 1 && ","}
+              </span>
+            );
+          })}
+        </Fragment>
+      ))}
+    </p>
+  );
+}
+
+/**
+ * "Other outputs so far · N" while the run goes: what is published that is neither a final output
+ * nor on a value's chain. Each opens like a row of Rests on: its report under it, the panes on it.
+ */
+function OtherOutputs({ rows, ...props }: FinalOutputsProps & { rows: OutputRow[] }) {
+  const holds = rows.some((r) => r.id === props.open);
+  const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
+  const shown = toggled && toggled.when === holds ? toggled.open : holds;
+  return (
+    <section aria-label="Other outputs so far" className="grid px-1.5 pb-3">
+      <button
+        type="button"
+        aria-expanded={shown}
+        onClick={() => setToggled({ when: holds, open: !shown })}
+        className="flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 text-left text-muted-foreground text-sm hover:bg-accent hover:text-foreground"
+      >
+        <ChevronRight
+          aria-hidden
+          className={cx(
+            "size-3.5 shrink-0 text-fg-subtle transition-transform motion-reduce:transition-none",
+            shown && "rotate-90",
+          )}
+        />
+        Other outputs so far · {rows.length}
+      </button>
+      {shown && (
+        <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] gap-0.5 p-0">
+          {rows.map((r) => (
+            <TrailItem
+              key={r.id}
+              row={{ id: r.id, depth: 1, state: r.state, superseded: false, from: [] }}
+              {...props}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

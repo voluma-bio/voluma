@@ -56,6 +56,7 @@ import {
 import { measurementSchema, unacceptableSchema } from "./review";
 import {
   inputSchema,
+  runOutputsInSchema,
   runSchema,
   runStateSchema,
   runTasksSchema,
@@ -101,6 +102,8 @@ export const studyRunSummarySchema = z.object({
   state: runStateSchema,
   /** As `runSchema.tasks`: a live run's finished tasks out of its plan's. */
   tasks: runTasksSchema,
+  /** As `runSchema.outputs`: a live agent-loop run's final outputs in, of all of them. */
+  outputs: runOutputsInSchema,
   /** As `runSchema.review`: the open checks and review time of a completed run; null otherwise. */
   review: z
     .object({
