@@ -6,16 +6,21 @@
  * what it decides (`step`) and how it reads the log; it keeps no state the shell holds.
  */
 
+import type { UserSender } from "@voluma/contracts/thread-records";
 import type { BashRuntime } from "./bash-runtime";
+import type { ProviderError } from "./failure-policy";
 import type { ThreadLayout } from "./layout";
+import type { LoopConfig, ModelSetup } from "./loop-config";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { Outputs } from "./ports/outputs";
 import type { Publish } from "./ports/publish";
 import type { PayloadOf, Recorder } from "./recorder";
-import type { LoopConfig, ModelSetup, ProviderError } from "./run-loop";
 import type { SandboxSession } from "./sandbox-session";
 import type { ThreadSpec, Threads } from "./threads";
+
+/** The sender of every line the loop itself writes to a thread. */
+export const RUNTIME: UserSender = { kind: "runtime" };
 
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
 export type Step = "acted" | "idle" | "done";

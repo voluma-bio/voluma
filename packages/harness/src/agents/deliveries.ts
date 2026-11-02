@@ -24,11 +24,6 @@ export const wrapUpText = (name: string) =>
 export const wrapUpResumeText = (name: string) =>
   `You were asked to wrap up: finish /work/${name}/NOTES.md, repeat the note as your last message and end your turn.`;
 
-export const PROVIDER_FAILED_RESUME = "The model provider failed during your last reply; continue.";
-
-export const livenessNudge = (state: string) =>
-  `Nothing is running and the run is not finished: start the next workers, answer a worker, or close the run.\n\n${state}`;
-
 export const STUCK_SUMMARY =
   "The run stopped before every output was made: main stopped moving, so code ended it.";
 export const STUCK_REASON = "the run stopped before this was made";

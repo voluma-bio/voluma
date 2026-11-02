@@ -134,9 +134,14 @@ async function detailFromSidecar(
   publishedKey: string | undefined,
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> {
+  // A sidecar over the read limit is as good as missing.
+  const readOrMissing = (k: string) =>
+    deps.publish.read(k, { signal }).catch((error: unknown) => {
+      if (error instanceof EvidenceRefused) return undefined;
+      throw error;
+    });
   const text =
-    (await deps.publish.read(key, { signal })) ??
-    (publishedKey ? await deps.publish.read(publishedKey, { signal }) : undefined);
+    (await readOrMissing(key)) ?? (publishedKey ? await readOrMissing(publishedKey) : undefined);
   let side: Record<string, unknown> = {};
   try {
     const parsed: unknown = text === undefined ? undefined : JSON.parse(text);
@@ -384,12 +389,11 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           Promise.all(input.evidence.map((f) => publishFile(f, "evidence/"))),
         ]);
 
-        return section(async () => {
+        // The section holds only the decision and the append; the R2 moves run after it, so other
+        // agents' tools are not held behind them. `finishMove` is idempotent and event-first.
+        const { payload, fresh } = await section(async () => {
           const again = stored();
-          if (again) {
-            await finishMove(again);
-            return answerOf(again);
-          }
+          if (again) return { payload: again, fresh: false };
           const version = nextVersion(deps, input.id);
           const path = versionPath(input.id, ctx.toolCallId);
           const value = input.value;
@@ -411,10 +415,11 @@ export function reportOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           };
           await recorder.append(ctx.threadId, "output.published", payload, id);
           deps.changed();
-          await deps.refreshRunFiles();
-          await finishMove(payload);
-          return answerOf(payload);
+          return { payload, fresh: true };
         });
+        if (fresh) await deps.refreshRunFiles();
+        await finishMove(payload);
+        return answerOf(payload);
       }),
   };
 }

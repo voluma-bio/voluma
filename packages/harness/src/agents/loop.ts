@@ -28,10 +28,10 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "@voluma/contracts/thread-records";
 import type { BashRuntime } from "../bash-runtime";
 import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
-import { loopShell, type Section, type Step } from "../loop-shell";
-import { cutOffText } from "../messages";
+import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "../loop-config";
+import { loopShell, RUNTIME, type Section, type Step } from "../loop-shell";
+import { cutOffText, livenessNudge, PROVIDER_FAILED_RESUME } from "../messages";
 import type { Recorder } from "../recorder";
-import type { LoopConfig, ModelSetup } from "../run-loop";
 import { threadIdOf } from "../thread-id";
 import type { ThreadSpec, Threads } from "../threads";
 import type { Tool } from "../tools/tool";
@@ -39,9 +39,7 @@ import {
   agentList,
   briefOf,
   deliveryText,
-  livenessNudge,
   noticeLine,
-  PROVIDER_FAILED_RESUME,
   receipts,
   STUCK_REASON,
   STUCK_SUMMARY,
@@ -64,8 +62,6 @@ import type { AgentsApi } from "./tools/coordination";
 
 /** Workers open at once (X). */
 const WORKER_LIMIT = 4;
-/** Deliveries with nothing new in a row before code ends the run. */
-const STUCK_LIMIT = 2;
 
 /** Who an agent is when a thread is built for it. */
 interface AgentIdentity {
@@ -115,7 +111,6 @@ interface AgentLoopOptions {
   signal?: AbortSignal;
 }
 
-const RUNTIME: UserSender = { kind: "runtime" };
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
 /** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
@@ -130,7 +125,7 @@ export function openingOutputs(
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, threads } = o;
-  const stuckLimit = o.config?.stuckLimit ?? STUCK_LIMIT;
+  const stuckLimit = o.config?.stuckLimit ?? LOOP_DEFAULTS.stuckLimit;
   const now = o.now ?? Date.now;
   const derive = () => agentLog(recorder.events());
   const stateOf = (r: AgentRecord): AgentState =>
@@ -501,7 +496,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         `${root}:stuck:outputs`,
       );
     }
-    // Every open worker ends with the run: an idle one has an end already and `stopAll` skips it.
+    // Every open worker, idle ones too, is cancelled (DIVERGENCE/06): idle workers would otherwise hold the run open, and the run's report shows them closed.
     for (const r of d.records.values()) {
       if (r.place === "worker" && stateOf(r) !== "closed") {
         await recorder.append(

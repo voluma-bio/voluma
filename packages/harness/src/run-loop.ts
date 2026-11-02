@@ -20,8 +20,6 @@
  * threads are aborted and the root ends `failed`, because the loop must not carry on from a
  * record the store does not hold. A runtime abort writes no end, like a crash.
  */
-import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { By } from "@voluma/contracts/events";
 import {
   checkResult,
@@ -35,7 +33,8 @@ import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { UserSender } from "./adapters/pi/start-thread";
 import { failureKind, mainFailureAction, type ProviderError } from "./failure-policy";
 import type { RunLayout, ThreadLayout } from "./layout";
-import { loopShell, type Section, type Step } from "./loop-shell";
+import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "./loop-config";
+import { loopShell, RUNTIME, type Section, type Step } from "./loop-shell";
 import {
   agentsList,
   answerText,
@@ -88,30 +87,8 @@ import type { Tool } from "./tools/tool";
 /** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
 type Lineage = { name: string; role: string; parentThreadId: string; attemptId?: string };
 
-/** What the host decides about a thread's model; the loop adds the prompts, identity and tools. */
-export interface ModelSetup {
-  model: Model<Api>;
-  /** The Pi agent's thinking level, which Pi sends as `reasoning` and records on each reply. */
-  thinkingLevel: ThinkingLevel;
-  streamFn: StreamFn;
-}
-
-export interface LoopConfig {
-  /** `needs-review` rounds a task gets before it is left to-check. */
-  maxFixRounds: number;
-  /** Deliveries with no notice in a row before code ends the run. */
-  stuckLimit: number;
-}
-
 /** The role file the run's first thread runs on; the loader requires it. */
 const MAIN_ROLE = "main";
-
-export const LOOP_DEFAULTS: LoopConfig = {
-  maxFixRounds: 2,
-  stuckLimit: 2,
-};
-
-export type { ProviderError };
 
 export interface RunLoopOptions {
   runId: string;
@@ -150,7 +127,6 @@ export interface RunLoopOptions {
 const CHECK_REPLACEMENTS = 2;
 
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
-const RUNTIME: UserSender = { kind: "runtime" };
 
 export async function runLoop(o: RunLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
@@ -678,7 +654,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     const covers = d.lastEventId;
     if (d.emptyDeliveries < config.stuckLimit) {
       const asking = [...d.threads.values()].some((r) => openAsk(d, r));
-      await resume(m, livenessNudge(asking, stateBlock(d, view, stateOf)), {
+      await resume(m, livenessNudge(stateBlock(d, view, stateOf), asking), {
         kind: "runtime",
         ...(covers && { covers }),
       });

@@ -20,9 +20,9 @@ import { corrections, type Folded, fold } from "@voluma/contracts/fold";
 import { cancelEnds, cancelRow } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
+import type { ProviderError } from "./failure-policy";
 import { EvidenceNotFound } from "./ports/evidence";
 import { recorder } from "./recorder";
-import type { ProviderError } from "./run-loop";
 import { type LoopConfig, type PlanTask, superviseRun } from "./supervise-run";
 
 export const RUN = "r1";

@@ -144,7 +144,7 @@ export const deliveryText = (
     .join("\n\n");
 
 /** What the main agent is told when nothing is running and the run is not finished. */
-export const livenessNudge = (asking: boolean, state: string) =>
+export const livenessNudge = (state: string, asking = false) =>
   `Nothing is running and the run is not finished: ${asking ? "answer the open question (nothing else can move until you do), then " : ""}start the next workers, or finish the run.\n\n${state}`;
 
 /** What the researcher reads when the main agent stopped moving and code ended the run. */
