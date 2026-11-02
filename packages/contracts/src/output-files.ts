@@ -2,8 +2,7 @@
  * The two files agents read in `/run/`, rendered from the events (`output-fold.ts`); nobody edits
  * them. Pure: the harness writes the text where `/run/` is mounted (`runFilesPrefix`).
  *
- * - `/run/final-outputs.yaml`: the run's final outputs in sections (the shape of
- *   `finalOutputsSchema`), its missing ones and its changes.
+ * - `/run/final-outputs.yaml`: the run's final outputs in sections (`finalOutputsSchema`), its missing ones and its changes.
  * - `/run/outputs.yaml`: every published output, final and intermediate, with its status, its
  *   latest version (files as `/outputs/...` paths an agent opens directly, `madeFrom`, open To
  *   check items) and the earlier versions. There is no "latest" alias on the read-only mount, so
@@ -11,6 +10,7 @@
  */
 import { stringify } from "yaml";
 import type { RunEvent } from "./events";
+import type { FinalOutputs } from "./final-outputs";
 import { OUTPUTS_MOUNT, type OutputVersion, outputsFold } from "./output-fold";
 
 const folder = (v: Pick<OutputVersion, "path">) => `${OUTPUTS_MOUNT}/${v.path}/`;
@@ -22,7 +22,7 @@ const versionBlock = (v: OutputVersion, detailed: boolean) => ({
   path: folder(v),
   ...(detailed && {
     ...(v.value && { value: v.value.number, unit: v.value.unit }),
-    ...(v.files.length > 0 && { files: v.files.map((f) => `${folder(v)}${f.path}`) }),
+    ...(v.files.length > 0 && { files: v.files.map((f) => `${folder(v)}${f.name}`) }),
     madeFrom: v.madeFrom,
     ...(v.provisional && { provisional: true }),
     ...(v.kept && { kept: v.kept.reason }),
@@ -35,7 +35,7 @@ const versionBlock = (v: OutputVersion, detailed: boolean) => ({
 /** `/run/final-outputs.yaml`; empty before the run's first `outputs.changed`. */
 export function renderFinalOutputs(events: readonly RunEvent[]): string {
   const { list } = outputsFold(events);
-  return stringify(list ?? { sections: [], changes: [] });
+  return stringify(list ?? ({ sections: [], changes: [] } satisfies FinalOutputs));
 }
 
 /** `/run/outputs.yaml`. */

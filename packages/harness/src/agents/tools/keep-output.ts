@@ -10,7 +10,7 @@
  * off between two outputs finishes the rest when repeated, and ids it already kept are not
  * checked again (they are no longer out of date).
  */
-import { outputRefSchema } from "@voluma/contracts/agent-events";
+import { outputRefSchema } from "@voluma/contracts/output-catalog";
 import { z } from "zod";
 import type { Tool } from "../../tools/tool";
 import { keepOutputId } from "../effects";
@@ -22,8 +22,6 @@ import {
   nextVersion,
   type OutputEvent,
   type OutputToolDeps,
-  shellOf,
-  titleOf,
 } from "./output-shared";
 import { Refusal, result } from "./refusal";
 
@@ -65,7 +63,7 @@ export function keepOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
           const kept: OutputEvent[] = [];
           for (const id of [...new Set(ids)]) {
             const stored = eventById(deps, eventId(id));
-            if (stored?.type === "output") {
+            if (stored?.type === "output.published") {
               kept.push(stored.payload);
               continue;
             }
@@ -73,16 +71,18 @@ export function keepOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
             const latest = foldOf(deps).byId.get(id)?.latest;
             if (!latest) throw new Error(`${id} lost its version`);
             const version = nextVersion(deps, id);
+            const { kind, base } = foldOf(deps).byId.get(id) ?? {};
+            if (!kind) throw new Error(`${id} has no kind`);
             const current = (other: string) =>
               other === id ? latest.version : foldOf(deps).byId.get(other)?.latest?.version;
             const payload: OutputEvent = {
               outputId: id,
-              title: titleOf(deps, id),
-              evidence: latest.evidence,
-              output: shellOf(latest, id),
               version,
               path: latest.path,
               ...(latest.files.length > 0 && { files: latest.files }),
+              ...(latest.value && { value: latest.value }),
+              ...(latest.evidence.length > 0 && { evidence: latest.evidence }),
+              ...(latest.detail && { detail: latest.detail }),
               madeFrom: latest.madeFrom.map((l) => ({ ...l, version: current(l.id) ?? l.version })),
               ...(latest.toCheck.some((t) => !t.resolved) && {
                 toCheck: latest.toCheck
@@ -90,11 +90,11 @@ export function keepOutput(deps: OutputToolDeps): Tool<typeof inputSchema> {
                   .map(({ title, focus }) => ({ title, ...(focus && { focus }) })),
               }),
               ...(latest.provisional && { provisional: true }),
-              kind: foldOf(deps).byId.get(id)?.kind,
-              ...(foldOf(deps).byId.get(id)?.base && { base: foldOf(deps).byId.get(id)?.base }),
+              kind,
+              ...(base && { base }),
               kept: { reason },
             };
-            await recorder.append(ctx.threadId, "output", payload, eventId(id));
+            await recorder.append(ctx.threadId, "output.published", payload, eventId(id));
             kept.push(payload);
           }
           deps.changed();

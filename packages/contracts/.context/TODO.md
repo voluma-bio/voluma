@@ -30,10 +30,12 @@ conversion, parse every staging run and every `run.json`, then narrow.
 
 ## Final outputs file
 
-`/run/final-outputs.yaml` has no schema here yet; the phase that writes it brings one. Its sections
-hold delivered ids only, and its links are checked against the run's catalog (the entries in the
-first `outputs.changed`), never against the file itself: a value's basis is shown with it but is
-not final and never blocks `close`.
+`final-outputs.ts` holds `finalOutputsSchema` (the rendered `/run/final-outputs.yaml`), the total
+`applyOutputsChange` the fold uses and `refuseOutputsChange`, the writer's check against the run's
+catalog. Not wired yet: the runner's opening change and `change_outputs` must call
+`refuseOutputsChange` and refuse there; until then nothing checks them. The label overlays the fold
+resolves come from the `add` entries of the opening change, so it must add each label overlay a
+value or version links to.
 
 ## Display units
 

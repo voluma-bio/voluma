@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { RunEvent } from "./events";
-import type { OutputEntry } from "./output-catalog";
 import {
   applyOutputsChange,
-  finalOutputs,
-  latest,
-  outputsFold,
-  pendingFinal,
-  undecidedOutOfDate,
-} from "./output-fold";
+  finalOutputsSchema,
+  type FinalEntry as OutputEntry,
+  refuseOutputsChange,
+} from "./final-outputs";
+import { type OutputCatalog, outputCatalogSchema } from "./output-catalog";
+import { finalOutputs, latest, outputsFold, pendingFinal, undecidedOutOfDate } from "./output-fold";
 
 type Link = { id: string; version: number; role: "on" | "base" | "input" };
 const sha = (n: string) => n.padEnd(64, "0");
@@ -33,18 +32,13 @@ function run() {
     madeFrom: Link[] = [],
     extra: object = {},
   ) =>
-    push("output", {
+    push("output.published", {
       outputId: id,
-      title: id,
-      evidence: [],
-      output: {
-        kind: "file",
-        file: { root: "outputs", path: `${id}/c${version}/x`, sha256: sha("a") },
-        mediaType: "application/octet-stream",
-      },
       version,
       path: `${id}/c${version}`,
-      files: Object.entries(files).map(([path, h]) => ({ path, sha256: sha(h) })),
+      files: Object.keys(files).length
+        ? Object.entries(files).map(([name, h]) => ({ name, sha256: sha(h) }))
+        : undefined,
       madeFrom,
       kind: "overlay",
       ...extra,
@@ -54,8 +48,9 @@ function run() {
   return { events, push, publish, final };
 }
 
-const overlay = (id: string): OutputEntry => ({ kind: "overlay", id, name: id, base: "scan" });
-const scan: OutputEntry = { kind: "base", id: "scan", name: "scan" };
+const overlay = (id: string) =>
+  ({ kind: "overlay", id, name: id, base: "scan" }) satisfies OutputEntry;
+const scan = { kind: "base", id: "scan", name: "scan" } satisfies OutputEntry;
 
 /** scan <- labels <- grid <- roi <- value, all at version 1; only `value` is final. */
 function chain() {
@@ -73,18 +68,7 @@ function chain() {
   r.publish("roi", 1, { "r.npy": "c1" }, [{ id: "grid", version: 1, role: "base" }]);
   r.publish("bv", 1, {}, [{ id: "roi", version: 1, role: "on" }], {
     kind: "value",
-    output: {
-      kind: "measurement",
-      value: 12,
-      unit: "%",
-      id: "bv",
-      confidence: null,
-      evidenceIds: [],
-      references: [],
-      on: [],
-      context: [],
-      source: null,
-    },
+    value: { number: 12, unit: "%" },
   });
   return r;
 }
@@ -190,33 +174,44 @@ describe("status", () => {
   });
 });
 
-describe("applyOutputsChange", () => {
+describe("label overlays", () => {
+  it("resolves a link to a label to its map's version", () => {
+    const r = chain();
+    r.push("outputs.changed", {
+      by: "runner",
+      reason: "labels",
+      add: [{ kind: "overlay", id: "femur", base: "scan", label: { of: "labels", value: 1 } }],
+    });
+    r.publish("femurvol", 1, { "f.json": "f1" }, [{ id: "femur", version: 1, role: "input" }]);
+    expect(stale(r.events)).toEqual([]);
+    r.publish("labels", 2, { "l.npy": "a2" });
+    expect(stale(r.events)).toContain("femurvol");
+  });
+});
+
+describe("final outputs", () => {
   const at = "2026-11-01T00:00:00.000Z";
+  const catalog: OutputCatalog = outputCatalogSchema.parse([
+    { kind: "base", id: "scan", name: "scan" },
+    { kind: "overlay", id: "a", name: "a", base: "scan", shape: "mask" },
+  ]);
   const start = applyOutputsChange(
     undefined,
     { by: "runner", reason: "start", add: [scan, overlay("a")] },
     at,
   );
-  if (!("list" in start)) throw new Error("setup");
 
-  it("groups what no section names", () => {
-    expect(start.list.sections.map((s) => s.title)).toEqual(["Other"]);
+  it("groups what no section names, and renders to a valid file", () => {
+    expect(start.sections.map((s) => s.title)).toEqual(["Other"]);
+    expect(finalOutputsSchema.safeParse(start).success).toBe(true);
   });
-  it("refuses a drop that leaves a link dangling", () => {
-    const r = applyOutputsChange(start.list, { by: "main", reason: "x", drop: ["scan"] }, at);
-    expect(r).toMatchObject({ refusal: expect.stringContaining("scan") });
-  });
-  it("refuses unknown ids and repeats", () => {
-    expect(
-      applyOutputsChange(start.list, { by: "main", reason: "x", drop: ["zz"] }, at),
-    ).toHaveProperty("refusal");
-    expect(
-      applyOutputsChange(start.list, { by: "main", reason: "x", add: [scan] }, at),
-    ).toHaveProperty("refusal");
+  it("is total: the fold takes a change the writer would refuse", () => {
+    const r = applyOutputsChange(start, { by: "main", reason: "x", drop: ["zz"] }, at);
+    expect(r.sections[0]?.outputs).toHaveLength(2);
   });
   it("regroups into sections and appends expect lines", () => {
     const r = applyOutputsChange(
-      start.list,
+      start,
       {
         by: "main",
         reason: "x",
@@ -225,8 +220,24 @@ describe("applyOutputsChange", () => {
       },
       at,
     );
-    if (!("list" in r)) throw new Error(JSON.stringify(r));
-    expect(r.list.sections.map((s) => s.title)).toEqual(["Bones"]);
-    expect(r.list.sections[0]?.outputs[1]).toMatchObject({ expect: ["smooth"] });
+    expect(r.sections.map((s) => s.title)).toEqual(["Bones"]);
+    expect(r.sections[0]?.outputs[1]).toMatchObject({ expect: ["smooth"] });
+  });
+  it("is refused by the writer's check, which has the catalog", () => {
+    const refuse = (change: object) =>
+      refuseOutputsChange(start, { by: "main", reason: "x", ...change }, catalog);
+    expect(refuse({ drop: ["zz"] })).toContain("zz");
+    expect(refuse({ add: [scan] })).toContain("already");
+    expect(refuse({ add: [{ kind: "value", id: "v" }] })).toContain("not in the catalog");
+    expect(
+      refuseOutputsChange(
+        undefined,
+        { by: "main", reason: "x", add: [{ kind: "base", id: "a" }] },
+        catalog,
+      ),
+    ).toContain("overlay");
+    expect(refuse({ add: [{ kind: "value", id: "me/v", on: ["gone"] }] })).toContain("gone");
+    expect(refuse({ add: [{ kind: "value", id: "me/v", on: ["a"] }] })).toBeUndefined();
+    expect(refuse({ missing: [{ id: "zz", reason: "r" }] })).toContain("zz");
   });
 });
