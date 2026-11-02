@@ -18,7 +18,8 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   `anatomy.json`; `label_stats --ranges` already reads this file.
 - **`femoral_frame.py` after the spec move (p231 M2), what is left.** DFL, DFW and W/L are computed by `measure.py` from `protocol.json`; the
   script keeps the landmark checks and the frame. `off_bone_mm` repeats `pick.py`'s snap distance. The frame's ML is now the femur label's
-  condylar axis, read by the ruler-direction checks; the other vectors are still read only by the SI check.
+  condylar axis, read by the ruler-direction checks, and SI is read by the SI check; nothing outside the script reads either
+  vector from `femoral.json` (the unread normal was dropped in #488).
 - **A kept synthetic-truth test (p230), for the user to decide.** A tilted planar growth-plate face under a flat top, where `iioc.py`'s height
   along W equals h / cos θ and the perpendicular height equals h. The heights moving by 3 to 7% between the two definitions was silent until a
   reviewer recomputed it; the same shape of test would pin plate thickness and node density. None is added.

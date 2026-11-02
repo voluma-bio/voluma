@@ -118,7 +118,11 @@ schema is `regions-and-landmarks`'):
   (`a` and `b` placed end-on, as on the first full run), an `a`-`b` that runs side to side or a `c`-`d` that does not
   (against the femur's mediolateral axis, which it finds from the label and prints: the sides and the front swapped, as
   on OA6-2RK run f45f630f, where OA6-1RK's axes were taken for its own) or an SI axis pointing away from the femur:
-  re-place the points; the refusal is not a warning to explain.
+  re-place the points; the refusal is not a warning to explain. The printed axis says which scan direction runs side
+  to side, not which side is lateral or where the front is: read those from a render of this scan. Two refusals are
+  not about the points, so do not move them: a femur label too short along its shaft to give the axes (the labels
+  or the field of view cut the shaft off), and a printed axis that a render of this scan contradicts (the condyles
+  side by side along another direction). For either, stop and raise a To check item naming it.
 
 `oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (A and B, no C) in that schema, with
 the `grid_id` of the frame it was traced on: a worked example of the keys and the point order, and a record of that
