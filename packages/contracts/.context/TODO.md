@@ -23,9 +23,13 @@ The agent model's events (`agent-events.ts`, the widened `output`, `thread.start
 below is a step-2 PR (root `AGENTS.md`, "Contract changes"): re-run the conversion, parse every
 staging run and every `run.json`, then narrow.
 
-- `output`: make `version`, `path` and `madeFrom` required and drop `taskId` and `attemptId`, once no
-  stored run is on the task loop. `outputId` is still one path segment; an undeclared output's id is
-  `<worker>/<id>` (`outputRefSchema`), so widen it when the first writer reports one.
+- `output`: make `version`, `path`, `files` (absent for a value) and `madeFrom` required and drop `taskId` and `attemptId`, once no
+  stored run is on the task loop. The nested `output` of an agent-model version is a compatibility shell
+  (`measurement` for a value, `file` holding the primary file); make it optional first, then drop it with the
+  task rows. `outputId` on the event already accepts `<worker>/<id>`; the task tool's input still takes one segment.
+- `output-fold.ts` skips an `outputs.changed` its rules refuse (a link to an output not in the list). The tool refuses
+  the same change first, but the runner's opening change is not checked by a tool: it must list each value's `on` and
+  `context` outputs, or the run has no final outputs and nothing says why.
 - Remove the task-loop events (`revision.started`, `attempt.opened`, `task`, `checkpoint`,
   `plan.changed`, `ask`, `answer`, `reply`, `outputs.*`, and the human `check.accepted`,
   `review.completed`, `correction.ended`) with the fold's task rows.

@@ -37,6 +37,10 @@ export const runPrefix = (runId: string) => `runs/${seg(runId)}/`;
  */
 export const workflowSnapshotPrefix = (runId: string) => `${runPrefix(runId)}workflow/`;
 export const scratchPrefix = (runId: string) => `${runPrefix(runId)}scratch/`;
+/** The agent model's per-agent working folders; a sandbox mounts only its own `<folder>/` read-write at `/work/<folder>`. */
+export const workPrefix = (runId: string) => `${runPrefix(runId)}work/`;
+/** `/run/final-outputs.yaml` and `/run/outputs.yaml`, written from the events; mounted read-only at `/run`. */
+export const runFilesPrefix = (runId: string) => `${runPrefix(runId)}run/`;
 /** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
 export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
 /**
@@ -46,6 +50,14 @@ export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
  */
 export const outputsBackupPrefix = (runId: string, reopenId: string) =>
   `${runPrefix(runId)}corrections/${seg(reopenId)}/`;
+/**
+ * A published output version's folder (the agent model), `<id>/<toolCallId>` under `outputs/`, `id` being
+ * a catalog id or `<worker>/<id>`. Keyed by the tool call so a repeated call writes the same keys.
+ */
+export const versionPath = (outputId: string, toolCallId: string) =>
+  `${outputId.split("/").map(seg).join("/")}/${seg(toolCallId)}`;
+export const versionPrefix = (runId: string, outputId: string, toolCallId: string) =>
+  `${outputsPrefix(runId)}${versionPath(outputId, toolCallId)}/`;
 export const taskOutputPrefix = (runId: string, task: string) =>
   `${outputsPrefix(runId)}${seg(task)}/`;
 

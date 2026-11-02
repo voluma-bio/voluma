@@ -61,6 +61,8 @@ export const outputsChangedSchema = z
     message: "a change changes something",
   });
 
+export type OutputsChange = z.infer<typeof outputsChangedSchema>;
+
 /**
  * A message between agents or to the researcher. `from` and `to` are `main`, a worker's name or
  * `researcher`. `show` points the researcher at an output, optionally in a view.
