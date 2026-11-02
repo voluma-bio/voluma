@@ -2,6 +2,7 @@
  * What a run has spent since its last acknowledged heartbeat (`Usage` in
  * `@voluma/contracts/runner`): model dollars from Pi's per-reply cost, and the seconds a
  * sandbox was up. A heartbeat takes it and, if the server did not acknowledge, puts it back.
+ * `costCapError` is the one spending limit: the runner fails a run that passes it.
  */
 import type { ModelUsage } from "@voluma/contracts/events";
 import type { Usage } from "@voluma/contracts/runner";
@@ -76,3 +77,13 @@ export function usageMeter() {
   };
 }
 export type UsageMeter = ReturnType<typeof usageMeter>;
+
+/**
+ * The error that fails a run whose model spend passed the cap, or undefined while it is under.
+ * `spentUsd` is the run's whole spend: what earlier claims reported (`run.usage`) plus this
+ * claim's meter, so a resumed run does not get a fresh budget.
+ */
+export function costCapError(runId: string, spentUsd: number, capUsd: number): string | undefined {
+  if (spentUsd <= capUsd) return undefined;
+  return `budget exceeded: run ${runId} spent $${spentUsd.toFixed(2)} on model calls, over its $${capUsd} cap (RUNNER_MAX_RUN_COST_USD)`;
+}

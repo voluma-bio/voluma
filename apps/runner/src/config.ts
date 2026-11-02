@@ -222,6 +222,11 @@ export function runnerConfig() {
   return {
     api,
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
+    /**
+     * `RUNNER_MAX_RUN_COST_USD`: the model dollars a run may spend over all its claims before the
+     * runner fails it (`costCapError`, `usage.ts`). Whole dollars; default 50.
+     */
+    maxRunCostUsd: positiveInt("RUNNER_MAX_RUN_COST_USD", 50),
     /** The run loop's limits (`LoopConfig`); the harness default is 2 fix rounds. */
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),

@@ -80,7 +80,7 @@ import { storePublish } from "./store-publish.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
-import { usageMeter } from "./usage.ts";
+import { costCapError, usageMeter } from "./usage.ts";
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -192,6 +192,7 @@ async function claimBody(
   if (shutdown.aborted) stop("shutdown");
 
   const meter = usageMeter();
+  let overBudget = false;
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -333,7 +334,21 @@ async function claimBody(
           ...(m.provider === "meta" && { cacheRetention: "long" }),
         });
         stream.result().then(
-          (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
+          (reply) => {
+            meter.addModelCall(role, threadId, usageOf(reply));
+            // Spend is checked after each reply: the call that crosses the cap is the last one
+            // paid for. Failing the run stops its threads; it is not retried or resumed.
+            const over = costCapError(
+              runId,
+              run.usage.modelCostUsd + meter.totalModelCostUsd(),
+              config.maxRunCostUsd,
+            );
+            if (over && !overBudget) {
+              overBudget = true;
+              log(over);
+              scope.fail?.(new Error(over));
+            }
+          },
           () => {},
         );
         return stream;
