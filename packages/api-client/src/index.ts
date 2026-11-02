@@ -400,7 +400,7 @@ export const runMessageSnapshotUrl = (runId: string, messageId: string) =>
 
 /**
  * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,
- * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG and PNG come back as
+ * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG, PNG, GIF and WebP come back as
  * images; anything else is an attachment. 404: unreadable run or no such file; 503: no file
  * storage configured. Only files under the run's own prefix, not the reference run's keys.
  */

@@ -62,6 +62,9 @@ function imageType(head: Uint8Array): string | null {
   if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return "image/jpeg";
   const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (png.every((byte, i) => head[i] === byte)) return "image/png";
+  const ascii = (from: number, to: number) => String.fromCharCode(...head.subarray(from, to));
+  if (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a") return "image/gif";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
   return null;
 }
 

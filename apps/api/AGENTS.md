@@ -172,7 +172,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
   files (`evidenceKey`) from the store (`files.ts` maps a missing object to 404 and a failed read to 502), after `RunRecords.readable`.
   No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`,
-  a day). The leading bytes pick the type: JPEG and PNG inline, anything else an attachment,
+  a day). The leading bytes pick the type: JPEG, PNG, GIF and WebP inline, anything else an attachment,
   always `nosniff`, since the stored content type is whatever the sandbox mount wrote. HEAD is
   a 405 before storage is opened.
 - `snapshots.ts` owns immutable screenshots, separate from scientific results and human
