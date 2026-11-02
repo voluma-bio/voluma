@@ -1,7 +1,7 @@
-# What correct looks like, per task
+# What correct looks like, per step
 
-For each placement a task makes: the criterion, and the lab's figure of it done right. A worker places against
-these; a checker writes down what it expects from them before it opens the worker's images. Every figure is a
+For each placement a step makes: the criterion, and the lab's figure of it done right. A worker places against
+these; whoever looks at the result writes down what it expects from them before opening the worker's images. Every figure is a
 crop from the lab's parameter deck unless its name says otherwise.
 
 ## intake
@@ -31,9 +31,8 @@ middle of the medial and the lateral compartment of the plateau.
 
 ## subchondral-plate
 
-`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches (`plate_patch_width_um` wide), the plate in green and the slab below it in red. The plate patch is a column around the middle of each plateau compartment (medial, lateral), and the
-measured slab lies under the articular top surface, inside the plate, not down in the trabeculae: the figure shows
-where the column sits on the plateau.
+`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches (`plate_patch_width_um` wide). Green is the subchondral bone plate, what #11 and #12 measure; red is the trabecular bone under it, which this step does not measure. The plate patch is a column around the middle of each plateau compartment (medial, lateral), and the
+measured slab lies under the articular top surface, inside the plate (the green), not down in the trabeculae (the red).
 
 ## trabecular-roi
 

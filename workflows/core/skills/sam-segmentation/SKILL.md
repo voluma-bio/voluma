@@ -1,7 +1,7 @@
 ---
 name: sam-segmentation
 description: >
-  Load when a task needs structures segmented in 3D and the `segment_sam` tool is available: what one request can
+  Load when a step needs structures segmented in 3D and the `segment_sam` tool is available: what one request can
   and cannot hold, why its masks are clipped and trimmed, and what SAM cannot do.
 ---
 
