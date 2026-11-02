@@ -29,7 +29,19 @@ run agent.
 - On a field with no patella, a box on a small anterior piece returned a 0.06 mm³ sesamoid called "patella".
 - Small structures in the big-bone request cost the patella: Dice 0.95 to 0.86 (the track loses frames and follows the femoral shaft).
 - Trimmed small tracks run 10-20% under the reference; the trim rule (confidence 0.5, unbroken run) was set on this one scan.
-  The "big bones win overlaps" merge was not run in the experiment, which showed a three-piece structure leaking into the patella.
+  In the experiment a three-piece structure leaked into the patella; "big bones win overlaps" was added for that and never tested.
+- Overlap rule of `merge_labels.py`, tested 2026-11-01 on the saved two-request SAM output of both scans (domain HU >= 2500, Dice against
+  OA6's review-07 labels; OA7 has no reference, so classic labels stand in, which are not ground truth):
+  - OA7-1L (staging run 8b05ef94): SAM's femur mask covered 32% of each sesamoid. Big wins: lateral 0.0718, medial 0.0642 mm3
+    (SAM request 0.1067, 0.0942). Small wins: 0.1067, 0.0942. Nearest one-sided voxel: lateral 0.0932, medial 0.0940; femur 11.059 / 10.994 / 11.008.
+    Against classic, lateral Dice 0.823 / 0.808 / 0.840, medial 0.781 / 0.966 / 0.965. The femur mask also sits on the lower half of the
+    lateral sesamoid, a cut of its own that the nearest rule only halves (61% of the contested voxels to the sesamoid).
+  - OA6-1RK: the patella-leaking piece (temp 13, 310,695 voxels, 293,861 of them in the patella). Patella Dice 0.942 big wins,
+    0.806 small wins (1.31 -> 0.95 mm3), 0.944 nearest; label 9 0.803 / 0.542 / 0.873; lateral sesamoid 0.877 / 0.921 / 0.920;
+    label 12 0.912 / 0.943 / 0.937. Femur and tibia move under 0.003 in every rule.
+  - The nearest rule keeps the leak out because the leaking piece sits wholly inside the patella, so the patella's own voxels
+    are nearer to every contested voxel; the same rule gives a sesamoid its voxels where the femur claim is a thin slab over it.
+    It does not know anatomy, and a leak that covers a whole big label would take it.
 - Repeat requests on one stack agreed at Dice 0.994-0.998.
 
 ## segmentation-check
