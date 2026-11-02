@@ -537,7 +537,7 @@ export function pgRunQueue(
       reader: Reader,
       caller: { userId: string; guest: boolean },
       run: Run,
-      /** Where to read: a caller inside a read transaction passes it, so the check shares its snapshot and connection. */
+      /** A caller inside a transaction passes it: a second pool connection there can exhaust the pool. */
       tx: Queryable = db,
       studyWorkflowId?: string,
     ): Promise<string | null> {

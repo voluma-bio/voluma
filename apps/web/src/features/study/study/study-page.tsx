@@ -208,7 +208,7 @@ function StatusLine({
     mark = <StatusMark status="check" label={needsYouText(needsYouOf(input), run.harness)} />;
     more = waitsOn(input, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
-    mark = <StatusMark {...liveStatus(run)} />;
+    mark = <StatusMark {...liveStatus({ ...run, waiting: 0 })} />;
   } else if (status.status === "stopped") {
     more = stoppedLine(input, workflow);
   } else if (status.status === "done" && hasBar(input)) {

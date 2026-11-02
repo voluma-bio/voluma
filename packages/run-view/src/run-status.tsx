@@ -71,8 +71,7 @@ export type RunStatus = { label: string; status: Status };
  * outputs) while an agent-loop run does: what a row says about a live run.
  */
 export function liveStatus(
-  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness"> &
-    Partial<Pick<StudyRunSummary, "waiting">>,
+  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness" | "waiting">,
 ): RunStatus {
   if (run.waiting) return WAITING_ON_YOU;
   const running = run.state.status === "running";
