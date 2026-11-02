@@ -84,7 +84,8 @@
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
  * sandbox time. The server adds them up per run. A heartbeat the server did not acknowledge is resent
  * with its usage added to the next one. The server adds spend up per run (`run.usage`); the claim
- * carries the study's `budgetUsd`, and the runner fails a run once its model spend passes it.
+ * carries the study's `budgetUsd`, and the runner fails a run once its model spend passes
+ * min(budgetUsd, RUNNER_MAX_RUN_COST_USD).
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
  * `released` (a shutdown, a self-stop or a loop stall: its `reason`). Either one ends the
