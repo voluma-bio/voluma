@@ -32,7 +32,14 @@ const purpose = new Map(workflowTasks.map((t) => [t.id, t.summary]));
  * `waiting`: open while the run waits in line for a runner; `paused`: while it waits for its
  * starter's keys. Either resumes with a `thread.started`.
  */
-export type ThreadStatus = "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
+export type ThreadStatus =
+  | "running"
+  | "waiting"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "closed";
 
 export type Thread = {
   id: string;
