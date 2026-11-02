@@ -51,8 +51,8 @@ export interface Caller {
   toolCallId: string;
   kind: "main" | Role;
   taskId?: string;
-  /** How many tool calls the reply that made this call holds (`ToolContext.batchSize`). */
-  batchSize: number;
+  /** The names of the tool calls the reply that made this call holds (`ToolContext.batch`). */
+  batch: string[];
   /** Aborts when the call is cancelled. */
   signal: AbortSignal;
 }
@@ -537,7 +537,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     submitTask: (c: Caller, input: SubmitTaskInput) =>
       section(async () => {
         const { taskId, summary } = input;
-        if (c.batchSize > 1) throw new Refusal("Call submit_task alone, not with other tools.");
+        if (c.batch.length > 1) throw new Refusal("Call submit_task alone, not with other tools.");
         const target = writeTarget(c, taskId, { verdict: false, what: "submits tasks" });
         const missing = target.fresh
           ? known(taskId)
@@ -578,7 +578,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         if ((c.kind !== "check" && c.kind !== "worker") || !c.taskId) {
           throw new Refusal("Only a worker or a check thread asks.");
         }
-        if (c.kind === "check" && c.batchSize > 1) {
+        if (c.kind === "check" && c.batch.length > 1) {
           throw new Refusal("Call ask alone, not with other tools.");
         }
         const asks = log().threads.get(c.threadId)?.asks ?? [];

@@ -3,8 +3,16 @@
  * out of date or pending), a worker's wrap-up request, the cut-off and liveness lines, and the
  * refusals and results of the coordination tools. The task loop's are `messages.ts`.
  */
-import type { AgentLog, AgentRecord, AgentState, Notice } from "@voluma/contracts/agents";
+import {
+  type AgentLog,
+  type AgentRecord,
+  type AgentState,
+  type ApprovalRecord,
+  approvalLeftPrefix,
+  type Notice,
+} from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
+import type { PersonMessage } from "@voluma/contracts/messages";
 import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
 import { callKey } from "@voluma/contracts/thread-records";
 
@@ -12,6 +20,9 @@ import { callKey } from "@voluma/contracts/thread-records";
 const RECEIPT_CHARS = 300;
 /** Characters of main's last message to an agent (or its brief), shown as what it is on. */
 const ON_CHARS = 80;
+
+/** Characters of the researcher's open view shown to main. */
+const VIEW_CHARS = 600;
 
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)}…` : text);
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -34,9 +45,17 @@ export const activityReminder = (minutes: number) =>
 
 export const STUCK_SUMMARY =
   "The run stopped before every output was made: main stopped moving, so code ended it.";
+/** The summary of the root's end while the researcher is reviewing and nothing is in flight. */
+export const WAITING_SUMMARY = "Waiting for the researcher.";
 export const STUCK_REASON = "the run stopped before this was made";
 
-export const noticeLine = (n: Notice, events: readonly RunEvent[]): string => {
+/** `screenshots`: where main reads each person notice's screenshot, by notice event id (`stageScreenshot`). */
+export const noticeLine = (
+  n: Notice,
+  events: readonly RunEvent[],
+  approvals: readonly ApprovalRecord[],
+  screenshots: ReadonlyMap<string, string>,
+): string => {
   switch (n.kind) {
     case "output": {
       const o = outputsFold(events).byId.get(n.outputId);
@@ -68,16 +87,110 @@ export const noticeLine = (n: Notice, events: readonly RunEvent[]): string => {
       return `- ${n.agent} was stopped: ${n.reason}. Start a new worker if its work is not done.`;
     case "silent":
       return `- ${n.agent} ended its turn without a report, a message to you or a close.${n.reply ? ` Its last words: ${n.reply}` : ""}`;
-    // R3a placeholders so the union stays exhaustive; no writer exists yet. R3c writes the real text.
     case "person":
-      return `- The researcher wrote: ${n.message.text ?? ""}`;
+      return personLines(n.message, events, screenshots.get(n.eventId));
     case "approval":
-      return `- ${n.outcome}: ${n.text}`;
+      return approvalLine(n, events, approvals);
   }
 };
 
-/** The brief and skills of a worker, read back from the `start_worker` call that started it. */
-export function briefOf(d: AgentLog, r: AgentRecord): { brief: string; skills: string[] } {
+const WITHDRAWN = "The run was closed";
+
+/** What became of a held call, for main: the researcher's answer, or what happened when it ran. */
+function approvalLine(
+  n: Extract<Notice, { kind: "approval" }>,
+  events: readonly RunEvent[],
+  approvals: readonly ApprovalRecord[],
+): string {
+  const request = approvals.find((a) => a.requestId === n.requestId);
+  const call = request ? `${request.tool} (${request.summary})` : n.toolCallId;
+  switch (n.outcome) {
+    case "done":
+      return `- The researcher approved ${call}, and it ran: ${n.text}`;
+    case "refused":
+      return `- The researcher approved ${call}, but it was refused when it ran: ${n.text}`;
+    case "withdrawn":
+      return `- ${call} was withdrawn: ${n.text || WITHDRAWN}.`;
+    case "declined": {
+      const left = events
+        .filter(
+          (e) => e.type === "output.published" && e.id.startsWith(approvalLeftPrefix(n.requestId)),
+        )
+        .map((e) => (e.type === "output.published" ? e.payload.outputId : ""));
+      return [
+        `- The researcher declined ${call}.${n.text ? ` Their words: ${n.text}` : ""}`,
+        ...(left.length > 0
+          ? [
+              `  ${left.join(", ")} ${left.length === 1 ? "is" : "are"} left to the researcher with a To check item, so ${left.length === 1 ? "it needs" : "they need"} no decision from you.`,
+            ]
+          : []),
+      ].join("\n");
+    }
+  }
+}
+
+const mm = (v: readonly number[]) => `(${v.map((x) => Number(x.toFixed(2))).join(", ")})`;
+
+const SHAPES: Record<string, string> = {
+  point: "a point",
+  line: "a line",
+  box: "a box",
+  angle: "an angle",
+  outline: "an outline",
+};
+
+/** The message the researcher sent, with each mark they attached in the plain terms of the notice (`design-r3.md`). Positions are world mm, never voxels. */
+function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?: string): string {
+  const fold = outputsFold(events);
+  const marks = (m.attached ?? []).map((a) => {
+    const shape = SHAPES[Object.keys(a.mark.mark).find((k) => k in SHAPES) ?? ""] ?? "a mark";
+    const view = a.mark.plane ? `the ${a.mark.plane.view.toUpperCase()} plane` : "3D";
+    const where = `${shape} in ${view}`;
+    const head = `- ${a.change}: "${a.mark.tag}" on ${a.mark.output} v${a.version}, ${where}`;
+    const line = (a.mark.mark as { line?: { lengthMm?: number } }).line;
+    const length =
+      line?.lengthMm === undefined ? "" : `, length ${Number(line.lengthMm.toFixed(2))} mm`;
+    const ends = a.mark.world.map(mm).join("–");
+    if (a.change === "move" && a.was)
+      return `${head}, from ${a.was.world.map(mm).join("–")} to ${ends} mm${length}`;
+    if (a.change === "place") {
+      // A ruler end dragged is a first `mark.placed` of an output the AI drew: the original is in its files.
+      const drawn = fold.byId.get(a.mark.output)?.latest?.detail?.points !== undefined;
+      return `${head} at ${ends} mm${length}${drawn ? `; the AI's version is in ${a.mark.output} v${a.version}'s files (\`/run/outputs.yaml\` gives the path)` : ""}`;
+    }
+    return `${head} at ${ends} mm${length}`;
+  });
+  const checkTitle = m.toCheck
+    ? fold.byId.get(m.toCheck.output)?.versions.find((v) => v.version === m.toCheck?.version)
+        ?.toCheck[m.toCheck.item]?.title
+    : undefined;
+  const about = [
+    ...(m.output ? [`They were looking at ${m.output}.`] : []),
+    ...(m.toCheck
+      ? [
+          `They are correcting To check item ${m.toCheck.item} of ${m.toCheck.output} v${m.toCheck.version}${checkTitle ? `: ${checkTitle}` : ""}.`,
+        ]
+      : []),
+    ...(m.view ? [`Their view: ${JSON.stringify(m.view).slice(0, VIEW_CHARS)}`] : []),
+  ];
+  return [
+    `The researcher wrote${m.text ? `:\n${m.text}` : " (marks only):"}`,
+    ...about,
+    ...(marks.length > 0
+      ? [
+          "Marks they attached (their annotations, not outputs; nothing changed until you change it):",
+          ...marks,
+        ]
+      : []),
+    ...(screenshot ? [`Screenshot: ${screenshot}`] : []),
+  ].join("\n");
+}
+
+/** The brief, skills and `outputs` limit of a worker, read back from the `start_worker` call that started it. */
+export function briefOf(
+  d: AgentLog,
+  r: AgentRecord,
+): { brief: string; skills: string[]; outputs?: string[] } {
   const call =
     r.parentThreadId && r.spawnedBy
       ? d.calls.get(callKey(r.parentThreadId, r.spawnedBy))
@@ -86,6 +199,7 @@ export function briefOf(d: AgentLog, r: AgentRecord): { brief: string; skills: s
   return {
     brief: typeof input.brief === "string" ? input.brief : "",
     skills: Array.isArray(input.skills) ? (input.skills as string[]) : [],
+    ...(Array.isArray(input.outputs) && { outputs: input.outputs as string[] }),
   };
 }
 
@@ -127,6 +241,10 @@ interface DeliveryParts {
   agents: string;
   outOfDate: string[];
   pending: string[];
+  /** The researcher is reviewing: an out-of-date output may also be left to them. */
+  reviewing: boolean;
+  /** Skill texts due with this delivery (`researcher`, `corrections`). */
+  skills: string[];
 }
 
 export const deliveryText = (p: DeliveryParts): string =>
@@ -135,11 +253,12 @@ export const deliveryText = (p: DeliveryParts): string =>
     p.receipts.length > 0 ? `Messages between workers:\n${p.receipts.join("\n")}` : "",
     `Agents:\n${p.agents}`,
     p.outOfDate.length > 0
-      ? `Out of date, not yet decided (keep_output if it still holds, or have it redone): ${p.outOfDate.join(", ")}`
+      ? `Out of date, not yet decided (keep_output if it still holds, or have it redone${p.reviewing ? ", or leave it to the researcher with keep_output's toCheck" : ""}): ${p.outOfDate.join(", ")}`
       : "",
     p.pending.length > 0
       ? `Final outputs still waiting for a first version: ${p.pending.join(", ")}`
       : "",
+    ...p.skills,
   ]
     .filter(Boolean)
     .join("\n\n");

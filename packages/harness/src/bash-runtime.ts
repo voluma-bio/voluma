@@ -79,7 +79,7 @@ class Command {
   consumed = false;
   waiters = 0;
   /** The `bash.backgrounded` write. */
-  recorded: Promise<void> | undefined;
+  recorded: Promise<boolean> | undefined;
   live: ReturnType<typeof coalescer> | undefined;
   failure: unknown;
   result: { exit: number; view: ModelView } | undefined;
