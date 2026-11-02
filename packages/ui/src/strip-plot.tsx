@@ -5,7 +5,7 @@
  * value spread around it so none hides another. A dot is a button: hover or
  * focus names the input and its value, and `onSelect` decides what it opens.
  * The plot is one tab stop: arrow keys move between dots (left and right in
- * value order, up and down between groups). Scans without a value yet are
+ * value order, up and down between groups). Inputs without a value yet are
  * counted beside their group, not drawn. Dots and the mean tick are ink; only
  * a far dot gets colour (amber), as DESIGN.md asks of every chart.
  */

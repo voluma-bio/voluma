@@ -112,7 +112,7 @@ export function TaskGraph(props: TaskGraphProps) {
   const boxes = new Map<string, ReactNode>(
     props.tasks.map((t) => [
       t.id,
-      <ScanBox
+      <InputBox
         key={t.id}
         task={t}
         size={props.size}
@@ -417,7 +417,7 @@ function keyValue(task: InputGraphTask): { text: ReactNode } {
   };
 }
 
-function ScanBox({
+function InputBox({
   task,
   size,
   selected,

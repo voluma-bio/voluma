@@ -9,7 +9,7 @@ import { Table, type TableColumn } from "./table";
  * for values and input lists, in place of six table-like grids. **Where:** Scans, Results, a
  * task's values, the runs list.
  */
-type Scan = {
+type Input = {
   id: string;
   group: string;
   knee: string;
@@ -18,14 +18,14 @@ type Scan = {
   bvtv?: number;
 };
 
-const inputs: Scan[] = [
+const inputs: Input[] = [
   { id: "OA7-4", group: "DMM", knee: "left", state: "check", checks: 2, bvtv: 55.1 },
   { id: "OA7-6", group: "DMM", knee: "left", state: "running" },
   { id: "OA7-11", group: "Sham", knee: "right", state: "done", bvtv: 61.4 },
   { id: "OA7-15", group: "Sham", knee: "right", state: "stopped" },
 ];
 
-const columns: TableColumn<Scan>[] = [
+const columns: TableColumn<Input>[] = [
   {
     key: "input",
     header: "Sample",
@@ -54,9 +54,9 @@ const columns: TableColumn<Scan>[] = [
 
 const meta = {
   title: "Parts/Table",
-  component: Table<Scan>,
-  args: { label: "Samples", columns, rows: inputs, rowKey: (s: Scan) => s.id },
-} satisfies Meta<typeof Table<Scan>>;
+  component: Table<Input>,
+  args: { label: "Samples", columns, rows: inputs, rowKey: (s: Input) => s.id },
+} satisfies Meta<typeof Table<Input>>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
@@ -106,7 +106,7 @@ export const Scrolls: Story = {
     columns: [
       ...columns,
       ...["Patella volume", "Medial osteophyte volume", "Tibial cortical thickness"].map(
-        (name): TableColumn<Scan> => ({
+        (name): TableColumn<Input> => ({
           key: name,
           header: <span className="inline-block w-28 whitespace-normal">{name}</span>,
           align: "end",

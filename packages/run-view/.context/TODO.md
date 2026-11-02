@@ -23,7 +23,7 @@
   (a contracts PR), and the skills' scripts' warnings written through it.
 - **Resend a stored key from Home and the study dashboard too.** Only the run page sends the
   starter's stored Meta key by itself when a run waits for keys (`AwaitingKeys` in
-  `apps/web/src/features/scan/scan-header.tsx`). Home and the dashboard list the waiting run and link
+  `apps/web/src/features/input/input-header.tsx`). Home and the dashboard list the waiting run and link
   to it, so a guest watching a batch still opens each scan. Move the once-per-wait send into a hook
   here and use it from both features.
 - Outputs review (`outputs-model.ts`): `report_output` fills `detail` from the file's sidecar

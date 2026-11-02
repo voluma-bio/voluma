@@ -326,7 +326,7 @@ interface LoadOptions {
   /**
    * Which failed or cancelled runs to fold. A stopped run's row says all a list shows of it
    * (`review` and `tasks` are null), so the lists take `none`; the study read takes `newest`, a
-   * scan's newest run, to show where it stopped; one run's read (default) takes `all`. A run
+   * input's newest run, to show where it stopped; one run's read (default) takes `all`. A run
    * left out reads as having no events.
    */
   stopped?: "all" | "newest" | "none";
@@ -338,7 +338,7 @@ async function loadResults(
   { cache = newCache(), skipSummaryless = false, stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
-  // Rows are newest first, so a scan's first row is its newest run.
+  // Rows are newest first, so an input's first row is its newest run.
   const seen = new Set<string>();
   const foldRows = rows.filter(({ run }) => {
     const newest = !seen.has(run.inputId);
