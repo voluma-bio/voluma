@@ -50,7 +50,11 @@ export function gate(tool: Tool, { api, hashIn }: GateDeps): Tool {
                 tool: tool.name,
                 args: input,
                 fileHashes,
-                summary: summaryOf(api.recorder.events(), tool.name, input),
+                summary: summaryOf(
+                  tool.name,
+                  input,
+                  (id) => api.catalog.find((e) => e.id === id)?.name ?? id,
+                ),
                 ...(tool.name !== "keep_output" && {
                   outOfDate: madeStale(api.recorder.events(), outputsNamed(tool.name, input)),
                 }),

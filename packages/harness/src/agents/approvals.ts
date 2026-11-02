@@ -25,18 +25,6 @@ export function madeStale(events: readonly RunEvent[], ids: readonly string[]): 
   return [...stale];
 }
 
-/** "This makes out of date: tibia-grid, roi-iioc, 6 values." Empty when it makes nothing out of date. */
-function knockOn(events: readonly RunEvent[], ids: readonly string[]): string {
-  const byId = outputsFold(events).byId;
-  const stale = madeStale(events, ids);
-  const values = stale.filter((id) => byId.get(id)?.kind === "value");
-  const others = stale.filter((id) => !values.includes(id));
-  const list = [...others, ...(values.length > 0 ? [`${values.length} values`] : [])];
-  return list.length > 0
-    ? ` This makes out of date: ${list.join(", ")}.`
-    : " It makes nothing out of date.";
-}
-
 /** The outputs a gated call names: what it changes, for the summary and for leaving them to the researcher when declined. */
 export function outputsNamed(tool: string, args: unknown): string[] {
   const a = (args ?? {}) as { ids?: string[]; outputs?: string[]; id?: string };
@@ -46,18 +34,22 @@ export function outputsNamed(tool: string, args: unknown): string[] {
   return [];
 }
 
-export function summaryOf(events: readonly RunEvent[], tool: string, args: unknown): string {
-  const a = (args ?? {}) as { name?: string; reason?: string };
-  const ids = outputsNamed(tool, args);
+/**
+ * What the call would do, in the researcher's words: outputs by their catalog name, no worker
+ * names or ids. What it makes out of date is `outOfDate` on the request, which the card lists.
+ */
+export function summaryOf(tool: string, args: unknown, titleOf: (id: string) => string): string {
+  const a = (args ?? {}) as { reason?: string };
+  const what = outputsNamed(tool, args).map(titleOf).join(", ");
   switch (tool) {
     case "start_worker":
-      return `Start worker ${a.name} for ${ids.join(", ")}.${knockOn(events, ids)}`;
+      return `Start an AI worker to redo ${what}.`;
     case "report_output":
-      return `Publish a new version of ${ids.join(", ")}.${knockOn(events, ids)}`;
+      return `Publish a new version of ${what}.`;
     case "keep_output":
-      return `Keep ${ids.join(", ")} as they are${a.reason ? `: ${a.reason}` : ""}. Whatever is made from them is current again.`;
+      return `Keep ${what} as ${outputsNamed(tool, args).length === 1 ? "it is" : "they are"}${a.reason ? `: ${a.reason}` : ""}.`;
     case "change_outputs":
-      return `Change the run's final outputs${a.reason ? `: ${a.reason}` : ""}.`;
+      return `Change which outputs the run delivers${a.reason ? `: ${a.reason}` : ""}.`;
     default:
       return `Run ${tool}.`;
   }
