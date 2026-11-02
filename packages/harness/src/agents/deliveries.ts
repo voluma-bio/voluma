@@ -112,7 +112,7 @@ export function receipts(d: AgentLog, since: number): string[] {
     .map((m) => `- ${m.from} to ${m.to}: ${clip(oneLine(m.text), RECEIPT_CHARS)}`);
 }
 
-export interface DeliveryParts {
+interface DeliveryParts {
   notices: string[];
   receipts: string[];
   agents: string;

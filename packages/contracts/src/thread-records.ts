@@ -52,7 +52,7 @@ export interface ThreadBase {
 }
 
 /** A stored tool call, by `callKey`: the tools whose results a cut-off rebuilds read their input back from here. */
-export interface StoredCall {
+interface StoredCall {
   name: string;
   input: unknown;
 }

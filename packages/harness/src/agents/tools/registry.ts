@@ -39,7 +39,7 @@ const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) 
     readTool({ layout, files, hasSandbox: names.includes("bash") }),
 };
 
-export interface AgentToolDeps {
+interface AgentToolDeps {
   layout: ThreadLayout;
   files: Files;
   bash: BashRuntime;

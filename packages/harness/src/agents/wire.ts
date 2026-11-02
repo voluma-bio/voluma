@@ -12,13 +12,13 @@ import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
 import type { Recorder } from "../recorder";
 import { keepNotes } from "./keep-notes";
-import { type AgentLoopConfig, agentLoop, interruptedResult, openingOutputs } from "./loop";
+import { agentLoop, interruptedResult, openingOutputs } from "./loop";
 import { type AgentStart, firstMessageOf, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
 import { buildAgentTools } from "./tools/registry";
 
-export interface AgentsWireOptions {
+interface AgentsWireOptions {
   runId: string;
   inputId: string;
   inputPrefix: string;

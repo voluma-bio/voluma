@@ -18,8 +18,7 @@
  * events), `/inputs` and `/workflow` read-only. Mounts must not overlap (a nested one is unreliable on
  * Modal: the same spec once wrote and once failed read-only), so the sandbox mounts each peer folder that
  * exists when it is created (`peers`); host-side tools (`read`, `view_image`) see all of `/work`, peers
- * that started later included. `others` is the one place that narrows what an agent sees of the rest
- * (a blind worker: `none`). The folder is the agent's name, except that every main thread (`main`,
+ * that started later included. The folder is the agent's name, except that every main thread (`main`,
  * `main.2`) works in `main`; the sandbox keeps the thread's name.
  *
  * `/inputs` is mounted read-only in every sandbox. Only a thread of a task whose `tasks.json`
@@ -119,8 +118,6 @@ export interface RunLayout {
     tools: readonly string[];
     /** The `/work` folders of the other agents that exist now: mounted read-only in the sandbox. */
     peers: readonly string[];
-    /** `none`: the agent sees only its own folder (a blind worker). Default `all`. */
-    others?: "all" | "none";
   }): ThreadLayout;
 }
 
@@ -287,20 +284,15 @@ export function runLayout({
   };
 
   return {
-    forAgent({ name, role, tools, peers, others = "all" }) {
+    forAgent({ name, role, tools, peers }) {
       const folder = role === "main" ? "main" : name;
       const dir = `${WORK}/${folder}`;
       const work = workPrefix(runId);
       const own: SandboxMount = { path: dir, prefix: `${work}${folder}/`, access: "read-write" };
-      // The one seam for what of /work an agent sees besides its own folder.
-      const peerMounts: SandboxMount[] =
-        others === "none"
-          ? []
-          : [...new Set(peers)]
-              .filter((p) => p !== folder)
-              .map((p) => ({ path: `${WORK}/${p}`, prefix: `${work}${p}/`, access: "read-only" }));
-      const hostWork: SandboxMount[] =
-        others === "none" ? [] : [{ path: WORK, prefix: work, access: "read-only" }];
+      const peerMounts: SandboxMount[] = [...new Set(peers)]
+        .filter((p) => p !== folder)
+        .map((p) => ({ path: `${WORK}/${p}`, prefix: `${work}${p}/`, access: "read-only" }));
+      const hostWork: SandboxMount[] = [{ path: WORK, prefix: work, access: "read-only" }];
       const mounts: SandboxMount[] = [
         inputs(false),
         workflow,

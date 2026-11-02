@@ -20,7 +20,7 @@ import {
 import { Crosshair } from "lucide-react";
 
 /** Each output status on the shared status marks, in the design's words. */
-export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
+const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
   pending: { status: "waiting", word: "Pending" },
   reported: { status: "done", word: "Reported" },
   "to-check": { status: "check", word: "To check" },

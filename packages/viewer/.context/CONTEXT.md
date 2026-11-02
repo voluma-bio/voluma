@@ -1,7 +1,7 @@
 # Viewer specification
 
 The **grid viewer** (`src/grid/`, entry `@voluma/viewer/grid`) reviews one analysis grid of a run
-from its converted review assets. Review shows each task on its own grid: `taskGrid` (`review.ts`)
+from its converted review assets. Review shows each task on its own grid: `reviewGrid` (`review.ts`)
 picks the grid and builds the scene from the run's blocks. three.js and the zarr reader load only
 with it (Review imports it lazily).
 
@@ -71,7 +71,7 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   nothing; showing it resizes it, which draws, so a caller may keep a viewer mounted and hidden.
 - **Marks.** With `tool` set, left clicks and drags mark instead of moving the crosshair, and
   `onMark` gets a `GridMark`: the contract's `Mark` (`messages.ts`) without `volumeId`, which the
-  caller adds from `TaskGrid.imageId`. The caller holds the marks and passes them back as
+  caller adds from `ReviewGrid.imageId`. The caller holds the marks and passes them back as
   `ShownMark`s. Point: a click; on a slice the voxel under the pointer, in 3D the nearer of the
   first shown mesh (a see-through shell included) and the volume where it turns half opaque by
   `volume.ts`'s opacity (a CPU march of the shown byte texture, with the shader's trilinear

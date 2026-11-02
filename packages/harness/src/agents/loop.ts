@@ -31,7 +31,7 @@ import { failureKind, mainFailureAction, type ProviderError } from "../failure-p
 import { loopShell, type Section, type Step } from "../loop-shell";
 import { cutOffText } from "../messages";
 import type { Recorder } from "../recorder";
-import type { ModelSetup } from "../run-loop";
+import type { LoopConfig, ModelSetup } from "../run-loop";
 import { threadIdOf } from "../thread-id";
 import type { ThreadSpec, Threads } from "../threads";
 import type { Tool } from "../tools/tool";
@@ -62,17 +62,13 @@ import {
 import type { RunFiles } from "./run-files";
 import type { AgentsApi } from "./tools/coordination";
 
-export interface AgentLoopConfig {
-  /** Workers open at once (X). */
-  limit: number;
-  /** Deliveries with nothing new in a row before code ends the run. */
-  stuckLimit: number;
-}
-
-export const AGENT_LOOP_DEFAULTS: AgentLoopConfig = { limit: 4, stuckLimit: 2 };
+/** Workers open at once (X). */
+const WORKER_LIMIT = 4;
+/** Deliveries with nothing new in a row before code ends the run. */
+const STUCK_LIMIT = 2;
 
 /** Who an agent is when a thread is built for it. */
-export interface AgentIdentity {
+interface AgentIdentity {
   id: string;
   name: string;
   role: "main" | "worker";
@@ -84,7 +80,7 @@ export interface AgentIdentity {
 }
 
 /** What the wiring decides about an agent's thread: its prompts, model and tools. */
-export interface AgentSetup extends ModelSetup {
+interface AgentSetup extends ModelSetup {
   systemPrompt: string;
   /** The thread's first message; a resumed thread uses it only if it never stored one. */
   prompt: string;
@@ -93,7 +89,7 @@ export interface AgentSetup extends ModelSetup {
   interrupted(tool: string, toolCallId: string): string | undefined;
 }
 
-export interface AgentLoopOptions {
+interface AgentLoopOptions {
   runId: string;
   rootThreadId: string;
   recorder: Recorder;
@@ -113,7 +109,7 @@ export interface AgentLoopOptions {
   keepNotes(agent: { name: string; role: string }): Promise<void>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
-  config?: Partial<AgentLoopConfig>;
+  config?: Partial<Pick<LoopConfig, "stuckLimit">>;
   providerError?(error: string): ProviderError | undefined;
   now?(): number;
   signal?: AbortSignal;
@@ -134,7 +130,7 @@ export function openingOutputs(
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, threads } = o;
-  const config = { ...AGENT_LOOP_DEFAULTS, ...o.config };
+  const stuckLimit = o.config?.stuckLimit ?? STUCK_LIMIT;
   const now = o.now ?? Date.now;
   const derive = () => agentLog(recorder.events());
   const stateOf = (r: AgentRecord): AgentState =>
@@ -173,7 +169,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     section: o.section,
     log: derive,
     state: stateOf,
-    limit: config.limit,
+    limit: WORKER_LIMIT,
     skills: o.skills,
     catalog: o.catalog,
     startWorker: async ({ name, brief, skills, spawnedBy, parentThreadId }) => {
@@ -487,7 +483,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     if (!m || stateOf(m) !== "idle" || d.undelivered.length > 0) return false;
     if ([...d.records.values()].some((r) => stateOf(r) === "working")) return false;
     const events = recorder.events();
-    if (d.emptyDeliveries < config.stuckLimit) {
+    if (d.emptyDeliveries < stuckLimit) {
       const state = `Agents:\n${agentList(d, stateOf, now())}`;
       await resume(m, livenessNudge(state), { kind: "runtime", covers: d.lastEventId });
       return true;
