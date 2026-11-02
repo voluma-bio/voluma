@@ -20,7 +20,6 @@ import {
   liveStatus,
   placeOfStatus,
   plural,
-  runStatus,
   useNow,
   whenText,
 } from "@voluma/run-view";
@@ -43,7 +42,7 @@ import { workflowById } from "@voluma/workflow/bundled";
 import { ChevronRight, Info, Plus } from "lucide-react";
 import { type KeyboardEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { PLACES, type Place, placeOf } from "./study/study-model";
+import { ACT_ON, PLACES, type Place, placeOf } from "./study/study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study/study-side";
 
 /** Where a study opens: its page, or a study of one's input once it has a run. */
@@ -54,7 +53,7 @@ const hrefOf = (study: StudySummary) => {
 
 /** One mark per sample: its newest run's status; a sample with no run waits. */
 function marksOf(study: StudySummary): Status[] {
-  const ran = study.newestRuns.map((r) => runStatus(r).status);
+  const ran = study.newestRuns.map((r) => liveStatus(r).status);
   return [...ran, ...Array<Status>(Math.max(0, study.inputCount - ran.length)).fill("waiting")];
 }
 
@@ -62,13 +61,15 @@ function marksOf(study: StudySummary): Status[] {
 function placeCounts(study: StudySummary): Map<Place, number> {
   const counts = new Map<Place, number>();
   const add = (p: Place, n = 1) => counts.set(p, (counts.get(p) ?? 0) + n);
-  for (const run of study.newestRuns) add(placeOfStatus(runStatus(run).status, study.example));
+  for (const run of study.newestRuns)
+    add(placeOfStatus(liveStatus(run).status, run.waiting, study.example));
   if (study.inputCount > study.newestRuns.length)
     add("not-started", study.inputCount - study.newestRuns.length);
   return counts;
 }
 
 const COUNT_WORD: Record<Place, string> = {
+  "waiting-on-you": "waiting on you",
   "needs-you": "need you",
   running: "running",
   done: "done",
@@ -76,6 +77,7 @@ const COUNT_WORD: Record<Place, string> = {
 };
 
 const COUNT_MARK: Record<Place, Status> = {
+  "waiting-on-you": "check",
   "needs-you": "check",
   running: "running",
   done: "done",
@@ -225,21 +227,13 @@ function StudyRow({
         <Progress states={marksOf(study)} className="max-w-60" />
         <span className="flex gap-3 text-sm whitespace-nowrap">
           {PLACES.filter((p) => counts.has(p.place)).map((p) => (
-            <span
+            <Count
               key={p.place}
-              className={cx(
-                "inline-flex items-center gap-1",
-                p.place === "needs-you" ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {p.place !== "needs-you" && (
-                <StatusGlyph status={COUNT_MARK[p.place]} className="size-3" />
-              )}
-              <span className={cx("tabular-nums", p.place === "needs-you" && "font-semibold")}>
-                {counts.get(p.place)}
-              </span>
-              {COUNT_WORD[p.place]}
-            </span>
+              n={counts.get(p.place) ?? 0}
+              word={COUNT_WORD[p.place]}
+              mark={ACT_ON.has(p.place) ? undefined : COUNT_MARK[p.place]}
+              emphasis={ACT_ON.has(p.place)}
+            />
           ))}
         </span>
       </div>
@@ -256,6 +250,32 @@ function StudyRow({
         <ChevronRight aria-hidden className="size-4" />
       </button>
     </div>
+  );
+}
+
+/** One status count of a study row; the emphasised ones are what the researcher has to act on. */
+function Count({
+  n,
+  word,
+  mark,
+  emphasis = false,
+}: {
+  n: number;
+  word: string;
+  mark?: Status;
+  emphasis?: boolean;
+}) {
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center gap-1",
+        emphasis ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      {mark && <StatusGlyph status={mark} className="size-3" />}
+      <span className={cx("tabular-nums", emphasis && "font-semibold")}>{n}</span>
+      {word}
+    </span>
   );
 }
 

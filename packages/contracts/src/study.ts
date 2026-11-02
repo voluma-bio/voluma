@@ -124,6 +124,13 @@ export const outputStatusSchema = z.enum([
   "out-of-date",
 ]) satisfies z.ZodType<OutputStatus>;
 
+/**
+ * The calls main holds for this run's answer (`openApprovals`, agents.ts) that the caller can
+ * answer: 0 unless the caller is the run's starter on a run that takes their messages
+ * (`runReadSchema.cannotMessage` is null). The sample page reads "Waiting on you" from the same rule.
+ */
+const waitingSchema = z.number().int().nonnegative();
+
 /** An input's newest run in brief, whatever its state: what Home shows of a study. */
 export const studyRunSummarySchema = z.object({
   runId: runIdSchema,
@@ -138,6 +145,7 @@ export const studyRunSummarySchema = z.object({
   /** As `runSchema.outputs`: a live agent-loop run's final outputs in, of all of them. */
   outputs: runOutputsInSchema,
   review: runReviewBriefSchema,
+  waiting: waitingSchema,
   example: z.boolean(),
 });
 export type StudyRunSummary = z.infer<typeof studyRunSummarySchema>;
@@ -183,6 +191,8 @@ export const studyInputDetailSchema = z.object({
   runs: z.array(runSchema),
   /** The newest run's review in brief, of either loop (`runReviewBriefSchema`). */
   review: runReviewBriefSchema,
+  /** The newest run's `waiting` (`studyRunSummarySchema`); 0 without a run. */
+  waiting: waitingSchema,
   /**
    * Final output id → its status in the newest run, for a run of the agent loop (whose outputs,
    * not tasks, say where it is); empty for the task loop and before main lists its outputs.

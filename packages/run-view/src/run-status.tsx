@@ -71,8 +71,9 @@ export type RunStatus = { label: string; status: Status };
  * outputs) while an agent-loop run does: what a row says about a live run.
  */
 export function liveStatus(
-  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness">,
+  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness" | "waiting">,
 ): RunStatus {
+  if (run.waiting) return WAITING_ON_YOU;
   const running = run.state.status === "running";
   if (running && run.outputs)
     return {
@@ -94,6 +95,9 @@ export function liveStatus(
  */
 export const needsYouText = (n: number, harness: StudyRunSummary["harness"]) =>
   harness === "agents" ? `${n} ${n === 1 ? "needs" : "need"} you` : `${n} to check`;
+
+/** A run with a held call the researcher can answer (`StudyRunSummary.waiting`): whatever its row says. */
+const WAITING_ON_YOU: RunStatus = { label: "Waiting on you", status: "check" };
 
 /** A run's status; a study's newest-run summary carries the same `state`, `review` and `harness`. */
 export function runStatus({
