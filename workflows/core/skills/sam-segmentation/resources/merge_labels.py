@@ -14,8 +14,8 @@ winning gave a leaking small piece 0.3 mm3 of OA6-1RK's patella (`.context/evide
 contested voxel is counted in the output by big label and by where it went, and `big_lost` totals what each big label
 gave away against its size, so a leak shows: a small label with a large contested count against its volume, or a big
 label that lost much, is a To check item. A big label with no own voxels is lost whole to the small side, which
-`big_lost` shows. Refused: a temp label that is also a label in `--big`, a label in `--small` that `--map` does not
-mention, volumes of different shape or grid id.
+`big_lost` shows. Refused: a temp or final label that is also a label in `--big`, a label in `--small` that `--map`
+does not mention, volumes of different shape or grid id.
 
 Writes: <out>  the merged labels (.npy, the grid of --big), with its sidecar (the map)
 Prints: one JSON line {labels, merged: {temp label: {final, voxels, contested: {big label: {to_small, to_big}}}}, big_lost: {big label: {voxels, of}}, volume_mm3: {label id: volume of the result}}
@@ -49,6 +49,9 @@ if __name__ == '__main__':
     clash = sorted(set(mapping) & {int(i) for i in big_ids})
     if clash:
         sidecar.fail(f'temporary labels {clash} are already labels in {a.big}: choose temporary labels the big bones do not use')
+    taken = sorted({f for f in mapping.values() if f > 0} & {int(i) for i in big_ids if i > 0})
+    if taken:
+        sidecar.fail(f'final labels {taken} are already labels in {a.big}: a small structure goes back under a label the big bones do not use')
     present = {int(i) for i in np.unique(small) if i > 0}
     stray = sorted(present - set(mapping))
     if stray:
@@ -60,7 +63,7 @@ if __name__ == '__main__':
     report = {temp: {'final': label, 'voxels': int((small == temp).sum()), 'contested': {}} for temp, label in mapping.items()}
     lost = {}
     for label in sorted({mapping[t] for t in claiming}):
-        temps = [t for t in claiming if mapping[t] == label and t <= len(boxes) and boxes[t - 1]]
+        temps = [t for t in claiming if mapping[t] == label and t in present]
         if not temps:
             continue
         lo = [min(boxes[t - 1][k].start for t in temps) for k in range(3)]
