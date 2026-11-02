@@ -83,7 +83,8 @@
  * Usage. The heartbeat carries the usage since the previous acknowledged
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
  * sandbox time. The server adds them up per run. A heartbeat the server did not acknowledge is resent
- * with its usage added to the next one. Spend is recorded, never limited.
+ * with its usage added to the next one. The server adds spend up per run (`run.usage`); the claim
+ * carries the study's `budgetUsd`, and the runner fails a run once its model spend passes it.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
  * `released` (a shutdown, a self-stop or a loop stall: its `reason`). Either one ends the
@@ -158,6 +159,12 @@ export const claimSchema = z
     leaseToken: z.string().min(1),
     /** Present exactly for a `visitor` run; returned once. */
     keys: visitorKeysSchema.optional(),
+    /**
+     * The run's study budget in model dollars (`Study.budgetUsd`); null when the study has none.
+     * Absent from a server that predates the field, read as null. The runner fails the run once
+     * its model spend (`run.usage` plus this claim's) passes it or the runner's own ceiling.
+     */
+    budgetUsd: z.number().nonnegative().nullable().optional(),
     /** Present on every claim after the run's first: why the previous claim ended. */
     previousClaim: z.object({ reason: claimEndReasonSchema }).optional(),
   })
