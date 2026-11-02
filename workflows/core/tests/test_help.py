@@ -27,7 +27,7 @@ def env_of(script):
 
 
 # Libraries have no CLI; sidecar.py has one and is checked with the other scripts.
-LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'objects.py'}
+LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'objects.py', 'face_qc.py'}
 # Every other resources/*.py is a script: a new file is checked without anyone listing it.
 SCRIPTS = sorted(
     p for d in RESOURCES for p in d.glob('*.py') if not p.name.startswith('test_') and p.name not in LIBRARIES

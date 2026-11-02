@@ -29,12 +29,17 @@ of the plateau. The heights (#7–9) run along the shaft axis from the growth pl
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
 middle of the medial and the lateral compartment of the plateau.
 
-`plate_faces.py` proposes both faces of the growth plate for the iioc task, and the metaphyseal task checks them again. A worker
+`plate_faces.py` proposes both faces of the growth plate for the iioc task, where the search finds the plate (a part of the tibia: its V
+range and each section's U span are in `plate-faces.json`), and the metaphyseal task checks them again. A worker
 checks the proposal against these: each proposed face lies on the plate's two edges, a few voxels apart, on every section; every
 flagged stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has your own dense points from its first to its last
 column, traced on a zoomed view; no straight line crosses a flagged stretch. `iioc.py` and `metaphysis_roi.py` stop on a stretch left
-sparse; a To check item never replaces the retrace. The plate is a thin sheet of lower density between denser bone, and it is not
+sparse; a To check item never replaces the retrace. Past the proposal's spans the worker's faces are traced by hand on zoomed views, not filled
+by a script or run across empty space or up the cortex. The plate is a thin sheet of lower density between denser bone, and it is not
 always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong.
+The check opens every `qc-faces-<n>.jpg` of the task, sheet by sheet: `iioc.py` writes them, one panel per traced section, the proximal face as the
+worker delivered it (solid between traced points, dotted where held constant past them) over the tibia's outline. On each: the line lies on
+the plate, stays on the bone from end to end, and does not climb a cortical wall; a sheet not opened is a check not done.
 
 **Eroded plate.** `iioc/eroded-plate-oa6-1rk-v231.jpg`: OA6-1RK, coronal section V=231, the lab's reading of the plate, traced by Jimmy.
 Left of U~296 two thin lines run along the plate, some 20 to 90 µm apart; to the right the plate has been destroyed, the two lines meet
@@ -63,6 +68,8 @@ only, and never reaches the fibula.
 The distal face it starts from is the one `plate_faces.py` proposed, checked and retraced where flagged or wrong (see iioc,
 above); where the plate is eroded and the range marked so, the two faces meet, `metaphysis_roi.py` accepts that, ROI-3 starts below the
 remaining bone, and the result record lists the marked ranges and their share: report them with the To check item.
+The check opens every `qc-faces-<n>.jpg` of the task too: `metaphysis_roi.py` draws the distal face (magenta) and the proximal one (orange)
+as delivered on every traced section over the tibia's outline, and the distal line must lie on the plate's lower edge, on the bone, nowhere on a cortical wall.
 
 ## cortical
 

@@ -24,9 +24,13 @@
     "flag_min_dip_hu": -1000,
     "flag_pad_um": 21,
     "flag_min_area_um2": 6600,
+    "max_surface_slope": 1.5,
+    "min_run_um": 210,
+    "bridge_um": 1000,
     "section_step_um": 105,
     "point_step_um": 42,
     "max_gap_um": 250,
+    "off_tibia_margin_um": 105,
     "qc_panels": 6
   },
 

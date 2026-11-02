@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import sidecar
 from region_from_curves import surface_from_curves
+from scipy import ndimage as ndi
 
 KEYS = (
     'grid_id', 'growth_plate_curves', 'growth_plate_distal_curves', 'under_plate_curves', 'articular_corrections',
@@ -175,6 +176,22 @@ def load_plate_stretches(plate_dir, grid):
     if record['grid_id'] != grid['grid_id']:
         sidecar.fail(f'{path} was made on another aligned grid (grid_id differs): rerun plate_faces.py on this scan')
     return record['stretches']
+
+
+def refuse_off_tibia(ann, key, tib, spec_path, vox):
+    """Refuse curve points that lie off the tibia: on the section's coronal cut of the tibia mask (axes W, U), farther than the spec's
+    `off_tibia_margin_um` (entry plate-faces) from any tibia voxel. A line run across empty space or up a cortical wall's far side is
+    an invented face, so the script stops and names the section, the count and the first point."""
+    margin = round(sidecar.protocol(spec_path, 'plate-faces', 'off_tibia_margin_um')['off_tibia_margin_um'] / 1000 / vox)
+    refused = []
+    for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
+        dist = ndi.distance_transform_edt(~tib[:, int(k), :])
+        off = [(w, u) for w, u in pts if dist[min(max(round(w), 0), dist.shape[0] - 1), min(max(round(u), 0), dist.shape[1] - 1)] > margin]
+        if off:
+            refused.append(f'V={k}: {len(off)} of {len(pts)} points, the first at W={off[0][0]:g}, U={off[0][1]:g}')
+    if refused:
+        shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more sections' if len(refused) > 6 else '')
+        sidecar.fail(f'"{key}" has points more than {margin * vox * 1000:.0f} um off the tibia: {shown}. Trace the face on the bone only')
 
 
 def cleared_stretches(ann, stretches, key, spec_path, shape, vox, on_bone):
