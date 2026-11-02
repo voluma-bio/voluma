@@ -21,6 +21,7 @@
     "./fold": "./src/fold.ts",
     "./threads": "./src/threads.ts",
     "./thread-place": "./src/thread-place.ts",
+    "./thread-records": "./src/thread-records.ts",
     "./spend": "./src/spend.ts",
     "./output": "./src/output.ts",
     "./run": "./src/run.ts",
