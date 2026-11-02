@@ -57,3 +57,17 @@ None of these stops a review; each makes it slower.
 - Presets per output ("XZ at V 125"), the value pinned on its overlay, and the pane's slice
   counter in the grid's own letters (U, V, W) wait for the workflow to define views.
 - A collection output opens as a table: not built ("Lists open here as a table in a later version").
+
+## Outputs review, from the am-marks review (p1306, p1307)
+
+- Two marks can get the same tag: `nextTag` (`marks-panel.tsx`) counts the marks already rendered,
+  so two quick adds, or two people marking at once, both get P3. Cosmetic.
+- Probe and Point share the letter P in `QUAD_TOOLS`; tags stay unique (one counter), but a tag
+  can't tell the kind.
+- `useSavedViews` (`outputs-review.tsx`) never clears `pendingFor`: after one save, any later
+  `view.saved` for that output, another person's included, becomes the one shown.
+- `outputs-review.tsx` is about 900 lines: split `useSavedViews` with `savedViews`, and
+  `MainConversation`, into their own files before more lands.
+- Per-event costs: `savedViews(events)` runs twice per durable event, each zod-parsing every saved
+  view; `marksOf`, `waitingApprovals` and `conversation` each rescan the whole log. Compute
+  `savedViews` once and pass it down.

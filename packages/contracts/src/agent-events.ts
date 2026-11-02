@@ -65,7 +65,7 @@ export const outputPublishedSchema = z
   .object({
     outputId: outputRefSchema,
     version: versionSchema,
-    /** The version's folder, relative to the run's prefix. */
+    /** The version's folder, relative to the run's `outputs/` (`versionPath`, r2.ts). */
     path: relativePathSchema,
     /** The first is the output's own file, the one out of date is judged by; the rest travel with it. A value has none. */
     files: z.array(versionFileSchema).min(1).optional(),
