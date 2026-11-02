@@ -9,24 +9,12 @@ import { deleteMark, placeMark } from "@voluma/api-client";
 import type { PlaceMarkRequest } from "@voluma/contracts/agent-events";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Volume } from "@voluma/contracts/review";
+import { marksOf } from "@voluma/contracts/review-state";
 import { markPoints, worldOf } from "@voluma/viewer/grid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gridKeyOf, type MarkStore, type YourMark } from "./marks-panel";
 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
-
-/** The marks the log holds, in the order they were first placed. */
-function foldMarks(events: readonly RunEvent[]): Map<string, Placed> {
-  const marks = new Map<string, Placed>();
-  for (const e of events) {
-    if (e.type === "mark.placed") {
-      const had = marks.get(e.payload.id);
-      if (!had || had.by === e.payload.by) marks.set(e.payload.id, e.payload);
-    } else if (e.type === "mark.deleted" && marks.get(e.payload.id)?.by === e.payload.by)
-      marks.delete(e.payload.id);
-  }
-  return marks;
-}
 
 const yours = (p: Placed, me: string): YourMark => ({
   id: p.id,
@@ -57,7 +45,7 @@ export function useRunMarks({
   /** Reconnects the stream, to catch what a write added to the log. */
   reopen: () => void;
 }): MarkStore & { error: string | undefined } {
-  const logged = useMemo(() => foldMarks(events), [events]);
+  const logged = useMemo(() => marksOf(events), [events]);
   // id → the mark as written and not yet seen in the log; null for a deletion.
   const [pending, setPending] = useState<ReadonlyMap<string, YourMark | null>>(new Map());
   const [error, setError] = useState<string>();

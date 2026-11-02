@@ -200,6 +200,9 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
       if (record.run.example)
         throw new HTTPException(403, { message: "Example runs can't be changed." });
+      // Only the author's deletion counts, so any other would be a pointless stored event.
+      if (record.results.marks.get(id.data)?.by !== c.var.user.userId)
+        throw new HTTPException(404, { message: "Mark not found." });
       return { type: "mark.deleted", payload: { id: id.data, by: c.var.user.userId } };
     });
     if (!record) return c.json({ error: "not found" }, 404);

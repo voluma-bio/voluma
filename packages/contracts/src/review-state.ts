@@ -51,7 +51,32 @@ export function reviewState(events: readonly RunEvent[], { live = false } = {}) 
       }
     : null;
   // The agent loop's outputs; empty for a run of the task loop, which publishes no versions.
-  return { revisions, summary, assets: folded.assets, outputs: outputsFold(events) };
+  return {
+    revisions,
+    summary,
+    assets: folded.assets,
+    outputs: outputsFold(events),
+    marks: marksOf(events),
+  };
+}
+
+type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
+
+/**
+ * The researchers' marks the log holds, by id, in the order first placed: `mark.placed` makes one
+ * or, from its author, replaces it; the author's `mark.deleted` takes it away. Another person's
+ * write to it changes nothing.
+ */
+export function marksOf(events: readonly RunEvent[]): Map<string, Placed> {
+  const marks = new Map<string, Placed>();
+  for (const e of events) {
+    if (e.type === "mark.placed") {
+      const had = marks.get(e.payload.id);
+      if (!had || had.by === e.payload.by) marks.set(e.payload.id, e.payload);
+    } else if (e.type === "mark.deleted" && marks.get(e.payload.id)?.by === e.payload.by)
+      marks.delete(e.payload.id);
+  }
+  return marks;
 }
 
 /**

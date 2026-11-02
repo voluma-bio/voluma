@@ -273,5 +273,8 @@ export type PlaceMarkRequest = Known<z.infer<typeof placeMarkRequestSchema>>;
 export const placeMarkResponseSchema = z.object({});
 export const MAX_MARK_BYTES = 64 * 1024;
 
-/** Deletes a mark: `DELETE /api/review/runs/:runId/marks/:markId`, answered 200 `{}`. The reader keeps only the author's deletion. */
+/**
+ * Deletes a mark: `DELETE /api/review/runs/:runId/marks/:markId`, answered 200 `{}`. 404: a run
+ * the caller can't read, or a mark the log doesn't hold as the caller's; 403: an example run.
+ */
 export const deleteMarkResponseSchema = z.object({});
