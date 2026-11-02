@@ -485,14 +485,16 @@ function endedText(
 const endNotice = (bashId: string, command: string, result: { exit: number; view: ModelView }) =>
   `Background command ${bashId} ended (exit code ${result.exit}): ${shown(command)}\n${result.view.output}`;
 
-/** Whether the thread has been told how `bashId` ended: by its end notice, or by a `wait` or `output` result. */
+/** Whether the thread has been told how `bashId` ended: by a notice (its end, or that release stopped it), or by a `wait`, `output` or `kill` result. */
 function seenBy(events: readonly RunEvent[], threadId: string, bashId: string): boolean {
   return events.some(
     (e) =>
       e.threadId === threadId &&
       ((e.type === "message" &&
         e.payload.role === "user" &&
-        e.payload.text.includes(`Background command ${bashId} ended`)) ||
-        (e.type === "tool.result" && e.payload.output.startsWith(`${bashId}: ended`))),
+        e.payload.text.startsWith(`Background command ${bashId} `)) ||
+        (e.type === "tool.result" &&
+          (e.payload.output.startsWith(`${bashId}: ended`) ||
+            e.payload.output.startsWith(`${bashId} killed`)))),
   );
 }

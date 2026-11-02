@@ -85,7 +85,7 @@ and check threads.
   (Modal counts a sandbox as active only while an exec runs), and `bash_manage` lists, reads,
   waits for, kills or detaches it. `bash.backgrounded` is stored before the agent is told, `bash.ended`
   before its end notice; a claim ends what the last one left running (`bash.ended {cutOff}`) and
-  the thread's next input says so. `BashRuntime.busy(threadId)` is true while a thread has an
+  the thread's next input says so. A thread that ends has its background commands stopped with its sandbox, and its next input says so. `BashRuntime.busy(threadId)` is true while a thread has an
   undetached background command, and `takeNotices(threadId)` hands over notices a thread that was
   not running could not take. It caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
