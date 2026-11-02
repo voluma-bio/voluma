@@ -262,13 +262,6 @@ async function claimBody(
     log(
       `sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"}); loop: ${harness}`,
     );
-    // This runner has no agent loop yet: give the claim back rather than end or half-run the run,
-    // so a runner that has one can take it.
-    if (harness === "agents") {
-      log("the run is pinned to the agent loop, which this runner does not have; releasing it");
-      stop("shutdown");
-      return;
-    }
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {

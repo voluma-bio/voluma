@@ -6,7 +6,14 @@
  * what it decides (`step`) and how it reads the log; it keeps no state the shell holds.
  */
 
+import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import type { ThreadLayout } from "./layout";
+import type { Evidence } from "./ports/evidence";
+import type { Files } from "./ports/files";
+import type { Outputs } from "./ports/outputs";
 import type { PayloadOf, Recorder } from "./recorder";
+import type { LoopConfig, ModelSetup, ProviderError } from "./run-loop";
+import type { SandboxSession } from "./sandbox-session";
 import type { ThreadSpec, Threads } from "./threads";
 
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
@@ -22,6 +29,39 @@ export function runLock(): Section {
     tail = result.catch(() => {});
     return result;
   };
+}
+
+/** What the shell hands a loop: the run's parts it built, and the host's settings it passes through. */
+export interface Shared {
+  runId: string;
+  rootThreadId: string;
+  recorder: Recorder;
+  definition: WorkflowDefinition;
+  /** The model, thinking level and call function of a thread of `role` (`recorded`: the model a resumed thread started on). */
+  model(role: string, recorded: string | undefined): ModelSetup;
+  selectedOutputs: readonly string[] | undefined;
+  notes: string | undefined;
+  config?: Partial<LoopConfig>;
+  providerError?(error: string): ProviderError | undefined;
+  files: Files;
+  evidence: Evidence;
+  outputs: Outputs;
+  session: SandboxSession;
+  pool: Threads;
+  /** The run's one lock. */
+  section: Section;
+  signal: AbortSignal;
+}
+
+/**
+ * One loop's side of a run (`tasks-wire.ts`): which sandbox and display name each thread has,
+ * read from the log, and the loop itself, run on the shell's parts.
+ */
+export interface Wire {
+  /** A thread's sandbox; its `thread.started` is stored before its first sandbox call. */
+  sandboxOf(threadId: string): ThreadLayout;
+  nameOf(threadId: string): string;
+  run(shared: Shared): Promise<void>;
 }
 
 /** How long the main agent gets to end its turn after the run ended. */

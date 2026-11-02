@@ -21,7 +21,7 @@ import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
 import { errorText } from "./error-text";
-import type { SandboxLayout } from "./layout";
+import { convertLayout, type SandboxLayout } from "./layout";
 import { runLock } from "./loop-shell";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
@@ -43,6 +43,9 @@ export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
 
 /** How long threads get to end after a cut-off or `fail` before the result settles anyway. */
 const WIND_DOWN_MS = 5_000;
+
+/** The loops this build can run; a runner lists them on its claim, so it is handed no other run. */
+export const HARNESSES: readonly Harness[] = ["tasks"];
 
 /** What `prepare` returns: the workflow and what depends on its roles. */
 export interface Prepared {
@@ -134,8 +137,9 @@ export interface Pin {
 
 /**
  * The pin of a run, or undefined for a run with no log yet. The first claim's root decides and
- * every later one copies it, so a resumed run keeps its dependencies and its loop. A root with no
- * `harness` is a task run. A log whose root is not the one this version mints
+ * every later one copies it, so a resumed run keeps its dependencies and its image. The loop is
+ * decided earlier, by `runs.harness` at the claim (which only hands a runner a run of a loop it
+ * lists); the root's `harness` records it for log readers. A root with no `harness` is a task run. A log whose root is not the one this version mints
  * (`<runId>.supervisor`, an id from before ids were derived), or whose root records no image, was
  * made by an older Voluma: resuming it would mint a second root or change its dependencies, so it
  * is refused.
@@ -154,6 +158,10 @@ export function pinOf(runId: string, log: readonly RunEvent[]): Pin | undefined 
 
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, signal: cutOff } = options;
+  // The branch on the pin lands with the agent loop's wire; until then no other loop has one.
+  if (!HARNESSES.includes(options.harness)) {
+    throw new Error(`this build has no ${options.harness} loop`);
+  }
   const rootThreadId = threadIdOf(runId, ROOT_NAME);
   const CONVERT = `${runId}.convert`;
   // Ends the run's own threads: after `fail`, and once the loop has settled.
@@ -173,11 +181,13 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       inputPrefix: options.inputPrefix,
       recorder,
       definition,
+      plan: prepared.plan,
       gateway: options.gateway !== undefined,
     });
+    const convert = convertLayout({ runId, inputId: options.inputId, skills: definition.skills });
     // The sandboxes of the run: one per thread, and the review-asset converter's.
     const sandboxLayout = (id: string): SandboxLayout =>
-      id === CONVERT ? wire.convert : wire.sandboxOf(id);
+      id === CONVERT ? convert : wire.sandboxOf(id);
     const settings = { runId, ...options.sandbox };
     const session: SandboxSession = sandboxSession(
       (id) => {
@@ -247,11 +257,18 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       loopSignal,
     );
     await wire.run({
-      ...options,
+      runId,
       rootThreadId,
+      recorder,
       definition,
-      plan: prepared.plan,
       model: prepared.model,
+      selectedOutputs: options.selectedOutputs,
+      notes: options.notes,
+      config: options.config,
+      providerError: options.providerError,
+      files: options.files,
+      evidence: options.evidence,
+      outputs: options.outputs,
       session,
       pool,
       section: runLock(),
