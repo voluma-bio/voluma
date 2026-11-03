@@ -12,8 +12,8 @@
  * The migration has two parts. Per run, one INSERT of the new events, applied to the run with that
  * id or to a copy of its log under another id (an example seeded from it): the same first
  * `revision.started` and as many events. Then a tail for every database, whatever its runs hold:
- * the task-only event types go, `reply` becomes `agent.message`, `person.message` loses its task
- * fields, and the runs and their root thread say `agents`. Both parts are idempotent: the INSERT
+ * the task-only event types go, `reply` becomes `agent.message`, `thread.started` gets a `role` and
+ * loses its task fields, `person.message` loses its task fields, and the runs and their root thread say `agents`. Both parts are idempotent: the INSERT
  * needs the `revision.started` the tail deletes. `payload` is `json` (some hold \u0000), so
  * each is read only inside a CASE on its own type.
  */
@@ -59,6 +59,17 @@ SET "payload" = ("payload"::jsonb || '{"harness": "agents"}'::jsonb)::json
 WHERE "type" = 'thread.started'
   AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NULL;
+--> statement-breakpoint
+-- A task or check thread is a worker, any other child the main agent; the task fields go.
+UPDATE "events"
+SET "payload" = (
+  ("payload"::jsonb - 'task' - 'attemptId')
+  || jsonb_build_object('role', CASE WHEN "payload"->>'task' IS NOT NULL OR "payload"->>'attemptId' IS NOT NULL THEN 'worker' ELSE 'main' END)
+)::json
+WHERE "type" = 'thread.started'
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
+  AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NOT NULL
+  AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'role' END IS NULL;
 --> statement-breakpoint
 -- Runs pinned to a workflow directory the repo has since renamed read the bundled catalog of its new name.
 UPDATE "runs"

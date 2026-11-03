@@ -25,6 +25,7 @@ size and single-part ETag) and writes the SQL. Delete both, with the task fold, 
 | open To check item with an output in its `focus` | `toCheck` on that output's version, focus ids made bare; an accepted one also gets `tocheck.resolved` |
 | a listed output with no version | `outputs.changed {by: rule, missing}`: the task's reason when it reported `missing`, else "The run ended without reporting it." |
 | `reply` | `agent.message {from: main, to: researcher}`, same row |
+| non-root `thread.started` | `role` (`worker` for a task or check thread, else `main`); `task` and `attemptId` removed |
 | `person.message` | task fields (`taskId`, `itemId`, `go`, `marks`) removed; one left with no text is deleted |
 
 Not converted, and listed in the report: outputs the catalog lacks (`oriented-volume`), scores, an output
@@ -37,7 +38,7 @@ New event ids are `convert:<runId>:<output>`; `seq` continues after the run's la
 
 The per-run INSERT applies to the run with that id, or to a copy of its log under another id (a
 `seed:example` example): the same first `revision.started` and the same event count. Every other
-database (a worktree's) gets only the tail: `reply`, `person.message`, the deletes of the task-only types,
+database (a worktree's) gets only the tail: `reply`, `thread.started`, `person.message`, the deletes of the task-only types,
 `harness` set to `agents` on task runs and their root thread, and the pinned path
 `workflows/workflow-mouse-oa` renamed to `workflows/mouse-oa` (the web bundles the catalog by that path). Those runs keep their
 conversation and lose their task outputs.

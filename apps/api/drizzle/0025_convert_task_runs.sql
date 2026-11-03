@@ -613,6 +613,17 @@ WHERE "type" = 'thread.started'
   AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NULL;
 --> statement-breakpoint
+-- A task or check thread is a worker, any other child the main agent; the task fields go.
+UPDATE "events"
+SET "payload" = (
+  ("payload"::jsonb - 'task' - 'attemptId')
+  || jsonb_build_object('role', CASE WHEN "payload"->>'task' IS NOT NULL OR "payload"->>'attemptId' IS NOT NULL THEN 'worker' ELSE 'main' END)
+)::json
+WHERE "type" = 'thread.started'
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
+  AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NOT NULL
+  AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'role' END IS NULL;
+--> statement-breakpoint
 -- Runs pinned to a workflow directory the repo has since renamed read the bundled catalog of its new name.
 UPDATE "runs"
 SET "workflows" = replace("workflows"::text, 'workflows/workflow-mouse-oa', 'workflows/mouse-oa')::json
