@@ -367,7 +367,13 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
           }
         } else if (sender.kind === "runtime" && sender.covers) {
           delivered.add(sender.covers);
-          if (record.place === "main" && !pingIds.has(sender.covers)) {
+          // Never backwards: a resend of an earlier snapshot is not a new delivery.
+          const to = written.get(sender.covers) ?? -1;
+          if (
+            record.place === "main" &&
+            !pingIds.has(sender.covers) &&
+            to > (cursor === undefined ? -1 : (written.get(cursor) ?? -1))
+          ) {
             cursor = sender.covers;
             deliveries.push({ at: written.get(sender.covers) ?? -1 });
           }

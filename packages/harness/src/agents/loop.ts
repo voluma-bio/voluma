@@ -650,6 +650,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const covers = d.lastEventId;
     // One send at a time to a running main: until it is stored, the next would repeat its notices.
     const [outstanding] = handed.get(m.id) ?? [];
+    // A start whose message is not stored yet has already taken these notices; its `onStored` nudge steps the loop again.
+    if (m.inputPending) return false;
     if (running && (!covers || (outstanding && d.cursor !== outstanding))) return false;
     const text = await deliveryOf(d, m.id);
     const sender: UserSender = { kind: "runtime", covers };
