@@ -35,7 +35,7 @@ script stops when they are not.
 
 ## The QC image each number needs
 
-Open it with `view_image` before you report.
+Look at it before you report.
 
 - **Trabecular** (`qc.jpg`: the ROI and bone on three slices; `qc-maps.jpg`: the Tb.Th and Tb.Sp maps, the skeleton). The ROI must
   hold the structure you mean and leave out cortex, plate and growth plate; the bone outline must follow the struts

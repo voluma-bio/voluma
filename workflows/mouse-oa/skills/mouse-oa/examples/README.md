@@ -38,8 +38,8 @@ wherever it opens a gap wider than `max_gap_um`. The positions are read by looki
 `iioc.py` and `metaphysis_roi.py` passing (they stop on points or sections more than `max_gap_um` apart over bone, or short of its ends, in U or V, and on points off the tibia) does not mean the face is on the plate.
 The plate is a thin sheet of lower density between denser bone, and it is not
 always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong. The right face follows the
-same visible plate band end to end, including where it wraps down the condyles at the sides of the arch (OA6-2RK V=220 and 225); it is wrong
-where it switches onto the cortex or the marrow. Where a single-valued face cannot represent the anatomy (OA6-2RK V=185, the notch nearly in
+same visible plate band end to end, including where it wraps down the condyles at the sides of the arch; it is wrong
+where it switches onto the cortex or the marrow. Where a single-valued face cannot represent the anatomy (in the notch, which can run nearly in
 the section's plane) the worker has read the neighbouring sections and raised it in a To check item, not flattened it or called it eroded.
 The check opens every `qc-faces-<n>.jpg` of the step, sheet by sheet: `iioc.py` writes them, one panel per traced section, the proximal face as the
 worker delivered it (solid between traced points, dotted where held constant past them) over the tibia's outline, the crop reaching 0.8 mm beyond the faces' height range (a band farther from the faces than that is not in the
@@ -50,7 +50,7 @@ leave the plate for cortex or marrow; a dotted stretch over the plate longer tha
 Left of U~296 two thin lines run along the plate, some 20 to 90 µm apart; to the right the plate has been destroyed, the two lines meet
 and the face follows the remaining bone. Trace what remains with both faces, densely, mark the U range where the plate is gone in `plate_eroded` (every traced section it reaches, flagged or not) with a reason (the mark
 never replaces the points), and raise a To check item naming it ("V=231, U 296 to 338: plate eroded, faces traced on the remaining bone"); a search for a plate there finds another structure. OA6-1RK is eroded
-(bone destruction, possibly age-related) and is not representative: OA6-2RK's plate is the typical one, and a thickness measured
+(bone destruction, possibly age-related) and is not representative: most of the lab's knees keep the plate whole, and a thickness measured
 on OA6-1RK is not a thickness of the plate.
 
 ## subchondral-plate
