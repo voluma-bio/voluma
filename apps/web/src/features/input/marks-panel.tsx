@@ -19,7 +19,7 @@ import {
   probeText,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler, Trash2 } from "lucide-react";
+import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler, Spline, Trash2 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
@@ -149,6 +149,7 @@ export const QUAD_TOOLS: Tool[] = [
   { value: "line", label: "Ruler", keys: ["l"], letter: "R", icon: <Ruler /> },
   { value: "angle", label: "Angle", keys: ["a"], letter: "A", icon: <Angle /> },
   { value: "outline", label: "Outline", keys: ["o"], letter: "O", icon: <Lasso /> },
+  { value: "path", label: "Line, drawn freehand", keys: ["d"], letter: "L", icon: <Spline /> },
   { value: "probe", label: "Probe", keys: ["i"], letter: "P", icon: <Pipette /> },
 ];
 

@@ -17,6 +17,7 @@ import {
   lengthMm,
   type MarkLayer,
   markPoints,
+  pathLengthMm,
   probeText,
   thin,
 } from "./marks";
@@ -63,9 +64,9 @@ export type GestureInputs = {
 
 /** A drag shorter than this (CSS px) is a click. */
 const CLICK_PX = 4;
-/** An outline takes a point when the pointer has moved this far (CSS px) since the last. */
+/** An outline or a path takes a point when the pointer has moved this far (CSS px) since the last. */
 const OUTLINE_STEP_PX = 3;
-/** The contract's cap on an outline's points. */
+/** The cap on an outline's or a path's points (the task loop's contract caps an outline at 500). */
 const OUTLINE_MAX = 500;
 /** How near a tilt handle a press must land (CSS px). */
 const HANDLE_HIT_PX = 9;
@@ -221,7 +222,7 @@ export function useSliceGestures(args: {
       at: Zyx;
       from: Zyx;
       moved: boolean;
-      /** An outline's points, and the screen position of the last. */
+      /** An outline's or a path's points, and the screen position of the last. */
       path: Zyx[];
       last: [number, number];
       /** A tilt's direction from the crosshair, in mm, at the last move. */
@@ -342,19 +343,18 @@ export function useSliceGestures(args: {
               lengthMm: lengthMm(drag.from, to, scene.spacingZyx),
             },
           };
-        } else if (drag.mode === "outline") {
+        } else if (drag.mode === "outline" || drag.mode === "path") {
           if (
             Math.hypot(event.clientX - drag.last[0], event.clientY - drag.last[1]) < OUTLINE_STEP_PX
           )
             return;
           drag.last = [event.clientX, event.clientY];
           drag.path.push(to);
-          layer.draft = {
-            outline: {
-              zyx: drag.path.map((p) => [...p] as unknown as Zyx),
-              areaMm2: areaMm2(drag.path, scene.spacingZyx),
-            },
-          };
+          const zyx = drag.path.map((p) => [...p] as unknown as Zyx);
+          layer.draft =
+            drag.mode === "path"
+              ? { path: { zyx, lengthMm: pathLengthMm(zyx, scene.spacingZyx) } }
+              : { outline: { zyx, areaMm2: areaMm2(zyx, scene.spacingZyx) } };
         }
         layer.redraw();
       } else {
@@ -434,6 +434,13 @@ export function useSliceGestures(args: {
         const zyx = thin(made.outline.zyx, OUTLINE_MAX);
         const area = areaMm2(zyx, scene.spacingZyx);
         if (zyx.length >= 3 && area > 0) return { outline: { zyx, areaMm2: area } };
+      }
+      if (made && "path" in made) {
+        // Thinned with its last point kept: an open line ends where it was drawn to.
+        const all = made.path.zyx;
+        const zyx = [...thin(all.slice(0, -1), OUTLINE_MAX - 1), all[all.length - 1]!];
+        const length = pathLengthMm(zyx, scene.spacingZyx);
+        if (zyx.length >= 2 && length > 0) return { path: { zyx, lengthMm: length } };
       }
       return null;
     };
