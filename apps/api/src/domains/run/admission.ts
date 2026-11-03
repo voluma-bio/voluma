@@ -13,15 +13,18 @@ export type Limits = {
   concurrent: number;
   /** Visitor runs queued or running, per org: the cap at start and `/keys`. */
   visitorActive: number;
+  /** Dollars of model spend the org's runs on Voluma's keys may total (`Usage.spentUsd`). */
+  spendUsd: number;
 };
 
-export type Refusal = "concurrent" | "per-caller" | "visitor-active";
+export type Refusal = "concurrent" | "per-caller" | "visitor-active" | "spend";
 
 /** One message per refusal: the API's answer when a start, resume or reopen is refused. */
 export const refusalMessage: Record<Refusal, string> = {
   concurrent: "The organization's runs-at-once limit was reached.",
   "per-caller": "You already have a run in progress.",
   "visitor-active": "Too many runs with your own keys are active.",
+  spend: "This organization has used its model budget for runs.",
 };
 
 /**
@@ -32,6 +35,7 @@ export const refusalError: Record<Refusal, string> = {
   concurrent: "the organization's runs-at-once limit was reached",
   "per-caller": "you already had a run in progress",
   "visitor-active": "too many runs with your own keys were active",
+  spend: "the organization had used its model budget for runs",
 };
 
 export type Usage = {
@@ -41,6 +45,8 @@ export type Usage = {
   visitorActive: number;
   /** The caller's unfinished runs of the credentials kind being started (0 when no caller). */
   callerUnfinished: number;
+  /** Model dollars spent by the org's runs on Voluma's keys, every run ever (the heartbeat adds to `runs.model_cost_usd`). */
+  spentUsd: number;
 };
 
 export async function usage(
@@ -52,6 +58,7 @@ export async function usage(
     SELECT
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
       (count(*) FILTER (WHERE credentials = 'visitor' AND state IN ('queued', 'running')))::int AS "visitorActive",
+      (coalesce(sum(model_cost_usd) FILTER (WHERE credentials = 'voluma'), 0))::float8 AS "spentUsd",
       (count(*) FILTER (WHERE ${caller ? sql`started_by = ${caller.userId} AND credentials = ${caller.credentials} AND state <> 'ended'` : sql`false`}))::int AS "callerUnfinished"
     FROM runs WHERE lab_id = ${labId} AND NOT example`);
   return row as Usage;
@@ -61,16 +68,26 @@ export async function usage(
  * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
  * claim is for `voluma` runs, since a visitor run's caps were checked when it
  * was queued. A reopen (a correction) of a `voluma` run (the route refuses visitor runs first) is
- * judged by the per-caller limit alone. Checks run in this order.
+ * judged by the per-caller and spend limits. Checks run in this order. A claim refuses on spend only
+ * a run that never started (one start request can queue many runs under the limit); a run that
+ * started keeps going after a deploy or a reopen, so a live run is never refused.
  */
 export function admit(
   stage: "start" | "resume" | "reopen" | "claim",
   limits: Limits,
   u: Usage,
-  run: { credentials: Run["credentials"] },
+  run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
   if (stage === "claim" && u.running >= limits.concurrent) return "concurrent";
-  if (stage === "reopen") return u.callerUnfinished >= limits.perCaller ? "per-caller" : null;
+  if (stage === "reopen" && u.callerUnfinished >= limits.perCaller) return "per-caller";
+  if (
+    !(stage === "claim" && run.started) &&
+    run.credentials === "voluma" &&
+    u.spentUsd >= limits.spendUsd
+  ) {
+    return "spend";
+  }
+  if (stage === "reopen") return null;
   if (stage === "start" && u.callerUnfinished >= limits.perCaller) return "per-caller";
   if (run.credentials === "visitor" && u.visitorActive >= limits.visitorActive) {
     return "visitor-active";

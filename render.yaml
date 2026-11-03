@@ -90,12 +90,15 @@ services:
       - key: R2_SECRET_ACCESS_KEY
         sync: false
       # What each organization may run (deploy.md); read at start; unset is no limit. No daily
-      # limits: the runner's two slots and Modal's spend limit bound the spend. Demo takes one slot
+      # limits: the runner's two slots and Modal's spend limit bound sandbox spend. Judges' total
+      # model spend is capped (SPEND_USD, dollars). Demo takes one slot
       # at most, so guests never hold both. Guest sign-in: GUEST_* in the dashboard (deploy.md).
       - key: RUN_LIMITS_LAB_CONCURRENT
         value: "4"
       - key: RUN_LIMITS_JUDGES_CONCURRENT
         value: "2"
+      - key: RUN_LIMITS_JUDGES_SPEND_USD
+        value: "300"
       - key: RUN_LIMITS_DEMO_PER_CALLER
         value: "1"
       - key: RUN_LIMITS_DEMO_CONCURRENT

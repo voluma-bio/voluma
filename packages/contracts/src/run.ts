@@ -136,7 +136,11 @@
  *     (those hold the visitor's keys in the server's memory, or a runner
  *     slot; an `awaiting-keys` run holds neither and doesn't count). Starting
  *     one, or `/keys`, answers 429 at the cap. Only those two calls add to the
- *     count, so the claim needn't check it again.
+ *     count, so the claim needn't check it again;
+ *   - for `voluma` runs only: a total model spend per org (the summed model
+ *     cost of its runs). A start, resume or reopen at or past it is refused
+ *     (429, a reopen 409); a claim refuses a run that never started and
+ *     never one that has.
  * Which org's run a claim takes: `runner.ts`.
  * Every run is created `queued`, and only a claim starts it (`runner.ts`). A
  * `visitor` run skips the org's runs-at-once count but still waits for a claim.
