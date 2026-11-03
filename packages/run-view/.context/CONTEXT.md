@@ -123,8 +123,8 @@ screens are the scan review (`apps/web/src/features/input`) and the study pages
  the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/contracts/fold`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
 - **Visitor keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
-  way a guest runs (the API refuses a guest start without it, 403); a member may keep one too. A key
-  in this browser is sent with every start, and `RunKeyLine` next to each Start says whose key the
+  way an account without Voluma's key (`Me.volumaKey` false: a guest) runs (the API refuses a start without it, 403); an account with it may keep one too. A key
+  in this browser is sent with every start, and with a message or answer to a finished own-key run (`keysToReopen`: the server wiped the run's keys when it ended), and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
   `voluma.visitor-keys.<userId>`. A run in `awaiting-keys` is handled on its page
   (`features/input/input-header.tsx`) for the user who started it only: with a key stored, the page
