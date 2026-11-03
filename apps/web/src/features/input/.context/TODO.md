@@ -48,10 +48,8 @@ None of these stops a review; each makes it slower.
 
 ## Task-loop runs, after the default flips
 
-- **Open task-loop runs read-only once new runs default to the agent loop.** Until then judges'
-  and guests' new runs are task-loop runs (`DEFAULT_RUN_HARNESS` and each organization's
-  `agentLoop` in `apps/api/src/index.ts`), so they keep their full review, corrections included.
-  After the flip: the run read's `cannotMessage` and `cannotAccept` give a reason for every run whose
+- **Open task-loop runs read-only now that new runs default to the agent loop** (superseded by the
+  task-loop deletion sweep, which converts old runs instead): the run read's `cannotMessage` and `cannotAccept` give a reason for every run whose
   harness isn't `agents` (`messageRefusal` in `apps/api/src/domains/run/corrections.ts`,
   `acceptRefusal` in `packages/contracts/src/run.ts`; a web-only response, so one step), and the task
   review's mark tools turn off. The docked `ShellPanel`s can go then (`packages/ui/.context/TODO.md`).

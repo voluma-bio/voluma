@@ -39,10 +39,10 @@ The harness has two run loops over one shell (`loop-shell.ts`: waking the loop, 
 threads, stopping them, the root's end): the **task loop** (`run-loop.ts`: a task graph,
 a worker per task, a check on every submit, fix rounds) and the **agent loop** (`agents/loop.ts`:
 main and up to 4 named workers, messages, published output versions). A run's loop is chosen when
-it is created (`runs.harness`, null = tasks; `DEFAULT_RUN_HARNESS` and the organization's
-`agentLoop` flag in `apps/api/src/index.ts`); at its first claim the runner copies it onto the root
-`thread.started` (`harness`), and a resumed run keeps that pinned loop. The task loop is the default
-and the only loop an organization without the flag gets (guests, the hackathon's judges). This section
+it is created (`runs.harness`, null = tasks; the start's `harness`, else `DEFAULT_RUN_HARNESS`, `agents`
+unless set, the same for every organization); at its first claim the runner copies it onto the root
+`thread.started` (`harness`), and a resumed run keeps that pinned loop. The task loop runs only when a
+start asks for it, and old runs keep theirs. This section
 describes the task loop unless a bullet says otherwise; the agent loop is in
 `packages/harness/.context/CONTEXT.md`, its roles in `workflows/core/roles/`.
 
