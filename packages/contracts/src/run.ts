@@ -147,16 +147,8 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import {
-  harnessSchema,
-  inputIdSchema,
-  modelRefSchema,
-  runIdSchema,
-  segmentSchema,
-  studyIdSchema,
-} from "./ids";
+import { inputIdSchema, modelRefSchema, runIdSchema, segmentSchema, studyIdSchema } from "./ids";
 import { relativePathSchema } from "./r2";
-import { reviewSummarySchema } from "./review";
 import { workflowPinSchema } from "./workflow";
 
 /**
@@ -221,7 +213,7 @@ export const selectedOutputsSchema = z
  * SAM operation normally makes three requests. Open requests count nowhere. `costUsd` sums
  * every known cost, regardless of route or status. Null costs add no dollars and increment
  * `unknownCostCalls`, so a screen shows "cost unknown", not $0. `bySandbox` covers requests
- * whose token was minted for a sandbox, by its name (`<taskId>.worker[.n]`, as in its `sandbox`
+ * whose token was minted for a sandbox, by its name (`main`, `segmentation.worker`, as in its `sandbox`
  * event). The serialized names stay `providerCalls`, `calls` and `unknownCostCalls`; label
  * these counts "gateway requests" in UI and operator output, not "SAM calls" or "operations".
  */
@@ -241,24 +233,6 @@ export const providerCallsSchema = z.object({
 export type ProviderCalls = z.infer<typeof providerCallsSchema>;
 
 /**
- * Whether a run's review is the task loop's: a completed run of it has a review summary. A run of
- * the agent loop has none (its outputs are the review), nor has one that has not completed.
- */
-export const hasTaskReview = (run: {
-  state: { status: string; outcome?: string };
-  harness?: "tasks" | "agents";
-}) => run.state.status === "ended" && run.state.outcome === "completed" && run.harness !== "agents";
-
-/**
- * While a run is live (queued, running, awaiting keys): the tasks of its current plan that
- * are finished (done or to check) out of all of them. Null before the plan is written and
- * once the run has ended (its state and `review` say the rest).
- */
-export const runTasksSchema = z
-  .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
-  .nullable();
-
-/**
  * While a run of the agent loop is live and main has listed its final outputs: those with a
  * version out of all of them ("1 of 2 in"). Absent otherwise. Optional because the runner's claim
  * carries a `Run` too, and a runner and an API of different builds overlap during a deploy.
@@ -267,100 +241,61 @@ export const runOutputsInSchema = z
   .object({ done: z.number().int().nonnegative(), total: z.number().int().positive() })
   .optional();
 
-export const runSchema = z
-  .object({
-    id: runIdSchema,
-    labId: z.string(),
-    startedBy: userIdSchema,
-    /** The study the run belongs to; its workflow is the run's. */
-    studyId: studyIdSchema,
-    /** The pins the server resolved from the study's workflow, as in `r2.ts`'s `workflowSnapshotPrefix`. */
-    workflows: z.array(workflowPinSchema).min(1),
-    input: inputSchema,
-    /**
-     * The output ids the user selected ("What do you want measured?", `outputs.json`); the run
-     * covers the tasks that produce them and the tasks those depend on. Absent: every output.
-     */
-    selectedOutputs: selectedOutputsSchema.optional(),
-    /** Free text the user added at the start; the workflow's main thread reads it. */
-    notes: z.string().max(4000).optional(),
-    /** Who pays for models and sandboxes; see the header. */
-    credentials: z.enum(["voluma", "visitor"]),
-    /**
-     * The model every role of the run uses, chosen by the API when the run is created (see the
-     * header). Absent on runs made before the choice existed: the runner then uses its own
-     * config, as it did.
-     */
-    model: modelRefSchema.optional(),
-    /**
-     * The loop that drives the run, decided by the API when the run is created (the request's
-     * `harness`, else the API's default) and pinned by the runner on the root thread at the
-     * first claim. Absent on runs made before the choice existed, and means `tasks`. A runner
-     * that predates the field drops it on parse and runs the task loop.
-     */
-    harness: harnessSchema.optional(),
-    /**
-     * A shared, read-only run every caller in the org can read, even under
-     * `self`, set only by seeding (see the header). It always reads its org's
-     * reference scan.
-     */
-    example: z.boolean(),
-    createdAt: z.iso.datetime(),
-    state: runStateSchema,
-    /**
-     * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
-     * `modelCostUsd` is model calls, in US dollars;
-     * `sandboxSeconds` is sandbox time summed over its sandboxes (one per thread, so concurrent
-     * threads add up and it can exceed wall time). Per task: `spend` in `spend.ts`.
-     */
-    usage: z.object({
-      modelCostUsd: z.number().nonnegative(),
-      sandboxSeconds: z.number().nonnegative(),
-    }),
-    /** Gateway request counts and known costs, not SAM-operation counts. */
-    providerCalls: providerCallsSchema,
-    /**
-     * Latest successfully completed results and their human review progress; null otherwise,
-     * and null for a run of the agent loop (`harness: "agents"`), whose review is its outputs.
-     */
-    review: reviewSummarySchema.nullable(),
-    tasks: runTasksSchema,
-    outputs: runOutputsInSchema,
-  })
-  .refine((run) => (hasTaskReview(run) ? run.review !== null : run.review === null), {
-    path: ["review"],
-    message: "only successfully completed runs of the task loop have review progress",
-  });
+export const runSchema = z.object({
+  id: runIdSchema,
+  labId: z.string(),
+  startedBy: userIdSchema,
+  /** The study the run belongs to; its workflow is the run's. */
+  studyId: studyIdSchema,
+  /** The pins the server resolved from the study's workflow, as in `r2.ts`'s `workflowSnapshotPrefix`. */
+  workflows: z.array(workflowPinSchema).min(1),
+  input: inputSchema,
+  /**
+   * The output ids the user selected ("What do you want measured?", the `selectable` ones of
+   * `outputs.yaml`). Absent: the workflow's selectable outputs.
+   */
+  selectedOutputs: selectedOutputsSchema.optional(),
+  /** Free text the user added at the start; the workflow's main thread reads it. */
+  notes: z.string().max(4000).optional(),
+  /** Who pays for models and sandboxes; see the header. */
+  credentials: z.enum(["voluma", "visitor"]),
+  /**
+   * The model every role of the run uses, chosen by the API when the run is created (see the
+   * header). Absent on runs made before the choice existed: the runner then uses its own
+   * config, as it did.
+   */
+  model: modelRefSchema.optional(),
+  /**
+   * A shared, read-only run every caller in the org can read, even under
+   * `self`, set only by seeding (see the header). It always reads its org's
+   * reference scan.
+   */
+  example: z.boolean(),
+  createdAt: z.iso.datetime(),
+  state: runStateSchema,
+  /**
+   * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
+   * `modelCostUsd` is model calls, in US dollars;
+   * `sandboxSeconds` is sandbox time summed over its sandboxes (one per thread, so concurrent
+   * threads add up and it can exceed wall time). Per agent: `spend` in `spend.ts`.
+   */
+  usage: z.object({
+    modelCostUsd: z.number().nonnegative(),
+    sandboxSeconds: z.number().nonnegative(),
+  }),
+  /** Gateway request counts and known costs, not SAM-operation counts. */
+  providerCalls: providerCallsSchema,
+  outputs: runOutputsInSchema,
+});
 export type Run = z.infer<typeof runSchema>;
 
 /**
- * Why a decision on the run's results can't be taken now, whoever the caller is: the rule the
- * accept and mark-reviewed routes enforce and `runReadSchema.cannotAccept` reports. The 403/409
- * are those routes' statuses; the message is shown to the researcher as is.
- */
-export function acceptRefusal(
-  run: Pick<Run, "example" | "state" | "review">,
-): { status: 403 | 409; message: string } | null {
-  if (run.example) return { status: 403, message: "Example runs can't be changed." };
-  if (run.state.status !== "ended")
-    return { status: 409, message: "You can decide once the run finishes." };
-  if (run.review === null && run.state.outcome === "completed")
-    return { status: 409, message: "This run has no task checks to accept." };
-  if (run.review === null)
-    return { status: 409, message: "This run didn't finish, so there is nothing to accept." };
-  return null;
-}
-
-/**
  * A run as the scan page reads it: the run plus what this caller may do on it now, from the
- * same functions that guard the writes. `cannotMessage` (a message to the run's AI,
- * `messages.ts`) and `cannotAccept` (a decision on its results) are null when the caller may,
- * else the reason, worded for the researcher. Only the browser parses this; the runner reads
+ * same function that guards the write. `cannotMessage` (a message to the run's AI,
+ * `messages.ts`) is null when the caller may, else the reason, worded for the researcher. Only the browser parses this; the runner reads
  * `runSchema`, so the fields are required here and nowhere the runner reads.
  */
-export const runReadSchema = runSchema.and(
-  z.object({ cannotMessage: z.string().nullable(), cannotAccept: z.string().nullable() }),
-);
+export const runReadSchema = runSchema.and(z.object({ cannotMessage: z.string().nullable() }));
 export type RunRead = z.infer<typeof runReadSchema>;
 
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
@@ -376,15 +311,13 @@ export const startRunRequestSchema = z.object({
   studyId: studyIdSchema,
   /** One of the study's scans. */
   inputId: inputIdSchema,
-  /** As `runSchema.selectedOutputs`; an id that is not a measurement or score of the study's workflow is refused with 400. */
+  /** As `runSchema.selectedOutputs`; an id that is not a selectable output of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. Absent: a guest is refused (403). */
   keys: visitorKeysSchema.optional(),
   /** One of `GET /run/models` for this run's credentials; absent: that list's default. Another is refused with 400. */
   model: modelRefSchema.optional(),
-  /** The loop that drives the run; absent: the API's default (`DEFAULT_RUN_HARNESS`, `tasks` unless set). */
-  harness: harnessSchema.optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
 

@@ -1,23 +1,14 @@
 /**
  * What a thread is for, from the fields of its first `thread.started`. The one place these field
- * rules live: the fold, spend and the run view all ask here. Its own file because `threads.ts`
- * imports the fold, which needs this.
+ * rules live: spend and the run view ask here.
  */
 import type { RunEvent } from "./events";
 
-export type ThreadPlace = "root" | "main" | "worker" | "check";
+export type ThreadPlace = "root" | "main" | "worker";
 
 type Started = Extract<RunEvent, { type: "thread.started" }>["payload"];
 
-/**
- * Root has no parent; an agent-loop thread says its `role`; a check records the attempt it
- * checks; a worker has a task and no attempt; the main agent has none of these.
- */
-export function threadPlace(
-  p: Pick<Started, "parentThreadId" | "task" | "attemptId" | "role">,
-): ThreadPlace {
-  if (p.parentThreadId === null) return "root";
-  if (p.role !== undefined) return p.role;
-  if (p.attemptId !== undefined) return "check";
-  return p.task !== undefined ? "worker" : "main";
+/** Root has no parent; every other thread says its `role` (the schema requires it). */
+export function threadPlace(p: Pick<Started, "parentThreadId" | "role">): ThreadPlace {
+  return p.parentThreadId === null ? "root" : (p.role ?? "main");
 }

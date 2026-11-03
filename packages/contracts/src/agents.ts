@@ -111,6 +111,8 @@ export interface AgentLog {
   span: string;
   /** Why the previous claim ended, from the latest `claim.started`. */
   after: ClaimEndReason | undefined;
+  /** A `run.reopened` was stored after the latest `claim.started` and no `correction.ended` closed it: the next claim says it follows a reopen. */
+  reopenPending: boolean;
   /** `tool.call`s by thread and call id (`callKey`), for rebuilding a cut-off tool's result. */
   calls: ThreadRecords<AgentRecord>["calls"];
   /** The researcher's messages main has not answered: those that follow its last message to `researcher`. */
@@ -181,6 +183,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   let rootStartAt = -1;
   let rootEndAt = -1;
   let after: ClaimEndReason | undefined;
+  let reopenPending = false;
   let main: AgentRecord | undefined;
   let answeredAt = -1;
 
@@ -207,8 +210,13 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         reviewing = false;
       }
     }
-    if (e.type === "claim.started") after = e.payload.after;
+    if (e.type === "claim.started") {
+      after = e.payload.after;
+      reopenPending = false;
+    }
+    if (e.type === "correction.ended") reopenPending = false;
     if (e.type === "run.reopened") {
+      reopenPending = true;
       rootEnded = false;
       reviewing = true;
       span = e.id;
@@ -439,6 +447,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     reviewing,
     span,
     after,
+    reopenPending,
     calls: fold.calls,
     unansweredPerson: notices.filter(
       (n): n is Extract<Notice, { kind: "person" }> => n.kind === "person" && n.at > answeredAt,

@@ -1,10 +1,9 @@
 /**
- * What every run loop reads of a thread from the log, however its work is shaped: starts, how
+ * What the run loop reads of a thread from the log: starts, how
  * the latest invocation ended, whether the model replied, the tool calls without a result, the
  * latest reply, and the input a cut-off start still owes. `threadRecords` folds the events into
- * these records; a loop adds its own fields to each record through `extend` and its own
- * reactions to each event after `apply` (`harness/thread-log.ts` for tasks, `agents.ts` for the
- * agent model). Pure: process facts (which threads run) are the caller's.
+ * these records; `agents.ts` adds its own fields to each record through `extend` and its own
+ * reactions to each event after `apply`. Pure: process facts (which threads run) are the caller's.
  */
 import type { RunEvent } from "./events";
 import { type ThreadPlace, threadPlace } from "./thread-place";

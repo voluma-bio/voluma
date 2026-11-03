@@ -1,13 +1,12 @@
 /**
- * The agent model's output fold: the run's final outputs, every published version, each
+ * The output fold: the run's final outputs, every published version, each
  * output's status, and which outputs are out of date. Pure, events in `seq` order in, plain data
- * out, memoized on the log's length; the task loop's rows (`fold.ts`) stay as they are and ignore
- * what is here. Rules: the design's `outputs.md`; the tools that write the events are the
+ * out, memoized on the log's length. Rules: the design's `outputs.md`; the tools that write the events are the
  * harness's `agents/tools/`.
  *
  * - **Final outputs.** `outputs.changed` events applied in order by `applyOutputsChange`
  *   (`final-outputs.ts`), which takes any change: the writer checks it first and refuses.
- * - **Versions.** `output.published` events (the task loop's `output` is ignored). A repeated
+ * - **Versions.** `output.published` events. A repeated
  *   (output, version) keeps the first. `by` is the thread's name from `thread.started`.
  * - **Status**, one per output: `missing` (marked, nothing published), `pending` (nothing
  *   published), `out-of-date`, `to-check` (an item of the latest version is unresolved: an item of

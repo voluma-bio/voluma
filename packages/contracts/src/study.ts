@@ -9,7 +9,7 @@
  *                              409: an input still uploading, or the per-caller limit;
  *                              429: the other limits, see `run.ts`; 400: `start` names a
  *                              input the study lacks, an input twice, or `selectedOutputs` names an
- *                              output that is not a measurement or score of the workflow)
+ *                              output that is not a selectable output of the workflow)
  *   GET  /api/run/studies      → 200 `listStudiesResponseSchema`, newest activity first
  *   GET  /api/run/studies/:id  → 200 `studyDetailSchema` (404 when absent or unreadable)
  *
@@ -25,45 +25,23 @@
  * `GET /runs` would show the caller, so a `self` caller sees only the runs they started in
  * an example study.
  *
- * Two counts, never swapped: `needsYou` is the open To check items a person can answer, what every screen calls To check (a run of the agent loop: `OutputsFold.toCheck`);
- * `acceptable` is only what "Looks right" can accept.
- *
- * `values` and `acceptable` come from each input's **newest completed run** only (`resultRunId`):
- * accepting a check needs the latest completed result, so a live run's items would answer 409.
- * `values` is keyed by output id (the `outputs.json` id, not the fold's `taskId/outputId`)
- * and holds every measurement the run reported; for a run of the agent loop, every final value's
- * latest number, its UCUM unit written as `outputs.json` writes units (`unitAsWritten`).
- * `acceptable` lists task-loop checks only. A run of the agent loop has no tasks: its newest
- * run's `outputStatus` and `review` say where it is and what needs a person. `taskState` comes from the input's **newest
- * run**, whatever its state, so the study shows where a live or stopped run is: the state the
- * input review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
- * task missing from it is outside the run's plan. `needsYou` and `unacceptable` come from the
- * same run and revision: what the input review counts To check, so both screens agree on a task's
- * status (`shownStatus`). They count items `acceptable` doesn't list: a live or stopped run's,
- * and the card of a To check task with no check (sent back by the second AI).
+ * `needsYou` is the open To check items a person can answer, what every screen calls To check
+ * (`OutputsFold.toCheck`). `values` come from each input's **newest completed run** only
+ * (`resultRunId`): every final value's latest number, its UCUM unit written as people write it
+ * (`unitAsWritten`), keyed by output id. `outputStatus` is each final output's status in the
+ * newest run, whatever its state, so the study shows where a live or stopped run is.
  *
  * The list is what Home renders: per study its counts and each input's newest run in brief
  * (`studyRunSummarySchema`), so Home reads no run list.
  */
 import { z } from "zod";
-import {
-  harnessSchema,
-  inputIdSchema,
-  modelRefSchema,
-  runIdSchema,
-  segmentSchema,
-  studyIdSchema,
-  taskIdSchema,
-  taskStateSchema,
-} from "./ids";
+import { inputIdSchema, modelRefSchema, runIdSchema, segmentSchema, studyIdSchema } from "./ids";
 import type { OutputStatus } from "./output-fold";
-import { measurementSchema, unacceptableSchema } from "./review";
 import {
   inputSchema,
   runOutputsInSchema,
   runSchema,
   runStateSchema,
-  runTasksSchema,
   selectedOutputsSchema,
   visitorKeysSchema,
   workflowIdSchema,
@@ -101,21 +79,12 @@ export const studySchema = z.object({
 });
 export type Study = z.infer<typeof studySchema>;
 
-/**
- * A completed run's review in brief, of either loop: the task loop's `runSchema.review` (items to
- * check), or for a run of the agent loop the open To check items on its final outputs and what they rest on (`OutputsFold.toCheck`, what
- * its sample page's To check counts), with no task-loop checks to accept (`acceptable` 0), never
- * reviewed. Null for a run that has not completed.
- */
+/** A completed run's review in brief: the open To check items on its final outputs and what they rest on (`OutputsFold.toCheck`). Null for a run that has not completed. */
 export const runReviewBriefSchema = z
-  .object({
-    acceptable: z.number().int().nonnegative(),
-    needsYou: z.number().int().nonnegative(),
-    reviewedAt: z.iso.datetime().nullable(),
-  })
+  .object({ needsYou: z.number().int().nonnegative() })
   .nullable();
 
-/** As `OutputStatus` (`output-fold.ts`): a final output's status in a run of the agent loop. */
+/** As `OutputStatus` (`output-fold.ts`): a final output's status in a run. */
 export const outputStatusSchema = z.enum([
   "pending",
   "reported",
@@ -138,11 +107,7 @@ export const studyRunSummarySchema = z.object({
   inputName: z.string(),
   /** As `runSchema.state`: the queue position of a queued run, the `error` of a failed one. */
   state: runStateSchema,
-  /** As `runSchema.tasks`: a live run's finished tasks out of its plan's. */
-  tasks: runTasksSchema,
-  /** As `runSchema.harness`: which loop, so a row says "needs you" (values) or "to check" (items). */
-  harness: harnessSchema.optional(),
-  /** As `runSchema.outputs`: a live agent-loop run's final outputs in, of all of them. */
+  /** As `runSchema.outputs`: a live run's final outputs in, of all of them. */
   outputs: runOutputsInSchema,
   review: runReviewBriefSchema,
   waiting: waitingSchema,
@@ -163,62 +128,28 @@ export const studySummarySchema = studySchema.extend({
 export type StudySummary = z.infer<typeof studySummarySchema>;
 export const listStudiesResponseSchema = z.object({ studies: z.array(studySummarySchema) });
 
-/** What a headline needs from a reported measurement. */
-export const studyValueSchema = measurementSchema.pick({
-  value: true,
-  unit: true,
-  confidence: true,
+/** What a headline needs from a final value. */
+export const studyValueSchema = z.object({
+  value: z.number().finite().nullable(),
+  unit: z.string(),
 });
 export type StudyValue = z.infer<typeof studyValueSchema>;
-
-/** An open check of a run's latest result. */
-export const toCheckItemSchema = z.object({
-  runId: runIdSchema,
-  taskId: taskIdSchema,
-  /** The task result shown with this check, passed unchanged when accepting it. */
-  resultRevisionId: z.string().min(1),
-  checkId: z.string().min(1),
-  title: z.string(),
-  /** The text the review shows under the title: why the check was raised. */
-  detail: z.string(),
-});
-export type ToCheckItem = z.infer<typeof toCheckItemSchema>;
 
 export const studyInputDetailSchema = z.object({
   member: studyMemberSchema,
   input: inputSchema,
   /** Newest first; empty: "not started". */
   runs: z.array(runSchema),
-  /** The newest run's review in brief, of either loop (`runReviewBriefSchema`). */
+  /** The newest run's review in brief (`runReviewBriefSchema`). */
   review: runReviewBriefSchema,
   /** The newest run's `waiting` (`studyRunSummarySchema`); 0 without a run. */
   waiting: waitingSchema,
-  /**
-   * Final output id → its status in the newest run, for a run of the agent loop (whose outputs,
-   * not tasks, say where it is); empty for the task loop and before main lists its outputs.
-   */
+  /** Final output id → its status in the newest run; empty before main lists its outputs. */
   outputStatus: z.record(segmentSchema, outputStatusSchema),
-  /** The newest completed run, which `values` and `acceptable` read; null when none has completed. */
+  /** The newest completed run, which `values` reads; null when none has completed. */
   resultRunId: runIdSchema.nullable(),
-  /** Output id → value, for every measurement (task loop) or final value (agent loop) that run reported. */
+  /** Output id → its latest number, for every final value that run reported. */
   values: z.record(segmentSchema, studyValueSchema),
-  /** That run's open checks a person can accept ("Looks right"); not what a screen counts To check. */
-  acceptable: z.array(toCheckItemSchema),
-  /**
-   * Task id → its state in the newest run (`taskStates`): the run's latest revision read with
-   * the run's state now. Empty before the run has a plan, or with no run. A task outside the
-   * run's plan (not selected) is absent.
-   */
-  taskState: z.record(taskIdSchema, taskStateSchema),
-  /**
-   * Task id → its items that need a person in the newest run, as the input review counts them
-   * (`openItems`): checks not accepted, or the card of a To check task with none. What a screen
-   * counts To check. Read from the same revision as `taskState`, whatever the run's state. A task
-   * with none is absent.
-   */
-  needsYou: z.record(taskIdSchema, z.number().int().positive()),
-  /** Task id → why its card without a check is there (`cardWithoutCheck`); nobody can accept it. */
-  unacceptable: z.record(taskIdSchema, unacceptableSchema),
 });
 export type StudyInputDetail = z.infer<typeof studyInputDetailSchema>;
 
@@ -264,8 +195,6 @@ export const createStudyRequestSchema = z.preprocess(
       keys: visitorKeysSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */
       model: modelRefSchema.optional(),
-      /** For every run started by this call, as in `startRunRequestSchema`. */
-      harness: harnessSchema.optional(),
     })
     .refine((r) => new Set(r.inputs.map((s) => s.inputId)).size === r.inputs.length, {
       path: ["inputs"],
