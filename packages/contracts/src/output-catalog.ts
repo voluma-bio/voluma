@@ -298,10 +298,11 @@ const SUPERSCRIPT: Record<string, string> = { "2": "²", "3": "³", "-1": "⁻¹
 
 /**
  * A value's UCUM unit as people write it: `mm3` → `mm³`, `[hnsf'U]` → `HU`,
- * `um` → `µm`, `1/mm3` → `1/mm³`; annotations in braces drop out.
+ * `um` → `µm`, `1/mm3` → `1/mm³`; annotations in braces drop out. A plain number (UCUM `1`)
+ * has no unit: `""`.
  */
 export const unitAsWritten = (ucum: string): string =>
-  ucum
+  (ucum === "1" ? "" : ucum)
     .replaceAll("[hnsf'U]", "HU")
     .replace(/\{[^}]*\}/g, "")
     .replace(/\bu(?=[mgLl])/g, "µ")

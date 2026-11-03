@@ -11,7 +11,7 @@ import { Button, Count, cx, INPUT_WORD, StatusGlyph, StatusMark } from "@voluma/
 import { Download } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
-import { headlinesOf, type Measurement, measurementsOf, unitLabel } from "../workflow-measurements";
+import { headlinesOf, type Measurement, measurementsOf, unitOf } from "../workflow-measurements";
 import { SEGMENT_LOOK } from "./sample-bar";
 import { useStudy } from "./study-layout";
 import {
@@ -52,7 +52,7 @@ export function ComparePage() {
               <figure key={o.id} className="m-0 grid gap-2">
                 <figcaption className="flex items-baseline gap-2 text-sm font-semibold">
                   {o.name}
-                  <span className="font-normal text-fg-subtle">{unitLabel(o)}</span>
+                  <span className="font-normal text-fg-subtle">{unitOf(o)}</span>
                 </figcaption>
                 <MeasurePlot detail={detail} output={o} />
               </figure>
@@ -141,7 +141,7 @@ function ValuesTable({
                 >
                   {/* "meniscus/osteophyte" may break after its slash, not run into the next column. */}
                   {o.name.replaceAll("/", "/\u200b")}
-                  <span className="block font-normal text-fg-subtle">{unitLabel(o)}</span>
+                  <span className="block font-normal text-fg-subtle">{unitOf(o)}</span>
                 </th>
               ))}
             </tr>
@@ -280,7 +280,7 @@ function exportCsv(detail: StudyDetail, outputs: Measurement[]) {
     INPUT_WORD.One,
     "Group",
     "Knee",
-    ...outputs.map((o) => text(`${o.name} (${unitLabel(o) || "-"})`)),
+    ...outputs.map((o) => text(`${o.name} (${unitOf(o) || "-"})`)),
   ];
   const row = (s: StudyInputDetail) => [
     text(s.member.subject),

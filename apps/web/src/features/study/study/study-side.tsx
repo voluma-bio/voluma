@@ -10,7 +10,7 @@ import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
-import { headlinesOf, type Measurement, measurementsOf, unitLabel } from "../workflow-measurements";
+import { headlinesOf, type Measurement, measurementsOf, unitOf } from "../workflow-measurements";
 import {
   type Activity,
   activityOf,
@@ -130,7 +130,7 @@ export function MeasurePlot({
 }) {
   const navigate = useNavigate();
   const grouped = detail.inputs.some((s) => s.member.group !== null);
-  const unit = unitLabel(output);
+  const unit = unitOf(output);
   const digits = digitsFor(valuesOf(detail, output));
   const far = farFromGroup(detail, output);
   const byId = new Map(detail.inputs.map((s) => [s.member.inputId, s]));
@@ -177,10 +177,7 @@ export function HeadlineBlock({
   const any = valuesOf(detail, output).length > 0;
   const others = measurementsOf(workflow).some((o) => valuesOf(detail, o).length > 0);
   return (
-    <SideBlock
-      title={output.name}
-      aside={<span className="text-fg-subtle">{unitLabel(output)}</span>}
-    >
+    <SideBlock title={output.name} aside={<span className="text-fg-subtle">{unitOf(output)}</span>}>
       {any ? (
         <MeasurePlot detail={detail} output={output} />
       ) : (

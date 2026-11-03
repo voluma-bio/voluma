@@ -103,9 +103,6 @@ const formatNumber = (value: number) =>
     ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
   }).format(value);
 
-/** A UCUM unit as a value shows it (`unitAsWritten`); a dimensionless `1` shows nothing. */
-export const unitText = (ucum: string): string => (ucum === "1" ? "" : unitAsWritten(ucum));
-
 /** The To check items version `v` of output `id` raised; `key` is the URL's `item`. */
 export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
   return v.toCheck.map((t, item) => ({
@@ -141,7 +138,7 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
     ...(description && { description }),
     state,
     ...(latest?.value && {
-      value: { text: formatNumber(latest.value.number), unit: unitText(latest.value.unit) },
+      value: { text: formatNumber(latest.value.number), unit: unitAsWritten(latest.value.unit) },
     }),
     provisional:
       latest?.provisional === true || (value?.provisional ?? loose?.provisional === true),
