@@ -102,16 +102,19 @@ const RELEASE_FLUSH_MS = 15_000;
 const DRAIN_MS = 10 * 60_000;
 /**
  * Pi's retries of a model call (408, 409, 429, 5xx, dropped connections) are the only ones: the
- * backoff doubles from 0.5 s to a cap of 8 s, so 10 retries cover about a minute of provider
- * trouble; a server asking for more than MODEL_MAX_RETRY_DELAY_MS fails the call at once.
+ * backoff doubles from 0.5 s, so 4 retries cover about 7.5 s of provider trouble, longer when the
+ * server sends `retry-after`; a server asking for more than MODEL_MAX_RETRY_DELAY_MS fails the call
+ * at once. Kept low because a hung endpoint costs MODEL_REQUEST_TIMEOUT_MS per attempt. The delay
+ * cap is 60 s because Meta answers an overload with a 503 and `retry-after: 60`: waiting costs no
+ * tokens, and refusing it fails the call, which on the main agent fails the run.
  */
-const MODEL_RETRIES = 10;
-const MODEL_MAX_RETRY_DELAY_MS = 30_000;
+const MODEL_RETRIES = 4;
+const MODEL_MAX_RETRY_DELAY_MS = 60_000;
 /**
  * Time the provider gets to answer a request with its headers (the SDK clears the timer then,
  * so a streaming body is not cut). Meta sends them after prefill: 24.7 s at most, measured at
  * 805k tokens. A request that hangs before its headers is retried, so a dead endpoint holds a
- * call for up to 11 × 60 s plus the backoff.
+ * call for up to 5 × 60 s plus the backoff.
  */
 const MODEL_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -314,6 +317,7 @@ async function claimBody(
       (m, context, options) => {
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
         const threadId = options?.sessionId as string;
+        const startedAt = Date.now();
         const apiKey = keyFor(m.provider);
         const fetch = loggedFetch(role, log, options?.signal);
         // Meta requests name each image by an uploaded file id, not its bytes (`meta-images.ts`).
@@ -342,7 +346,7 @@ async function claimBody(
         });
         stream.result().then(
           (reply) => {
-            const reason = meter.addModelCall(role, threadId, usageOf(reply));
+            const reason = meter.addModelCall(role, threadId, usageOf(reply), startedAt);
             // Fails the run once; `scope.fail` is final, so the prompt is not sent again.
             if (!reason || stopReason) return;
             stopReason = new RunStopped(reason);
