@@ -14,7 +14,7 @@
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
  * DEFAULT_RUN_HARNESS (tasks|agents, default tasks): the loop of a run whose start names none.
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * _VISITOR_ACTIVE, and _SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -77,6 +77,7 @@ const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
   perCaller: limitNumber(`RUN_LIMITS_${org}_PER_CALLER`),
   concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
   visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
+  spendUsd: limitNumber(`RUN_LIMITS_${org}_SPEND_USD`),
 });
 
 /** A positive whole number from env, or `fallback` when unset. */
