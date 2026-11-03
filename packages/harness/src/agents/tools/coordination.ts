@@ -203,7 +203,7 @@ const closeTool = (api: AgentsApi): Tool =>
   define({
     name: "close",
     description:
-      "A worker: wrap up. You write your notes, repeat them as your last message and end your turn; you are not resumed. Main: end the run; refused while a worker is open, an out-of-date output is undecided, the researcher's message is unanswered or a final output has no version.",
+      "A worker: wrap up. You write your notes (what is done, what was decided and why, what is still open, where the files are: enough for someone to continue from), repeat them as your last message and end your turn; you are not resumed. Main: end the run; refused while a worker is open, an out-of-date output is undecided, the researcher's message is unanswered or a final output has no version.",
     input: z.object({}),
     execute: (_input, ctx) =>
       run(() =>
