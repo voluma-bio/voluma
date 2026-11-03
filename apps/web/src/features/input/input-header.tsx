@@ -159,18 +159,27 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
         for (const pin of e.payload.workflows ?? []) seen.add(pin.commit);
     return [...seen];
   }, [events]);
+  // What the agents called; before any has started, the model the API picked (none on older runs).
+  const models = useMemo(() => {
+    const seen = new Set<string>();
+    for (const e of events)
+      if (e.type === "thread.started" && e.payload.model) seen.add(e.payload.model);
+    return seen.size ? [...seen] : run.model ? [run.model] : [];
+  }, [events, run.model]);
   const cost = formatUsd(runCost(run));
   const unknown = providerCalls.unknownCostCalls;
   const researcher: FactSection["items"] = [
     // Live, the sum includes earlier work: a correction adds to the run's total.
     [live ? "Worked so far" : "Took", work ? formatDuration(work.seconds) : "Not started"],
     ["Workflow", workflow],
-    ...(run.model
+    ...(models.length
       ? [
           [
-            "Model",
+            models.length > 1 ? "Models" : "Model",
             <span key="model" className="flex flex-col font-mono text-xs">
-              <ModelId id={run.model} />
+              {models.map((m) => (
+                <ModelId key={m} id={m} />
+              ))}
             </span>,
           ] as [string, ReactNode],
         ]
