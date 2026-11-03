@@ -29,16 +29,6 @@ import {
   sendRunMessageResponseSchema,
 } from "@voluma/contracts/messages";
 import {
-  type AcceptCheckRequest,
-  acceptCheckRequestSchema,
-  type MarkReviewedRequest,
-  markReviewedRequestSchema,
-  type ReviewDecisionResponse,
-  type ReviewRun,
-  reviewDecisionResponseSchema,
-  reviewRunSchema,
-} from "@voluma/contracts/review";
-import {
   type CreateUploadRequest,
   type CreateUploadResponse,
   completeUploadConflictSchema,
@@ -290,28 +280,8 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<RunRead
   );
 }
 
-/** A run's review data, built from its event log on each call. 404: unreadable or unknown run; 409: the run has no plan. */
-export async function getReviewRun(runId: string): Promise<ReviewRun> {
-  return read(reviewRunSchema, await request(`/review/runs/${encodeURIComponent(runId)}`));
-}
-
-/** Accepts one current-result check; never marks the run reviewed. */
-export async function acceptCheck(
-  runId: string,
-  checkId: string,
-  body: AcceptCheckRequest,
-): Promise<ReviewDecisionResponse> {
-  return read(
-    reviewDecisionResponseSchema,
-    await request(
-      `/review/runs/${encodeURIComponent(runId)}/checks/${encodeURIComponent(checkId)}/accept`,
-      { method: "POST", body: acceptCheckRequestSchema.parse(body) },
-    ),
-  );
-}
-
 /**
- * Looks right on one To check item of an output version (a run of the agent loop). The decision
+ * Looks right on one To check item of an output version. The decision
  * comes back on the run's event stream as `tocheck.resolved`: reconnect it to see it.
  */
 export async function acceptToCheck(runId: string, body: AcceptToCheckRequest): Promise<void> {
@@ -325,7 +295,7 @@ export async function acceptToCheck(runId: string, body: AcceptToCheckRequest): 
 }
 
 /**
- * Saves a view of an output (a run of the agent loop). It comes back on the run's event stream
+ * Saves a view of an output. It comes back on the run's event stream
  * as `view.saved`: reconnect it to see it.
  */
 export async function saveView(runId: string, body: SaveViewRequest): Promise<void> {
@@ -339,7 +309,7 @@ export async function saveView(runId: string, body: SaveViewRequest): Promise<vo
 }
 
 /**
- * Places or changes a mark of yours (a run of the agent loop); it comes back on the run's event
+ * Places or changes a mark of yours; it comes back on the run's event
  * stream as `mark.placed`.
  */
 export async function placeMark(runId: string, body: PlaceMarkRequest): Promise<void> {
@@ -358,20 +328,6 @@ export async function deleteMark(runId: string, markId: string): Promise<void> {
     deleteMarkResponseSchema,
     await request(`/review/runs/${encodeURIComponent(runId)}/marks/${encodeURIComponent(markId)}`, {
       method: "DELETE",
-    }),
-  );
-}
-
-/** Explicitly completes review of a revision with no open checks. */
-export async function markReviewed(
-  runId: string,
-  body: MarkReviewedRequest,
-): Promise<ReviewDecisionResponse> {
-  return read(
-    reviewDecisionResponseSchema,
-    await request(`/review/runs/${encodeURIComponent(runId)}/mark-reviewed`, {
-      method: "POST",
-      body: markReviewedRequestSchema.parse(body),
     }),
   );
 }
@@ -395,7 +351,7 @@ export async function sendRunMessage(
 }
 
 /**
- * Answers a call main holds for you (a run of the agent loop). `requestId` is the id of the
+ * Answers a call main holds for you. `requestId` is the id of the
  * `approval.requested` event. The answer comes back on the run's event stream as `approval.given`
  * or `approval.declined`.
  */
@@ -430,7 +386,7 @@ export const reviewFileUrl = (runId: string, sha256: string) =>
   `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
 
 /**
- * Where the browser reads a file under a run's outputs (the agent loop): `path` is relative to
+ * Where the browser reads a file under a run's outputs: `path` is relative to
  * `/outputs/`, an output version's `path` and a file name. Images come back as images, anything
  * else as an attachment. 404: unreadable run or no such file.
  */

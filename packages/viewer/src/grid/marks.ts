@@ -274,8 +274,7 @@ const mid = (points: readonly Zyx[]): Zyx =>
 
 /**
  * The part of a mark on a slice pane's slice (`slab`; `whole` when the pane is untilted: the
- * axis it holds at a source voxel), or null. A box shows only on untilted panes: the task
- * review's, which never tilt.
+ * axis it holds at a source voxel), or null. A box shows only on untilted panes.
  */
 export function sliceShape(
   mark: GridMark,

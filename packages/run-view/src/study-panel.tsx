@@ -4,7 +4,6 @@
  * click away on every study page and in the input review, so both render it from here. Also the
  * input-level facts both read from a `StudyDetail`: an input's status, knee and group.
  */
-import { inputNeedsYou } from "@voluma/contracts/review-state";
 import type { StudyDetail, StudyInputDetail, StudyRunSummary } from "@voluma/contracts/study";
 import {
   INPUT_WORD,
@@ -20,19 +19,17 @@ import { liveStatus, plural, toCheckText } from "./run-status";
 
 type InputStatus = { label: string; status: Status; open: number };
 
-/** What needs a person on an input (`inputNeedsYou`), as Studies counts it too. */
-export const needsYouOf = (input: StudyInputDetail) =>
-  inputNeedsYou(input.review, input.acceptable.length);
+/** What needs a person on an input: its newest run's open To check items once it completed, as Studies counts it too. */
+export const needsYouOf = (input: StudyInputDetail) => input.review?.needsYou ?? 0;
 
 /**
- * An input's status: its newest run's (`runStatus`, which reads To check from the items that need
- * a person), with "Task N of M" while it runs; "Not started" without a run. Its values may come
- * from an older completed run.
+ * An input's status: its newest run's (`liveStatus`, which reads To check from the items that need
+ * a person); "Not started" without a run. Its values may come from an older completed run.
  */
 export function inputStatus(input: StudyInputDetail): InputStatus {
   const [run] = input.runs;
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
-  // The input's `review` is its newest run's, of either loop (a `Run` has one for the task loop only).
+  // The input's `review` is its newest run's.
   const { label, status } = liveStatus({
     ...run,
     review: input.review,

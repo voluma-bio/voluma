@@ -1,8 +1,8 @@
 /**
  * A study's page (`/studies/:id`): which sample needs me. Its samples grouped Needs you, Running,
  * Done (then Not started), each row with its picture, group and knee, its bar of measurements,
- * one line of status and when it last changed; a row opens the input review at the first item that
- * needs you, else the input. `?status=<place>` shows one group. On the right: the study's details,
+ * one line of status and when it last changed; a row opens the input review. `?status=<place>`
+ * shows one group. On the right: the study's details,
  * its headline measurement with the way to Compare, and recent activity. Nothing here judges or
  * changes a result.
  */
@@ -28,25 +28,21 @@ import {
   StatusMark,
   Thumbnail,
 } from "@voluma/ui";
-import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight, PanelRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
+import { measurementsOf } from "../workflow-measurements";
 import { SampleBar } from "./sample-bar";
 import { useStudy } from "./study-layout";
 import {
-  actHref,
   changedAt,
   hasBar,
   kneeWord,
+  type Measurement,
+  openHref,
   PLACES,
-  type Place,
   placeOf,
   placeParam,
-  type Section,
-  sectionsOf,
   segmentOf,
-  stoppedLine,
-  waitsOn,
 } from "./study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study-side";
 
@@ -54,7 +50,7 @@ export function StudyPage() {
   const { detail, workflow } = useStudy();
   const [search] = useSearchParams();
   const only = placeParam(search.get("status"));
-  const sections = sectionsOf(workflow);
+  const measurements = measurementsOf(workflow);
   const live = detail.inputs.some((s) => s.runs[0] && s.runs[0].state.status !== "ended");
   const now = useNow(live);
   const knees = detail.inputs.some((s) => kneeOf(s) !== null);
@@ -102,9 +98,7 @@ export function StudyPage() {
                       studyId={detail.study.id}
                       key={input.member.inputId}
                       input={input}
-                      place={g.place}
-                      workflow={workflow}
-                      sections={sections}
+                      measurements={measurements}
                       knees={knees}
                       now={now}
                     />
@@ -131,21 +125,17 @@ export function StudyPage() {
 function SampleRow({
   studyId,
   input,
-  place,
-  workflow,
-  sections,
+  measurements,
   knees,
   now,
 }: {
   studyId: string;
   input: StudyInputDetail;
-  place: Place;
-  workflow: BundledWorkflow;
-  sections: Section[];
+  measurements: Measurement[];
   knees: boolean;
   now: number;
 }) {
-  const href = actHref(studyId, input, place);
+  const href = openHref(studyId, input);
   const knee = kneeOf(input);
   const changed = changedAt(input);
   const about = [input.member.group, knees && knee ? `${kneeWord(knee)} knee` : null]
@@ -174,10 +164,10 @@ function SampleRow({
           )}
           <span className="truncate text-sm text-muted-foreground">{about}</span>
         </p>
-        <StatusLine input={input} workflow={workflow} sections={sections} />
+        <StatusLine input={input} measurements={measurements} />
       </div>
       <span className="min-w-0">
-        {hasBar(input) && <SampleBar input={input} sections={sections} />}
+        {hasBar(input) && <SampleBar input={input} measurements={measurements} />}
       </span>
       <span className="text-right text-sm whitespace-nowrap text-fg-subtle tabular-nums">
         {changed && whenText(changed, now)}
@@ -188,17 +178,15 @@ function SampleRow({
 }
 
 /**
- * The row's one line: what needs you (count and the items' titles), where a run is, how it
- * stopped, or that it is done, naming any measurement its result lacks.
+ * The row's one line: what needs you, where a run is, how it stopped, or that it is done, naming
+ * any measurement its result lacks.
  */
 function StatusLine({
   input,
-  workflow,
-  sections,
+  measurements,
 }: {
   input: StudyInputDetail;
-  workflow: BundledWorkflow;
-  sections: Section[];
+  measurements: Measurement[];
 }) {
   const run = input.runs[0];
   const status = inputStatus(input);
@@ -206,14 +194,10 @@ function StatusLine({
   let more: string | null = null;
   if (run && status.status === "check" && input.waiting === 0) {
     mark = <StatusMark status="check" label={toCheckText(needsYouOf(input))} />;
-    more = waitsOn(input, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
-    mark = <StatusMark {...liveStatus({ ...run, waiting: 0 })} />;
-  } else if (status.status === "stopped") {
-    more = stoppedLine(input, workflow);
+    mark = <StatusMark {...liveStatus({ ...run, review: input.review, waiting: 0 })} />;
   } else if (status.status === "done" && hasBar(input)) {
-    const missing = sections
-      .flatMap((s) => s.outputs)
+    const missing = measurements
       .filter((o) => segmentOf(input, o) === "missing")
       .map((o) => o.name);
     if (missing.length > 0)

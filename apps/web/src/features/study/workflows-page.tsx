@@ -1,12 +1,12 @@
 /**
- * Workflows (`/workflows`, on the left strip): the workflows a study can use, each with its tasks
- * and measurements, read from the bundle. No versions or editing yet.
+ * Workflows (`/workflows`, on the left strip): the workflows a study can use, each with its
+ * measurements, read from the bundle. No versions or editing yet.
  */
 import { Box, Breadcrumb, Count, PageHead, ShellHeading } from "@voluma/ui";
-import { catalog } from "@voluma/workflow/bundled";
-import { measurementsOf, TaskList } from "./workflow-tasks";
+import { workflowById } from "@voluma/workflow/bundled";
+import { MeasurementList, measurementsOf } from "./workflow-measurements";
 
-const WORKFLOWS = [catalog["mouse-oa"]];
+const WORKFLOWS = [workflowById("mouse-oa")].filter((w) => w !== undefined);
 
 export function WorkflowsPage() {
   return (
@@ -21,14 +21,14 @@ export function WorkflowsPage() {
           title={w.name}
           tools={
             <span className="text-sm text-muted-foreground">
-              {w.tasks.length} tasks, {measurementsOf(w).length} measurements
+              {measurementsOf(w).length} measurements
             </span>
           }
           className="border-b border-border"
         >
           <div className="grid max-w-3xl gap-4 px-6 py-4">
             <p className="m-0 text-muted-foreground">{w.description}</p>
-            <TaskList workflow={w} />
+            <MeasurementList workflow={w} />
           </div>
         </Box>
       ))}

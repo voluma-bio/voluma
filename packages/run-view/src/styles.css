@@ -1,4 +1,4 @@
-/* The model's prose in transcripts (`chat/markdown.tsx`) and the streaming caret. An app imports this after Tailwind. */
+/* The model's prose (`chat/markdown.tsx`). An app imports this after Tailwind. */
 
 @layer components {
   .run-prose {
@@ -51,16 +51,5 @@
   }
   .run-prose hr {
     @apply border-border;
-  }
-}
-
-/* The streaming caret's blink, a calm step rather than a fade. */
-@keyframes blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
   }
 }

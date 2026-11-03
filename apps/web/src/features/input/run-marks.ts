@@ -1,5 +1,5 @@
 /**
- * Your marks on a run of the agent loop, kept in its log: `mark.placed` makes or replaces one
+ * Your marks on a run, kept in its log: `mark.placed` makes or replaces one
  * (same id, same author), `mark.deleted` takes the author's away, and everyone who opens the run
  * sees them. A write shows at once and is dropped from `pending` when the stream carries it back.
  * The wire shape is `markPlacedSchema`, which also holds the mark in world mm with its pane's
@@ -21,7 +21,7 @@ import type { Volume } from "@voluma/contracts/review";
 import { canon, changeOf, markStatesOf, marksOf, toldMarks } from "@voluma/contracts/review-state";
 import { markPoints, worldOf } from "@voluma/viewer/grid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { gridKeyOf, type MarkChange, type MarkStore, type YourMark } from "./marks-panel";
+import { gridKeyOf, type MarkChange, type MarkStore, type YourMark } from "./marking";
 import { NotSent } from "./message-send";
 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
@@ -38,7 +38,7 @@ const asLogged = (body: object, by: string): Placed | undefined => {
 const yours = (p: Placed, me: string): YourMark => ({
   id: p.id,
   tag: p.tag,
-  taskId: p.output,
+  output: p.output,
   gridKey: p.gridKey,
   volumeId: p.volume,
   mark: p.mark,
@@ -175,7 +175,7 @@ export function useRunMarks({
       if (!volume) return;
       const body: PlaceMarkRequest = {
         id: m.id,
-        output: m.taskId,
+        output: m.output,
         tag: m.tag,
         volume: m.volumeId,
         gridKey: m.gridKey,
@@ -214,5 +214,5 @@ export function useRunMarks({
     },
     [write, erase],
   );
-  return { marks, tags, full: false, place, erase, error, changes, discard, settled };
+  return { marks, tags, place, erase, error, changes, discard, settled };
 }

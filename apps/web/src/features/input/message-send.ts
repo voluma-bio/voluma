@@ -1,7 +1,6 @@
 /**
- * Sending a message to a run's AI, for both composers: the task loop's (`ai-panel.tsx`) and main's
- * on the agent loop (`use-main-message.ts`). Each supplies its fields and its refusal words; this
- * owns the draft kept across reloads, the picture fitted into the room the body leaves, and a send
+ * Sending a message to a run's main AI (`use-main-message.ts` supplies its fields and its refusal
+ * words): this owns the draft kept across reloads, the picture fitted into the room the body leaves, and a send
  * that keeps the message id across retries. The API deduplicates by id alone, so a retry resends
  * the exact request, picture included, and the message is stored once.
  */

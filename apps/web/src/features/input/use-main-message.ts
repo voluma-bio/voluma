@@ -22,7 +22,7 @@ import type { RunRead } from "@voluma/contracts/run";
 import { type OutputItem, type OutputRow, shownOf } from "@voluma/run-view";
 import { storeView } from "@voluma/viewer/grid";
 import { type RefObject, useState } from "react";
-import type { MarkChange } from "./marks-panel";
+import type { MarkChange } from "./marking";
 import { refusalOf, useDraft, useIdempotentSend } from "./message-send";
 import type { SceneHandle } from "./viewer";
 

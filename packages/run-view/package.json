@@ -16,12 +16,9 @@
   "dependencies": {
     "@voluma/contracts": "workspace:*",
     "@voluma/ui": "workspace:*",
-    "@voluma/workflow": "workspace:*",
     "lucide-react": "catalog:",
-    "radix-ui": "1.8.1",
     "react-markdown": "catalog:",
-    "remark-gfm": "catalog:",
-    "remend": "catalog:"
+    "remark-gfm": "catalog:"
   },
   "devDependencies": {
     "@storybook/react-vite": "^10.6.5",
