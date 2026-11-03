@@ -30,7 +30,4 @@
   (`affine`, `offsetZyx`, `dtype`, a surface's `axis`, a base's `unit`) but not `points`, so point and
   line overlays are listed as "not drawn yet". A sidecar without `spacing_zyx_mm` leaves the scene in
   voxel units.
-- Outputs review: pick the layout by the run's pin too (`run.harness === "agents"`, am-shell) so an
-  agents run opens on its outputs before its first `outputs.changed`; today the page shows the task
-  review for that moment.
 

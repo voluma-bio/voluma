@@ -252,10 +252,12 @@ An agent in its own worktree tries a workflow change on the real system like thi
    `gateway https://…trycloudflare.com` line before starting the runner.
 2. `RUNNER_MODEL=deepseek/deepseek-flash RUNNER_THINKING=low pnpm --filter @voluma/runner start` (set in `.env`
    or the shell: one model for every role). Agents run plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`, never wonder, and never a run on staging (Jimmy). Meta SAM is the only Meta call here, about $0.10 each.
-3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
-   (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
-   follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
-   cost and the run page. Exit 1 when the run failed or was cancelled, 2 when the script itself broke
+3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …] [--harness tasks|agents]`
+   (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan
+   (with no `--harness` the API's `DEFAULT_RUN_HARNESS` decides, `tasks` unless set; `--harness agents`
+   needs the test account's organization to set `agentLoop` in `apps/api/src/index.ts`),
+   follows the run's event stream until it ends and prints its outcome, per-task status with outputs reported and
+   missing (task runs only: an agent-loop run has no tasks, so read its outputs on the run page), cost and the run page. Exit 1 when the run failed or was cancelled, 2 when the script itself broke
    (no `pnpm dev`, sign-in or API errors), 3 when no runner claimed the run in 3 minutes. Edits to `workflows/` are read from
    the checkout when a run starts, so edit, then try-run again.
 4. `sandboxes:clean --run <id>` for each run, as always.
@@ -519,7 +521,12 @@ file is shared page cache, not counted twice. The `stopped` event of a sandbox M
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
 
-# Runner: role text, tool grants and models come from `workflows/core/agents/`
+# Runner: role text, tool grants and models come from the run's role files
+
+This section describes the task loop's role files, `workflows/core/agents/`. A run pinned `harness: agents`
+reads `workflows/core/roles/` instead, built by `packages/harness/src/agents/prompts.ts` with tools from
+`packages/harness/src/agents/tools/registry.ts` (`workflows/core/roles/AGENTS.md`). Of what follows, the snapshot and resume
+rules and the model precedence hold for both loops; the prompt composition and tool grants are the task loop's.
 
 The worker's, checker's and (when its file grants `bash`) main's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
 (sandbox text per role, `packages/harness/src/prompts.ts` `systemPrompt`), then the role's skill list and the tool index (one line per skill

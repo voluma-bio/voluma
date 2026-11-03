@@ -239,7 +239,7 @@ export function runnerConfig() {
       pingCloseMinutes: positiveInt("RUNNER_PING_CLOSE_MINUTES", 50),
     },
     /**
-     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),
+     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/` or `workflows/core/roles/`),
      * for a `voluma` run. Our key for each provider is `VOLUMA_<PROVIDER>_API_KEY`.
      */
     models,
