@@ -50,3 +50,9 @@ Readers that take an output's status from `fold.byId` by its own id (`hasVersion
 `outputsIn`, the panel's not-in list) are right only while label overlays stay off the final list.
 One fold helper, `stateOf(fold, id)`, that resolves the label to its map first and is the only way
 readers get a state, would end that class (`chainOf` needed the same step, #489).
+
+`readStoredTitle` in `fold.ts` repairs to-check titles stored as a whole malformed array
+(`[{"focus":…, "title": "…"}]`). The task-loop harness guard (`packages/harness/src/task-runtime.ts`)
+refuses a title only when it parses as JSON, so malformed arrays can still be written. Make it refuse
+any title that starts with `[{` or `{"`, parsable or not; once that is live and the last run recorded
+before it is gone, delete `readStoredTitle`.

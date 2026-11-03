@@ -24,6 +24,7 @@ import {
   type OutputsReview,
   openItemsOf,
   ROLE_WORD,
+  rowsToCheck,
   type TrailRow,
 } from "@voluma/run-view";
 import { cx, EmptyState, type Status, StatusGlyph } from "@voluma/ui";
@@ -58,8 +59,8 @@ export type FinalOutputsProps = {
   /** The output of its history whose report is open and whose output the panes show. */
   open: string | undefined;
   onOpen: (id: string | null) => void;
-  /** Only the values that need you. */
-  onlyNeeds: boolean;
+  /** Only the rows with an open To check item (`rowsToCheck`). */
+  onlyToCheck: boolean;
   /** The run has not ended: the panel adds what a run going shows. */
   live: boolean;
   runId: string;
@@ -84,7 +85,7 @@ export function FinalOutputs(props: FinalOutputsProps) {
 }
 
 function Values(props: FinalOutputsProps) {
-  const { review, selected, onlyNeeds, live } = props;
+  const { review, selected, onlyToCheck, live } = props;
   const { sections, undeclared } = review;
   if (sections.length === 0 && undeclared.length === 0)
     return (
@@ -94,15 +95,20 @@ function Values(props: FinalOutputsProps) {
         </EmptyState>
       </div>
     );
-  const groups = [
-    ...sections,
-    ...(undeclared.length > 0 ? [{ title: "Not in the workflow", rows: undeclared }] : []),
-  ]
-    .map((s) => ({
-      ...s,
-      rows: onlyNeeds ? s.rows.filter((r) => openItemsOf(r).length > 0) : s.rows,
-    }))
-    .filter((s) => s.rows.length > 0);
+  const checking = onlyToCheck ? rowsToCheck(review) : undefined;
+  const groups = checking
+    ? [
+        ...sections.map((s) => ({ ...s, rows: s.rows.filter((r) => checking.listed.includes(r)) })),
+        {
+          title: "Not in the workflow",
+          rows: undeclared.filter((r) => checking.listed.includes(r)),
+        },
+        { title: "Behind the values", rows: checking.behind },
+      ].filter((s) => s.rows.length > 0)
+    : [
+        ...sections,
+        ...(undeclared.length > 0 ? [{ title: "Not in the workflow", rows: undeclared }] : []),
+      ];
   if (groups.length === 0)
     return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing to check.</p>;
   return (
@@ -114,7 +120,7 @@ function Values(props: FinalOutputsProps) {
           title={s.title}
           rows={s.rows}
           opens={
-            onlyNeeds || s.rows.some((r) => r.id === selected?.id || openItemsOf(r).length > 0)
+            onlyToCheck || s.rows.some((r) => r.id === selected?.id || openItemsOf(r).length > 0)
           }
         />
       ))}

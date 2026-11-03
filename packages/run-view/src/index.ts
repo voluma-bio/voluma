@@ -25,6 +25,7 @@ export {
   outputName,
   outputsReview,
   reviewAssetsOf,
+  rowsToCheck,
   shownOf,
   undrawn,
 } from "./outputs-model";

@@ -203,8 +203,8 @@ export function OutputsReview({
   const focusKey = item?.focus && JSON.stringify(item.focus);
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
-  const [onlyNeeds, setOnlyNeeds] = useState(false);
-  const needing = review.toCheck;
+  const [onlyToCheck, setOnlyNeeds] = useState(false);
+  const toCheck = review.open.size;
   const [leftTab, setLeftTab] = useState("conversation");
   const said = useMemo(() => conversation(events), [events]);
   const runMarks = useRunMarks({
@@ -512,19 +512,19 @@ export function OutputsReview({
               : undefined
           }
           icon={<Sigma />}
-          badge={needing || undefined}
-          badgeLabel={`${needing} to check`}
+          badge={toCheck || undefined}
+          badgeLabel={`${toCheck} to check`}
           tools={
             <>
-              {(!live || needing > 0 || onlyNeeds) && (
+              {(!live || toCheck > 0 || onlyToCheck) && (
                 <Button
                   size="sm"
-                  variant={onlyNeeds ? "secondary" : "ghost"}
-                  aria-pressed={onlyNeeds}
-                  disabled={needing === 0 && !onlyNeeds}
-                  onClick={() => setOnlyNeeds(!onlyNeeds)}
+                  variant={onlyToCheck ? "secondary" : "ghost"}
+                  aria-pressed={onlyToCheck}
+                  disabled={toCheck === 0 && !onlyToCheck}
+                  onClick={() => setOnlyNeeds(!onlyToCheck)}
                 >
-                  To check <span className="font-semibold">{needing}</span>
+                  To check <span className="font-semibold">{toCheck}</span>
                 </Button>
               )}
               <Button
@@ -549,7 +549,7 @@ export function OutputsReview({
             onSelect={(id) => select({ output: id, item: null, trail: null })}
             open={trailOpen?.id}
             onOpen={(id) => select({ trail: id, item: null, centre: null })}
-            onlyNeeds={onlyNeeds}
+            onlyToCheck={onlyToCheck}
             live={live}
             runId={run.id}
             events={events}

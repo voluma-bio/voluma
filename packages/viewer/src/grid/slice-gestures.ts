@@ -5,9 +5,9 @@
  * left click or drag marks: Point a voxel, Box a drag's rectangle, Line a drag's two ends (or two
  * clicks, with `clickLines`), Angle three clicks (the vertex second), Outline a freehand loop,
  * Probe reads the value under the pointer and keeps it as a point on click. Whatever the tool, a
- * press within `END_HIT_PX` of an end of an editable mark (`ShownMark.movable`: a point, a line, an
- * angle) or of a published ruler drags that end (`onEdit`), and only a press outside every end
- * starts a new mark; a click on a mark's end without moving picks it (`onPick`).
+ * drag that starts within `END_HIT_PX` of an end of an editable mark (`ShownMark.movable`: a point, a
+ * line, an angle) or of a published ruler moves that end (`onEdit`); a click there goes to the tool
+ * (places, probes, adds a line end), and with no tool picks the mark (`onPick`).
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { angleAbout, type Basis, type Slab, unit, type Vec3 } from "./frame";
@@ -274,11 +274,12 @@ export function useSliceGestures(args: {
             )
           : undefined;
       // Mid-way through a click-made line or angle, a press adds its next end, even on an old one.
+      // Under a tool the end is only a candidate: `move` makes it a drag once the pointer leaves.
       const end = !pan && !hit && !clicks.length ? endAt(event) : null;
       layer.start(event);
       const from = toPosition(event);
       drag = {
-        mode: pan ? "pan" : hit ? "tilt" : end ? "end" : (tool ?? "cross"),
+        mode: pan ? "pan" : hit ? "tilt" : end && !tool ? "end" : (tool ?? "cross"),
         x: event.clientX,
         y: event.clientY,
         at: latest.current.point,
@@ -315,6 +316,12 @@ export function useSliceGestures(args: {
         if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
           return;
         drag.moved = true;
+        // Under a tool, a press near an end is settled on release: past the threshold it is an end
+        // drag; a click goes to the tool.
+        if (drag.end && drag.mode !== "end") {
+          drag.mode = "end";
+          layer.hover = null;
+        }
         // On the slice the gesture began on, even if the wheel stepped since.
         const to = toPosition(event, drag.at);
         if (drag.mode === "end") {

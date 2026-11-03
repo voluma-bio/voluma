@@ -107,13 +107,18 @@ export interface OutputsFold {
   /** Each label overlay the log names (`outputs.changed`'s `labels`, a list entry's `label`), to the map whose version a link to it means. */
   labels: Map<string, string>;
   /**
-   * The open To check items a person can answer: those on the latest version of each final output
-   * and of everything it was made from, each counted once. The one number every screen calls To
-   * check for an agent-loop run (the output panel, the Samples tree, the study row, the heading);
-   * a value that only rests on an open item has its own status and is not counted for it.
+   * The open To check items a person can answer, as `itemKey`s: those on the latest version of each
+   * final or undeclared output and of everything it was made from. The one source every screen
+   * counts To check from for an agent-loop run (the output panel and its filter, the Samples tree,
+   * the study row, the heading); a value that only rests on an open item has its own status.
    */
+  openItems: Set<string>;
+  /** `openItems.size`. */
   toCheck: number;
 }
+
+/** The key of To check item `item` of version `version` of output `id`: the URL's `item`. */
+export const itemKey = (id: string, version: number, item: number) => `${id}/${version}/${item}`;
 
 const isLabel = (e: FinalEntry): e is FinalEntry & { label: { of: string } } =>
   typeof e.label === "object" &&
@@ -234,8 +239,22 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   // A final label overlay is walked as its map, so only the map is ever undecided.
   for (const e of finalEntries) walk(mapOf(e.id));
 
-  let toCheck = 0;
-  for (const id of trail) toCheck += latestOf(id)?.toCheck.filter((t) => !t.resolved).length ?? 0;
+  // Open items: the trails of the finals and of the undeclared outputs, which need a person too.
+  const counted = new Set<string>();
+  const count = (id: string) => {
+    if (counted.has(id)) return;
+    counted.add(id);
+    for (const link of latestOf(id)?.madeFrom ?? []) count(mapOf(link.id));
+  };
+  for (const e of finalEntries) count(mapOf(e.id));
+  for (const id of versions.keys()) if (id.includes("/")) count(mapOf(id));
+  const openItems = new Set<string>();
+  for (const id of counted) {
+    const latest = latestOf(id);
+    latest?.toCheck.forEach((t, i) => {
+      if (!t.resolved) openItems.add(itemKey(id, latest.version, i));
+    });
+  }
 
   const sectionOf = new Map<string, string>();
   for (const s of sectionsOf(list)) for (const o of s.outputs) sectionOf.set(o.id, s.title);
@@ -284,7 +303,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
     outputs,
     byId: new Map(outputs.map((o) => [o.id, o])),
     labels,
-    toCheck,
+    openItems,
+    toCheck: openItems.size,
   };
 }
 

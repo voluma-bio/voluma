@@ -185,13 +185,21 @@ export type FoldedRevision = {
 };
 
 /**
- * Old runs stored a whole `toCheck` array, as a malformed JSON string, in the title field. Read the
- * `"title"` inside it. Old data only; delete with the last run recorded before the fix.
+ * Some runs stored a whole `toCheck` array, as a malformed JSON string, in the title field: the
+ * task-loop harness (`task-runtime.ts`) refuses a title only when it parses as JSON, so a malformed
+ * array still gets written. Read the `"title"` inside it. Total: it runs over stored model text
+ * inside `fold`, so it never throws. Delete once the write side refuses any title starting `[{`
+ * (`packages/contracts/.context/TODO.md`) and the last such run is gone.
  */
 function readStoredTitle(title: string): string {
   if (!title.startsWith("[{")) return title;
-  const m = /"title":\s*("(?:[^"\\]|\\.)*")/.exec(title);
-  return m ? (JSON.parse(m[1] as string) as string) : title;
+  const m = /"title":\s*"((?:[^"\\]|\\.)*)"/.exec(title);
+  if (!m) return title;
+  try {
+    return JSON.parse(`"${m[1]}"`) as string;
+  } catch {
+    return (m[1] as string).replace(/\\(["\\])/g, "$1");
+  }
 }
 
 /**
