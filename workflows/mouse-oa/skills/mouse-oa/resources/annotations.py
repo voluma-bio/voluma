@@ -258,6 +258,49 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
                      f'or the ends of the bone): {shown}. Trace the plate there ({len(levels)} traced sections: V={levels[0]}..{levels[-1]})')
 
 
+def face_jumps(spec, on_bone, overlap):
+    """How far a face moves between each pair of neighbouring traced sections: the median |W change| over the U columns that both
+    curves span (first to last point) and that lie on `on_bone` (bool (V, U), the tibia's footprint) at both sections, as
+    (v1, v2, median in voxels, first U, last U). A pair sharing fewer than `overlap` such columns is left out: a median over a
+    short stretch, such as the plate's steep front and back ends, says little."""
+    u = np.arange(on_bone.shape[1])
+    curves = {}
+    for k, pts in spec['slices'].items():
+        p = np.array(sorted(pts, key=lambda q: q[1]), float)
+        curves[int(k)] = (np.interp(u, p[:, 1], p[:, 0]), p[0, 1], p[-1, 1])
+    jumps = []
+    for v1, v2 in pairwise(sorted(curves)):
+        (w1, lo1, hi1), (w2, lo2, hi2) = curves[v1], curves[v2]
+        cols = np.flatnonzero((u >= max(lo1, lo2)) & (u <= min(hi1, hi2)) & on_bone[v1] & on_bone[v2])
+        if len(cols) >= overlap:
+            jumps.append((v1, v2, float(np.median(np.abs(w2[cols] - w1[cols]))), int(cols[0]), int(cols[-1])))
+    return jumps
+
+
+def refuse_jumps(ann, key, on_bone, spec_path, vox):
+    """Refuse a face that jumps between neighbouring traced sections farther than a plate moves: a median W change (`face_jumps`)
+    of more than the spec's `max_jump_um` (entry plate-faces) plus the sections' distance apart, where they share at least its
+    `jump_overlap_um` of bone. A face read off each section's image moves less than that between sections so close; one assembled
+    by code from a detector's fragments or another section's points jumps where its source changes, so the script stops and names
+    each pair, the move and the U range."""
+    p = sidecar.protocol(spec_path, 'plate-faces', 'max_jump_um', 'jump_overlap_um')
+    um = vox * 1000
+    problems, refused = [], []
+    for v1, v2, move, lo, hi in face_jumps(ann[key], on_bone, p['jump_overlap_um'] / um):
+        limit = p['max_jump_um'] / um + (v2 - v1)
+        if move > limit:
+            problems.append(f'V={v1} to V={v2}: {move * um:.0f} um over U={lo}..{hi}, at most {limit * um:.0f} um')
+            refused += [v1, v2]
+    if problems:
+        shown = '; '.join(problems[:6]) + (f'; and {len(problems) - 6} more' if len(problems) > 6 else '')
+        shared = sorted(v for v in set(refused) if refused.count(v) > 1)
+        odd = f' V={", ".join(map(str, shared))} jumps against both neighbours, so start there.' if shared else ''
+        sidecar.fail(f'"{key}" jumps between neighbouring traced sections farther than a plate moves (the median W change over the U columns '
+                     f'both cover on bone, at most {p["max_jump_um"]:g} um plus the sections\' distance apart): {shown}.{odd} '
+                     'Trace the face on each of those sections from its own image; a section kept from the proposal next to one you traced '
+                     'is as likely to be the wrong one. Deleting a section does not fix the face: the sections left keep the same points')
+
+
 def eroded_marks(ann, key, shape, on_bone):
     """The worker's `ann["plate_eroded"]` ranges for the curves `key`, which must lie on a section with a curve whose points reach both
     ends of the range (a mark never replaces points; the curve follows the remaining bone through it). Returns (eroded, record):
