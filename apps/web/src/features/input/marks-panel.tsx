@@ -175,7 +175,7 @@ export function messageMark({ mark, volumeId }: YourMark): Mark | null {
       volumeId,
       line: { aZyx: [...mark.line.aZyx], bZyx: [...mark.line.bZyx], lengthMm: mark.line.lengthMm },
     };
-  if ("angle" in mark) return null;
+  if ("angle" in mark || "path" in mark) return null;
   const axis = outlineAxis(mark.outline.zyx);
   const { zyx, areaMm2 } = mark.outline;
   return axis === null
@@ -194,7 +194,9 @@ const kindOf = (mark: GridMark): MarkTool =>
         ? "line"
         : "angle" in mark
           ? "angle"
-          : "outline";
+          : "path" in mark
+            ? "path"
+            : "outline";
 
 /** The slice panes by the array axis they hold. */
 const PLANE = ["axial", "sagittal", "coronal"] as const;
@@ -211,6 +213,7 @@ export function describe(
   const n = (v: number) => String(Number(v.toPrecision(3)));
   if ("line" in mark) return { title: word, measure: `${n(mark.line.lengthMm)} mm` };
   if ("angle" in mark) return { title: word, measure: `${n(mark.angle.degrees)}°` };
+  if ("path" in mark) return { title: word, measure: `${n(mark.path.lengthMm)} mm` };
   if ("outline" in mark) {
     const { zyx, areaMm2 } = mark.outline;
     const axis = outlineAxis(zyx);
