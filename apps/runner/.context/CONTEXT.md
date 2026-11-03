@@ -544,12 +544,11 @@ A run's model is decided by the API when the run is created and arrives as `run.
 Without `run.model`, a role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
 `RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
 (no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
-set, forces every alias to one model. Each configured alias's provider key is required at start. A
-visitor run without `run.model` uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
+set, forces every alias to one model. Each configured alias's provider key is required at start.
 
-A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
+A run made at `/new` carries `run.thinking` (low, medium or high; the API records it, default medium), which every role uses at the nearest level its model supports (`nearestThinking`). Without it (an older run), a role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
 levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a test
-run), `RUNNER_THINKING` when set applies to every role, and otherwise each role keeps its file's level at the nearest the forced model supports, `off` for a model with no reasoning (`config.modelForced`; `main.ts` refuses at boot a `RUNNER_THINKING` the model lacks) (Jimmy, 2 Nov: forcing the model must not turn thinking off). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+run), `RUNNER_THINKING` when set applies to every role, and otherwise each role keeps the run's level (else its file's) at the nearest the forced model supports, `off` for a model with no reasoning (`config.modelForced`; `main.ts` refuses at boot a `RUNNER_THINKING` the model lacks) (Jimmy, 2 Nov: forcing the model must not turn thinking off). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each

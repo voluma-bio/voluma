@@ -52,6 +52,7 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
         notes: body.notes,
         keys: body.keys,
         model: body.model,
+        thinking: body.thinking,
         harness: body.harness,
       },
     });

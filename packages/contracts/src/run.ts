@@ -103,9 +103,14 @@
  * is on Voluma's Modal account; `keys` is the model key alone.
  *
  * Model (`model`): the API picks the run's model when it creates the run (the request's
- * `model` if it is in the caller's `GET /run/models` list, else the list's default, or the
+ * `model` if it is in the `GET /run/models` list, else the list's default, or the
  * API's debug override for a `voluma` run) and records it; every role of the run uses it.
- * Visitor runs only ever get a standard Meta model. A run without `model` predates this.
+ * A model marked `needsVolumaKey` is refused (400) on a run with the starter's own keys.
+ * A run without `model` predates this.
+ *
+ * Thinking (`thinking`): how hard the model reasons, picked the same way (the request's
+ * `thinking`, else the list's default) and recorded; every role of the run uses it, at the
+ * nearest level its model supports. A run without `thinking` predates this.
  *
  * Visitor keys are the caller's own, kept in their browser. The server and the
  * runner hold them in memory for that run only: never in the database, on
@@ -163,6 +168,10 @@ import { workflowPinSchema } from "./workflow";
  * is `inputKey` in `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
  * org's reference scan.
  */
+/** The levels a person may pick at `/new`: ones every offered model supports (or is mapped to). */
+export const runThinkingSchema = z.enum(["low", "medium", "high"]);
+export type RunThinking = z.infer<typeof runThinkingSchema>;
+
 export const inputSchema = z.object({
   id: inputIdSchema,
   labId: z.string(),
@@ -289,6 +298,8 @@ export const runSchema = z
      * config, as it did.
      */
     model: modelRefSchema.optional(),
+    /** How hard every role of the run reasons, chosen like `model`; absent on runs made before the choice. */
+    thinking: runThinkingSchema.optional(),
     /**
      * The loop that drives the run, decided by the API when the run is created (the request's
      * `harness`, else the API's default) and pinned by the runner on the root thread at the
@@ -378,8 +389,10 @@ export const startRunRequestSchema = z.object({
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. Absent: a guest is refused (403). */
   keys: visitorKeysSchema.optional(),
-  /** One of `GET /run/models` for this run's credentials; absent: that list's default. Another is refused with 400. */
+  /** One of `GET /run/models`; absent: its default. A choice the run's keys can't take is refused with 400. */
   model: modelRefSchema.optional(),
+  /** One of `GET /run/models` `thinking.choices`; absent: its default. */
+  thinking: runThinkingSchema.optional(),
   /** The loop that drives the run; absent: the API's default (`DEFAULT_RUN_HARNESS`, `tasks` unless set). */
   harness: harnessSchema.optional(),
 });
@@ -391,19 +404,17 @@ export const modelChoiceSchema = z.object({
   label: z.string(),
   /** A caution to show beside the choice. */
   note: z.string().optional(),
-});
-const modelChoicesSchema = z.object({
-  choices: z.array(modelChoiceSchema).min(1),
-  default: modelRefSchema,
+  /** True: only a run on Voluma's keys can use it (the starter's own Meta key can't, or mustn't). */
+  needsVolumaKey: z.boolean(),
 });
 /**
- * `GET /run/models`: the choices for a run on Voluma's keys (`voluma`, null for a guest, who
- * has none) and on the starter's own (`visitor`). `forced`: the API is set to give every run
- * on Voluma's keys this model whatever is picked (a debug setting); visitor runs keep their pick.
+ * `GET /run/models`: the same lists for every caller. `forced`: the API is set to give every
+ * run on Voluma's keys this model whatever is picked (a debug setting); own-key runs keep their pick.
  */
 export const runModelsResponseSchema = z.object({
-  voluma: modelChoicesSchema.nullable(),
-  visitor: modelChoicesSchema,
+  choices: z.array(modelChoiceSchema).min(1),
+  default: modelRefSchema,
+  thinking: z.object({ choices: z.array(runThinkingSchema).min(1), default: runThinkingSchema }),
   forced: z.object({ model: modelRefSchema, label: z.string() }).optional(),
 });
 export type RunModelsResponse = z.infer<typeof runModelsResponseSchema>;

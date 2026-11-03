@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, createStudy, signIn } from "@voluma/api-client";
 import { inputsQuery, runModelsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
-import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
+import type { Input, Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
 import {
   formatDuration,
@@ -126,6 +126,7 @@ export function NewPage() {
   const [pilot, setPilot] = useState(true);
   const [keys, setKeys] = useState<VisitorKeys | undefined>(() => loadKeys(me.userId));
   const [pickedModel, setPickedModel] = useState<string>();
+  const [pickedThinking, setPickedThinking] = useState<RunThinking>();
   /** Start was pressed while scans were still uploading. */
   const [armed, setArmed] = useState(false);
   const nextId = useRef(0);
@@ -221,15 +222,20 @@ export function NewPage() {
                 ? "Add your Meta key first."
                 : undefined;
 
-  // A start with keys runs on the starter's own Meta key, so it gets the visitor list.
-  const modelList =
-    keys || !runModels.data?.voluma ? runModels.data?.visitor : runModels.data.voluma;
-  const forced = keys || !runModels.data?.voluma ? undefined : runModels.data.forced;
-  const model = modelList?.choices.some((c) => c.model === pickedModel)
+  // One list for everyone. On a run that uses the user's own key (they saved one, or a guest must),
+  // a model that needs Voluma's key shows disabled, and a pick of it falls back to the default.
+  const list = runModels.data;
+  const ownKey = keys || guest;
+  const forced = ownKey ? undefined : list?.forced;
+  const usable = (c: { needsVolumaKey: boolean }) => !(ownKey && c.needsVolumaKey);
+  const model = list?.choices.some((c) => c.model === pickedModel && usable(c))
     ? pickedModel
-    : modelList?.default;
+    : list?.default;
   /** What the list shows ticked: the forced model, which may not be in the list, ticks nothing. */
   const shown = forced ? forced.model : model;
+  const thinking = list?.thinking.choices.includes(pickedThinking as RunThinking)
+    ? pickedThinking
+    : list?.thinking.default;
 
   const start = useMutation({
     mutationFn: async () => {
@@ -246,6 +252,7 @@ export function NewPage() {
         start: table.filter((r) => startIds.includes(r.id)).map((r) => (r.input as Input).id),
         keys,
         model,
+        thinking,
         // Hidden switch for the agent loop (no UI): /new?harness=agents.
         ...(new URLSearchParams(location.search).get("harness") === "agents" && {
           harness: "agents" as const,
@@ -376,25 +383,51 @@ export function NewPage() {
           </div>
         </Step>
 
-        {runModels.data && modelList && (
+        {list && (
           <Step n={3} title="Choose a model">
             <fieldset className="grid gap-2" disabled={forced !== undefined}>
               <legend className="sr-only">Model</legend>
-              {modelList.choices.map((c) => (
+              {list.choices.map((c) => (
                 <Choice
                   key={c.model}
                   name="model"
                   checked={shown === c.model}
+                  disabled={!usable(c)}
                   onChange={() => setPickedModel(c.model)}
                   title={c.label}
                 >
-                  {c.note ?? c.model}
+                  {usable(c)
+                    ? (c.note ?? c.model)
+                    : "Needs Voluma's key; not available on your own."}
                 </Choice>
               ))}
             </fieldset>
             {forced && (
               <p className="text-sm text-muted-foreground">Debug: every run uses {forced.label}.</p>
             )}
+            <fieldset className="grid gap-2">
+              <legend className="mb-1 text-sm font-medium">Thinking</legend>
+              <div className="flex flex-wrap gap-2">
+                {list.thinking.choices.map((level) => (
+                  <label
+                    key={level}
+                    className={`cursor-pointer rounded-lg border px-3.5 py-1.5 text-sm capitalize ${thinking === level ? "border-primary" : "border-border hover:border-line-strong"}`}
+                  >
+                    <input
+                      type="radio"
+                      name="thinking"
+                      className="sr-only"
+                      checked={thinking === level}
+                      onChange={() => setPickedThinking(level)}
+                    />
+                    {level}
+                  </label>
+                ))}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                More thinking costs more time and money per run.
+              </p>
+            </fieldset>
           </Step>
         )}
 
@@ -512,25 +545,28 @@ function Step({ n, title, children }: { n?: number; title: string; children: Rea
 function Choice({
   name = "pilot",
   checked,
+  disabled,
   onChange,
   title,
   children,
 }: {
   name?: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: () => void;
   title: string;
   children: ReactNode;
 }) {
   return (
     <label
-      className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3.5 py-2.5 ${checked ? "border-primary" : "border-border hover:border-line-strong"}`}
+      className={`flex items-start gap-3 rounded-lg border px-3.5 py-2.5 ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${checked ? "border-primary" : "border-border"} ${checked || disabled ? "" : "hover:border-line-strong"}`}
     >
       <input
         type="radio"
         name={name}
         className="mt-1 size-4 accent-primary"
         checked={checked}
+        disabled={disabled}
         onChange={onChange}
       />
       <span>
