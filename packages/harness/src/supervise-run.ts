@@ -277,9 +277,8 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     });
     /** A thread whose sandbox the run is done with: its commands stop, then the sandbox goes. */
     const release = (id: string) =>
-      bash
-        .release(id)
-        .then(() => session.release(id))
+      session
+        .release(id, () => bash.release(id))
         .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`));
     const running = threads(
       {
