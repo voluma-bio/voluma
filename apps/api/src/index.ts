@@ -99,7 +99,6 @@ const members = [
     id: required("WORKOS_LAB_ORGANIZATION_ID"),
     scope: "lab" as const,
     limits: limitsFromEnv("LAB"),
-    agentLoop: true,
   },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
     ? [
@@ -107,7 +106,6 @@ const members = [
           id: process.env.WORKOS_JUDGES_ORGANIZATION_ID,
           scope: "self" as const,
           limits: limitsFromEnv("JUDGES"),
-          agentLoop: true,
         },
       ]
     : []),
@@ -117,16 +115,11 @@ const guest = process.env.GUEST_ORGANIZATION_ID
       id: process.env.GUEST_ORGANIZATION_ID,
       scope: guestScope(),
       limits: limitsFromEnv("DEMO"),
-      agentLoop: true,
     }
   : null;
 // An org missing here is no longer configured: its queued runs fail and its running ones stop.
 const limits: ReadonlyMap<string, Limits> = new Map(
   [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.limits]),
-);
-
-const agentLoop: ReadonlyMap<string, boolean> = new Map(
-  [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.agentLoop]),
 );
 
 const auth = createAuth({
@@ -166,7 +159,6 @@ const queue = pgRunQueue(
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
   harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "agents"),
-  (labId) => agentLoop.get(labId) === true,
 );
 const eventLog = pgEventLog(db, notifier);
 
