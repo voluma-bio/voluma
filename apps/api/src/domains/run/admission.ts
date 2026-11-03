@@ -69,7 +69,7 @@ export async function usage(
   const [own] = await tx.execute<{ n: number }>(sql`
     SELECT count(*)::int AS n FROM runs
     WHERE credentials = 'visitor' AND state IN ('queued', 'running') AND NOT example`);
-  return { ...row, ownKeyActive: own.n } as Usage;
+  return { ...row, ownKeyActive: own?.n ?? 0 } as Usage;
 }
 
 /**
