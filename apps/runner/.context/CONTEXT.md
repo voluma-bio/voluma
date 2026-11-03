@@ -270,7 +270,8 @@ judges every model call with `cacheStep` (the rule the run page uses, `@voluma/c
 baseline on a compaction summary as `spend()` does, and prints every `--every` seconds run-wide calls, misses, unexpected misses, a per-thread
 table, and one block per new unexpected miss (prompt sizes, gap since the thread's previous call, the tool result just
 before, any `claim.started` / `run.reopened` / "Tools changed" between the two calls). Unexpected = a miss that is not
-the first call after a "Tools changed" notice in its thread; a thread's first call and the call after a compaction are
+the first call after a "Tools changed" notice in its thread and not after `CACHE_IDLE_MS` (5 min) idle (previous reply to the thread's
+latest tool result or delivered message; the runner's stop rule uses request start, so it agrees to within a request); idle misses print an `IDLE` line; a thread's first call and the call after a compaction are
 not misses under `cacheStep`.
 
 - It prints a `FLAG` line when a thread has 2 or more unexpected misses in its last 10 calls, or the run-wide

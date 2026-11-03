@@ -317,6 +317,7 @@ async function claimBody(
       (m, context, options) => {
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
         const threadId = options?.sessionId as string;
+        const startedAt = Date.now();
         const apiKey = keyFor(m.provider);
         const fetch = loggedFetch(role, log, options?.signal);
         // Meta requests name each image by an uploaded file id, not its bytes (`meta-images.ts`).
@@ -345,7 +346,7 @@ async function claimBody(
         });
         stream.result().then(
           (reply) => {
-            const reason = meter.addModelCall(role, threadId, usageOf(reply));
+            const reason = meter.addModelCall(role, threadId, usageOf(reply), startedAt);
             // Fails the run once; `scope.fail` is final, so the prompt is not sent again.
             if (!reason || stopReason) return;
             stopReason = new RunStopped(reason);
