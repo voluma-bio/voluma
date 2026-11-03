@@ -20,7 +20,7 @@ A correction fixes what the researcher named, and nothing else.
    would make out of date. To get an independent look at a doubtful result, add `blind: <the first worker>`
    (you cannot use both `from` and `blind` naming related workers). Brief it with what is wrong and where, in
    mm and in the researcher's words, the To check item it corrects, and each mark's points copied whole as your
-   delivery gave them: the worker maps them onto its grid.
+   delivery gave them: the worker maps them onto its grid. Do not message it to change other outputs: it cannot report them.
 3. **A short fix you can do yourself** is a `report_output` of the corrected version. It waits for the
    researcher's yes, like a worker; what it makes out of date is decided after it has settled, not in the
    same turn.

@@ -89,12 +89,14 @@ const inputSchema = z.object({
     .array(z.string().min(1))
     .default([])
     .describe(
-      "Files in your /work folder that show why it is right (views, logs); published with the version.",
+      "Files in your /work folder that show why it is right, published with the version: a view of each thing you placed, on the input, made after your last change to it and looked at by you; for a number, the log of the command that made it. A view you do not cite here is one nobody receives.",
     ),
   toCheck: z
     .array(toCheckItemSchema)
     .optional()
-    .describe("What a person must judge, in plain words about the scan: {title, focus?}."),
+    .describe(
+      "What a person must judge, in plain words about the scan: {title, focus?}. A choice the method and the data do not settle, and that changes a result, goes here with the choice you made meanwhile.",
+    ),
   provisional: z.boolean().optional().describe("No reference comparison yet."),
   kind: outputKindSchema.optional().describe("Only for an output the workflow does not list."),
   base: outputRefSchema
