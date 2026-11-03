@@ -4,8 +4,8 @@
  * run's keys before the transaction that makes the run `queued` commits, and the
  * claim takes them or a cancel or failure drops them. A process that doesn't hold a
  * queued visitor run's keys can't claim it, so the claim moves it to `awaiting-keys`. An
- * org holds at most `MAX_PER_ORG` runs' keys: a backstop for an org with no
- * `VISITOR_ACTIVE` set (the visitor cap, queued and running runs only, is the real bound),
+ * org holds at most `MAX_PER_ORG` runs' keys: a backstop for when
+ * `RUN_LIMITS_OWN_KEY_ACTIVE` is unset (the own-key cap, queued and running runs only, is the real bound),
  * so a client can't pin unbounded memory. Never log, store or return a value held here.
  */
 import type { VisitorKeys } from "@voluma/contracts/run";

@@ -8,19 +8,12 @@ import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import type { z } from "zod";
 
-/**
- * How much of the lab's data a user sees: `lab` is all of it; `self` only the records
- * the user created. Domains never branch on it: they pass `readerOf(user)` to their store.
- */
-export type Scope = "lab" | "self";
-
 type UserBase = {
   kind: "user";
   userId: string;
   name: string | null;
   /** The user's WorkOS organization: the tenant every record is filed under. */
   labId: string;
-  scope: Scope;
 };
 
 export type Principal =
@@ -36,13 +29,13 @@ export type AppEnv = { Variables: { principal: Principal } };
 export type UserPrincipal = Extract<Principal, { kind: "user" }>;
 
 /**
- * The filter every read applies, derived from the scope so no handler branches on it:
- * records filed under `labId`, and, when `ownerId` is set, created by that user.
+ * The filter every read applies, so no handler branches on who is asking: records filed under
+ * `labId` that `ownerId` created. Everyone sees only their own, plus the examples.
  */
-export type Reader = { labId: string; ownerId: string | null };
+export type Reader = { labId: string; ownerId: string };
 
 export function readerOf(user: UserPrincipal): Reader {
-  return { labId: user.labId, ownerId: user.scope === "self" ? user.userId : null };
+  return { labId: user.labId, ownerId: user.userId };
 }
 
 /** Who starts a run or sends a message: a guest is a visitor principal. */

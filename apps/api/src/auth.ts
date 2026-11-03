@@ -6,9 +6,9 @@
  *    `service`/`debug`, which only reads runs (domain.ts `requireReader`). When the header
  *    is present only the bearer counts; the cookie is never consulted.
  *  - the WorkOS AuthKit session cookie: a member of an allowed organization, principal
- *    `user` (its `labId` is that organization, its `scope` the organization's entry).
+ *    `user` (its `labId` is that organization).
  * With `config.guest` set, a request with neither a session cookie nor a bearer but a
- * guest cookie is a guest: a `user` with account `visitor`, `labId` and `scope` from the
+ * guest cookie is a guest: a `user` with account `visitor`, `labId` from the
  * config, identified by a server-minted id in its own sealed cookie (no WorkOS call).
  * Only `POST /api/auth/guest` mints one; a GET never does. A session cookie that is
  * refused is cleared and answered 401, never turned into a guest; with `guest` null the
@@ -54,7 +54,7 @@ import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
 import { serialize } from "hono/utils/cookie";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { type Principal, parseJson, requireUser, type Scope, type UserEnv } from "./domain";
+import { type Principal, parseJson, requireUser, type UserEnv } from "./domain";
 
 export interface AuthConfig {
   clientId: string;
@@ -62,15 +62,12 @@ export interface AuthConfig {
   /** Seals the session cookie; at least 32 characters. */
   cookiePassword: string;
   /**
-   * The organizations whose members may sign in, each with the data scope its members
-   * get. The first `lab` entry is the organization the sign-in page is pinned to.
+   * The ids of the organizations whose members may sign in. The first is the one the sign-in
+   * page is pinned to.
    */
-  organizations: { id: string; scope: Scope }[];
-  /**
-   * Who a request with no credential is, or null for a sign-in wall. Guests belong to
-   * `organizationId` and see what `scope` allows, as a member of it would.
-   */
-  guest: { organizationId: string; scope: Scope } | null;
+  organizations: string[];
+  /** Who a request with no credential is, or null for a sign-in wall. Guests belong to `organizationId`. */
+  guest: { organizationId: string } | null;
   /** Where the browser reaches the app (no trailing slash). Never taken from `Host`. */
   appUrl: string;
   /** The runner's bearer token. */
@@ -118,7 +115,7 @@ class RequestStorage extends CookieSessionStorage<Request, string[]> {
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
 
 // The guest cookie outlives any visit: a guest is a browser, and losing the cookie
-// loses their work under `scope: "self"`.
+// loses their work.
 const GUEST_MAX_AGE = 400 * 24 * 60 * 60;
 const GUEST_ID_PREFIX = "guest_";
 
@@ -227,11 +224,7 @@ class RefreshMemo {
 
 type SessionRef = { id: string; refreshToken: string };
 
-function userPrincipal(
-  user: User,
-  labId: string,
-  scope: Scope,
-): Extract<Principal, { account: "member" }> {
+function userPrincipal(user: User, labId: string): Extract<Principal, { account: "member" }> {
   return {
     kind: "user",
     userId: user.id,
@@ -239,7 +232,6 @@ function userPrincipal(
     email: user.email,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
     labId,
-    scope,
   };
 }
 
@@ -253,7 +245,6 @@ function guestPrincipal(
     account: "visitor",
     name: null,
     labId: guest.organizationId,
-    scope: guest.scope,
   };
 }
 
@@ -283,10 +274,10 @@ const PASSWORD_WINDOW_MS = 15 * 60 * 1000;
 
 export function createAuth(config: AuthConfig) {
   const appOrigin = new URL(config.appUrl).origin;
-  const scopes = new Map(config.organizations.map((org) => [org.id, org.scope]));
-  const signInOrganizationId = config.organizations.find((org) => org.scope === "lab")?.id;
-  if (!signInOrganizationId) throw new Error("createAuth needs a lab organization");
-  if (config.guest && scopes.has(config.guest.organizationId)) {
+  const organizations = new Set(config.organizations);
+  const signInOrganizationId = config.organizations[0];
+  if (!signInOrganizationId) throw new Error("createAuth needs an organization");
+  if (config.guest && organizations.has(config.guest.organizationId)) {
     throw new Error("The guest organization must not be one that members sign in to");
   }
   // __Host- needs Secure, Path=/ and no Domain, so a sibling subdomain can't plant or
@@ -433,14 +424,13 @@ export function createAuth(config: AuthConfig) {
     }
     // The enforcement point for membership, bounded by the access-token lifetime.
     const orgId = result.claims.org_id;
-    const scope = orgId === undefined ? undefined : scopes.get(orgId);
-    if (orgId === undefined || scope === undefined) {
+    if (orgId === undefined || !organizations.has(orgId)) {
       await clearSessionCookies(request, sink);
       return "refused" as const;
     }
     if (result.refreshed)
       await authkit.saveSession(sink, await core.encryptSession(result.session));
-    return userPrincipal(result.session.user, orgId, scope);
+    return userPrincipal(result.session.user, orgId);
   }
 
   // The guest for a request, or null for no valid guest cookie (absent, garbled, forged
@@ -587,7 +577,7 @@ export function createAuth(config: AuthConfig) {
     const created = newSid ? { id: newSid, refreshToken: result.authResponse.refreshToken } : null;
     const old = await requestSession(c.req.raw);
     const stale = old?.id === created?.id ? null : old;
-    if (scopes.has(result.authResponse.organizationId ?? "")) {
+    if (organizations.has(result.authResponse.organizationId ?? "")) {
       await revokeSessions([stale]);
       setCookies(c, cookies);
       return c.redirect(`${config.appUrl}${result.returnPathname}`);
@@ -639,8 +629,7 @@ export function createAuth(config: AuthConfig) {
     }
     tries.count--;
     const sid = core.parseTokenClaims(auth.accessToken).sid;
-    const scope = scopes.get(auth.organizationId ?? "");
-    if (!scope || !auth.organizationId) {
+    if (!auth.organizationId || !organizations.has(auth.organizationId)) {
       await revokeSessions([sid ? { id: sid, refreshToken: auth.refreshToken } : null]);
       return c.json({ error: "not-a-member" }, 403);
     }
@@ -655,7 +644,7 @@ export function createAuth(config: AuthConfig) {
       }),
     );
     setCookies(c, cookies);
-    return c.json(meOf(userPrincipal(auth.user, auth.organizationId, scope)));
+    return c.json(meOf(userPrincipal(auth.user, auth.organizationId)));
   });
 
   sessionRoutes.post("/logout", async (c) => {
