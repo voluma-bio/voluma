@@ -35,3 +35,9 @@
   (141 and 51 µm) and run f45f630f's wrong ones at the top of the epiphysis (669 and 575 µm). Re-judge it on the next runs. The check
   does not judge where along the face the ends are: two points anywhere on the face over the tibia, on one section, pass, so whether
   they are the fibula–tibia junction and the prominent point opposite is still judged by eye.
+- **Workers name scan axes from crops whose axes they do not label.** On OA6-2RK run 0ed8e7d3 the femoral worker plotted
+  axial crops with pixel offsets on both axes and read the condyles as side by side along y (they sit along x), as the
+  f45f630f worker had. `femoral_frame.py` now confirms its axis against the bending plane, so the femoral step catches it,
+  but any landmark step that reads directions off a worker-made crop can repeat it. Next: one knee-axes helper (from
+  `frame.json`'s bending-plane normal and shaft axes) that prints which scan axis runs side to side, front to back and
+  along the shafts, for workers and scripts to read instead of their own crops.
