@@ -16,9 +16,10 @@ advance along the section (a hand wavering on a steep stretch) is dropped. Refus
 back along the section more than a few voxels (an outline drawn around the plate, a path that doubles back), since a curve has
 one row per column; points outside the grid. With `--into annotations.json --key <curve key>` the mark is spliced into that section of a copy of
 the file, written to `--out`: the section's points within the mark's column range are replaced, those beyond its ends kept,
-and every other key and section stays as it was (the file's `grid_id` must be this grid's). `--key` is the curve of the face the mark
-was drawn on, which the delivery names by its output; `moved_vox` is the median row change over the columns the old and new
-curve share (how far the researcher moved the face there). Without `--into`, `--out` gets the curve alone, with the grid's `grid_id`. Check the result on that section's
+and every other key and section stays as it was (the file's `grid_id` must be this grid's). `--key` is the curve the mark corrects; the
+script cannot tell which, since a correction can land nearer another curve than its own. `moved_vox` is the median row change
+over the columns the old and new curve share (how far the mark moves that curve); `vox_from_key` gives the same for every curve
+key on that section. Without `--into`, `--out` gets the curve alone, with the grid's `grid_id`. Check the result on that section's
 view as you would your own trace, and trace the neighbouring sections to meet it.
 
 `--seed --labels labels.npy`: the mark is an outline drawn around a piece that does not belong to the region (an ossicle on the
@@ -31,7 +32,7 @@ specks are listed but never chosen. `apart` is true when the
 for the bone and this one for the piece (`segmentation-check`).
 
 Writes: <out>  --curve only: the annotations copy, or the curve alone
-Prints: one JSON line: --curve {grid_id, axis, section, points, cols_replaced, kept_points, moved_vox, off_section_vox, out};
+Prints: one JSON line: --curve {grid_id, axis, section, points, cols_replaced, kept_points, moved_vox, vox_from_key, off_section_vox, out};
         --seed {grid_id, seed_zyx, label, apart, piece_voxels, pieces: [{label, apart, piece_voxels, inside_voxels}], off_plane_vox}
 Example: python marks_to_grid.py --curve --world "at (8.1, 5.0, 129.4)–(8.3, 5.1, 129.4)–(8.5, 5.1, 129.5) mm" --grid tibia-frame.json --into annotations.json --key growth_plate_curves --out annotations-marked.json
          python marks_to_grid.py --seed --world "(...)–(...)–(...)" --grid hu.json --labels labels.npy
@@ -83,6 +84,18 @@ def inside_grid(zyx, shape, what):
                      'the mark was drawn on another part of the scan, or this is the wrong grid')
 
 
+def distance(pts, curve_pts):
+    """Median row distance from the mark's points to a section's curve, over the columns both cover; None if they share none."""
+    c = sorted(curve_pts, key=lambda q: q[1])
+    if len(c) < 2:
+        return None
+    cu, cw = np.array([q[1] for q in c]), np.array([q[0] for q in c])
+    mine = [q for q in pts if cu.min() <= q[1] <= cu.max()]
+    if not mine:
+        return None
+    return round(float(np.median([abs(q[0] - np.interp(q[1], cu, cw)) for q in mine])), 1)
+
+
 def curve(a, g, zyx):
     if 'shape' not in g:
         sidecar.fail(f'{a.grid} has no shape: pass a frame.json or the hu.json that scan-intake wrote')
@@ -112,7 +125,7 @@ def curve(a, g, zyx):
     if len(pts) < 2:
         sidecar.fail('the mark spans less than one column of the section: draw it along the face')
     lo, hi = pts[0][1], pts[-1][1]
-    kept, moved = 0, None
+    kept, moved, distances = 0, None, {}
     if a.into:
         ann = json.loads(Path(a.into).read_text())
         if ann.get('grid_id') != g['grid_id']:
@@ -123,12 +136,10 @@ def curve(a, g, zyx):
             sidecar.fail(f'"{a.key}" in {a.into} is traced on axis {old.get("axis")}, not {a.axis}: pass --axis {old.get("axis")}')
         slices = dict((old or {}).get('slices', {}))
         before = sorted(slices.get(str(section), []), key=lambda q: q[1])
-        if len(before) >= 2:
-            ou, ow = np.array([q[1] for q in before]), np.array([q[0] for q in before])
-            shared = cols[(cols >= ou.min()) & (cols <= ou.max())]
-            if len(shared):
-                new_w = np.interp(shared, [q[1] for q in pts], [q[0] for q in pts])
-                moved = round(float(np.median(np.abs(new_w - np.interp(shared, ou, ow)))), 1)
+        distances = {k: distance(pts, v['slices'][str(section)]) for k, v in ann.items()
+                     if isinstance(v, dict) and v.get('axis') == a.axis and str(section) in v.get('slices', {})}
+        distances = {k: d for k, d in distances.items() if d is not None}
+        moved = distances.get(a.key)
         outside = [q for q in before if q[1] < lo - SPLICE_MARGIN_VOX or q[1] > hi + SPLICE_MARGIN_VOX]
         kept = len(outside)
         slices[str(section)] = sorted(outside + pts, key=lambda q: q[1])
@@ -138,7 +149,7 @@ def curve(a, g, zyx):
         doc = {'grid_id': g['grid_id'], 'axis': a.axis, 'height': 'row', 'slices': {str(section): pts}}
     Path(a.out).write_text(json.dumps(doc, indent=1))
     sidecar.emit(grid_id=g['grid_id'], axis=a.axis, section=section, points=pts, cols_replaced=[lo, hi], kept_points=kept,
-                 moved_vox=moved, off_section_vox=round(spread, 2), out=str(a.out))
+                 moved_vox=moved, vox_from_key=distances, off_section_vox=round(spread, 2), out=str(a.out))
 
 
 def seed(a, g, zyx):
