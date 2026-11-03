@@ -379,7 +379,7 @@ def main():
     meta_files = {'like': a.frame, 'inputs': inputs, 'params': params}
     placed = {  # heights are along axis 0 (W) of the aligned grid
         'roi-iioc': objects.mask(out / 'roi-iioc.npy', roi, crop=True, **meta_files),
-        'growth-plate-proximal-face': objects.surface(out / 'growth-plate-proximal-face.npy', gp, 0, where=footprint(tib), **meta_files),
+        'growth-plate-proximal-face': objects.surface(out / 'growth-plate-proximal-face.npy', gp, 0, where=on_bone, **meta_files),
         'articular-surface': objects.surface(out / 'articular-top-surface.npy', np.where(valid, top, np.nan), 0, **meta_files),
         **rulers,
     }

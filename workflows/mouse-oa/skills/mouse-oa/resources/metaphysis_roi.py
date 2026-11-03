@@ -218,7 +218,7 @@ def main():
     placed = {
         'roi-metaphyseal': objects.mask(out / 'roi-metaphyseal.npy', roi, like=like, **meta),
         'cortex': objects.mask(out / 'cortex-object.npy', cortex, like=like, **meta),
-        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=footprint(tib), **meta),  # heights along W
+        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=on_bone, **meta),  # heights along W
     }
     window = a.window
     overlays = [(roi, 'cyan'), (cortex, 'orange')]

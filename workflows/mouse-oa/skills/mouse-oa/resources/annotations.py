@@ -285,16 +285,20 @@ def refuse_jumps(ann, key, on_bone, spec_path, vox):
     each pair, the move and the U range."""
     p = sidecar.protocol(spec_path, 'plate-faces', 'max_jump_um', 'jump_overlap_um')
     um = vox * 1000
-    problems = []
+    problems, refused = [], []
     for v1, v2, move, lo, hi in face_jumps(ann[key], on_bone, p['jump_overlap_um'] / um):
         limit = p['max_jump_um'] / um + (v2 - v1)
         if move > limit:
             problems.append(f'V={v1} to V={v2}: {move * um:.0f} um over U={lo}..{hi}, at most {limit * um:.0f} um')
+            refused += [v1, v2]
     if problems:
         shown = '; '.join(problems[:6]) + (f'; and {len(problems) - 6} more' if len(problems) > 6 else '')
+        shared = sorted(v for v in set(refused) if refused.count(v) > 1)
+        odd = f' V={", ".join(map(str, shared))} jumps against both neighbours, so start there.' if shared else ''
         sidecar.fail(f'"{key}" jumps between neighbouring traced sections farther than a plate moves (the median W change over the U columns '
-                     f'both cover on bone, at most {p["max_jump_um"]:g} um plus the sections\' distance apart): {shown}. '
-                     'Trace the face on each of those sections from its own image')
+                     f'both cover on bone, at most {p["max_jump_um"]:g} um plus the sections\' distance apart): {shown}.{odd} '
+                     'Trace the face on each of those sections from its own image; a section kept from the proposal next to one you traced '
+                     'is as likely to be the wrong one. Deleting a section does not fix the face: the sections left keep the same points')
 
 
 def eroded_marks(ann, key, shape, on_bone):

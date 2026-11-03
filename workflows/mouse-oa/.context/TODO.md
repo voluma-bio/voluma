@@ -46,4 +46,5 @@
   Needs 0ed8e7d3's aligned HU rebuilt to calibrate. On 6 of the 9 by-eye traces in `~/experiments/plate-data/scans/<scan>/trace/`,
   5 to 13 sections keep the distal face within a 0.5-voxel band of one offset from the proximal over 100 or more columns
   (OA6-2RK's plate-test-opus trace: 12 of 19); run 0ed8e7d3's copied faces: 15 of 28. The same HU check would catch one misread
-  section between sparse neighbours, which `refuse_jumps` passes when it is less than about 330 to 420 µm off with neighbours 16 to 20 apart.
+  section between sparse neighbours, which `refuse_jumps` passes when it is less than about 330 to 420 µm off with neighbours 16 to 20 apart. It would also catch a worker that clears a jump refusal by deleting the sections in between: the sections left still
+  pass the jump and gap checks with the same generated points (0ed8e7d3 with V=202 and 212 removed passes from V=197 to 217).
