@@ -27,8 +27,8 @@
   (a contract PR) and a `prompt` query parameter on `/login`.
 - **Clean up abandoned scan uploads.** An upload never completed leaves an `uploading`
   row and objects under `uploads/<inputId>/`; a PUT URL used after complete leaves a stray
-  object there too. Add an R2 lifecycle rule deleting `uploads/` objects after 2 days, and
-  delete `uploading` rows older than the URL lifetime (6 h, `inputs.ts`) on a schedule. Also
+  object there too. The bucket's lifecycle rule deletes `uploads/` objects after 2 days (set
+  3 Nov 2026, with `work/` after 7 days); still to do: delete `uploading` rows older than the URL lifetime (6 h, `inputs.ts`) on a schedule. Also
   delete `inputs/<id>/` for any id with no `ready` row: a complete cancelled or abandoned
   part way through its copy leaves files there.
 
