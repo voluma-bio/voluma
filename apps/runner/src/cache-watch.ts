@@ -174,7 +174,7 @@ function ingest(e: RunEvent, out: string[]) {
         const between = markers.filter((x) => x.at > prev.at && x.at <= at).map((x) => x.what);
         const r = th.lastResult;
         const result = r
-          ? `${r.name} result ${r.output.length} chars${r.name === "view_image" ? ` [${clip(r.output, 200)}]` : ""}, ${((at - r.at) / 1000).toFixed(0)}s before this call`
+          ? `${r.name} result ${r.output.length} chars${r.name === "read" ? ` [${clip(r.output, 200)}]` : ""}, ${((at - r.at) / 1000).toFixed(0)}s before this call`
           : "none";
         out.push(
           [
