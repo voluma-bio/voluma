@@ -9,7 +9,6 @@ services:
       WORKOS_API_KEY: sk_test_local
       WORKOS_LAB_ORGANIZATION_ID: org_local
       GUEST_ORGANIZATION_ID: org_demo
-      GUEST_SCOPE: self
     health: /health
     portal:
       url: /runs/local

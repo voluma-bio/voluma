@@ -12,7 +12,7 @@ import { once } from "node:events";
 import { createWriteStream, openAsBlob } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Agent, FormData, fetch, Response } from "undici";
-import type { StreamStats } from "./input";
+import type { Prompt, StreamStats } from "./input";
 
 export class Failure extends Error {
   constructor(
@@ -199,7 +199,10 @@ export function metaClient(options: { url: string; token: string; log(line: stri
      */
     async track(
       prompt: string,
-      fileId: string,
+      /** The media part: the uploaded video, or a one-image data URL. */
+      media: { type: "input_video"; file_id: string } | { type: "input_image"; image_url: string },
+      /** `metadata.propagation_direction`; absent for a concept prompt and an image. */
+      direction: string | undefined,
       out: string,
       asked: string,
     ): Promise<{
@@ -222,15 +225,15 @@ export function metaClient(options: { url: string; token: string; log(line: stri
                 body: JSON.stringify({
                   model: "sam-3.1",
                   stream: true,
-                  metadata: { propagation_direction: "both", include_confidence: "true" },
+                  metadata: {
+                    ...(direction && { propagation_direction: direction }),
+                    include_confidence: "true",
+                  },
                   input: [
                     {
                       type: "message",
                       role: "user",
-                      content: [
-                        { type: "input_text", text: prompt },
-                        { type: "input_video", file_id: fileId },
-                      ],
+                      content: [{ type: "input_text", text: prompt }, media],
                     },
                   ],
                 }),
@@ -364,17 +367,29 @@ function streamWatch(started: number) {
   };
 }
 
-/** `<frame>f` then `label<|box;x1;y1;x2;y2;w;h|>` for each box on that frame. */
+/**
+ * Box and point prompts as Meta reads them: `<frame>f`, then per object `id` followed by its box
+ * and points (a negative point has a `-` before it), objects of a frame comma-separated.
+ */
 export function promptText(
-  objects: { label: number; frame: number; box: [number, number, number, number] }[],
+  objects: { id: number; prompts: Prompt[] }[],
   width: number,
   height: number,
 ): string {
+  const size = `w=${width};h=${height}`;
   const byFrame = new Map<number, string[]>();
-  for (const { label, frame, box } of objects) {
-    const [r0, c0, r1, c1] = box;
-    const entry = `${label}<|box;x1=${c0};y1=${r0};x2=${c1};y2=${r1};w=${width};h=${height}|>`;
-    byFrame.set(frame, [...(byFrame.get(frame) ?? []), entry]);
+  for (const { id, prompts } of objects) {
+    for (const { frame, box, points } of prompts) {
+      const [r0, c0, r1, c1] = box ?? [];
+      const tokens = [
+        ...(box ? [`<|box;x1=${c0};y1=${r0};x2=${c1};y2=${r1};${size}|>`] : []),
+        // Positive points first, as in Meta's own example.
+        ...[...points]
+          .sort((a, b) => Number(!!a.negative) - Number(!!b.negative))
+          .map((p) => `${p.negative ? "-" : ""}<|point;x=${p.col};y=${p.row};${size}|>`),
+      ];
+      byFrame.set(frame, [...(byFrame.get(frame) ?? []), `${id}${tokens.join("")}`]);
+    }
   }
   return [...byFrame]
     .sort(([a], [b]) => a - b)

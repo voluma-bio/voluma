@@ -180,8 +180,15 @@
     {
       "idx": 25,
       "version": "7",
-      "when": 1793743567882,
-      "tag": "0025_drop_review_snapshots",
+      "when": 1793744768724,
+      "tag": "0025_run_thinking",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793746142144,
+      "tag": "0026_drop_review_snapshots",
       "breakpoints": true
     }
   ]

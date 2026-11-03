@@ -42,7 +42,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   const userOf = (principal: Principal) => (principal.kind === "user" ? principal : undefined);
 
   app.post("/runs", requireUser, async (c) => {
-    const { studyId, inputId, selectedOutputs, notes, keys, model } = await parseJson(
+    const { studyId, inputId, selectedOutputs, notes, keys, model, thinking } = await parseJson(
       c,
       startRunRequestSchema,
     );
@@ -55,16 +55,13 @@ export function runsRoutes({ reads, queue }: RunDeps) {
       notes,
       keys,
       model,
+      thinking,
     });
     return c.json(result.run satisfies Run);
   });
 
   app.get("/models", requireUser, (c) => {
-    const { voluma, visitor, forced } = queue.models();
-    // A guest's runs always use their own key, which the override never touches.
-    return callerOf(c.var.user).guest
-      ? c.json({ voluma: null, visitor })
-      : c.json({ voluma, visitor, forced });
+    return c.json(queue.models());
   });
 
   app.get("/runs", requireReader, async (c) => c.json({ runs: await reads.list(c.var.reader) }));
@@ -84,7 +81,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   app.post("/runs/:id/keys", requireUser, async (c) => {
     const { keys } = await parseJson(c, resendKeysRequestSchema);
     const user = c.var.user;
-    const result = await queue.resume(readerOf(user), user.userId, c.req.param("id"), keys);
+    const result = await queue.resume(readerOf(user), c.req.param("id"), keys);
     return c.json(await readOf(user, result.run));
   });
 

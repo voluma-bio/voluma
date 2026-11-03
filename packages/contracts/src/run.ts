@@ -59,8 +59,8 @@
  *
  * Until complete succeeds the input is its uploader's alone: it isn't listed, complete
  * and `startRun` answer 404 to everyone else, and `startRun` answers 409 to the uploader.
- * Once complete, it is read like any input (scoping below): under scope `self` only the
- * uploader lists and starts on it, under `lab` the whole org does. One PUT per file, no
+ * Once complete, it is read like any input (scoping below): only the
+ * uploader lists and starts on it. One PUT per file, no
  * multipart: a file is at most `MAX_UPLOAD_FILE_BYTES`, the object store's single-PUT
  * limit; a scan is a folder of slices, or one volume of a few GB at most, so a retry
  * re-sends one file. Creating an upload needs a member account (judges included; a guest
@@ -68,15 +68,12 @@
  * unexpired uploads a member may have open.
  *
  * Org scoping, enforced by the server on every call and every read:
- *   - Every read by a user is filtered by the caller's `labId`. Another org's run
- *     or input answers 404, never 403. (The debug token reads every org's runs.)
- *   - When the caller's server-side scope is `self` (not in `meResponseSchema`),
- *     reads are also filtered to the caller: a run when `startedBy` is the
- *     caller's `userId` or the run is an `example`; an input when `uploadedBy`
- *     is the caller or it is the org's reference scan (`source: "reference"`),
- *     which every reader of the org can read, list and start on, so it must be
- *     cleared for public use in an org that has guests. Scope `lab`
- *     sees the org.
+ *   - Every read by a user is filtered by the caller's `labId` and to the caller:
+ *     a run when `startedBy` is the caller's `userId` or the run is an `example`; an
+ *     input when `uploadedBy` is the caller or it is the org's reference scan
+ *     (`source: "reference"`), which every reader of the org can read, list and start on,
+ *     so it must be cleared for public use in an org that has guests. Another user's
+ *     or org's run or input answers 404, never 403. (The debug token reads every org's runs.)
  *   - Example runs are read-only to everyone. Only server-side seeding (an
  *     operator script, under a dedicated operator id) sets `example`, never
  *     `startRun` or a fork, and it never changes afterwards; to change an
@@ -106,9 +103,14 @@
  * is on Voluma's Modal account; `keys` is the model key alone.
  *
  * Model (`model`): the API picks the run's model when it creates the run (the request's
- * `model` if it is in the caller's `GET /run/models` list, else the list's default, or the
+ * `model` if it is in the `GET /run/models` list, else the list's default, or the
  * API's debug override for a `voluma` run) and records it; every role of the run uses it.
- * Visitor runs only ever get a standard Meta model. A run without `model` predates this.
+ * A model marked `needsVolumaKey` is refused (400) on a run with the starter's own keys.
+ * A run without `model` predates this.
+ *
+ * Thinking (`thinking`): how hard the model reasons, picked the same way (the request's
+ * `thinking`, else the list's default) and recorded; every role of the run uses it, at the
+ * nearest level its model supports. A run without `thinking` predates this.
  *
  * Visitor keys are the caller's own, kept in their browser. The server and the
  * runner hold them in memory for that run only: never in the database, on
@@ -158,6 +160,10 @@ import { workflowPinSchema } from "./workflow";
  * is `inputKey` in `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
  * org's reference scan.
  */
+/** The levels a person may pick at `/new`: ones every offered model supports (or is mapped to). */
+export const runThinkingSchema = z.enum(["low", "medium", "high"]);
+export type RunThinking = z.infer<typeof runThinkingSchema>;
+
 export const inputSchema = z.object({
   id: inputIdSchema,
   labId: z.string(),
@@ -265,6 +271,8 @@ export const runSchema = z.object({
    * config, as it did.
    */
   model: modelRefSchema.optional(),
+  /** How hard every role of the run reasons, chosen like `model`; absent on runs made before the choice. */
+  thinking: runThinkingSchema.optional(),
   /**
    * A shared, read-only run every caller in the org can read, even under
    * `self`, set only by seeding (see the header). It always reads its org's
@@ -316,8 +324,10 @@ export const startRunRequestSchema = z.object({
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. Absent: a guest is refused (403). */
   keys: visitorKeysSchema.optional(),
-  /** One of `GET /run/models` for this run's credentials; absent: that list's default. Another is refused with 400. */
+  /** One of `GET /run/models`; absent: its default. A choice the run's keys can't take is refused with 400. */
   model: modelRefSchema.optional(),
+  /** One of `GET /run/models` `thinking.choices`; absent: its default. */
+  thinking: runThinkingSchema.optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
 
@@ -327,19 +337,17 @@ export const modelChoiceSchema = z.object({
   label: z.string(),
   /** A caution to show beside the choice. */
   note: z.string().optional(),
-});
-const modelChoicesSchema = z.object({
-  choices: z.array(modelChoiceSchema).min(1),
-  default: modelRefSchema,
+  /** True: only a run on Voluma's keys can use it (the starter's own Meta key can't, or mustn't). */
+  needsVolumaKey: z.boolean(),
 });
 /**
- * `GET /run/models`: the choices for a run on Voluma's keys (`voluma`, null for a guest, who
- * has none) and on the starter's own (`visitor`). `forced`: the API is set to give every run
- * on Voluma's keys this model whatever is picked (a debug setting); visitor runs keep their pick.
+ * `GET /run/models`: the same lists for every caller. `forced`: the API is set to give every
+ * run on Voluma's keys this model whatever is picked (a debug setting); own-key runs keep their pick.
  */
 export const runModelsResponseSchema = z.object({
-  voluma: modelChoicesSchema.nullable(),
-  visitor: modelChoicesSchema,
+  choices: z.array(modelChoiceSchema).min(1),
+  default: modelRefSchema,
+  thinking: z.object({ choices: z.array(runThinkingSchema).min(1), default: runThinkingSchema }),
   forced: z.object({ model: modelRefSchema, label: z.string() }).optional(),
 });
 export type RunModelsResponse = z.infer<typeof runModelsResponseSchema>;

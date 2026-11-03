@@ -142,6 +142,8 @@ export const runs = pgTable(
     credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
     /** The model every role of the run uses (`runSchema.model`); null for runs made before the choice existed. */
     model: text(),
+    /** How hard every role reasons (`runSchema.thinking`); null for runs made before the choice. */
+    thinking: text({ enum: ["low", "medium", "high"] }),
     /** Read nowhere. New runs write `agents` so a build that still claims by it hands them out (TODO: drop the column). */
     harness: text({ enum: ["tasks", "agents"] }),
     example: boolean().notNull().default(false),

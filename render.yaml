@@ -86,21 +86,17 @@ services:
         sync: false
       - key: R2_SECRET_ACCESS_KEY
         sync: false
-      # What each organization may run (deploy.md); read at start; unset is no limit. No daily
-      # limits: the runner's two slots and Modal's spend limit bound sandbox spend. Judges' total
-      # model spend is capped (SPEND_USD, dollars). Demo takes one slot
-      # at most, so guests never hold both. Guest sign-in: GUEST_* in the dashboard (deploy.md).
+      # What guards Voluma's key (deploy.md); read at start; unset is no limit. CONCURRENT and
+      # SPEND_USD (dollars of model spend) are per organization that has the key; OWN_KEY_ACTIVE is
+      # the runs on callers' own keys over every account. No daily limits: the runner's two slots
+      # and Modal's spend limit bound sandbox spend. Guest sign-in: GUEST_ORGANIZATION_ID in the dashboard (deploy.md).
       - key: RUN_LIMITS_LAB_CONCURRENT
         value: "4"
       - key: RUN_LIMITS_JUDGES_CONCURRENT
         value: "2"
       - key: RUN_LIMITS_JUDGES_SPEND_USD
         value: "300"
-      - key: RUN_LIMITS_DEMO_PER_CALLER
-        value: "1"
-      - key: RUN_LIMITS_DEMO_CONCURRENT
-        value: "1"
-      - key: RUN_LIMITS_DEMO_VISITOR_ACTIVE
+      - key: RUN_LIMITS_OWN_KEY_ACTIVE
         value: "4"
 
   - type: web

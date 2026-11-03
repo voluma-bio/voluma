@@ -6,7 +6,7 @@
  *
  *   POST /api/run/studies      body `createStudyRequestSchema` → 200 `studyDetailSchema`
  *                              (404: unknown `workflowId`, or an input the caller can't read;
- *                              409: an input still uploading, or the per-caller limit;
+ *                              409: an input still uploading;
  *                              429: the other limits, see `run.ts`; 400: `start` names a
  *                              input the study lacks, an input twice, or `selectedOutputs` names an
  *                              output that is not a selectable output of the workflow)
@@ -20,10 +20,9 @@
  * a time. The stored input row is the confirmed one: nothing runs until the researcher
  * confirms intake.
  *
- * Reads. `readableStudies` is the run rule on the study: the org matches and, under scope
- * `self`, the caller created it or it is the seeded example. A study's runs are the ones
- * `GET /runs` would show the caller, so a `self` caller sees only the runs they started in
- * an example study.
+ * Reads. `readableStudies` is the run rule on the study: the org matches and the caller
+ * created it or it is the seeded example. A study's runs are the ones `GET /runs` would
+ * show the caller, so they see only the runs they started in an example study.
  *
  * `needsYou` is the open To check items a person can answer, what every screen calls To check
  * (`OutputsFold.toCheck`). `values` come from each input's **newest completed run** only
@@ -42,6 +41,7 @@ import {
   runOutputsInSchema,
   runSchema,
   runStateSchema,
+  runThinkingSchema,
   selectedOutputsSchema,
   visitorKeysSchema,
   workflowIdSchema,
@@ -194,6 +194,8 @@ export const createStudyRequestSchema = z.preprocess(
       keys: visitorKeysSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */
       model: modelRefSchema.optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      thinking: runThinkingSchema.optional(),
     })
     .refine((r) => new Set(r.inputs.map((s) => s.inputId)).size === r.inputs.length, {
       path: ["inputs"],

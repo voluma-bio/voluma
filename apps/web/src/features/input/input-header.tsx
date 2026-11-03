@@ -321,14 +321,7 @@ const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
 /** The run's own problems, over the views: waiting for its starter's keys, failed, or out of touch. */
 export function RunAlert({ run, userId, stale }: { run: Run; userId: string; stale: boolean }) {
   const { state } = run;
-  if (state.status === "awaiting-keys")
-    return run.startedBy === userId ? (
-      <AwaitingKeys run={run} userId={userId} />
-    ) : (
-      <p className={`${bar} bg-check-tint text-check-strong`}>
-        The run is waiting for the keys of the person who started it.
-      </p>
-    );
+  if (state.status === "awaiting-keys") return <AwaitingKeys run={run} userId={userId} />;
   if (state.status === "ended" && state.outcome === "failed")
     return (
       <p role="alert" className={`${bar} bg-destructive-tint text-destructive`}>

@@ -119,20 +119,6 @@ function modelAliases(): Record<string, ModelRef> {
   return models;
 }
 
-/**
- * A visitor run sends the visitor's Meta key with this model, so it must be a Meta model; a
- * `-contributor` one would let Meta train on the visitor's scan.
- */
-function visitorModel(): ModelRef {
-  const ref = modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3");
-  if (!isVisitorSafe(ref)) {
-    throw new Error(
-      `RUNNER_VISITOR_MODEL must be a Standard-mode meta/ model, got "${ref.provider}/${ref.id}"`,
-    );
-  }
-  return ref;
-}
-
 /** `RUNNER_THINKING`, one of Pi's thinking levels; unset: Pi sends none. */
 function thinkingLevel(): ModelThinkingLevel | undefined {
   const raw = optional("RUNNER_THINKING");
@@ -143,7 +129,7 @@ function thinkingLevel(): ModelThinkingLevel | undefined {
   return level;
 }
 
-/** Whether a visitor's Meta key and scan may go to this model (see `visitorModel`). */
+/** Whether a run's own Meta key and scan may go to this model: Standard-mode Meta only, since a `-contributor` model lets Meta train on what it is sent. */
 export const isVisitorSafe = (ref: ModelRef) =>
   ref.provider === "meta" && !ref.id.endsWith("-contributor");
 
@@ -163,7 +149,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =
-  "ghcr.io/voluma-bio/voluma-sandbox@sha256:c14fbad3fbb9c397bd1c3359a1ab7e4fd5d347ec3406b9516f2c0b0847971c68";
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:b1b7bb213763305c6ebbae980a9f8c7783420ff94f4882a0c308e4532afdc47b";
 
 /**
  * The commit this runner's checkout is at, which a run records as the source of its workflow
@@ -242,7 +228,7 @@ export function runnerConfig() {
      * `RUNNER_THINKING`: the thinking level of a `voluma` run's roles whose file sets none, or of
      * every role when the model is forced, set as each Pi agent's `thinkingLevel`; main.ts refuses a non-off level an alias's model does
      * not support, since Pi would quietly use another. Unset or "off": no requested effort
-     * (DeepSeek: thinking disabled; Muse: provider default). Visitor runs: "off".
+     * (DeepSeek: thinking disabled; Muse: provider default).
      */
     thinking: thinkingLevel(),
     /**
@@ -250,11 +236,6 @@ export function runnerConfig() {
      * thinking level, at the nearest the forced model supports, unless `RUNNER_THINKING` sets one.
      */
     modelForced: optional("RUNNER_MODEL") !== undefined,
-    /**
-     * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
-     * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
-     */
-    visitorModel: visitorModel(),
     modal,
     /**
      * The gateway sandboxes reach providers through, and the secrets their tokens are minted

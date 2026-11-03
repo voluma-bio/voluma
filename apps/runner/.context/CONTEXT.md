@@ -176,7 +176,7 @@ The tool (`packages/harness/src/tools/segment-sam.ts`) checks the paths and runs
 (`packages/voluma-sam`, baked into the sandbox image with Node 24 and `ffmpeg`) in the calling
 thread's sandbox, with the run's abort signal and a 30-minute timeout; the runner holds no
 volume and does none of the work. The program reads the `.npy` by position (never whole), crops it (`subVolume`, else
-the tissue plus a margin, always including the boxes), encodes lossless H.264, sends it to Meta
+the tissue plus a margin, always including the prompts), encodes lossless H.264, sends it to Meta
 through the gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the bearer; the
 sandbox's network uses the gateway's SNI or dedicated IPv4; only a sandbox whose role is granted `segment_sam` gets the
 network and the token, so a check sandbox stays `network: none` with no token), decodes the masks (`sam-mask.ts`, a port of Meta's
@@ -452,12 +452,11 @@ A run's model is decided by the API when the run is created and arrives as `run.
 Without `run.model`, a role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
 `RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
 (no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
-set, forces every alias to one model. Each configured alias's provider key is required at start. A
-visitor run without `run.model` uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
+set, forces every alias to one model. Each configured alias's provider key is required at start.
 
-A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
+A run made at `/new` carries `run.thinking` (low, medium or high; the API records it, default medium), which every role uses at the nearest level its model supports (`nearestThinking`). Without it (an older run), a role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
 levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a test
-run), `RUNNER_THINKING` when set applies to every role, and otherwise each role keeps its file's level at the nearest the forced model supports, `off` for a model with no reasoning (`config.modelForced`; `main.ts` refuses at boot a `RUNNER_THINKING` the model lacks) (Jimmy, 2 Nov: forcing the model must not turn thinking off). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+run), `RUNNER_THINKING` when set applies to every role, and otherwise each role keeps the run's level (else its file's) at the nearest the forced model supports, `off` for a model with no reasoning (`config.modelForced`; `main.ts` refuses at boot a `RUNNER_THINKING` the model lacks) (Jimmy, 2 Nov: forcing the model must not turn thinking off). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
@@ -465,7 +464,7 @@ role's set level against its model (the role files load per run); both use `thin
 only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
 guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
 DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
-without asking Muse for an unsupported effort. With `run.model`, the role file's level goes to the nearest level the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`), and `RUNNER_THINKING` is checked against the aliases only. Visitor runs always use `"off"`. The level is
+without asking Muse for an unsupported effort. With `run.model`, the role file's level goes to the nearest level the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`), and `RUNNER_THINKING` is checked against the aliases only. Visitor runs get the same levels as anyone's (fitted with `nearestThinking` to the model they run on). The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
