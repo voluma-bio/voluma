@@ -48,9 +48,6 @@
 - **The example on Studies.** Its sample counts as Done (#454), but its progress mark and the Samples tree's glyph are still amber To check, which nobody can act on. A neutral "Example" mark would read better.
 - **Example studies hold only reference inputs.** Reading a study reads every input in it. `seed:example` and `import:run` should assert that an example study has only the reference input.
 - **Mark and view caps count characters.** `MAX_MARK_BYTES` and `MAX_VIEW_BYTES` (`runs.ts`) measure `JSON.stringify(...).length`, so a note of multi-byte characters can be up to 3× the cap; `browserLimit` (256 KB) still bounds the request. Measure UTF-8 bytes.
-- **Drop the `study_scans` view** once the deploy that renamed the table to `study_members`
-  (migration `0023_study_members.sql`) is live: a migration `DROP VIEW "study_scans"`. The view only
-  keeps the previous API deployment running during that deploy's overlap; nothing reads it now.
 - **Delete `readOldDump` in `src/ops/import-run.ts`** once no run dump written before the
   `studyMembers` key remains (those have `studyScans` for the study rows and `studyInputs` for
   the input rows, e.g. `r2:dev/runs/732a2eea…`).
