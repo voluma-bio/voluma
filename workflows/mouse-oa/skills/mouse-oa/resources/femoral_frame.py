@@ -15,11 +15,14 @@ joint face puts a and b across the notch and DFL comes out a third of its size);
 most 0.5) and c-d across the condyles (|cos| to ML at least 0.7), so points placed with the sides and the front swapped
 are refused on any knee, left or right; and SI (b to a) pointing toward the shaft. Also refused: a missing landmark,
 coincident landmarks, a points file or frame on another grid.
-Two refusals are not about the points and are raised as a To check item, not answered by moving them: a femur label
-shorter than 4.5 mm along its shaft, whose axes cannot be read (the labels or the field of view cut it off), and an axis
-the bending plane does not confirm (the two reads disagree, or the frame has no bending plane: a nearly straight knee or
-a shaft out of the field) that a render of the scan, its image axes named as scan axes, contradicts. A confirmed axis is
-not open to a render's reading: a render that seems to disagree has its image axes mislabelled.
+A ruler that fails against the label's ML axis is refused one of three ways. It fails against the bending-plane normal
+too and the two axes agree: re-place the points, with no way out (a render that seems to disagree has its image axes
+mislabelled). It fits the normal: the label's axis may be wrong, so leave the points and raise a To check item. Otherwise
+(the axes disagree, or the frame has no bending plane: a knee bent under 20 degrees or a shaft out of the field):
+re-place the points, unless a render of the scan, its image axes named as scan axes, shows the condyles along another
+direction; then leave them and raise a To check item. A femur label shorter than 4.5 mm along its shaft, whose axes
+cannot be read (the labels or the field of view cut it off), is also raised as a To check item, not answered by moving
+the points.
 
 Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
         distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml and si vectors, zyx) and checks;
@@ -50,9 +53,14 @@ MIN_WIDTH_ML = 0.7
 # |cos| between the label's ML axis and the bending-plane normal at or above which the axis counts as confirmed (about 32
 # degrees). On threshold-split labels of ten lab scans with a bending plane in the frame: OA7-1L 0.996, OA6-1RK 0.98, OA6-2RK
 # 0.95, OA6-9RK 0.90, OA6-17LK9 0.86 confirm; OA7-3R 0.76, OA8-17L 0.58, OA8-19L 0.53 do not (OA6-14LK3 and OA7-4R had no
-# bending plane). A confirmed axis can be off by this much and correct points still pass both ruler checks.
+# bending plane). A ruler is refused with no way out only when it fails against both reads and they agree, so correct points
+# within the checks' limits of either read are never sent back.
 MIN_ML_AGREE = 0.85
 BENDING_PLANE = 'span of the two shaft axes'  # orient_joint.py's plane_rule when the normal is the bending-plane normal
+# The normal's error is about the shaft axes' error over sin(bend), so a knee bent less than this has no usable normal. Lab
+# scans above: 25 to 68 degrees.
+MIN_BEND_DEG = 20.0
+MOSTLY = 0.85  # a direction with a component at least this large runs "mostly" along that scan axis
 # The femur label must run at least this far along its shaft for its axes to be read. Whole labels: OA6-1RK 5.31 mm,
 # OA6-2RK 5.86. Cut to the distal few mm (review of #488), the ML axis swings by up to 42 degrees below 4.5 mm of label and by
 # under 3 degrees above it.
@@ -67,9 +75,12 @@ def unit(v):
 
 
 def direction(v):
-    """A direction for a refusal: the unit vector in scan (z, y, x) and the scan axis it runs mostly along."""
+    """A direction for a refusal: the unit vector in scan (z, y, x) and the scan axis it runs mostly along, or the two it
+    runs between."""
     u = unit(np.asarray(v, float))
-    return f"{np.round(u, 2).tolist()} (scan z, y, x), mostly scan {'zyx'[int(np.argmax(np.abs(u)))]}"
+    first, second = np.argsort(np.abs(u))[::-1][:2]
+    along = f"mostly scan {'zyx'[first]}" if abs(u[first]) >= MOSTLY else f"between scan {'zyx'[first]} and {'zyx'[second]}"
+    return f'{np.round(u, 2).tolist()} (scan z, y, x), {along}'
 
 
 def main_axis(p):
@@ -159,35 +170,40 @@ def main():
         sidecar.fail(f"the femur label runs only {checks['femur_length_mm']:.2f} mm along its shaft (at least {MIN_FEMUR_MM}): "
                      "too little shaft is labelled or in the field of view to find the femur's axes, so the labels or the scan "
                      'are the problem, not the points. Do not move the points: raise a To check item naming this')
-    checks['a_b_cos_to_ml'] = abs(unit(pm['a'] - pm['b']) @ ml)
-    checks['c_d_cos_to_ml'] = abs(unit(pm['c'] - pm['d']) @ ml)
     normal = unit(np.array(knee['normal_zyx'], float))  # voxel-index direction; frames need isotropic voxels, so mm agrees
+    checks['bending_plane'] = knee.get('plane_rule') == BENDING_PLANE and (knee.get('bend_deg') or 0) >= MIN_BEND_DEG
     checks['ml_cos_to_bending_normal'] = abs(ml @ normal)
-    checks['bending_plane'] = knee.get('plane_rule') == BENDING_PLANE
-    confirmed = checks['bending_plane'] and checks['ml_cos_to_bending_normal'] >= MIN_ML_AGREE
-    axis = f"the femur's mediolateral axis runs along {direction(ml)}"
-    if confirmed:
-        axis += (f": confirmed by two reads that agree (|cos| {checks['ml_cos_to_bending_normal']:.2f}), the long axis of the "
-                 "condyles' cross-section in the femur label and the normal of the plane the femur and tibia shafts bend in "
-                 '(frame.json). The condyles sit side by side along that direction on this scan. A render that seems to show '
-                 'them along another direction has its image axes mislabelled: name the scan axis along each image axis of '
-                 'that render before you re-place the points. Which side is lateral and where the front is still come from a '
-                 'render of this scan')
-        way_out = ''
-    else:
-        axis += (", read from the long axis of the condyles' cross-section in the femur label; the bending plane does not "
-                 + (f"confirm it (|cos| {checks['ml_cos_to_bending_normal']:.2f} to its normal, at least {MIN_ML_AGREE})"
-                    if checks['bending_plane'] else 'confirm it (frame.json has none: the knee is nearly straight or a shaft is out of the field)'))
-        way_out = (' If a render of this scan, with each image axis named as a scan axis, shows the condyles side by side along '
-                   'another direction, leave the points and raise a To check item naming the printed axis')
-    if checks['a_b_cos_to_ml'] > MAX_LENGTH_ML:
-        sidecar.fail(f"a-b runs along {direction(pm['a'] - pm['b'])}, side to side (|cos| {checks['a_b_cos_to_ml']:.2f} to the "
-                     f'mediolateral axis, at most {MAX_LENGTH_ML}), but DFL runs from the front of the groove to the notch, in '
-                     f'the sagittal plane: {axis}. Re-place a and b.{way_out}')
-    if checks['c_d_cos_to_ml'] < MIN_WIDTH_ML:
-        sidecar.fail(f"c-d runs along {direction(pm['c'] - pm['d'])}, not side to side (|cos| {checks['c_d_cos_to_ml']:.2f} to "
-                     f'the mediolateral axis, at least {MIN_WIDTH_ML}), but DFW spans the two condyles: {axis}. Re-place c and '
-                     f'd.{way_out}')
+    agree = checks['ml_cos_to_bending_normal']
+    for name, ends, limit, fits, wrong, rule in (
+        ('a-b', 'a and b', f'at most {MAX_LENGTH_ML}', lambda c: c <= MAX_LENGTH_ML, 'side to side',
+         'DFL runs from the front of the groove to the notch, in the sagittal plane'),
+        ('c-d', 'c and d', f'at least {MIN_WIDTH_ML}', lambda c: c >= MIN_WIDTH_ML, 'not side to side',
+         'DFW spans the two condyles'),
+    ):
+        v = unit(pm[name[0]] - pm[name[2]])
+        to_ml = checks[f'{name[0]}_{name[2]}_cos_to_ml'] = abs(v @ ml)
+        to_normal = checks[f'{name[0]}_{name[2]}_cos_to_bending_normal'] = abs(v @ normal)
+        if fits(to_ml):
+            continue
+        head = (f'{name} runs along {direction(v)}, {wrong} (|cos| {to_ml:.2f} to the mediolateral axis in the femur label, '
+                f"{limit}), but {rule}. The label's axis runs along {direction(ml)}")
+        if checks['bending_plane'] and fits(to_normal):
+            sidecar.fail(f"{head}; {name} does fit the knee's bending plane, whose normal runs along {direction(normal)} "
+                         f'(|cos| {to_normal:.2f}). The two reads of the mediolateral axis differ (|cos| {agree:.2f}), so the '
+                         f"label's axis may be wrong, not the points: leave them and raise a To check item naming both axes.")
+        if checks['bending_plane'] and agree >= MIN_ML_AGREE:
+            sidecar.fail(f'{head}, confirmed by the normal of the plane the femur and tibia shafts bend in (frame.json, |cos| '
+                         f'{agree:.2f}), and {name} fails against that normal too (|cos| {to_normal:.2f}). The condyles sit side '
+                         'by side along that direction on this scan. A render that seems to show them along another direction '
+                         'has its image axes mislabelled: name the scan axis along each image axis of that render before you '
+                         'place the points again. Which side is lateral and where the front is still come from a render of this '
+                         f'scan. Re-place {ends}.')
+        why = (f'its normal runs along {direction(normal)}, |cos| {agree:.2f} to the label\'s axis, at least {MIN_ML_AGREE}'
+               if checks['bending_plane'] else
+               f'frame.json has none: the knee bends less than {MIN_BEND_DEG:.0f} degrees or a shaft is out of the field')
+        sidecar.fail(f'{head}; the bending plane does not confirm it ({why}). Re-place {ends}. If a render of this scan, with '
+                     'each image axis named as a scan axis, shows the condyles side by side along another direction, leave '
+                     'the points and raise a To check item naming the printed axis.')
     si_seed = pm['a'] - pm['b']
     si = unit(si_seed - (si_seed @ ml) * ml)
     frame = {
