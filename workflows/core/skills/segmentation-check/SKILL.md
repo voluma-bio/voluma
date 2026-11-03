@@ -42,9 +42,9 @@ structure in two pieces is two components, each labelled. A model's name for a p
 
 The scan's notes come before any naming. A structure is **absent** when the notes put it
 outside the field or cut off (overrule them only with a render you cite), or when no candidate sits where the
-anatomy puts it after you looked; record the structure as absent, with the reason and the view it rests on (your role says who marks the output missing). Its measurements: `null` with the
-reason when nothing could be measured (outside the field, cut off); `0` with a note when its region is in the field
-and holds none. Never substitute a look-alike piece to fill an output. Raise a To check item when the notes and the
+anatomy puts it after you looked; record the structure as absent, with the reason and the view it rests on. Its
+measurements: outside the field or cut off, they can't be measured, which is not zero; in the field with none in its
+region, they are 0, with a note. Your role says who records an output as missing, and how. Never substitute a look-alike piece to fill an output. Raise a To check item when the notes and the
 CT disagree, or when the anatomy expects a structure, none is there and the notes say nothing.
 
 ## 3. SAM against a classic segmentation
