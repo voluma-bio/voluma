@@ -411,7 +411,7 @@ function focusPoint(
 }
 
 /** World mm to voxel (z, y, x): the affine's columns are orthogonal, so each is a projection. */
-function voxelOf(volume: Volume, world: readonly number[]): number[] {
+export function voxelOf(volume: Volume, world: readonly number[]): number[] {
   const m = volume.affine;
   const d = [0, 1, 2].map((r) => world[r]! - m[r]![3]!);
   const xyz = [0, 1, 2].map((j) => {

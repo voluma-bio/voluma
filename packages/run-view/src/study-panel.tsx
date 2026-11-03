@@ -16,7 +16,7 @@ import {
   type Status,
   StatusMark,
 } from "@voluma/ui";
-import { liveStatus, needsYouText, plural } from "./run-status";
+import { liveStatus, plural, toCheckText } from "./run-status";
 
 type InputStatus = { label: string; status: Status; open: number };
 
@@ -39,7 +39,7 @@ export function inputStatus(input: StudyInputDetail): InputStatus {
     waiting: input.waiting,
   });
   const open = status === "check" && input.waiting === 0 ? needsYouOf(input) : 0;
-  return { label: open > 0 ? needsYouText(open) : label, status, open };
+  return { label: open > 0 ? toCheckText(open) : label, status, open };
 }
 
 /** An input's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */

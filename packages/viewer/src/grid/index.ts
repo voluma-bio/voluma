@@ -19,6 +19,7 @@ export {
   reviewGrid,
   type StructureDisplay,
   taskBlocks,
+  voxelOf,
 } from "./review";
 export { readView, type StoredView, storedWords, storeView } from "./saved-view";
 export type {

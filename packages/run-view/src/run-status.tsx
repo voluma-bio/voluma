@@ -89,8 +89,8 @@ export function liveStatus(
     : runStatus(run);
 }
 
-/** What needs a person on one run: a count of its items, never of samples ("3 to check"). */
-export const needsYouText = (n: number) => `${n} to check`;
+/** What needs a person on one run, final outputs on the agent loop and items on the task loop, never samples ("3 to check"). */
+export const toCheckText = (n: number) => `${n} to check`;
 
 /** A run with a held call the researcher can answer (`StudyRunSummary.waiting`): whatever its row says. */
 const WAITING_ON_YOU: RunStatus = { label: "Waiting on you", status: "check" };
@@ -108,7 +108,7 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
       // To check means needs you: a card nobody can accept outranks Reviewed too.
       if (state.outcome === "completed")
         return review?.needsYou
-          ? { label: needsYouText(review.needsYou), status: "check" }
+          ? { label: toCheckText(review.needsYou), status: "check" }
           : review?.reviewedAt
             ? { label: "Reviewed", status: "done" }
             : { label: "Checked", status: "done" };

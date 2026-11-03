@@ -97,7 +97,7 @@ function Values(props: FinalOutputsProps) {
     .map((s) => ({ ...s, rows: onlyNeeds ? s.rows.filter((r) => needing.has(r.id)) : s.rows }))
     .filter((s) => s.rows.length > 0);
   if (groups.length === 0)
-    return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing needs you.</p>;
+    return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing to check.</p>;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 py-1.5">
       {groups.map((s) => (

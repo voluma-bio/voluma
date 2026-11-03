@@ -54,6 +54,8 @@ import {
   type PlaneFit,
   QUAD_START,
   type QuadLayout,
+  voxelOf,
+  type Zyx,
 } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
 import {
@@ -70,7 +72,7 @@ import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
 import { MainConversation } from "./main-conversation";
-import { QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
+import { gridKeyOf, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
 import { FinalOutputs, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
@@ -201,13 +203,6 @@ export function OutputsReview({
   const focusKey = item?.focus && JSON.stringify(item.focus);
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
-  // A selected published ruler or point puts the slices through its (first) end, so a Navigate drag
-  // can take it; the same object until another output is in view, so panning isn't undone.
-  const inViewId = inView?.id;
-  const rulerFocus = useMemo(
-    () => (blocks.annotations.some((a) => a.id === inViewId) ? { on: [inViewId!] } : undefined),
-    [blocks, inViewId],
-  );
   const [onlyNeeds, setOnlyNeeds] = useState(false);
   const needing = review.needing.size;
   const [leftTab, setLeftTab] = useState("conversation");
@@ -224,6 +219,23 @@ export function OutputsReview({
   const store = run.example ? exampleMarks : runMarks;
   const settled = runMarks.settled;
   const marking = useMarking(QUAD_TOOLS, store);
+  // Opening a published ruler or point puts the slices through its first end once, so a Navigate
+  // drag can take it; a To check item's own focus wins, and later events leave the slices alone.
+  const inViewId = inView?.id;
+  const aimedFor = useRef<string | undefined>(undefined);
+  const { jumpTo } = marking;
+  useEffect(() => {
+    if (!inViewId || item || aimedFor.current === inViewId) return;
+    const a = blocks.annotations.find((x) => x.id === inViewId);
+    const on = a && blocks.volumes.find((v) => v.id === a.volumeId);
+    const image = on && blocks.volumes.find((v) => v.kind === "image" && v.gridId === on.gridId);
+    const gridKey = image && gridKeyOf(image);
+    if (!a || !image || !gridKey) return;
+    aimedFor.current = inViewId;
+    const end = voxelOf(image, a.kind === "point" ? a.position : a.a);
+    const at = end.map((n, i) => Math.max(0, Math.min(image.shapeZyx[i]! - 1, Math.round(n))));
+    jumpTo({ at: at as unknown as Zyx, gridKey, taskId: inViewId });
+  }, [inViewId, item, blocks, jumpTo]);
   const allViews = useMemo(() => savedViews(events), [events]);
   const views = useSavedViews(run, allViews, reopen);
   const scene = useRef<SceneHandle>(null);
@@ -397,7 +409,7 @@ export function OutputsReview({
         subject={inView.id}
         shown={shownOf(inView)}
         nameOf={nameOf}
-        focus={(trailOpen ? undefined : focus) ?? rulerFocus}
+        focus={trailOpen ? undefined : focus}
         marking={marking}
         quad={{
           layout,
@@ -495,7 +507,7 @@ export function OutputsReview({
           }
           icon={<Sigma />}
           badge={needing || undefined}
-          badgeLabel={`${needing} need you`}
+          badgeLabel={`${needing} to check`}
           tools={
             <>
               {(!live || needing > 0 || onlyNeeds) && (
@@ -506,7 +518,7 @@ export function OutputsReview({
                   disabled={needing === 0 && !onlyNeeds}
                   onClick={() => setOnlyNeeds(!onlyNeeds)}
                 >
-                  Needs you <span className="font-semibold">{needing}</span>
+                  To check <span className="font-semibold">{needing}</span>
                 </Button>
               )}
               <Button
