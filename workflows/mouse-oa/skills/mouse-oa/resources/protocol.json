@@ -30,6 +30,8 @@
     "point_step_um": 42,
     "max_gap_um": 250,
     "off_tibia_margin_um": 105,
+    "max_jump_um": 200,
+    "jump_overlap_um": 500,
     "qc_panels": 6
   },
 

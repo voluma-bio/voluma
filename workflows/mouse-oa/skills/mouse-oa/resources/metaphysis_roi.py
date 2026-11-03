@@ -3,7 +3,9 @@
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
 it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `start_um` below it, and
 there is no thickness fallback. A curve point more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused,
-naming the section, and so is a face that leaves bone at plate level untraced (over a section's bone, points more than `max_gap_um` of the spec apart or the first or last point more than that short of the bone's ends; over the rows with tibia at plate level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count). The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
+naming the section, and so is a face that leaves bone at plate level untraced (over a section's bone, points more than `max_gap_um` of the spec apart or the first or last point more than that short of the bone's ends; over the rows with tibia at plate level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count),
+and so is a face that jumps between neighbouring traced sections (a median W change, over the U columns both cover on the tibia's footprint
+when they share at least `jump_overlap_um`, of more than `max_jump_um` plus the sections' distance apart). The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
 ROI-3 is the slab between `start_um` and `start_um + length_um` below that face (measured along W), inside the filled tibial
 cross-section, at least `cortex + cortex_clearance_um` from its outer edge. Those, and `cortex_search_factor`, come from the spec
@@ -70,6 +72,7 @@ from annotations import (
     load_annotations,
     need,
     refuse_gaps,
+    refuse_jumps,
     refuse_off_tibia,
     traced_surface,
 )
@@ -173,7 +176,9 @@ def main():
     dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
     refuse_off_tibia(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
     refuse_gaps(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
-    eroded, plate = eroded_marks(ann, 'growth_plate_distal_curves', h.shape, footprint(tib))
+    on_bone = footprint(tib)
+    refuse_jumps(ann, 'growth_plate_distal_curves', on_bone, a.spec, vox)
+    eroded, plate = eroded_marks(ann, 'growth_plate_distal_curves', h.shape, on_bone)
     check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox, eroded)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
@@ -213,7 +218,7 @@ def main():
     placed = {
         'roi-metaphyseal': objects.mask(out / 'roi-metaphyseal.npy', roi, like=like, **meta),
         'cortex': objects.mask(out / 'cortex-object.npy', cortex, like=like, **meta),
-        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=footprint(tib), **meta),  # heights along W
+        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=on_bone, **meta),  # heights along W
     }
     window = a.window
     overlays = [(roi, 'cyan'), (cortex, 'orange')]
