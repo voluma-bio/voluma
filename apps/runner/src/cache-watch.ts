@@ -16,6 +16,7 @@
  * to staging (https, or localhost). The flag line fires when a thread has 2 or more unexpected misses in its last 10
  * calls, or the run-wide unexpected rate is over 1% once the run has made 200 calls.
  */
+import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
@@ -87,16 +88,7 @@ let unexpected = 0;
 let misses = 0;
 let finished = false;
 
-const sleep = (ms: number, signal: AbortSignal) =>
-  new Promise<void>((resolve) => {
-    const t = setTimeout(done, ms);
-    function done() {
-      clearTimeout(t);
-      signal.removeEventListener("abort", done);
-      resolve();
-    }
-    signal.addEventListener("abort", done);
-  });
+const sleep = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }).catch(() => {});
 const mmss = (ms: number) => {
   const s = Math.round(ms / 1000);
   return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m${String(s % 60).padStart(2, "0")}s`;

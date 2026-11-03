@@ -10,6 +10,7 @@
  */
 import { once } from "node:events";
 import { createWriteStream, openAsBlob } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { Agent, FormData, fetch, Response } from "undici";
 import type { StreamStats } from "./input";
 
@@ -31,8 +32,6 @@ const MAX_CALL_MS = THIRTY_MINUTES;
 const dispatcher = new Agent({ headersTimeout: THIRTY_MINUTES, bodyTimeout: THIRTY_MINUTES });
 /** Waits before each retry of a call the gateway answered 429 (too many in flight). */
 const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function failure(res: Response): Promise<string> {
   return `${res.status} ${(await res.text()).slice(0, 500)}`;

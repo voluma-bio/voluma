@@ -41,7 +41,6 @@
     "@earendil-works/pi-agent-core": "1.4.0",
     "@earendil-works/pi-ai": "1.4.0",
     "sharp": "0.34.5",
-    "typebox": "^1.4.3",
     "zod": "catalog:",
     "@voluma/contracts": "workspace:*",
     "@voluma/workflow": "workspace:*",

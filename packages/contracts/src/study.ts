@@ -133,7 +133,6 @@ export const studyValueSchema = z.object({
   value: z.number().finite().nullable(),
   unit: z.string(),
 });
-export type StudyValue = z.infer<typeof studyValueSchema>;
 
 export const studyInputDetailSchema = z.object({
   member: studyMemberSchema,

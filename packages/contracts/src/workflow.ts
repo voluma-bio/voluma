@@ -41,4 +41,3 @@ export type WorkflowPin = z.infer<typeof workflowPinSchema>;
 export const recordedPinSchema = workflowPinSchema.extend({
   commit: z.string().regex(/^[0-9a-f]{40}$/),
 });
-export type RecordedPin = z.infer<typeof recordedPinSchema>;

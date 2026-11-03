@@ -148,7 +148,6 @@ export const claimRequestSchema = z.object({
    */
   harnesses: z.array(z.enum(["tasks", "agents"])).optional(),
 });
-export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
 export const claimSchema = z
   .object({
@@ -185,7 +184,6 @@ export const usageSchema = z.object({
 export type Usage = z.infer<typeof usageSchema>;
 
 export const heartbeatRequestSchema = z.object({ usage: usageSchema });
-export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 
 export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */

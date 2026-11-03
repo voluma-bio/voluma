@@ -8,7 +8,6 @@
  *                                   a presigned GET, the browser fetches the bytes from storage
  *   GET /runs/:runId/thumbnail      a small WebP of the run, rendered once and kept (`thumbnail.ts`);
  *                                   204 while the run has no converted intensity image yet
- *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
  *   POST /runs/:runId/tocheck/accept  Looks right on a To check item of an output version
  *                                   (`acceptToCheckRequestSchema`)
  *   POST /runs/:runId/views         a view of an output the researcher saved
@@ -229,20 +228,6 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
       c,
       await openFile(store, `${outputsPrefix(runId)}${tail}`, c.req.raw.signal),
       "private, no-cache",
-    );
-  });
-
-  app.get("/runs/:runId/messages/:messageId/snapshot", async (c) => {
-    const { runId, messageId } = c.req.param();
-    if (!z.uuid().safeParse(messageId).success) return c.json({ error: "not found" }, 404);
-    if (!(await runs.readable(readerOf(c.var.user), runId)))
-      return c.json({ error: "not found" }, 404);
-    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
-    // Written once under the message's id, never rewritten.
-    return serveFile(
-      c,
-      await openFile(store, messageSnapshotKey(runId, messageId), c.req.raw.signal),
-      "private, max-age=86400, immutable",
     );
   });
 
