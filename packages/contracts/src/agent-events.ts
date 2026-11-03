@@ -90,7 +90,7 @@ export const outputPublishedSchema = z
     kept: z.object({ reason: nonEmpty }).optional(),
     /**
      * What the review's asset converter needs per kind, which the fold ignores. Today it reads,
-     * from the task loop's `output` block: for an image, `dtype` and `unit` (a float32 `HU` scan
+     * from an output's `detail`: for an image, `dtype` and `unit` (a float32 `HU` scan
      * is loaded as int16); for a mask or labels map, the `gridId` it was made on; for a
      * surface, its `axis`; and the representation to convert as (`as`: `image`, `labels`,
      * `mask`, `surface`). The writer fills them from the catalog's `shape` and the file.

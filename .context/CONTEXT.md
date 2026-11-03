@@ -38,8 +38,7 @@ Dependencies point down: apps → feature code → packages. `contracts` and
 The harness has one run loop over one shell (`loop-shell.ts`: waking the loop, starting
 threads, stopping them, the root's end): the **agent loop** (`agents/loop.ts`: main and up to 4
 named workers, messages, published output versions). It is described in
-`packages/harness/.context/CONTEXT.md`; its roles are in `workflows/core/agents/`. The task loop
-(a task graph, a worker per task, a check per submit) was deleted ([decisions.md](decisions.md)).
+`packages/harness/.context/CONTEXT.md`; its roles are in `workflows/core/agents/`.
 `runs.harness` and the claim's `harnesses` field remain only for the deploy overlap
 (`apps/api/.context/TODO.md`).
 
