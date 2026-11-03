@@ -205,7 +205,7 @@ function StatusLine({
   let mark = <StatusMark {...status} />;
   let more: string | null = null;
   if (run && status.status === "check" && input.waiting === 0) {
-    mark = <StatusMark status="check" label={needsYouText(needsYouOf(input), run.harness)} />;
+    mark = <StatusMark status="check" label={needsYouText(needsYouOf(input))} />;
     more = waitsOn(input, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
     mark = <StatusMark {...liveStatus({ ...run, waiting: 0 })} />;

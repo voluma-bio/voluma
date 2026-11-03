@@ -346,7 +346,8 @@ export function OutputsReview({
     panes = (
       <Centered>
         <EmptyState title="The run is going">
-          The AI's plan is in the conversation. What it makes shows here as it is published.
+          The AI is still setting up. What it makes shows here as it is published, and its plan in
+          the conversation.
         </EmptyState>
       </Centered>
     );

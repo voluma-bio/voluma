@@ -89,22 +89,14 @@ export function liveStatus(
     : runStatus(run);
 }
 
-/**
- * What needs a person on a run, as its sample page says it: the agent loop counts final values
- * ("1 needs you", as its Needs you), the task loop items ("3 to check", as its To check).
- */
-export const needsYouText = (n: number, harness: StudyRunSummary["harness"]) =>
-  harness === "agents" ? `${n} ${n === 1 ? "needs" : "need"} you` : `${n} to check`;
+/** What needs a person on one run: a count of its items, never of samples ("3 to check"). */
+export const needsYouText = (n: number) => `${n} to check`;
 
 /** A run with a held call the researcher can answer (`StudyRunSummary.waiting`): whatever its row says. */
 const WAITING_ON_YOU: RunStatus = { label: "Waiting on you", status: "check" };
 
-/** A run's status; a study's newest-run summary carries the same `state`, `review` and `harness`. */
-export function runStatus({
-  state,
-  review,
-  harness,
-}: Pick<StudyRunSummary, "state" | "review" | "harness">): RunStatus {
+/** A run's status; a study's newest-run summary carries the same `state` and `review`. */
+export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Waiting", status: "waiting" };
@@ -116,7 +108,7 @@ export function runStatus({
       // To check means needs you: a card nobody can accept outranks Reviewed too.
       if (state.outcome === "completed")
         return review?.needsYou
-          ? { label: needsYouText(review.needsYou, harness), status: "check" }
+          ? { label: needsYouText(review.needsYou), status: "check" }
           : review?.reviewedAt
             ? { label: "Reviewed", status: "done" }
             : { label: "Checked", status: "done" };

@@ -68,12 +68,13 @@ function placeCounts(study: StudySummary): Map<Place, number> {
   return counts;
 }
 
-const COUNT_WORD: Record<Place, string> = {
-  "waiting-on-you": "waiting on you",
-  "needs-you": "need you",
-  running: "running",
-  done: "done",
-  "not-started": "not started",
+/** What follows a count of samples; the two groups that ask for you name the unit, since an item count says "to check". */
+const COUNT_WORD: Record<Place, (n: number) => string> = {
+  "waiting-on-you": (n) => `${n === 1 ? INPUT_WORD.one : INPUT_WORD.many} waiting on you`,
+  "needs-you": (n) => (n === 1 ? `${INPUT_WORD.one} needs you` : `${INPUT_WORD.many} need you`),
+  running: () => "running",
+  done: () => "done",
+  "not-started": () => "not started",
 };
 
 const COUNT_MARK: Record<Place, Status> = {
@@ -230,7 +231,7 @@ function StudyRow({
             <Count
               key={p.place}
               n={counts.get(p.place) ?? 0}
-              word={COUNT_WORD[p.place]}
+              word={COUNT_WORD[p.place](counts.get(p.place) ?? 0)}
               mark={ACT_ON.has(p.place) ? undefined : COUNT_MARK[p.place]}
               emphasis={ACT_ON.has(p.place)}
             />
@@ -359,7 +360,7 @@ function SamplesBlock({ study, detail }: { study: StudySummary; detail: StudyDet
               to={`/studies/${study.id}?status=${p.place}`}
               className="inline-flex items-center gap-1 rounded-sm hover:underline"
             >
-              <span className="font-semibold tabular-nums">{p.n}</span> {COUNT_WORD[p.place]}
+              <span className="font-semibold tabular-nums">{p.n}</span> {COUNT_WORD[p.place](p.n)}
             </Link>
           ))}
         </p>

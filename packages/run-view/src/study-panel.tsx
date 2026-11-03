@@ -39,7 +39,7 @@ export function inputStatus(input: StudyInputDetail): InputStatus {
     waiting: input.waiting,
   });
   const open = status === "check" && input.waiting === 0 ? needsYouOf(input) : 0;
-  return { label: open > 0 ? needsYouText(open, run.harness) : label, status, open };
+  return { label: open > 0 ? needsYouText(open) : label, status, open };
 }
 
 /** An input's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */
