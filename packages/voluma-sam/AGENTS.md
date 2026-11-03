@@ -5,6 +5,13 @@ the crop (`ffmpeg`), sends it to Meta through the run's gateway, decodes the mas
 full-grid labels plus a sidecar. Input is JSON on stdin (`src/input.ts`, also the tool's schema);
 stdout is one JSON line. Entry: `src/main.ts`; the steps are `src/run.ts`.
 
+- The tool is a generic wrapper of Meta's hosted API, with no bone or CT assumptions: per object a box
+  and any points (negative ones too) on one or more slices, or one `concept` noun phrase (never both), a
+  `direction`, and a 2D `.npy` as a single image (`input_image`, a data URL; the input's slice 0). All
+  the API takes from one media part and up to 16 objects.
+  A concept's ids are the model's: labels are `firstLabel` plus the order they first appear. The sidecar holds
+  the prompts per object as the caller gave them (the volume's own slices and pixels), and `direction`.
+  Every prompt must lie inside the crop; a clipped prompt would segment another shape, so it is refused.
 - It is bundled to one file (`pnpm --filter @voluma/sam build`, esbuild) because the sandbox
   image has Node and `ffmpeg` but no workspace. The "Sandbox image" workflow builds it and bakes
   it in as `voluma-sam`; change anything here, run that workflow, update `SANDBOX_IMAGE`.

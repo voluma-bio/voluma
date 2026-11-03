@@ -28,10 +28,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   byte-for-byte history.
 - Only `src/index.ts` reads env. It hands `createAuth` (`src/auth.ts`) the WorkOS values;
   AuthKit would otherwise read `WORKOS_*` from `process.env` itself.
-- **Guests are principals too.** `GUEST_ORGANIZATION_ID`/`GUEST_SCOPE` (read in `index.ts`)
+- **Guests are principals too.** `GUEST_ORGANIZATION_ID` (read in `index.ts`)
   make a browser holding a guest cookie a `user` with `account: "visitor"` and no email
-  (`auth.ts`); `POST /api/auth/guest` is the only minter. `readerOf` is still the only
-  place scope becomes a filter. Unset: 401.
+  (`auth.ts`); `POST /api/auth/guest` is the only minter. `readerOf` is the only
+  place the reader's filter is made. Unset: 401.
 - **Domains read the caller from the context, not the request.** The root authenticates
   once (`src/auth.ts`) and answers 401 when there is no principal. A domain app is
   `new Hono<AppEnv>()` (`src/domain.ts`) and reads `c.get("principal")`; the runner's
@@ -40,13 +40,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   token (`VOLUMA_DEBUG_TOKEN`, principal `service`/`debug`) reads every lab's runs
   (`EVERY_LAB`) and writes nothing. A subtree for signed-in members is
   `new Hono<UserEnv>().use(requireUser)`, whose handlers read the narrowed
-  `c.var.user` (`userId`, `email`, `name`, `labId`, `scope`) and never check `kind`. Any
+  `c.var.user` (`userId`, `email`, `name`, `labId`) and never check `kind`. Any
   other kind gets 403. **Research-data reads go through the reader:** a domain passes `readerOf(c.var.user)`
-  (`src/domain.ts`: `{ labId, ownerId }`, `ownerId` null for a lab member and the user's id for
-  a `self` user) into its store port's read methods, and the adapter applies it once
-  (`labId = ? AND (ownerId IS NULL OR created_by = ownerId)`). Personal settings instead use
-  the authenticated `c.var.user.userId` directly, independent of lab or research-data scope. Handlers never branch on
-  `scope`, which is server-internal; no domain reads an organization id. A domain never reads cookies, tokens or `Origin`; the CSRF and Origin checks
+  (`src/domain.ts`: `{ labId, ownerId }`, the user's id) into its store port's read methods, and
+  the adapter applies it once (`labId = ? AND created_by = ownerId`, plus the examples):
+  everyone reads only their own. Personal settings use the authenticated `c.var.user.userId`
+  directly. Handlers never branch on who is asking; no domain reads an organization id. A domain never reads cookies, tokens or `Origin`; the CSRF and Origin checks
   are the root's.
 - Each domain's factory returns a Hono app, mounted by `index.ts` with `app.route`. Use
   Hono's routing and params; the root's JSON 404 and `onError` cover the domains.
@@ -61,11 +60,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
   recovery) and the key vault. A run carries its loop (`runs.harness`, null = tasks), set at start
-  from the request's `harness` or `DEFAULT_RUN_HARNESS`. The agent loop is allowed only for an
-  organization whose `index.ts` entry sets `agentLoop`: from any other, an explicit `agents` is 403
-  and no `harness` means tasks whatever the default. A claim hands out only runs whose loop the
+  from the request's `harness` or `DEFAULT_RUN_HARNESS` (`agents` unless set), the same for every organization. A claim hands out only runs whose loop the
   runner lists (`harnesses`, absent = tasks, so an older runner never gets an agent-loop run). Keep
-  the organization gate and the claim filter when you touch start or claim; `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
+  the claim filter when you touch start or claim; `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per limit.
 - **Every run belongs to a study** (`studies`, `study_members`; `runs.study_id` is not null), and
@@ -125,7 +122,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
 - Operator CLIs (seed, archive, export and import a run, `r2:put`, `upload:scan`) live in
   `src/ops/`, not in a domain.
-- **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
+- **Limits come from env** (`RUN_LIMITS_*`, read in `index.ts`; they guard Voluma's key, `admission.ts`); the workflow catalog
   (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/`, `review/`, `scratch/person/` and `outputs/` under the example's prefix)
   (`src/ops/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and

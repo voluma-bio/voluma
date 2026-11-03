@@ -11,7 +11,7 @@ import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
 import { EvidenceNotFound } from "../ports/evidence";
 import type { Recorder } from "../recorder";
-import { keepNotes } from "./keep-notes";
+import { keepNotes, restoreMainPlan } from "./keep-notes";
 import { agentLoop, interruptedResult, openingOutputs } from "./loop";
 import { type AgentStart, firstMessageOf, skillBlock, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
@@ -133,6 +133,7 @@ async function runAgents(
     runFiles: files,
     bash: o.bash,
     release: o.release,
+    restoreMainPlan: () => restoreMainPlan(o.publish, o.runId, o.signal),
     keepNotes: (agent) => keepNotes(o.publish, o.runId, agent, o.signal),
     prepareTranscript: (agent) =>
       prepareTranscript({

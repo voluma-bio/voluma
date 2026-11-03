@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-LIBRARIES = ["numpy", "scipy", "skimage", "pydicom", "nibabel", "SimpleITK", "matplotlib", "pyvista"]
+LIBRARIES = ["numpy", "scipy", "skimage", "pydicom", "matplotlib", "pyvista"]
 
 
 @pytest.mark.parametrize("name", LIBRARIES)

@@ -186,7 +186,7 @@ export const roleModelUnset = (alias: string) =>
 export const runModelUnavailable = (model: string) =>
   `this run's AI (${model}) is not set up on this server; whoever runs Voluma sets it up`;
 export const runModelNotForVisitors = (model: string) =>
-  `${model} cannot run on your own Meta key; start the run again with a standard model`;
+  `${model} cannot run on your own key; start the run again with a model that can, or with Voluma's key`;
 
 /** Read when main reads the notice: the task may have moved on since the check failed. */
 const awaitsMain = (d: ThreadLog, threadId: string) => {

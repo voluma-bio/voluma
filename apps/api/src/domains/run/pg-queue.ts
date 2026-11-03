@@ -12,7 +12,7 @@
 import { randomBytes } from "node:crypto";
 import type { Harness } from "@voluma/contracts/ids";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
-import type { Run, VisitorKeys } from "@voluma/contracts/run";
+import type { Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
   type ReleaseReason,
@@ -58,7 +58,7 @@ import {
   readableStudies,
   type Tx,
 } from "./pg-runs";
-import { modelChoices, pickModel } from "./run-models";
+import { DEFAULT_THINKING, modelChoices, pickModel } from "./run-models";
 import { events, inputs, runs, studies, studyMembers } from "./schema";
 
 /**
@@ -265,9 +265,6 @@ async function lateWrite(tx: Tx, runId: string, readSeq: number | undefined) {
   return lateResearcherWrite(rows, readSeq);
 }
 
-/** A run's error when its org is gone from config: a clause read after "The run stopped: ". */
-const NO_LIMITS = "this organization can no longer run work";
-
 /** What the runs of one start call share: the credentials kind comes from `keys`. */
 type Starts = {
   runs: { id: string; inputId: string }[];
@@ -276,22 +273,24 @@ type Starts = {
   keys?: VisitorKeys;
   /** The model the caller asked for; `pickModel` decides the run's. */
   model?: string;
+  /** The thinking level the caller asked for; absent: `DEFAULT_THINKING`. */
+  thinking?: RunThinking;
   /** The loop the caller asked for; absent: `defaultHarness`. */
   harness?: Harness;
 };
 
-/** A limit reached is 429, except the per-caller one: the web branches on its 409. */
+/** A limit reached is 429; an account without a key is 403. */
 const limitRefusal = (refused: Refusal) =>
-  new HTTPException(refused === "per-caller" ? 409 : 429, { message: refusalMessage[refused] });
+  new HTTPException(refused === "no-key" ? 403 : 429, { message: refusalMessage[refused] });
 
 /**
- * `limits` has every org the API serves (index.ts). An org missing from it is one no
- * longer configured: its queued runs fail and its running ones stop. `workflowOf` resolves a
+ * `limits.voluma` has every org that may run on Voluma's keys (index.ts). A `voluma` run of an org
+ * missing from it (no longer configured) fails if queued and stops if running. `workflowOf` resolves a
  * study's workflow id to the pins its runs record and the outputs a selection is checked against.
  */
 export function pgRunQueue(
   db: PostgresJsDatabase,
-  limits: ReadonlyMap<string, Limits>,
+  limits: Limits,
   vault: KeyVault,
   notifier: Notifier,
   workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputEntry[] } | undefined,
@@ -299,21 +298,12 @@ export function pgRunQueue(
   modelOverride: string | null,
   /** `DEFAULT_RUN_HARNESS`: the loop of a run whose start names none. */
   defaultHarness: Harness,
-  /** Whether an organization's members may start the agent loop (index.ts). */
-  agentLoopOf: (labId: string) => boolean,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
       return work(tx);
     });
-
-  /** Browser calls only: a signed-in user's or guest's org is always configured (auth.ts). */
-  const limitsOf = (labId: string): Limits => {
-    const found = limits.get(labId);
-    if (!found) throw new Error(`organization ${labId} has no run limits`);
-    return found;
-  };
 
   type Hold = (runId: string, labId: string, keys: VisitorKeys) => void;
 
@@ -339,10 +329,10 @@ export function pgRunQueue(
     }
   };
 
-  const messageContext = (reader: Reader) => ({
-    limits: limitsOf(reader.labId),
+  const messageContext = {
+    limits,
     pinsOf: (workflowId: string) => workflowOf(workflowId)?.pins,
-  });
+  };
 
   const workflowFor = (workflowId: string) => {
     const workflow = workflowOf(workflowId);
@@ -350,23 +340,20 @@ export function pgRunQueue(
     return workflow;
   };
 
-  /** Every input must be readable; an uncompleted upload exists only for its uploader. Returns them by id. */
-  const checkInputs = async (tx: Tx, reader: Reader, caller: { userId: string }, ids: string[]) => {
+  /** Every input must be readable (an uncompleted upload is readable only by its uploader). Returns them by id. */
+  const checkInputs = async (tx: Tx, reader: Reader, ids: string[]) => {
     const found = await tx
       .select({
         id: inputs.id,
         name: inputs.name,
         status: inputs.status,
-        uploadedBy: inputs.uploadedBy,
       })
       .from(inputs)
       .where(and(readableInputs(reader), inArray(inputs.id, ids)));
     const byId = new Map(found.map((input) => [input.id, input]));
     for (const id of ids) {
       const input = byId.get(id);
-      if (!input || (input.status !== "ready" && input.uploadedBy !== caller.userId)) {
-        throw new HTTPException(404, { message: "unknown input" });
-      }
+      if (!input) throw new HTTPException(404, { message: "unknown input" });
     }
     if (found.some((input) => input.status !== "ready"))
       throw new HTTPException(409, { message: "The scan is still uploading." });
@@ -396,16 +383,10 @@ export function pgRunQueue(
     if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
-    // Internal until the agent loop ships: only allowed organizations (never guests) may ask
-    // for it, and the default loop applies to them alone, so flipping it never fails another
-    // account's run.
-    const loopOpen = agentLoopOf(reader.labId) && !caller.guest;
-    if (starts.harness === "agents" && !loopOpen)
-      throw new HTTPException(403, { message: "The agent loop is not open to this account yet." });
-    const harness = starts.harness ?? (loopOpen ? defaultHarness : "tasks");
-    const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
+    const harness = starts.harness ?? defaultHarness;
+    const used = await usage(tx, reader.labId, credentials);
     for (const { id, inputId } of starts.runs) {
-      const refused = admit("start", limitsOf(reader.labId), used, { credentials });
+      const refused = admit("start", limits, reader.labId, used, { credentials });
       if (refused) throw limitRefusal(refused);
       if (starts.keys) hold(id, reader.labId, starts.keys);
       await tx.insert(runs).values({
@@ -419,11 +400,11 @@ export function pgRunQueue(
         inputId,
         credentials,
         model,
+        thinking: starts.thinking ?? DEFAULT_THINKING,
         harness,
         state: "queued",
       });
-      used.callerUnfinished++;
-      if (credentials === "visitor") used.visitorActive++;
+      if (credentials === "visitor") used.ownKeyActive++;
     }
   };
 
@@ -458,7 +439,7 @@ export function pgRunQueue(
             ),
           );
         if (!member) throw new HTTPException(404, { message: "unknown input" });
-        await checkInputs(tx, reader, caller, [request.inputId]);
+        await checkInputs(tx, reader, [request.inputId]);
         await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
           runs: [{ id: request.id, inputId: request.inputId }],
@@ -489,7 +470,6 @@ export function pgRunQueue(
         const found = await checkInputs(
           tx,
           reader,
-          caller,
           request.inputs.map((input) => input.inputId),
         );
         await tx.insert(studies).values({
@@ -541,7 +521,7 @@ export function pgRunQueue(
       tx: Queryable = db,
       studyWorkflowId?: string,
     ): Promise<string | null> {
-      const refusal = await messageRefusal(tx, messageContext(reader).pinsOf, caller, {
+      const refusal = await messageRefusal(tx, messageContext.pinsOf, caller, {
         ...messageTargetOf(run),
         studyWorkflowId,
       });
@@ -555,9 +535,7 @@ export function pgRunQueue(
       runId: string,
       msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) =>
-      db.transaction((tx) =>
-        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, false),
-      ),
+      db.transaction((tx) => decideMessage(tx, messageContext, reader, caller, runId, msg, false)),
 
     /** Stores the message, reopening the run if it had ended; one transaction under the queue lock. */
     async sendMessage(
@@ -567,7 +545,7 @@ export function pgRunQueue(
       msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) {
       const result = await locked((tx) =>
-        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, true),
+        decideMessage(tx, messageContext, reader, caller, runId, msg, true),
       );
       if (!result.duplicate) notifier.notify(runId);
       return result;
@@ -582,24 +560,28 @@ export function pgRunQueue(
       body: AnswerApprovalRequest,
     ) {
       const { duplicate } = await locked((tx) =>
-        answerApproval(tx, messageContext(reader), reader, caller, runId, requestId, body),
+        answerApproval(tx, messageContext, reader, caller, runId, requestId, body),
       );
       if (!duplicate) notifier.notify(runId);
     },
 
     /**
      * `awaiting-keys` → `queued`, for the run's own starter, holding the new keys. The run
-     * stays as it was when the visitor cap is reached or the vault is full.
+     * stays as it was when the own-key cap is reached or the vault is full.
      */
-    resume: (reader: Reader, userId: string, runId: string, keys: VisitorKeys) =>
+    resume: (reader: Reader, runId: string, keys: VisitorKeys) =>
       attempt(async (tx, hold) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
         if (!run) throw new HTTPException(404, { message: "not found" });
-        if (run.startedBy !== userId)
-          throw new HTTPException(403, { message: "Only the run's starter can resend keys." });
         if (run.state.status !== "awaiting-keys")
           throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        const refused = admit("resume", limitsOf(reader.labId), await usage(tx, reader.labId), run);
+        const refused = admit(
+          "resume",
+          limits,
+          reader.labId,
+          await usage(tx, reader.labId, run.credentials),
+          run,
+        );
         if (refused) throw limitRefusal(refused);
         hold(runId, reader.labId, keys);
         await tx
@@ -650,16 +632,10 @@ export function pgRunQueue(
         // Failing or skipping a run changes none of these counts, so read each org's once.
         const usages = new Map<string, Usage>();
         for (const run of queued) {
-          const orgLimits = limits.get(run.labId);
-          if (!orgLimits) {
-            await fail(tx, run.id, NO_LIMITS);
-            vault.drop(run.id);
-            continue;
-          }
           if (run.credentials === "voluma") {
-            const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
+            const used = usages.get(run.labId) ?? (await usage(tx, run.labId, "voluma"));
             usages.set(run.labId, used);
-            const refused = admit("claim", orgLimits, used, {
+            const refused = admit("claim", limits, run.labId, used, {
               credentials: "voluma",
               started: run.startedAt !== null,
             });
@@ -710,9 +686,9 @@ export function pgRunQueue(
         const run = await lockRun(tx, runId, eq(runs.leaseToken, leaseToken));
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
-        // An org dropped from config stops its running runs here (its queued ones fail at claim).
-        if (!limits.has(run.labId)) {
-          await fail(tx, runId, NO_LIMITS);
+        // An org dropped from config stops its running Voluma-key runs here (its queued ones fail at claim).
+        if (run.credentials === "voluma" && !limits.voluma.has(run.labId)) {
+          await fail(tx, runId, refusalError["no-key"]);
           return { stop: true };
         }
         await tx

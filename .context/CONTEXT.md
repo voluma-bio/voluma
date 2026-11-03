@@ -39,10 +39,10 @@ The harness has two run loops over one shell (`loop-shell.ts`: waking the loop, 
 threads, stopping them, the root's end): the **task loop** (`run-loop.ts`: a task graph,
 a worker per task, a check on every submit, fix rounds) and the **agent loop** (`agents/loop.ts`:
 main and up to 4 named workers, messages, published output versions). A run's loop is chosen when
-it is created (`runs.harness`, null = tasks; `DEFAULT_RUN_HARNESS` and the organization's
-`agentLoop` flag in `apps/api/src/index.ts`); at its first claim the runner copies it onto the root
-`thread.started` (`harness`), and a resumed run keeps that pinned loop. The task loop is the default
-and the only loop an organization without the flag gets (guests, the hackathon's judges). This section
+it is created (`runs.harness`, null = tasks; the start's `harness`, else `DEFAULT_RUN_HARNESS`, `agents`
+unless set, the same for every organization); at its first claim the runner copies it onto the root
+`thread.started` (`harness`), and a resumed run keeps that pinned loop. The task loop runs only when a
+start asks for it, and old runs keep theirs. This section
 describes the task loop unless a bullet says otherwise; the agent loop is in
 `packages/harness/.context/CONTEXT.md`, its roles in `workflows/core/roles/`.
 
@@ -223,19 +223,20 @@ The original design and the evidence behind it are in the archived voluma-bio/do
 `principal` (`apps/api/src/domain.ts`): `service` for the runner's bearer token
 (`VOLUMA_API_TOKEN`) or the optional read-only debug token (`VOLUMA_DEBUG_TOKEN`, every lab's
 runs, for agents debugging a run), `user` for a WorkOS AuthKit session cookie of a member of an allowed
-organization: the Yao Lab (`WORKOS_LAB_ORGANIZATION_ID`, scope `lab`) or, if set, the Judges
-organization (`WORKOS_JUDGES_ORGANIZATION_ID`, scope `self`). `org_id` must be in that list,
+organization: the Yao Lab (`WORKOS_LAB_ORGANIZATION_ID`) or, if set, the Judges
+organization (`WORKOS_JUDGES_ORGANIZATION_ID`). `org_id` must be in that list,
 checked on every request and again in the sign-in callback. The user's `labId` is their
-organization and `scope` its entry; domains receive `readerOf(user)` and never branch on
-`scope`. `self` has two producers, one per identity source: WorkOS users in the Judges
-organization, and anonymous demo visitors, whom our server mints (a sealed cookie, no WorkOS
-user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organization, so
-none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
-per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape.
+organization; domains receive `readerOf(user)` and never branch on who is asking. Everyone
+reads only the records they created, plus the examples; the only thing an account changes
+is whose key runs use: the listed organizations get Voluma's, anyone else (a guest, or any
+account that signs up) brings their own, and an organization with no entry in `index.ts`
+never gets Voluma's key. Guests are anonymous demo visitors, whom our server mints (a sealed
+cookie, no WorkOS user, no email). No WorkOS user signs into a Demo organization, so none is
+in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
+per-request allow-list is the only control.
 
-**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `self` or `lab`, default `self`) set, a request with no session cookie, no bearer and a valid guest cookie
-is a guest: a `user` principal with `account: "visitor"`, no email, and that organization and
-scope, so domains and `readerOf` treat it like any member. Its id (`guest_…`) is minted by
+**Guests.** With `GUEST_ORGANIZATION_ID` set, a request with no session cookie, no bearer and a valid guest cookie
+is a guest: a `user` principal with `account: "visitor"`, no email, and that organization, so domains and `readerOf` treat it like any member. Its id (`guest_…`) is minted by
 `POST /api/auth/guest` (same-origin, behind the CSRF guard; it returns the `/me` body) into its
 own sealed cookie (`voluma-guest`, `__Host-` on https, HttpOnly, 400 days; same seal as the
 session cookie, no WorkOS call). A GET or a 404 never mints. The web gate calls it when `/me`

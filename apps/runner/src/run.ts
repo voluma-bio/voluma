@@ -123,7 +123,6 @@ export interface RunnerContext {
   models: Models;
   /** The model behind each alias the config sets (`config.models`), resolved at startup. */
   aliases: Record<string, Model<Api>>;
-  visitorModel: Model<Api>;
   /** The run's bucket. */
   objects: ObjectStore;
   log(line: string): void;
@@ -381,15 +380,10 @@ async function claimBody(
       );
       // The model every role uses: `RUNNER_MODEL` (a plumbing check) over the run's own model
       // (`run.model`, chosen by the API) over the role file's alias. A run without one predates
-      // the choice. A visitor's key and scan go to Standard-mode Meta models only, whatever the
-      // API recorded, so a run that asks for another fails here and says which.
+      // the choice.
       const runModel = (): Model<Api> | undefined => {
         if (!run.model || config.modelForced) return undefined;
         const [provider = "", ...id] = run.model.split("/");
-        if (visitor && !isVisitorSafe({ provider, id: id.join("/") })) {
-          log(`the visitor run's model ${run.model} is not a Standard-mode Meta model`);
-          throw new Error(runModelNotForVisitors(run.model));
-        }
         const model = models.getModel(provider, id.join("/"));
         if (!model || !keyFor(provider)) {
           log(
@@ -400,28 +394,35 @@ async function claimBody(
         return model;
       };
       const chosen = runModel();
-      // Without a run model, a role's model is its file's alias; a visitor's main thread keeps
-      // it when that is Standard-mode Meta, else the visitor model.
+      // Without a run model, a role's model is its file's alias. A run on its own key sends that key
+      // and the scan to Standard-mode Meta models only, whichever way the model was picked
+      // (forced, alias or the run's), so a run that gets another fails here and says which.
       const roleModel = ({ name, model: alias }: AgentDefinition) => {
-        if (chosen) return chosen;
-        const model = ctx.aliases[alias];
+        const model = chosen ?? ctx.aliases[alias];
         if (!model) {
           log(
             `the ${name} role's model "${alias}" is unset: set RUNNER_MODEL_${alias.toUpperCase()}`,
           );
           throw new Error(roleModelUnset(alias));
         }
-        return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
+        if (visitor && !isVisitorSafe({ provider: model.provider, id: model.id })) {
+          log(
+            `the model ${model.provider}/${model.id} cannot take a run's own Meta key (not a Standard-mode Meta model)`,
+          );
+          throw new Error(runModelNotForVisitors(`${model.provider}/${model.id}`));
+        }
+        return model;
       };
-      // A role's file may set its thinking level; else the runner's; else none is sent ("off").
-      // A forced model (`RUNNER_MODEL`) keeps the role's level unless `RUNNER_THINKING` sets one.
-      // A run's or forced model gets the nearest level it supports (DeepSeek Flash has no `medium`).
+      // The level every role uses: the run's own (`run.thinking`, picked at /new) unless the runner
+      // forces its model (`RUNNER_MODEL`), where `RUNNER_THINKING` wins when set; else the role
+      // file's, else the runner's, else none is sent ("off"). A run's or forced model gets the
+      // nearest level it supports (DeepSeek Flash has no `medium`).
+      // A visitor's run thinks like anyone's: only whose key it uses differs.
       const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
-        if (visitor) return "off";
         const wanted = config.modelForced
-          ? (config.thinking ?? thinking)
-          : (thinking ?? config.thinking);
-        const level = chosen || config.modelForced ? nearestThinking(wanted, model) : wanted;
+          ? (config.thinking ?? run.thinking ?? thinking)
+          : (run.thinking ?? thinking ?? config.thinking);
+        const level = nearestThinking(wanted, model);
         assertThinking(level, [model], `the ${name} role's`);
         return level ?? "off";
       };

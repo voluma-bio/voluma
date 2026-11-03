@@ -10,11 +10,12 @@
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, APP_URL, PORT, optionally HOST (`pnpm dev` sets
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
- * GUEST_ORGANIZATION_ID with GUEST_SCOPE (self|lab, default self) to let anyone in as a guest (the repo .env).
+ * GUEST_ORGANIZATION_ID to let anyone in as a guest (the repo .env).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
- * DEFAULT_RUN_HARNESS (tasks|agents, default tasks): the loop of a run whose start names none.
- * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _VISITOR_ACTIVE, and _SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * DEFAULT_RUN_HARNESS (tasks|agents, default agents): the loop of a run whose start names none.
+ * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
+ * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
+ * and RUN_LIMITS_OWN_KEY_ACTIVE (runs on callers' own keys, queued or running, over every account); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -37,7 +38,7 @@ import { pgSnapshots } from "./adapters/pg-snapshots";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
-import type { Limits } from "./domains/run/admission";
+import type { KeyLimits, Limits } from "./domains/run/admission";
 import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
@@ -57,12 +58,6 @@ const required = (name: string) => {
   return value;
 };
 
-function guestScope(): "lab" | "self" {
-  const scope = process.env.GUEST_SCOPE || "self";
-  if (scope !== "lab" && scope !== "self") throw new Error("GUEST_SCOPE must be lab or self");
-  return scope;
-}
-
 /** A run limit from env: unset means no limit (`Infinity`). */
 function limitNumber(name: string): number {
   const raw = process.env[name];
@@ -72,11 +67,9 @@ function limitNumber(name: string): number {
   return value;
 }
 
-/** An organization's run limits (`run.ts`), every number from `RUN_LIMITS_<ORG>_*` so it can change without a deploy. */
-const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
-  perCaller: limitNumber(`RUN_LIMITS_${org}_PER_CALLER`),
+/** What an organization with Voluma's key may run (`admission.ts`), every number from `RUN_LIMITS_<ORG>_*` so it can change without a deploy. */
+const keyLimitsFromEnv = (org: "LAB" | "JUDGES"): KeyLimits => ({
   concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
-  visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
   spendUsd: limitNumber(`RUN_LIMITS_${org}_SPEND_USD`),
 });
 
@@ -92,53 +85,30 @@ function countFromEnv(name: string, fallback: number): number {
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
 
-// The organizations and what each may run. Members sign in to `members`; the guest
-// organization (auth.ts) is separate, and unset means the sign-in wall.
-const members = [
-  {
-    id: required("WORKOS_LAB_ORGANIZATION_ID"),
-    scope: "lab" as const,
-    limits: limitsFromEnv("LAB"),
-    // The agent loop is internal until it ships: only the lab's members may start it.
-    agentLoop: true,
-  },
+// The organizations that get Voluma's key, and what each may run on it: only these, never an
+// organization that merely exists. Members sign in to them; the guest organization (auth.ts) is
+// separate and has no key, and unset means the sign-in wall.
+const keyOrganizations = [
+  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
-    ? [
-        {
-          id: process.env.WORKOS_JUDGES_ORGANIZATION_ID,
-          scope: "self" as const,
-          limits: limitsFromEnv("JUDGES"),
-          agentLoop: false,
-        },
-      ]
+    ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, limits: keyLimitsFromEnv("JUDGES") }]
     : []),
 ];
-const guest = process.env.GUEST_ORGANIZATION_ID
-  ? {
-      id: process.env.GUEST_ORGANIZATION_ID,
-      scope: guestScope(),
-      limits: limitsFromEnv("DEMO"),
-      agentLoop: false,
-    }
-  : null;
-// An org missing here is no longer configured: its queued runs fail and its running ones stop.
-const limits: ReadonlyMap<string, Limits> = new Map(
-  [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.limits]),
-);
-
-const agentLoop: ReadonlyMap<string, boolean> = new Map(
-  [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.agentLoop]),
-);
+const guestOrganizationId = process.env.GUEST_ORGANIZATION_ID || null;
+// An org missing from `voluma` is no longer configured: its queued Voluma-key runs fail and its running ones stop.
+const limits: Limits = {
+  voluma: new Map(keyOrganizations.map((org) => [org.id, org.limits])),
+  ownKeyActive: limitNumber("RUN_LIMITS_OWN_KEY_ACTIVE"),
+};
 
 const auth = createAuth({
   clientId: required("WORKOS_CLIENT_ID"),
   apiKey: required("WORKOS_API_KEY"),
   cookiePassword: required("WORKOS_COOKIE_PASSWORD"),
-  // Who may sign in, and how much of the data each sees (auth.ts, domain.ts). No domain
-  // reads an organization id.
-  organizations: members.map(({ id, scope }) => ({ id, scope })),
+  // Who may sign in (auth.ts). No domain reads an organization id.
+  organizations: keyOrganizations.map(({ id }) => id),
   // Guests (auth.ts): a request with no credential is a guest in this organization.
-  guest: guest && { organizationId: guest.id, scope: guest.scope },
+  guest: guestOrganizationId ? { organizationId: guestOrganizationId } : null,
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),
   debugToken: process.env.VOLUMA_DEBUG_TOKEN || null,
@@ -166,8 +136,7 @@ const queue = pgRunQueue(
     );
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
-  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "tasks"),
-  (labId) => agentLoop.get(labId) === true,
+  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "agents"),
 );
 const eventLog = pgEventLog(db, notifier);
 
@@ -292,7 +261,10 @@ app.onError((error, c) => {
 
 // Fail fast on a bad URL, bad credentials or a missing migration; /health stays liveness-only.
 await client`select run_id from pi_messages limit 0`;
-await reads.ensureReferenceInputs([...limits.keys()]);
+await reads.ensureReferenceInputs([
+  ...keyOrganizations.map((org) => org.id),
+  ...(guestOrganizationId ? [guestOrganizationId] : []),
+]);
 
 const server = serve(
   { fetch: app.fetch, port: Number(required("PORT")), hostname: process.env.HOST },

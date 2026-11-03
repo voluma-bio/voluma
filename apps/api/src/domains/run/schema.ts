@@ -142,6 +142,8 @@ export const runs = pgTable(
     credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
     /** The model every role of the run uses (`runSchema.model`); null for runs made before the choice existed. */
     model: text(),
+    /** How hard every role reasons (`runSchema.thinking`); null for runs made before the choice. */
+    thinking: text({ enum: ["low", "medium", "high"] }),
     /** The loop that drives the run (`runSchema.harness`); null for runs made before the choice: the task loop. */
     harness: text({ enum: ["tasks", "agents"] }),
     example: boolean().notNull().default(false),
