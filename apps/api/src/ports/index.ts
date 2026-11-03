@@ -13,18 +13,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
-import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
 import type { Caller, Reader } from "../domain";
-
-/** Immutable screenshots; writes require the same run lifetime to still exist. */
-export type ReviewSnapshots = {
-  find(runId: string, generation: string, id: string): Promise<ReviewSnapshot | null>;
-  list(runId: string, generation: string): Promise<ReviewSnapshot[]>;
-  insert(
-    snapshot: ReviewSnapshot,
-    generation: string,
-  ): Promise<{ snapshot: ReviewSnapshot; created: boolean }>;
-};
 
 export type RunRecord = {
   /** Opaque run lifetime; changes when an example is replaced under the same id. */
@@ -35,8 +24,6 @@ export type RunRecord = {
 };
 /** Only authenticated human decisions can cross the review write port. */
 export type ReviewDecision =
-  | Pick<Extract<RunEvent, { type: "check.accepted" }>, "type" | "payload">
-  | Pick<Extract<RunEvent, { type: "review.completed" }>, "type" | "payload">
   | Pick<Extract<RunEvent, { type: "tocheck.resolved" }>, "type" | "payload">
   | Pick<Extract<RunEvent, { type: "view.saved" }>, "type" | "payload">
   | Pick<Extract<RunEvent, { type: "mark.placed" }>, "type" | "payload">

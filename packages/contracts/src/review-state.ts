@@ -1,10 +1,46 @@
-/** What the log says of the researcher's review: the agent loop's outputs and the marks placed on them. */
+/** What the log says of the review: the outputs, the converted assets of their files, and the researcher's marks. */
 import type { Attached } from "./agent-events";
 import type { RunEvent } from "./events";
 import { outputsFold } from "./output-fold";
+import type { ReviewAssets } from "./review";
+
+/**
+ * Every event type `reviewState` reads, and the ones `openThreads`, `failedThreads` and
+ * `openApprovals` read: a reader that loads only these gets the same result as one that loads
+ * the whole log.
+ */
+export const RESULT_EVENT_TYPES = [
+  "thread.started",
+  "thread.ended",
+  "assets.ready",
+  "assets.failed",
+  "outputs.changed",
+  "output.published",
+  "tocheck.resolved",
+  "mark.placed",
+  "mark.deleted",
+  "approval.requested",
+  "approval.given",
+  "approval.declined",
+  "approval.settled",
+] as const satisfies readonly RunEvent["type"][];
 
 export function reviewState(events: readonly RunEvent[]) {
-  return { outputs: outputsFold(events), marks: marksOf(events) };
+  return { outputs: outputsFold(events), assets: assetsOf(events), marks: marksOf(events) };
+}
+
+/** Converted assets by the sha256 of the file they were made from: the latest `assets.*` event of each. */
+function assetsOf(events: readonly RunEvent[]): Record<string, ReviewAssets> {
+  const assets: Record<string, ReviewAssets> = {};
+  for (const e of events) {
+    if (e.type === "assets.ready") {
+      const { sourceSha256, ...manifest } = e.payload;
+      assets[sourceSha256] = { state: "ready", ...manifest };
+    } else if (e.type === "assets.failed") {
+      assets[e.payload.sourceSha256] = { state: "failed", error: e.payload.error };
+    }
+  }
+  return assets;
 }
 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];

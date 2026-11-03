@@ -1,19 +1,17 @@
 /**
  * Review lane's API domain, mounted at /api/review/: a mount list for run review data
- * and a run's files, and a researcher's messages to it (`runs.ts`), and review snapshots (`snapshots.ts`).
+ * and a run's files, and a researcher's messages to it (`runs.ts`).
  * The composition root supplies ports; Review never imports the Run domain.
  */
 
 import type { ObjectStore } from "@voluma/object-store";
 import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
-import type { ReviewSnapshots, RunMessages, RunRecords } from "../../ports";
+import type { RunMessages, RunRecords } from "../../ports";
 import { runRoutes } from "./runs";
-import { snapshotRoutes } from "./snapshots";
 
 export type ReviewDeps = {
   runs: RunRecords;
-  snapshots: ReviewSnapshots;
   /** A researcher's message to a run: the Run domain stores it and reopens the run. */
   messages: RunMessages;
   /** Null without R2 or a storage directory: run files are 503s. */
@@ -23,6 +21,5 @@ export type ReviewDeps = {
 export function createReview(deps: ReviewDeps) {
   const app = new Hono<AppEnv>();
   app.route("/", runRoutes(deps));
-  app.route("/", snapshotRoutes(deps));
   return app;
 }

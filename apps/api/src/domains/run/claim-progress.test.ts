@@ -46,11 +46,10 @@ describe("stalledError", () => {
 });
 
 describe("isProgress", () => {
-  it("counts run-state changes, not model turns, tool calls or the first plan", () => {
-    expect(isProgress({ type: "task", payload: {} })).toBe(true);
-    expect(isProgress({ type: "revision.started", payload: { reason: "correction" } })).toBe(true);
-    expect(isProgress({ type: "revision.started", payload: { reason: "run" } })).toBe(false);
-    expect(isProgress({ type: "tool.call", payload: {} })).toBe(false);
-    expect(isProgress({ type: "message", payload: {} })).toBe(false);
+  it("counts run-state changes, not model turns, tool calls or the rest", () => {
+    expect(isProgress({ type: "output.published" })).toBe(true);
+    expect(isProgress({ type: "outputs.changed" })).toBe(true);
+    expect(isProgress({ type: "tool.call" })).toBe(false);
+    expect(isProgress({ type: "message" })).toBe(false);
   });
 });

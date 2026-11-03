@@ -6,7 +6,7 @@
  * never counted. The runner reports `loop-stalled` only when it held that one run for the
  * blocked time; with two runs live a block is `self-stop` for both, so a run that blocks a
  * shared runner is not counted until it is the only one live. Progress is a change to run state
- * (a task, checkpoint, output, attempt, revision or plan change); model turns and tool calls are not, since a loop that kills the runner every
+ * (a published output or a change to the outputs); model turns and tool calls are not, since a loop that kills the runner every
  * time still makes them. The run row keeps `last_progress_seq` (set on append) and the
  * current claim's `claim_start_seq`; `endClaim` judges a claim when it ends.
  */
@@ -21,24 +21,14 @@ const COUNTED: ReadonlySet<ClaimEnd> = new Set(["lease-expired", "loop-stalled",
 export const isCounted = (reason: ClaimEnd) => COUNTED.has(reason);
 
 const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "task",
-  "checkpoint",
-  "output",
-  "attempt.opened",
-  "revision.started",
-  "plan.changed",
+  "output.published",
+  "outputs.changed",
   // Review-asset conversion is progress: a run whose only work left is conversion is not stalled.
   "assets.ready",
 ]);
 
-/**
- * Whether an appended event is run-state progress. The plan every first claim writes
- * (`revision.started` with reason `run`) is not: a run that crashes its runner right after
- * planning has made none.
- */
-export const isProgress = (event: { type: string; payload: unknown }) =>
-  PROGRESS_EVENT_TYPES.has(event.type) &&
-  !(event.type === "revision.started" && (event.payload as { reason?: string }).reason === "run");
+/** Whether an appended event is run-state progress. */
+export const isProgress = (event: { type: string }) => PROGRESS_EVENT_TYPES.has(event.type);
 
 /** Consecutive claims that end without progress before the run fails. */
 export const STALLED_CLAIMS_LIMIT = 3;

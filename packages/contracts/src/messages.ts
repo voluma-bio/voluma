@@ -22,16 +22,12 @@
  * payload `runReopenedSchema`) is written by the route alone, moving an ended run to `queued`.
  * `person.message` is on the same thread, id `<runId>.person:<id>`.
  *
- * A correction never ends a run worse than `completed`. A failure or cancel of a correction claim
- * (a thread failure, the main agent stopping moving, the no-progress limit, a user cancel, a
- * lease that cannot be recovered, a claim that cannot load the run's workflow) is
- * written as `correction.ended` (server-authored, thread `<runId>.person`, id
- * `<runId>.person:<id>:ended`, keyed to the open correction's `run.reopened`, payload
- * `correctionEndedSchema`) and the run ends `completed` again. The run page shows the span from
- * `run.reopened` to the next root `thread.ended` or `correction.ended`. An abandoned correction
- * also ends every thread that ran in it, finished ones too (`cancelEnds`, threads.ts), so the next
- * correction starts fresh threads: none resumes with memory of work that was reverted. Messages,
- * thread events, `run.reopened` and `correction.ended` stay.
+ * A correction never ends a run worse than `completed`: a failure or cancel of a correction claim
+ * (a thread failure, the no-progress limit, a user cancel, a lease that cannot be recovered)
+ * ends the claim's workers and the root, leaves main cut off for the researcher's next message,
+ * and the run ends `completed` again. (`correction.ended`, `correctionEndedSchema`, is what an
+ * earlier version wrote for this; runs keep theirs.) The run page shows the span from
+ * `run.reopened` to the next root `thread.ended` or `correction.ended`.
  *
  * Who may send: only the run's `startedBy` (403 otherwise). Cookie auth and Origin rules are
  * `run.ts`'s. Only this route's body limit is raised, to `MESSAGE_BODY_BYTES`; the snapshot is at

@@ -23,7 +23,6 @@ import { workflowById } from "@voluma/workflow/bundled";
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { reviewSnapshots } from "../domains/review/schema";
 import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
 import { events, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
@@ -120,10 +119,6 @@ const deleted = await db.transaction(async (tx) => {
   matches("run", locked ? [locked] : [], [copy.run]);
   const rows = {
     providerCalls: await tx.delete(providerCalls).where(eq(providerCalls.runId, runId)).returning(),
-    reviewSnapshots: await tx
-      .delete(reviewSnapshots)
-      .where(eq(reviewSnapshots.runId, runId))
-      .returning(),
     piMessages: await tx.delete(piMessages).where(eq(piMessages.runId, runId)).returning(),
     events: await tx.delete(events).where(eq(events.runId, runId)).returning(),
   };

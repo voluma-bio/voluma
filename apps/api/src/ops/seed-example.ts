@@ -1,6 +1,6 @@
 /**
  * Operator script: copy a finished run into an example run in the Demo organization.
- *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>] [--remote]
+ *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--remote]
  * Reads DATABASE_URL (else this worktree's `pnpm dev` database), GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
  *
  * The example gets the source's events and history under its own run id (event ids, thread ids
@@ -8,8 +8,7 @@
  * and the Demo org's reference input. It belongs to its own study of one input
  * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence, review assets, message snapshots (`scratch/person/`) and `outputs/` objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
- * example can't point at another run's files). `--backfill` adds the objects a run recorded before
- * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
+ * example can't point at another run's files). Re-seeding the same `--id` replaces the
  * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: a visitor run's
  * outputs are untrusted (`@voluma/contracts/run`), and an example's input is shown to everyone.
  */
@@ -36,22 +35,18 @@ import {
   studies,
   studyMembers,
 } from "../domains/run/schema";
-import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
 import { databaseUrl } from "./operator";
-import { r2FromEnv, required, withLocalDir } from "./r2-dir";
+import { r2FromEnv, required } from "./r2-dir";
 
 const { values } = parseArgs({
   options: {
     from: { type: "string" },
     id: { type: "string" },
-    backfill: { type: "string" },
     remote: { type: "boolean" },
   },
 });
 if (!values.from)
-  throw new Error(
-    "usage: seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>] [--remote]",
-  );
+  throw new Error("usage: seed:example --from <runId> [--id <exampleRunId>] [--remote]");
 const source = runIdSchema.parse(values.from);
 const stagingId = `example-${source}`;
 if (!values.remote && values.id === stagingId) {
@@ -130,16 +125,6 @@ const copied = await copyPrefix(evidencePrefix);
 const copiedReview = await copyPrefix(reviewAssetPrefix, { replace: true });
 const copiedSnapshots = await copyPrefix((id) => `${scratchPrefix(id)}person/`, { replace: true });
 const copiedOutputs = await copyPrefix(outputsPrefix, { replace: true });
-const rows = values.backfill
-  ? await withLocalDir(values.backfill, async (dir) =>
-      backfillRows(
-        exampleId,
-        renamed,
-        await readBackfill(dir),
-        await uploadBackfill(store, exampleId, dir),
-      ),
-    )
-  : renamed;
 
 await db.transaction(async (tx) => {
   await tx.delete(piMessages).where(eq(piMessages.runId, exampleId));
@@ -186,7 +171,7 @@ await db.transaction(async (tx) => {
   });
 
   // Postgres caps a statement's parameters, so insert in batches.
-  const numbered = rows.map((row, i) => ({ ...row, seq: i + 1 }));
+  const numbered = renamed.map((row, i) => ({ ...row, seq: i + 1 }));
   for (let i = 0; i < numbered.length; i += 500) {
     await tx.insert(events).values(numbered.slice(i, i + 500));
   }

@@ -1,5 +1,4 @@
-/** Human screenshot metadata. Pixels live in content-addressed run storage, never in the event log. */
-import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
+/** Nothing reads or writes this table any more (the screenshots feature went with the task review); it stays until a migration drops it (`apps/api/.context/TODO.md`). */
 import { json, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const reviewSnapshots = pgTable(
@@ -9,7 +8,7 @@ export const reviewSnapshots = pgTable(
     generation: uuid().notNull(),
     id: text().notNull(),
     createdAt: timestamp({ withTimezone: true }).notNull(),
-    snapshot: json().$type<ReviewSnapshot>().notNull(),
+    snapshot: json().notNull(),
   },
   (t) => [primaryKey({ columns: [t.runId, t.generation, t.id] })],
 );

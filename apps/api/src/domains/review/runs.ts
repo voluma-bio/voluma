@@ -1,27 +1,25 @@
 /**
  * The review's run routes, for users only. Reads are scoped by `readerOf`, so a run the
  * caller can't read is 404.
- *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
- *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
  *   GET /runs/:runId/outputs/*      a file under its outputs (`outputsPrefix`): an output
- *                                   version's files and evidence, the agent loop's runs
+ *                                   version's files and evidence
  *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
  *                                   a presigned GET, the browser fetches the bytes from storage
  *   GET /runs/:runId/thumbnail      a small WebP of the run, rendered once and kept (`thumbnail.ts`);
  *                                   204 while the run has no converted intensity image yet
  *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
  *   POST /runs/:runId/tocheck/accept  Looks right on a To check item of an output version
- *                                   (`acceptToCheckRequestSchema`, the agent loop's runs)
+ *                                   (`acceptToCheckRequestSchema`)
  *   POST /runs/:runId/views         a view of an output the researcher saved
- *                                   (`saveViewRequestSchema`, the agent loop's runs)
+ *                                   (`saveViewRequestSchema`)
  *   POST /runs/:runId/marks         a mark the researcher placed or changed (`placeMarkRequestSchema`)
  *   DELETE /runs/:runId/marks/:markId  a mark the researcher took away
  *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
  *                                   the snapshot is checked and stored here, the Run domain judges
  *                                   and stores the message
  *   POST /runs/:runId/approvals/:requestId  the researcher's yes or no to a held call
- *                                   (`answerApprovalRequestSchema`, the agent loop's runs)
+ *                                   (`answerApprovalRequestSchema`)
  */
 import {
   acceptToCheckRequestSchema,
@@ -44,20 +42,12 @@ import {
   relativePathSchema,
   sha256Schema,
 } from "@voluma/contracts/r2";
-import {
-  acceptCheckRequestSchema,
-  markReviewedRequestSchema,
-  type ReviewDecisionResponse,
-} from "@voluma/contracts/review";
-import { acceptRefusal } from "@voluma/contracts/run";
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { callerOf, parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
-import type { RunRecord } from "../../ports";
 import type { ReviewDeps } from ".";
 import { assetUrl, openFile } from "./files";
-import { reviewRun } from "./review-run";
 import { runThumbnail } from "./thumbnail";
 
 /** The image types a browser may render inline, by their leading bytes; anything else downloads. */
@@ -71,81 +61,9 @@ function imageType(head: Uint8Array): string | null {
   return null;
 }
 
-function currentReview(record: RunRecord, baseRevisionId: string) {
-  const refusal = acceptRefusal(record.run);
-  if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
-  const review = record.run.review;
-  if (review?.revisionId !== baseRevisionId)
-    throw new HTTPException(409, { message: "Results changed. Reload the run." });
-  return review;
-}
-
-/** A decision's answer: the run's review data, whose `review` a decided run always has. */
-function decisionResponse(record: RunRecord): ReviewDecisionResponse {
-  const run = reviewRun(record);
-  if (!run?.review) throw new Error(`run ${record.run.id} has no review after a decision`);
-  return { ...run, review: run.review };
-}
-
 export function runRoutes({ runs, store, messages }: ReviewDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs/*", requireUser);
-
-  app.get("/runs/:runId", async (c) => {
-    const record = await runs.load(readerOf(c.var.user), c.req.param("runId"));
-    if (!record) return c.json({ error: "not found" }, 404);
-    const review = reviewRun(record);
-    if (!review) return c.json({ error: "this run has no plan" }, 409);
-    return c.json(review);
-  });
-
-  app.post("/runs/:runId/checks/:checkId/accept", async (c) => {
-    const { baseRevisionId, taskId, resultRevisionId } = await parseJson(
-      c,
-      acceptCheckRequestSchema,
-    );
-    const { runId, checkId } = c.req.param();
-    const record = await runs.decide(readerOf(c.var.user), runId, (record) => {
-      currentReview(record, baseRevisionId);
-      const task = record.results.revisions.at(-1)?.tasks.find((task) => task.id === taskId);
-      if (!task) throw new HTTPException(404, { message: "Check not found." });
-      if (task.resultRevisionId !== resultRevisionId)
-        throw new HTTPException(409, { message: "This task's result changed. Look again." });
-      const check = task.checks.find((check) => check.id === checkId);
-      if (!check) throw new HTTPException(404, { message: "Check not found." });
-      if (check.status === "accepted") return null;
-      return {
-        type: "check.accepted",
-        payload: {
-          by: c.var.user.userId,
-          revisionId: baseRevisionId,
-          taskId,
-          checkId,
-          resultRevisionId,
-        },
-      };
-    });
-    if (!record) return c.json({ error: "not found" }, 404);
-    return c.json(decisionResponse(record));
-  });
-
-  app.post("/runs/:runId/mark-reviewed", async (c) => {
-    const { baseRevisionId } = await parseJson(c, markReviewedRequestSchema);
-    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
-      const review = currentReview(record, baseRevisionId);
-      if (review.acceptable !== 0)
-        throw new HTTPException(409, {
-          message: "Accept every To check item before marking reviewed.",
-        });
-      if (review.reviewedAt) return null;
-      return {
-        type: "review.completed",
-        payload: { by: c.var.user.userId, revisionId: baseRevisionId },
-      };
-    });
-    if (!record) return c.json({ error: "not found" }, 404);
-    return c.json(decisionResponse(record));
-  });
 
   app.post("/runs/:runId/tocheck/accept", async (c) => {
     const { output, version, item } = await parseJson(c, acceptToCheckRequestSchema);

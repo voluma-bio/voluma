@@ -28,7 +28,7 @@ import type { ReadScope } from "../../domain";
 import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { openCorrectionOf, readableRuns, readEvents, type Tx, toRunEvent } from "./pg-runs";
+import { readableRuns, readEvents, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
@@ -77,23 +77,20 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  * the log consistent, whether a runner holds the run or none does (a recovered or queued run).
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
-  const { rows, log } = await cancelRows(tx, runId);
-  for (const ended of cancelEnds(runId, log, new Date(), openCorrectionOf(rows)?.seq)) {
-    await insertEvent(tx, ended);
-  }
+  const { log } = await cancelRows(tx, runId);
+  for (const ended of cancelEnds(runId, log, new Date())) await insertEvent(tx, ended);
 }
 
 /**
  * The end of an agent-loop claim in review (a run with a `run.reopened`) that failed or was
  * cancelled. The workers end `cancelled`, and so does the root for this claim, but main is left
  * cut off, as a deploy leaves it: the researcher's next message resumes it, so nothing of the
- * review is discarded and no `correction.ended` is written (`cancelOpenThreads` is the task
- * loop's). A user's cancel (`withdraw`) also settles an approval given but not yet settled as
+ * review is discarded and no `correction.ended` is written. A user's cancel (`withdraw`) also settles an approval given but not yet settled as
  * withdrawn, so the next unrelated message does not restart its job.
  */
 export async function cancelReviewWorkers(tx: Tx, runId: string, withdraw: boolean) {
   const { rows, log, mains, requests } = await cancelRows(tx, runId);
-  for (const ended of cancelEnds(runId, log, new Date(), undefined)) {
+  for (const ended of cancelEnds(runId, log, new Date())) {
     if (!mains.has(ended.threadId)) await insertEvent(tx, ended);
   }
   if (!withdraw) return;
@@ -125,7 +122,7 @@ async function cancelRows(tx: Tx, runId: string) {
       type: events.type,
       threadId: events.threadId,
       seq: events.seq,
-      payload: sql<unknown>`CASE WHEN ${events.type} IN ('thread.started', 'thread.ended', 'approval.requested') THEN ${events.payload} END`,
+      payload: sql<unknown>`CASE WHEN ${events.type} IN ('thread.started', 'approval.requested') THEN ${events.payload} END`,
     })
     .from(events)
     .where(eq(events.runId, runId))
@@ -133,7 +130,6 @@ async function cancelRows(tx: Tx, runId: string) {
   const fields = (payload: unknown) =>
     (payload ?? {}) as {
       parentThreadId?: unknown;
-      status?: unknown;
       role?: unknown;
       toolCallId?: unknown;
     };
@@ -142,7 +138,6 @@ async function cancelRows(tx: Tx, runId: string) {
     return {
       ...row,
       ...(row.type === "thread.started" && { root: f.parentThreadId === null }),
-      ...(row.type === "thread.ended" && typeof f.status === "string" && { status: f.status }),
     };
   });
   const mains = new Set(

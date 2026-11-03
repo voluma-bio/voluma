@@ -10,8 +10,8 @@
  * so that holder is `lease-lost` (lease.ts).
  */
 import { randomBytes } from "node:crypto";
-import type { Harness } from "@voluma/contracts/ids";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
+import { type OutputCatalog, unselectable } from "@voluma/contracts/output-catalog";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
@@ -19,7 +19,6 @@ import {
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
 import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
@@ -38,7 +37,6 @@ import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progre
 import {
   answerApproval,
   decideMessage,
-  endCorrection,
   GUEST_KEYS_MESSAGE,
   messageRefusal,
   messageTargetOf,
@@ -198,10 +196,9 @@ const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, 
 
 /**
  * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
- * person's message, `messages.ts`) is never left worse than `completed`: its open threads end
- * `cancelled`, `correction.ended` records what happened, and the run ends `completed` with its
- * earlier results. On the agent loop only the workers and the root end, and main stays cut off
- * (`cancelReviewWorkers`). `set` adds columns to the update (a recovery's lease reset).
+ * person's message, `messages.ts`) is never left worse than `completed`: only its workers and the
+ * root end, and main stays cut off (`cancelReviewWorkers`); the run ends `completed` with its
+ * earlier results. `set` adds columns to the update (a recovery's lease reset).
  */
 async function endUnfinished(
   tx: Tx,
@@ -212,16 +209,8 @@ async function endUnfinished(
 ) {
   const reopenId = await openCorrection(tx, runId);
   const correcting = reopenId !== null;
-  const [{ harness } = { harness: null }] = correcting
-    ? await tx.select({ harness: runs.harness }).from(runs).where(eq(runs.id, runId))
-    : [];
-  if (correcting && harness === "agents") {
-    // Review on the agent loop (`cancelReviewWorkers`): main is cut off, not ended, and no correction span exists.
-    await cancelReviewWorkers(tx, runId, status === "cancelled");
-  } else {
-    if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
-    if (correcting) await endCorrection(tx, runId, reopenId, status, error);
-  }
+  if (correcting) await cancelReviewWorkers(tx, runId, status === "cancelled");
+  else if (status === "cancelled") await cancelOpenThreads(tx, runId);
   await tx
     .update(runs)
     .set({
@@ -276,8 +265,6 @@ type Starts = {
   keys?: VisitorKeys;
   /** The model the caller asked for; `pickModel` decides the run's. */
   model?: string;
-  /** The loop the caller asked for; absent: `defaultHarness`. */
-  harness?: Harness;
 };
 
 /** A limit reached is 429, except the per-caller one: the web branches on its 409. */
@@ -294,13 +281,9 @@ export function pgRunQueue(
   limits: ReadonlyMap<string, Limits>,
   vault: KeyVault,
   notifier: Notifier,
-  workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputEntry[] } | undefined,
+  workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputCatalog } | undefined,
   /** `RUN_MODEL_OVERRIDE`, validated by `modelOverride`. */
   modelOverride: string | null,
-  /** `DEFAULT_RUN_HARNESS`: the loop of a run whose start names none. */
-  defaultHarness: Harness,
-  /** Whether an organization's members may start the agent loop (index.ts). */
-  agentLoopOf: (labId: string) => boolean,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
@@ -383,26 +366,19 @@ export function pgRunQueue(
     reader: Reader,
     caller: Caller,
     study: { id: string },
-    workflow: { pins: WorkflowPin[]; outputs: OutputEntry[] },
+    workflow: { pins: WorkflowPin[]; outputs: OutputCatalog },
     starts: Starts,
   ) => {
     const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
     if (bad.length)
       throw new HTTPException(400, {
-        message: `Not a measurement or score of this workflow: ${bad.join(", ")}.`,
+        message: `Not a selectable output of this workflow: ${bad.join(", ")}.`,
       });
     if (starts.runs.length === 0) return;
     // A guest runs only on their own keys: Voluma's are for signed-in accounts.
     if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
-    // Internal until the agent loop ships: only allowed organizations (never guests) may ask
-    // for it, and the default loop applies to them alone, so flipping it never fails another
-    // account's run.
-    const loopOpen = agentLoopOf(reader.labId) && !caller.guest;
-    if (starts.harness === "agents" && !loopOpen)
-      throw new HTTPException(403, { message: "The agent loop is not open to this account yet." });
-    const harness = starts.harness ?? (loopOpen ? defaultHarness : "tasks");
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limitsOf(reader.labId), used, { credentials });
@@ -419,7 +395,8 @@ export function pgRunQueue(
         inputId,
         credentials,
         model,
-        harness,
+        // Read nowhere; an API built before the task loop was deleted claims by it (TODO: drop the column).
+        harness: "agents",
         state: "queued",
       });
       used.callerUnfinished++;
@@ -613,12 +590,12 @@ export function pgRunQueue(
      * One transaction: sweep expired leases, send the queued visitor runs whose keys this
      * process doesn't hold (another process took the start, or it restarted) to
      * `awaiting-keys`, then take the oldest queued run of the org served longest ago
-     * that the limits allow and whose loop the runner lists (a run's `harness`, null: `tasks`),
+     * that the limits allow,
      * with its keys if it is a visitor run. The held ids are read
      * under the lock: a start that holds its keys before it commits is either in them or
      * not yet queued.
      */
-    claim: (runnerId: string, harnesses: readonly Harness[]) =>
+    claim: (runnerId: string) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
         await tx
@@ -636,12 +613,7 @@ export function pgRunQueue(
         const queued = await tx
           .select()
           .from(runs)
-          .where(
-            and(
-              eq(runs.state, "queued"),
-              inArray(sql`coalesce(${runs.harness}, 'tasks')`, [...harnesses]),
-            ),
-          )
+          .where(eq(runs.state, "queued"))
           .orderBy(
             sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
             asc(runs.createdAt),
@@ -754,7 +726,7 @@ export function pgRunQueue(
           await endUnfinished(tx, runId, "failed", report.error);
         } else {
           // The researcher wrote while the claim was ending: the run goes back to the queue.
-          const late = run.harness === "agents" ? await lateWrite(tx, runId, report.readSeq) : null;
+          const late = await lateWrite(tx, runId, report.readSeq);
           // A reopen already stored for that write cannot queue the run again: it would loop.
           if (!late || !(await reopen(tx, runId, late, run.startedBy)))
             await tx

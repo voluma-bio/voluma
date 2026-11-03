@@ -12,7 +12,6 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (self|lab, default self) to let anyone in as a guest (the repo .env).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
- * DEFAULT_RUN_HARNESS (tasks|agents, default tasks): the loop of a run whose start names none.
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
  * _VISITOR_ACTIVE, and _SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
@@ -22,18 +21,16 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { harnessSchema } from "@voluma/contracts/ids";
 import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
-import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
 import { directoryStore } from "@voluma/object-store/directory";
 import { r2Store } from "@voluma/object-store/r2";
-import { workflowById } from "@voluma/workflow/bundled";
+import { catalog, workflowById } from "@voluma/workflow/bundled";
+import { readOutputCatalog } from "@voluma/workflow/catalog-file";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
-import { pgSnapshots } from "./adapters/pg-snapshots";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
@@ -99,8 +96,6 @@ const members = [
     id: required("WORKOS_LAB_ORGANIZATION_ID"),
     scope: "lab" as const,
     limits: limitsFromEnv("LAB"),
-    // The agent loop is internal until it ships: only the lab's members may start it.
-    agentLoop: true,
   },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
     ? [
@@ -108,7 +103,6 @@ const members = [
           id: process.env.WORKOS_JUDGES_ORGANIZATION_ID,
           scope: "self" as const,
           limits: limitsFromEnv("JUDGES"),
-          agentLoop: false,
         },
       ]
     : []),
@@ -118,16 +112,11 @@ const guest = process.env.GUEST_ORGANIZATION_ID
       id: process.env.GUEST_ORGANIZATION_ID,
       scope: guestScope(),
       limits: limitsFromEnv("DEMO"),
-      agentLoop: false,
     }
   : null;
 // An org missing here is no longer configured: its queued runs fail and its running ones stop.
 const limits: ReadonlyMap<string, Limits> = new Map(
   [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.limits]),
-);
-
-const agentLoop: ReadonlyMap<string, boolean> = new Map(
-  [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.agentLoop]),
 );
 
 const auth = createAuth({
@@ -150,6 +139,11 @@ const results = resultsLoader();
 const reads = pgRunReads(db, results);
 const studies = pgStudyReads(db, results);
 const notifier = createNotifier();
+// Each bundled workflow's catalog, from this checkout: the outputs a start may select.
+const REPO_ROOT = resolve(import.meta.dirname, "../../..");
+const outputs = Object.fromEntries(
+  Object.values(catalog).map((w) => [w.id, readOutputCatalog(REPO_ROOT, w.path)]),
+);
 const queue = pgRunQueue(
   db,
   limits,
@@ -161,13 +155,11 @@ const queue = pgRunQueue(
     return (
       workflow && {
         pins: [{ repo: "voluma-bio/voluma", path: workflow.path }],
-        outputs: workflow.outputs,
+        outputs: outputs[id] ?? [],
       }
     );
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
-  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "tasks"),
-  (labId) => agentLoop.get(labId) === true,
 );
 const eventLog = pgEventLog(db, notifier);
 
@@ -209,12 +201,9 @@ const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
 const messageLimit = bodyLimit({ maxSize: MESSAGE_BODY_BYTES });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
-const snapshotLimit = bodyLimit({ maxSize: REVIEW_SNAPSHOT_BODY_BYTES });
 app.use("/api/*", (c, next) => {
   if (c.req.path.startsWith("/api/run/ingest/")) return runnerLimit(c, next);
   if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
-  if (c.req.method === "POST" && /^\/api\/review\/runs\/[^/]+\/snapshots$/.test(c.req.path))
-    return snapshotLimit(c, next);
   if (/^\/api\/review\/runs\/[^/]+\/messages$/.test(c.req.path)) return messageLimit(c, next);
   return browserLimit(c, next);
 });
@@ -250,7 +239,6 @@ app.route(
   "/api/review",
   createReview({
     runs: runRecords,
-    snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage, answer: queue.answerApproval },
     store,
   }),

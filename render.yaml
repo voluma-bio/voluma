@@ -50,11 +50,8 @@ services:
         - .tool-versions
         - tsconfig.base.json
         - pnpm-workspace.yaml
-        # @voluma/workflow/bundled imports these (the API's workflow catalog, the web build's
-        # outputs and task titles); @voluma/workflow/output-catalogs imports outputs.yaml (the
-        # agent loop's catalog, in the web build). No other workflows/**: the build reads no other.
-        - workflows/*/outputs.json
-        - workflows/*/tasks.json
+        # The API reads each workflow's outputs.yaml at start (@voluma/workflow/catalog-file) and the
+        # web build bundles it (@voluma/workflow/output-catalogs). No other workflows/**: the build reads no other.
         - workflows/*/outputs.yaml
     envVars:
       - fromGroup: voluma-shared

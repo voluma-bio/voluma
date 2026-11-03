@@ -10,7 +10,6 @@ import { providerCalls } from "@voluma/provider-calls";
 import { catalog, workflowById } from "@voluma/workflow/bundled";
 import { asc, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { reviewSnapshots } from "../domains/review/schema";
 import { events, inputs, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
 
 export async function readDump(db: PostgresJsDatabase, runId: string) {
@@ -38,10 +37,6 @@ async function readRows(db: PostgresJsDatabase, runId: string) {
       .from(piMessages)
       .where(eq(piMessages.runId, runId))
       .orderBy(asc(piMessages.threadId), asc(piMessages.idx)),
-    reviewSnapshots: await db
-      .select()
-      .from(reviewSnapshots)
-      .where(eq(reviewSnapshots.runId, runId)),
     providerCalls: await db.select().from(providerCalls).where(eq(providerCalls.runId, runId)),
   };
 }
@@ -50,17 +45,15 @@ async function readRows(db: PostgresJsDatabase, runId: string) {
 export const countsOf = (dump: {
   events: unknown[];
   piMessages: unknown[];
-  reviewSnapshots?: unknown[];
   providerCalls?: unknown[];
 }) => ({
   events: dump.events.length,
   piMessages: dump.piMessages.length,
-  reviewSnapshots: dump.reviewSnapshots?.length ?? 0,
   providerCalls: dump.providerCalls?.length ?? 0,
 });
 
 export const describeCounts = (c: ReturnType<typeof countsOf>) =>
-  `${c.events} events, ${c.piMessages} pi messages, ${c.reviewSnapshots} snapshots, ${c.providerCalls} provider calls`;
+  `${c.events} events, ${c.piMessages} pi messages, ${c.providerCalls} provider calls`;
 
 /**
  * Everything `import:run` needs to hold of a dump, so `archive:run` can refuse to delete a run
@@ -74,8 +67,7 @@ export function assertRestorable(dump: {
   events: { id: string; seq: number; runId: string }[];
   // Dumps made before run-keyed rows have no `runId` here.
   piMessages: { runId?: string }[];
-  // Dumps from before these were exported have neither.
-  reviewSnapshots?: { runId: string }[];
+  // Dumps from before these were exported have none.
   providerCalls?: { runId: string }[];
 }) {
   const runId = dump.run.id;
@@ -95,9 +87,6 @@ export function assertRestorable(dump: {
     ...dump.piMessages
       .filter((m) => m.runId !== undefined && m.runId !== runId)
       .map((m) => `pi message of ${m.runId}`),
-    ...(dump.reviewSnapshots ?? [])
-      .filter((s) => s.runId !== runId)
-      .map((s) => `snapshot of ${s.runId}`),
     ...(dump.providerCalls ?? []).filter((c) => c.runId !== runId).map((c) => `call of ${c.runId}`),
   ];
   if (strays.length > 0) {

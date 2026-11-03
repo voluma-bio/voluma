@@ -67,8 +67,9 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
   });
 
   app.post("/ingest/claim", async (c) => {
-    const { runnerId, harnesses } = await parseJson(c, claimRequestSchema);
-    const claimed = await queue.claim(runnerId, harnesses ?? ["tasks"]);
+    // The request's `harnesses` is read and ignored: every run is an agent-loop run.
+    const { runnerId } = await parseJson(c, claimRequestSchema);
+    const claimed = await queue.claim(runnerId);
     if (!claimed) return c.json({ claim: null } satisfies ClaimResponse);
     const { run, leaseToken, budgetUsd, keys, previousClaim } = claimed;
     return c.json({
