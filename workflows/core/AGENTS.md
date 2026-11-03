@@ -6,12 +6,12 @@ its scripts). Design: `work/iterate-and-review/design/workflow-behavior/tool-con
 file, a method skill, a workflow skill and a script's `--help`). The measurements behind the skills' rules are in `.context/evidence.md`: SKILL.md
 holds rules, not experiment logs.
 
-- A skill is `skills/<name>/SKILL.md` (frontmatter `name`, `description` only) plus `resources/`, and `references/` for
+- A skill is `skills/<name>/SKILL.md` (frontmatter `name`, `description`; `companions` and `harness: agents`, the latter for a skill the task loop must not list) plus `resources/`, and `references/` for
   depth only some tasks need, each file named in SKILL.md with when to open it. The run agent reads
   SKILL.md and runs the resources as `python <skill dir>/resources/<x>.py`; so SKILL.md names a resource by file name,
   says when to reach for it and what its result means, and leaves flags, schemas and outputs to the script's `--help`
   (the tool index in every agent's prompt lists each script by its first docstring line). There are no per-workflow agent definitions: the roles shared by every workflow are in
-  `agents/`, and a skill never addresses one role; what a workflow wants checked per task is in its `tasks.json` and
+  `agents/` (task loop) and `roles/` (agent loop), and a skill never addresses one role; what a workflow wants checked per task is in its `tasks.json` and
   `skills/<workflow>/examples/`.
 - Change a skill or role file only on evidence from runs on the models the workflow runs on. A run on a
   cheap stand-in model (DeepSeek) checks plumbing only: never judge or change skill or role text by how it

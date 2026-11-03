@@ -1,9 +1,9 @@
 /**
- * A study (`/studies/:id/*`): loads it once for its two pages (the scans, and Compare), puts
+ * A study (`/studies/:id/*`): loads it once for its two pages (the inputs, and Compare), puts
  * "Studies › <study> (› Compare)" and "Next sample that needs you" in the header line, and the
- * scan tree on the left side (this study open, the lab's other studies below). Pages read the
+ * input tree on the left side (this study open, the lab's other studies below). Pages read the
  * study through `useStudy` and render the centre, and a right side if they have one, beside the
- * tree. A study of one has no study page: it opens its scan. While a scan is still running the
+ * tree. A study of one has no study page: it opens its input. While an input is still running the
  * study refetches every 5 s.
  */
 import { useQuery } from "@tanstack/react-query";
@@ -27,7 +27,7 @@ import { ChevronRight, ListTree } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router";
 import { linkTo } from "../link";
-import { byMostToCheck, placeOf, reviewHref, scanHref } from "./study-model";
+import { actHref, nextToAct, openHref, placeOf } from "./study-model";
 
 export type StudyContext = { detail: StudyDetail; workflow: BundledWorkflow; me: Me };
 
@@ -53,8 +53,8 @@ export function StudyLayout() {
     );
 
   const detail = study.data;
-  const only = detail.scans.length === 1 ? detail.scans[0] : undefined;
-  const onlyRun = only && scanHref(only);
+  const only = detail.inputs.length === 1 ? detail.inputs[0] : undefined;
+  const onlyRun = only && openHref(detail.study.id, only);
   if (onlyRun) return <Navigate to={onlyRun} replace />;
 
   const workflow = workflowById(detail.study.workflowId);
@@ -87,15 +87,13 @@ export function StudyLayout() {
   );
 }
 
-/** The header line: where you are, and the next scan that needs you. */
+/** The header line: where you are, and the next input that needs you. */
 function StudyHeading({ detail }: { detail: StudyDetail }) {
   const { pathname } = useLocation();
   const base = `/studies/${detail.study.id}`;
   const compare = pathname.startsWith(`${base}/compare`);
-  const [next] = byMostToCheck(
-    detail.scans.filter((s) => placeOf(s, detail.study.example) === "needs-you"),
-  );
-  const nextHref = next && reviewHref(next);
+  const next = nextToAct(detail.inputs, detail.study.example);
+  const nextHref = next && actHref(detail.study.id, next, placeOf(next, detail.study.example));
   return (
     <ShellHeading>
       <Breadcrumb
@@ -109,7 +107,7 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
         <Button asChild variant="secondary" size="sm" className="ml-auto">
           <Link to={nextHref}>
             Next {INPUT_WORD.one} that needs you:
-            <span className="font-mono font-semibold">{next.scan.subject}</span>
+            <span className="font-mono font-semibold">{next.member.subject}</span>
             <ChevronRight aria-hidden />
           </Link>
         </Button>
@@ -118,7 +116,7 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
   );
 }
 
-/** The left side: the scan tree, from the lab's study list. */
+/** The left side: the input tree, from the lab's study list. */
 function SamplesSide({ studyId }: { studyId: string }) {
   const studies = useQuery(studiesQuery());
   return (

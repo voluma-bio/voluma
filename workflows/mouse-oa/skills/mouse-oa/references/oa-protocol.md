@@ -80,8 +80,8 @@ schema is `regions-and-landmarks`'):
   from a zoomed image by looking, on the plate band, and put the points no farther apart than `max_gap_um` (closer where it turns). Code may
   write down the positions you read; a detector, an interpolation or a fill choosing the positions is not tracing, and a face that passes
   the spacing and mask checks is not thereby on the plate. Correct means the same visible plate band, end to end: it can wrap down the
-  condyles at the sides (OA6-2RK V=220 and 225, where the plate turns steeply down the arch), and you follow it there; what is wrong is a
-  switch onto cortex or marrow. Where one height per (V, U) cannot represent what you see (OA6-2RK V=185, where the notch runs nearly in
+  condyles at the sides, where the plate turns steeply down the arch, and you follow it there; what is wrong is a
+  switch onto cortex or marrow. Where one height per (V, U) cannot represent what you see (in the notch, which can run nearly in
   the section's plane), read the neighbouring sections and a view across them, trace the nearest single-valued face, and raise it as a To
   check item; do not flatten it and do not call it eroded. Look at every proposed section's render, and every `qc-faces-<n>.jpg` sheet (the
   faces as delivered, solid where your points define them, dotted where the surface is held past them, over the tibia's outline, cropped to the faces' height range and 0.8 mm beyond it). Where
@@ -109,14 +109,22 @@ schema is `regions-and-landmarks`'):
   section V=231) the two faces meet or cross: trace the remaining bone with both faces, densely, mark the U range where the plate is gone in `plate_eroded` on every traced section it reaches (a neighbouring section the proposal did not flag too),
   and raise a To check item. `metaphysis_roi.py` then accepts faces that meet inside the marked range, cuts ROI-3 `start_um` below the
   remaining bone, and reports the marked ranges and their share (`roi3.json`): say so in your report. OA6-1RK's eroded plate (bone destruction,
-  possibly age-related) is not representative of the lab's knees: OA6-2RK's is. Look at the faces drawn on the sections before you run.
+  possibly age-related) is not representative of the lab's knees, most of which keep the plate whole. Look at the faces drawn on the sections before you run.
 - **D, the landmark points files** (scan grid, each name once across the files, straight from `pick.py`: do not
   copy coordinates into a new file). `a` midpoint of the upper line of the intercondylar groove, `b` intercondylar
   notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck slide 7). `a` and
   `b` go on a long view of the femur that shows the shaft and the groove side-on; `c` and `d` can go on the
   joint-face view. `femoral_frame.py` refuses a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
-  (`a` and `b` placed end-on, as on the first full run) or an SI axis pointing away from the femur: re-place the
-  points; the refusal is not a warning to explain.
+  (`a` and `b` placed end-on), an `a`-`b` that runs side to side or a `c`-`d` that does not
+  (against the femur's mediolateral axis, which it finds from the label, checks against the knee's bending plane in the
+  `frame` output and prints: the sides and the front swapped, which happens when an image's axes are read as the wrong scan axes) or an SI axis pointing away from the femur: re-place the points; the
+  refusal is not a warning to explain. The printed axis says which scan direction runs side to side, not which side is
+  lateral or where the front is: read those from a render of this scan. When the refusal says the axis is confirmed,
+  a render that seems to disagree has its image axes mislabelled: name the scan axis along each image axis, then
+  re-place. Three refusals are not about the points, so do not move them: a femur label too short along its shaft to
+  give the axes (the labels or the field of view cut the shaft off); points whose two rulers both fit the knee's bending plane
+  but not the label's axis (the refusal says so); and an axis the bending plane does not confirm that a render of this scan,
+  its image axes named, contradicts. For each, stop and raise a To check item naming it.
 
 `oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (A and B, no C) in that schema, with
 the `grid_id` of the frame it was traced on: a worked example of the keys and the point order, and a record of that
@@ -212,7 +220,7 @@ the measurements they check.
   do we. They are counted on the aligned grid, a linear resampling of HU (grid rule above).
 - ROI-3 (#16–23) depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported
   as `cortex_estimate_mm`, the wall's thickness just below the plate): a wrong depth moves ROI-3. The edge is that
-  one depth all round, so where the wall is locally thicker ROI-3 reaches into it (OA6-2RK: the tibial tuberosity).
+  one depth all round, so where the wall is locally thicker ROI-3 reaches into it (at the tibial tuberosity, for example).
 - A medial or lateral value (#8, #9, #11, #12) follows the aligned frame's +U medial, confirmed on the render.
 - Tb.Nd and Tb.Tm (#22, #23) are exploratory; Tb.Th, Tb.Sp, Tb.N and Ct.Th (#19–21, #24, #25) carry the
   sphere-method bias with the voxel size.

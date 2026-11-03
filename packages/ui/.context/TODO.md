@@ -1,7 +1,7 @@
 # packages/ui: deferred work
 
-- One panel system, after the 4 Nov freeze (structure review of #452, p1275). The scan page
-  (`features/scan/scan-page.tsx`) still docks `ShellPanel`s while the study pages use
+- One panel system (structure review of #452, p1275). The scan page
+  (`features/input/input-page.tsx`) still docks `ShellPanel`s while the study pages use
   `SidePanel`, and the two keep separate state: widths in `voluma.shell` (left 280–720 px) and
   `voluma.sides` (220–520 px), so a width set on a study page doesn't carry into a scan, and only
   `ShellPanel` takes part in the `MAIN_MIN` squeeze; they share only fold state and the `\`, `]`

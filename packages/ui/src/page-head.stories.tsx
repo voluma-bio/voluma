@@ -8,7 +8,7 @@ import { PageHead } from "./page-head";
  * **What:** the head of a page in the main area: title, a Count when the page is a list, facts
  * about what it shows, and the page's actions. **Why:** every study page and Home open the same
  * way, so the eye finds the title and the one primary action in the same place. **Where:** Home,
- * Run on new scans, Workflows, and each study page (Dashboard, To check, Scans, Results, Details).
+ * Run on new inputs, Workflows, and each study page (Dashboard, To check, Scans, Results, Details).
  */
 const meta = {
   title: "Parts/PageHead",

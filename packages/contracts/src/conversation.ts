@@ -1,10 +1,14 @@
 /**
  * The chat between a researcher and a run's main agent (`messages.ts`), read from the run's events:
  * the person's messages, the agent's replies (the task loop's `reply`, the agent loop's
- * `agent.message` to the researcher), and how each correction ended (`corrections`,
- * fold.ts). A correction's end is the only sign in the chat that the AI stopped working: its last
- * reply is often "Redoing it now", and the outcome is in the root thread's closing summary.
+ * `agent.message` to the researcher), how each correction ended (`corrections`, fold.ts), and on
+ * the agent loop the calls main held for the researcher's yes (`approval.requested`) with their
+ * answer and how each settled. A correction's end is the only sign in the chat that the AI
+ * stopped working: its last reply is often "Redoing it now", and the outcome is in the root
+ * thread's closing summary.
  */
+import type { AcceptToCheckRequest, Attached } from "./agent-events";
+import { approvalAnswerId, approvalSettledId } from "./agents";
 import type { RunEvent } from "./events";
 import { corrections } from "./fold";
 import type { Mark } from "./messages";
@@ -21,6 +25,12 @@ export type ConversationItem =
       /** The task the person was reviewing when they wrote (or, with `go`, the task to redo). */
       taskId?: string;
       go: boolean;
+      /** Agent-loop runs: the marks the message carried, as the API froze them. */
+      attached: Attached[];
+      /** Agent-loop runs: the output in view when they wrote. */
+      output?: string;
+      /** Agent-loop runs: the To check item the message answers. */
+      toCheck?: AcceptToCheckRequest;
     }
   | {
       from: "agent";
@@ -48,17 +58,40 @@ export type ConversationItem =
        * opened (a go can end with the AI finding nothing to redo).
        */
       redo?: string;
+    }
+  | {
+      /** A call main held for the researcher (agent-loop runs): the question, then its answer. */
+      from: "approval";
+      /** The `approval.requested` event id: what the answer route takes. */
+      id: string;
+      seq: number;
+      at: string;
+      tool: string;
+      args: unknown;
+      /** What the call would do, in words; written by code. */
+      summary: string;
+      /** The outputs it changes, when the request names them. */
+      outputs?: string[];
+      /** The outputs it makes out of date if it runs, when the request names them. */
+      outOfDate?: string[];
+      /** The researcher's answer, once given. */
+      answer?: { answer: "yes" | "no"; text?: string; at: string };
+      /** How it closed: the held call ran, was refused when it ran, or was withdrawn. */
+      settled?: { outcome: "done" | "refused" | "withdrawn"; at: string };
     };
 
 /**
- * The person's messages, the agent's replies and the corrections' ends, in log order. A correction
- * that completed with no go and a reply adds nothing: the reply already answered.
+ * The person's messages, the agent's replies, the corrections' ends and the held calls, in log
+ * order (a held call where it was asked). A correction that completed with no go and a reply adds
+ * nothing: the reply already answered.
  */
 export function conversation(events: readonly RunEvent[]): ConversationItem[] {
   const items: ConversationItem[] = [];
+  // A held call by the ids of its answer and its outcome.
+  const approvals = new Map<string, Extract<ConversationItem, { from: "approval" }>>();
   for (const e of events) {
     if (e.type === "person.message") {
-      const { text, marks, taskId, go } = e.payload;
+      const { text, marks, taskId, go, attached, output, toCheck } = e.payload;
       items.push({
         from: "person",
         id: e.id,
@@ -68,7 +101,38 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         marks: marks ?? [],
         ...(taskId && { taskId }),
         go: go === true,
+        attached: attached ?? [],
+        ...(output && { output }),
+        ...(toCheck && { toCheck }),
       });
+    } else if (e.type === "approval.requested") {
+      const { tool, args, summary, outputs, outOfDate } = e.payload;
+      const item = {
+        from: "approval" as const,
+        id: e.id,
+        seq: e.seq,
+        at: e.createdAt,
+        tool,
+        args,
+        summary,
+        ...(outputs && { outputs }),
+        ...(outOfDate && { outOfDate }),
+      };
+      approvals.set(approvalAnswerId(e.id), item);
+      approvals.set(approvalSettledId(e.id), item);
+      items.push(item);
+    } else if (e.type === "approval.given" || e.type === "approval.declined") {
+      const request = approvals.get(e.id);
+      if (request)
+        request.answer = {
+          answer: e.type === "approval.given" ? "yes" : "no",
+          ...(e.payload.text && { text: e.payload.text }),
+          at: e.createdAt,
+        };
+    } else if (e.type === "approval.settled") {
+      const request = approvals.get(e.id);
+      // Its text is written for main, not the researcher.
+      if (request) request.settled = { outcome: e.payload.outcome, at: e.createdAt };
     } else if (e.type === "agent.message" && e.payload.to === "researcher") {
       items.push({ from: "agent", id: e.id, seq: e.seq, at: e.createdAt, text: e.payload.text });
     } else if (e.type === "reply") {

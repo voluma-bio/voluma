@@ -29,7 +29,7 @@ Things `render.yaml` holds that are easy to miss:
 - **Pre-deploy is `pnpm --filter @voluma/api db:migrate`** (`src/migrate.ts`), the only place migrations run in production; a failure stops the deploy and prints the error in the deploy log.
 - **Health check `/health`** is liveness only (no database): the gate for moving traffic, not monitoring.
 - **Shutdown delay 30 s**, above the API's `DRAIN_MS` (10 s) in `src/index.ts`.
-- **Build filter** (the paths that redeploy the API): `apps/api`, `apps/web`, `packages`, the root build files, and `workflows/*/outputs.json` and `workflows/*/tasks.json` (`@voluma/workflow/bundled` imports them for the workflow catalog and the web build's outputs and task titles). No other `workflows/`: the API reads no other workflow file; the runner snapshots them and records its own commit (`RENDER_GIT_COMMIT`) in each run.
+- **Build filter** (the paths that redeploy the API): `apps/api`, `apps/web`, `packages`, the root build files, `workflows/*/outputs.json` and `workflows/*/tasks.json` (`@voluma/workflow/bundled` imports them for the workflow catalog and the web build's outputs and task titles), and `workflows/*/outputs.yaml` (`@voluma/workflow/output-catalogs` bundles the agent loop's catalog into the web build; a catalog that fails its schema throws when the web app loads, and no `pnpm check` test parses it). No other `workflows/`: the build reads no other workflow file; the runner snapshots them and records its own commit (`RENDER_GIT_COMMIT`) in each run.
 - **One instance** (`numInstances: 1`): see "What a restart or outage does to runs".
 - The root `prepare` script skips `lefthook install` when `LEFTHOOK=0` (set in the env group `voluma-shared`, with `NODE_VERSION` and `R2_BUCKET`).
 - **Render doesn't prune dev dependencies**, but keep everything the server runs in `dependencies` (tsx, drizzle-orm): [../AGENTS.md](../AGENTS.md).
@@ -231,17 +231,17 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
 (with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, unsettled provider calls,
 or missing inputs/study metadata and unsupported workflows that prevent restoration. It reads one database snapshot
-(`run.json`: run, study, study scans and their inputs, events, pi messages, review snapshots, provider calls),
+(`run.json`: run, study, study members and the inputs, events, pi messages, review snapshots, provider calls),
 writes `~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), syncs the file and directory entries
 to disk, and reads it back. Only then does it delete, holding the queue, event and run-row locks. Every deleted row,
-including the run and any deleted study/scans, must match the archive, not merely its count; any difference rolls back.
-Inputs stay (shared); the study and its scans go only when no other run is in it. A failed write, sync or validation
+including the run and any deleted study and its inputs, must match the archive, not merely its count; any difference rolls back.
+Inputs stay (shared); the study and its study members go only when no other run is in it. A failed write, sync or validation
 never deletes rows; an existing `run.json` is never overwritten. A failure may leave an incomplete file: retain it for
 inspection and use a new output directory when retrying.
 
-`import:run --from <that directory>` restores the original study identity and scan metadata, adding missing shared rows
+`import:run --from <that directory>` restores the original study identity and input metadata, adding missing shared rows
 and refusing conflicts rather than overwriting them. Legacy dumps without study metadata get a study of one, or keep
-the replaced run's study only if its lab, workflow, example status and scan agree; input conflicts are refused too.
+the replaced run's study only if its lab, workflow, example status and input agree; input conflicts are refused too.
 Every import creates a fresh local run generation and moves the dump's current screenshots to it. Older screenshot
 generations stay historical. A save that validated before the import is refused instead of entering the restored run.
 

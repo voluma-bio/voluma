@@ -1,14 +1,14 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
- * Studies, the study page and the scan review so they read the same: Running, N to check, Checked,
+ * Studies, the study page and the input review so they read the same: Running, N to check, Checked,
  * Failed, Stopped, Waiting (queued),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
- * reviewed, which is never inferred. Also where a run's row links (the scan review), how a scan
+ * reviewed, which is never inferred. Also where a run's row links (the input review), how an input
  * is named, and how its cost, time and age ("12 min ago") read.
  */
 import type { Run } from "@voluma/contracts/run";
-import type { StudyRunSummary, StudyScan } from "@voluma/contracts/study";
+import type { StudyMember, StudyRunSummary } from "@voluma/contracts/study";
 import type { Status } from "@voluma/ui";
 
 /** "1 run", "3 runs"; `many` for an irregular plural. */
@@ -39,28 +39,30 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
 
-/** A scan as people name it: its subject and knee ("OA6-1, right knee"), the subject alone without one. */
-export function scanLabel(scan: Pick<StudyScan, "subject" | "attributes">): string {
-  const knee = scan.attributes.knee;
+/** An input as people name it: its subject and knee ("OA6-1, right knee"), the subject alone without one. */
+export function inputLabel(input: Pick<StudyMember, "subject" | "attributes">): string {
+  const knee = input.attributes.knee;
   return typeof knee === "string" && knee
-    ? `${scan.subject}, ${knee.toLowerCase()} knee`
-    : scan.subject;
+    ? `${input.subject}, ${knee.toLowerCase()} knee`
+    : input.subject;
 }
 
-/** Where a row leads: the scan review, live while the run goes and for review once it ends. */
-export const runHref = ({ runId }: Pick<StudyRunSummary, "runId">) =>
-  `/scans/${encodeURIComponent(runId)}`;
+/**
+ * Where an input opens: its page in a study, on the input's newest run (live while it goes, for
+ * review once it ends). `query` carries the page's selection (`task`, `item`, `output`...); a link
+ * that means an earlier run adds `run`.
+ */
+export const inputHref = (studyId: string, inputId: string, query: Record<string, string> = {}) =>
+  `/studies/${encodeURIComponent(studyId)}/inputs/${encodeURIComponent(inputId)}${
+    Object.keys(query).length > 0 ? `?${new URLSearchParams(query)}` : ""
+  }`;
 
-/** Where one To check item leads: its scan review, opened on that task and item (`checkId`, as `acceptCheck` takes it). */
-export const itemHref = ({
-  runId,
-  taskId,
-  checkId,
-}: {
-  runId: string;
-  taskId: string;
-  checkId: string;
-}) => `${runHref({ runId })}?${new URLSearchParams({ task: taskId, item: checkId })}`;
+/** Where one To check item leads: its input page, opened on that task and item (`checkId`, as `acceptCheck` takes it). */
+export const itemHref = (
+  studyId: string,
+  inputId: string,
+  { taskId, checkId, run }: { taskId: string; checkId: string; run?: string },
+) => inputHref(studyId, inputId, { task: taskId, item: checkId, ...(run && { run }) });
 
 export type RunStatus = { label: string; status: Status };
 
@@ -69,8 +71,9 @@ export type RunStatus = { label: string; status: Status };
  * outputs) while an agent-loop run does: what a row says about a live run.
  */
 export function liveStatus(
-  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness">,
+  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness" | "waiting">,
 ): RunStatus {
+  if (run.waiting) return WAITING_ON_YOU;
   const running = run.state.status === "running";
   if (running && run.outputs)
     return {
@@ -86,19 +89,14 @@ export function liveStatus(
     : runStatus(run);
 }
 
-/**
- * What needs a person on a run, as its sample page says it: the agent loop counts final values
- * ("1 needs you", as its Needs you), the task loop items ("3 to check", as its To check).
- */
-export const needsYouText = (n: number, harness: StudyRunSummary["harness"]) =>
-  harness === "agents" ? `${n} ${n === 1 ? "needs" : "need"} you` : `${n} to check`;
+/** What needs a person on one run: open To check items on either loop, never samples ("3 to check"). */
+export const toCheckText = (n: number) => `${n} to check`;
 
-/** A run's status; a study's newest-run summary carries the same `state`, `review` and `harness`. */
-export function runStatus({
-  state,
-  review,
-  harness,
-}: Pick<StudyRunSummary, "state" | "review" | "harness">): RunStatus {
+/** A run with a held call the researcher can answer (`StudyRunSummary.waiting`): whatever its row says. */
+const WAITING_ON_YOU: RunStatus = { label: "Waiting on you", status: "check" };
+
+/** A run's status; a study's newest-run summary carries the same `state` and `review`. */
+export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Waiting", status: "waiting" };
@@ -110,7 +108,7 @@ export function runStatus({
       // To check means needs you: a card nobody can accept outranks Reviewed too.
       if (state.outcome === "completed")
         return review?.needsYou
-          ? { label: needsYouText(review.needsYou, harness), status: "check" }
+          ? { label: toCheckText(review.needsYou), status: "check" }
           : review?.reviewedAt
             ? { label: "Reviewed", status: "done" }
             : { label: "Checked", status: "done" };

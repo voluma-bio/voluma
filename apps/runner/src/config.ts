@@ -222,6 +222,15 @@ export function runnerConfig() {
   return {
     api,
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
+    /**
+     * The run-abort limits (`StopLimits`, `usage.ts`). `RUNNER_MAX_RUN_COST_USD`: the most model
+     * dollars any run may spend, whole dollars, default 50; a study's `budgetUsd` can only lower
+     * it. `RUNNER_CACHE_MISS_LIMIT`: unexpected prompt-cache misses in a row on one thread, default 3.
+     */
+    stop: {
+      maxRunCostUsd: positiveInt("RUNNER_MAX_RUN_COST_USD", 50),
+      cacheMissLimit: positiveInt("RUNNER_CACHE_MISS_LIMIT", 3),
+    },
     /** The run loop's limits (`LoopConfig`); the harness default is 2 fix rounds. */
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),
@@ -230,7 +239,7 @@ export function runnerConfig() {
       pingCloseMinutes: positiveInt("RUNNER_PING_CLOSE_MINUTES", 50),
     },
     /**
-     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),
+     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/` or `workflows/core/roles/`),
      * for a `voluma` run. Our key for each provider is `VOLUMA_<PROVIDER>_API_KEY`.
      */
     models,

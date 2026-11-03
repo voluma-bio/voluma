@@ -1,0 +1,465 @@
+/**
+ * The AI: the conversation with this run's lead AI, read from the run's events
+ * (`conversation`), and a box to write to it (`sendRunMessage`). A message is about the task in
+ * view, or the item's task after Something's wrong; "The AI sees" names what goes with it: the
+ * input, the task, a picture of the views as they show (`snapshot`) and your marks. A
+ * message reopens a finished run for one answer: the AI talks it through and, when a redo would
+ * help, offers one (`reply.offer`). Under its latest offer, "Yes, redo <task>" and "No, keep it"
+ * start your answer in the box, where you can add detail; Send sends it (a `go` on the task, or a
+ * message about it). The answer is a message like any other, so it opens a conversation.
+ * When the AI is done with a message the chat says how it ended (`outcome`): what it did, or that
+ * it failed or was stopped and the earlier results stand. Until then it says the AI is working.
+ * Who may write, and when, is the API's rule (`messages.ts`); the run read carries it as
+ * `cannotMessage` and the box shows it as its reason for being off.
+ */
+import { ApiError } from "@voluma/api-client";
+import { type ConversationItem, conversation, openOffer } from "@voluma/contracts/conversation";
+import type { RunRead } from "@voluma/contracts/run";
+import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
+import { Button, Chip, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
+import { ArrowRight, RotateCcw, Send, X } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { describe, gridMark, messageMark, type YourMark } from "./marks-panel";
+import { refusalOf, useDraft, useIdempotentSend } from "./message-send";
+
+/** The API's refusal in its own words when it gave some; the text stays in the box. */
+const refusal = (error: Error) =>
+  refusalOf(error, (status) =>
+    status === 409
+      ? "The AI is still answering, or the run can't be reopened. Try again once it finishes."
+      : status === 403
+        ? "You can't write to this run's AI."
+        : status === 429
+          ? "Too many runs are going right now. Try again shortly."
+          : undefined,
+  );
+
+/**
+ * A go the server turned down (409: the plan no longer lets that task be redone), in the task's own
+ * name; the server's text names it by id.
+ */
+function redoRefused(
+  error: Error,
+  tasks: TaskView[],
+  redo: string | undefined,
+): string | undefined {
+  if (redo === undefined || !(error instanceof ApiError) || error.status !== 409) return undefined;
+  const title = tasks.find((t) => t.id === redo)?.title ?? "That task";
+  return `${title} can't be redone now. Ask the AI what changed.`;
+}
+
+/**
+ * The message being written to the run's AI: its words, its id and its send. The page holds it, so
+ * closing the panel mid-message or mid-send loses nothing and can't send it twice.
+ */
+export function useMessage({
+  run,
+  tasks,
+  task,
+  about,
+  marks,
+  snapshot,
+  viewKey,
+  itemId,
+  onSent,
+}: {
+  run: RunRead;
+  tasks: TaskView[];
+  /** The task in view. */
+  task: TaskView | undefined;
+  /** Set by Something's wrong: the message is about this task. */
+  about: { taskId: string } | undefined;
+  /** Your marks on the subject's views: the next message carries them. */
+  marks: readonly YourMark[];
+  /**
+   * The subject's views as one PNG of at most this many bytes: null when even the smallest is
+   * larger, undefined when they aren't shown (also as the function's answer).
+   */
+  snapshot: ((maxBytes: number) => Promise<Blob | null | undefined>) | undefined;
+  /** Identity of the image/grid being captured, independent of the current camera. */
+  viewKey: string | undefined;
+  /** The To check item open on the subject task, so the AI knows which one you mean. */
+  itemId: string | undefined;
+  /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
+  onSent: (marks: string[]) => void;
+}) {
+  const [text, setText] = useDraft(`voluma:ai-draft:${run.id}`);
+  /** The AI's offer you are answering: `go` redoes its task, else you keep the task as it is. */
+  const [answer, setAnswer] = useState<{ replyId: string; taskId: string; go: boolean }>();
+  const subject = tasks.find((t) => t.id === (answer?.taskId ?? about?.taskId ?? task?.id));
+  // The offer accepted: its button stays gone while the reopened run catches up.
+  const [accepted, setAccepted] = useState<string>();
+  // A message without the picture it meant to carry says so once sent.
+  const [unseen, setUnseen] = useState(false);
+  const { send, submit: post } = useIdempotentSend<{
+    marks: string[];
+    /** The reply whose offer this accepts. */
+    offer?: string;
+    /** The task a go asks to redo. */
+    redo?: string;
+  }>({
+    runId: run.id,
+    onSuccess: ({ unseen, meta }) => {
+      setText("");
+      setAnswer(undefined);
+      setUnseen(unseen);
+      if (meta.offer) setAccepted(meta.offer);
+      onSent(meta.marks);
+    },
+  });
+  const closed = run.cannotMessage ?? undefined;
+  /**
+   * Sends the words. An answer to an offer carries only the words and the offer's task (with `go`
+   * when it redoes it), no picture and no marks; its words are optional.
+   */
+  const submit = () => {
+    const go = answer?.go === true;
+    if (closed !== undefined || (!answer && !text.trim())) return;
+    const note = text.trim();
+    // A mark a message can't carry (an angle) stays on the page.
+    const carried = !answer && subject ? marks.filter((m) => messageMark(m)) : [];
+    // Marks name a block of the task's results, so they go only with a task; an answer takes none.
+    const fields = answer
+      ? go
+        ? { taskId: answer.taskId, go: true as const, ...(note && { text: note }) }
+        : { taskId: answer.taskId, text: note || KEEP_IT }
+      : {
+          text: note,
+          ...(subject && { taskId: subject.id }),
+          ...(subject && itemId && { itemId }),
+          ...(carried.length > 0 && { marks: carried.map((m) => messageMark(m)!) }),
+        };
+    // An answer is told apart by the offer it answers: a later offer for the same task is a new message.
+    const fingerprint = JSON.stringify({
+      ...fields,
+      offer: answer?.replyId,
+      marks: carried,
+      viewKey: !answer && snapshot ? viewKey : undefined,
+    });
+    // An answer has nothing to show the AI; a message carries the views as they are.
+    post(fingerprint, () => ({
+      fields,
+      ...(!answer && snapshot && { picture: snapshot }),
+      meta: {
+        marks: carried.map((m) => m.id),
+        offer: answer?.replyId,
+        redo: go ? answer?.taskId : undefined,
+      },
+    }));
+  };
+  return {
+    subject,
+    text,
+    setText,
+    send,
+    unseen,
+    submit,
+    closed,
+    accepted,
+    answer,
+    setAnswer,
+  };
+}
+
+/** What a "No, keep it" answer says when you add nothing. */
+const KEEP_IT = "No, keep it.";
+
+export function AiPanel({
+  run,
+  input,
+  tasks,
+  inView,
+  onTask,
+  about,
+  marks,
+  views,
+  message: { subject, text, setText, send, unseen, submit, closed, accepted, answer, setAnswer },
+}: {
+  run: RunRead;
+  input: string;
+  tasks: TaskView[];
+  /** The task in view: a redo of it needs no link to it. */
+  inView: string | undefined;
+  /** Shows a task's results. */
+  onTask: (taskId: string) => void;
+  /** Set by Something's wrong: the box takes focus. */
+  about: { taskId: string; at: number } | undefined;
+  /** Your marks the next message carries, shown under "The AI sees". */
+  marks: readonly YourMark[];
+  /** The views are shown, so the message carries a picture of them. */
+  views: boolean;
+  message: ReturnType<typeof useMessage>;
+}) {
+  const events = useEvents();
+  // A task run holds no calls for approval: those are the agent loop's.
+  const items = useMemo(
+    () =>
+      conversation(events).filter(
+        (m): m is Exclude<ConversationItem, { from: "approval" }> => m.from !== "approval",
+      ),
+    [events],
+  );
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (about || answer) form.current?.querySelector("textarea")?.focus();
+  }, [about, answer]);
+  // An answer is to the open offer: once a reply or message follows it, there is nothing to answer.
+  const offer = openOffer(items);
+  useEffect(() => {
+    if (answer && offer?.id !== answer.replyId) setAnswer(undefined);
+  }, [answer, offer, setAnswer]);
+  const closedId = useId();
+  const titleOf = (id: string) => tasks.find((t) => t.id === id)?.title ?? id;
+  // The AI works on a message until its correction's outcome; a run that ended has stopped.
+  const waiting = [...items].reverse().find((m) => m.from !== "agent");
+  const working = run.state.status !== "ended" && waiting?.from === "person" ? waiting : undefined;
+
+  const log = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = log.current;
+    if (el && items.length > 0) el.scrollTop = el.scrollHeight;
+  }, [items.length]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <p className="flex flex-wrap items-center gap-1 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+        <span className="mr-0.5">The AI sees</span>
+        <Chip>{input}</Chip>
+        {subject && <Chip>{subject.title}</Chip>}
+        {!answer && views && <Chip>the views</Chip>}
+        {answer ? null : marks.length === 0 ? (
+          <Chip>no marks of yours</Chip>
+        ) : (
+          marks.map((m) => (
+            <Chip key={m.id} className="text-mark-mine-text">
+              your {m.tag}
+            </Chip>
+          ))
+        )}
+      </p>
+      <div ref={log} role="log" className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        {items.length === 0 ? (
+          <EmptyState title="No messages yet" />
+        ) : (
+          <ol className="grid gap-3">
+            {items.map((m) =>
+              m.from === "person" ? (
+                <li key={m.id} className="ml-6 grid gap-1 rounded-lg bg-muted px-3 py-2">
+                  <span className="text-xs text-muted-foreground">
+                    You
+                    {m.taskId && !m.go && `, on ${titleOf(m.taskId)}`}
+                  </span>
+                  {m.go && m.taskId && <p className="text-sm">Yes, redo {titleOf(m.taskId)}.</p>}
+                  {m.text && <p className="text-sm whitespace-pre-wrap">{m.text}</p>}
+                  {m.marks.length > 0 && (
+                    <span className="flex flex-wrap gap-1">
+                      {m.marks.map((mark, i) => {
+                        const shape = gridMark(mark);
+                        const { title, measure } = shape ? describe(shape) : { title: "Mark" };
+                        return (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: a sent message's marks never change.
+                          <Chip key={i}>
+                            {title}
+                            {measure && ` ${measure}`}
+                          </Chip>
+                        );
+                      })}
+                    </span>
+                  )}
+                </li>
+              ) : m.from === "outcome" ? (
+                <li key={m.id} className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">The AI</span>
+                  <Outcome
+                    outcome={m}
+                    title={m.redo && titleOf(m.redo)}
+                    onShow={m.redo === inView ? undefined : onTask}
+                  />
+                </li>
+              ) : (
+                <li key={m.id} className="grid gap-1">
+                  <span className="text-xs text-muted-foreground">The AI</span>
+                  <Markdown text={m.text} className="text-sm" />
+                  {m === offer &&
+                    closed === undefined &&
+                    m.id !== accepted &&
+                    answer?.replyId !== m.id &&
+                    (() => {
+                      const offered = tasks.find((t) => t.id === m.offer?.taskId);
+                      if (!offered) return null;
+                      const pick = (go: boolean) =>
+                        setAnswer({ replyId: m.id, taskId: offered.id, go });
+                      return (
+                        <span className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={send.isPending}
+                            onClick={() => pick(true)}
+                          >
+                            <RotateCcw aria-hidden />
+                            Yes, redo {offered.title}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={send.isPending}
+                            onClick={() => pick(false)}
+                          >
+                            No, keep it
+                          </Button>
+                        </span>
+                      );
+                    })()}
+                </li>
+              ),
+            )}
+            {working && (
+              <li>
+                <StatusMark
+                  status="running"
+                  label={
+                    working.go && working.taskId
+                      ? `Redoing ${titleOf(working.taskId)}`
+                      : "The AI is answering"
+                  }
+                />
+              </li>
+            )}
+          </ol>
+        )}
+      </div>
+      <form
+        ref={form}
+        className="grid gap-2 border-t border-border p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        {answer && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Your answer</span>
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {answer.go ? `Redo ${titleOf(answer.taskId)}` : `Keep ${titleOf(answer.taskId)}`}
+            </span>
+            <IconButton
+              label="Cancel your answer"
+              size="sm"
+              disabled={send.isPending}
+              onClick={() => setAnswer(undefined)}
+            >
+              <X aria-hidden />
+            </IconButton>
+          </div>
+        )}
+        <TextAreaField
+          label="Message to the AI"
+          hideLabel
+          placeholder={
+            answer
+              ? answer.go
+                ? "Anything the AI should know for the redo? Optional."
+                : "Anything the AI should know? Optional."
+              : "What's wrong and why? What does the AI need to do to get it right?"
+          }
+          rows={3}
+          maxLength={10_000}
+          value={text}
+          disabled={closed !== undefined || send.isPending}
+          aria-describedby={closed ? closedId : undefined}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              if (!e.repeat && !e.nativeEvent.isComposing) submit();
+            }
+          }}
+        />
+        {closed && (
+          <p id={closedId} className="text-xs text-muted-foreground">
+            {closed}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex-1" />
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={closed !== undefined || send.isPending || (!answer && !text.trim())}
+            aria-describedby={closed ? closedId : undefined}
+          >
+            <Send aria-hidden />
+            {send.isPending ? "Sending…" : "Send"}
+          </Button>
+        </div>
+        {send.isSuccess && unseen && (
+          <p className="text-xs text-muted-foreground">
+            Sent without a picture of the views: it couldn't be made, or was too large.
+          </p>
+        )}
+        {send.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            {redoRefused(send.error, tasks, send.variables?.meta.redo) ?? refusal(send.error)}
+          </p>
+        )}
+      </form>
+    </div>
+  );
+}
+
+/**
+ * How a correction ended, as the AI's closing message: what it did, or that it failed or was
+ * stopped. A failed or stopped redo undid its changes, so the task's earlier results stand.
+ */
+function Outcome({
+  outcome: { status, text, redo },
+  title,
+  onShow,
+}: {
+  outcome: Extract<ConversationItem, { from: "outcome" }>;
+  /** The redone task's name. */
+  title: string | undefined;
+  /** Opens the redone task; unset when it is in view. */
+  onShow: ((taskId: string) => void) | undefined;
+}) {
+  if (status === "completed")
+    return (
+      <div className="grid gap-1.5 rounded-lg border border-border px-3 py-2">
+        <StatusMark status="done" label={title ? `Redid ${title}` : "Done"} />
+        {text && <Markdown text={text} className="text-sm" />}
+        {redo && onShow && (
+          <Button
+            type="button"
+            variant="link"
+            className="justify-self-start"
+            onClick={() => onShow(redo)}
+          >
+            Show {title}
+            <ArrowRight aria-hidden />
+          </Button>
+        )}
+      </div>
+    );
+  const stopped = status === "cancelled";
+  return (
+    <div className="grid gap-1.5 rounded-lg border border-border px-3 py-2">
+      <StatusMark
+        status="stopped"
+        label={
+          title
+            ? `Redo of ${title} ${stopped ? "stopped" : "failed"}`
+            : stopped
+              ? "Answer stopped"
+              : "Stopped with an error"
+        }
+      />
+      {title && <p className="text-sm">The earlier results of {title} stand.</p>}
+      {text && (
+        <p className="text-xs break-words whitespace-pre-wrap text-muted-foreground">{text}</p>
+      )}
+    </div>
+  );
+}

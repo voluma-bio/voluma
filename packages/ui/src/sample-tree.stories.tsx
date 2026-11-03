@@ -4,7 +4,7 @@ import { SampleTree, type TreeSample, type TreeStudy } from "./sample-tree";
 /**
  * **What:** the studies and their samples, grouped Needs you, Running and Done, with a search.
  * **Why:** a researcher jumps between samples without leaving review. **Where:** the left side of the
- * study pages, which build it with `sampleTree` (`@voluma/run-view`); the scan page is to show it
+ * study pages, which build it with `sampleTree` (`@voluma/run-view`); the input page is to show it
  * as a tab. On screen it is called by `INPUT_WORD` ("Samples").
  *
  * Try: type "oa61" (dashes and case don't matter); Up and Down move, Left and Right close and
@@ -47,6 +47,6 @@ const studies: TreeStudy[] = [
   { id: "oa9", name: "OA9 pilot", samples: [sample("OA9-1", "done", "done")] },
 ];
 
-export const OnAScan: Story = { args: { studies, studyId: "oa6", sampleId: "OA6-1RK" } };
+export const OnAnInput: Story = { args: { studies, studyId: "oa6", sampleId: "OA6-1RK" } };
 export const OnAStudy: Story = { args: { studies, studyId: "oa8" } };
 export const NoSamples: Story = { args: { studies: [] } };

@@ -11,7 +11,7 @@
  */
 import { randomBytes } from "node:crypto";
 import type { Harness } from "@voluma/contracts/ids";
-import type { PersonMessage } from "@voluma/contracts/messages";
+import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
@@ -33,29 +33,33 @@ import {
   type Usage,
   usage,
 } from "./admission";
+import { lateResearcherWrite } from "./agent-review";
 import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
 import {
+  answerApproval,
   decideMessage,
   endCorrection,
   GUEST_KEYS_MESSAGE,
   messageRefusal,
   messageTargetOf,
   openCorrection,
+  reopen,
 } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { cancelOpenThreads, lockRun } from "./pg-event-log";
+import { cancelOpenThreads, cancelReviewWorkers, lockRun } from "./pg-event-log";
 import {
   loadRun,
   loadRuns,
+  type Queryable,
   readableInputs,
   readableRuns,
   readableStudies,
   type Tx,
 } from "./pg-runs";
 import { modelChoices, pickModel } from "./run-models";
-import { events, inputs, runs, studies, studyScans } from "./schema";
+import { events, inputs, runs, studies, studyMembers } from "./schema";
 
 /**
  * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
@@ -79,7 +83,7 @@ export class RunEnded extends Error {
 }
 
 export type RunnerReport =
-  | { kind: "ended"; outcome: "completed" | "failed"; error?: string }
+  | { kind: "ended"; outcome: "completed" | "failed"; error?: string; readSeq?: number }
   | { kind: "released"; reason: ReleaseReason };
 
 export type Claimed = {
@@ -87,6 +91,8 @@ export type Claimed = {
   leaseToken: string;
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
+  /** The study's budget (`claimSchema.budgetUsd`); null: none. */
+  budgetUsd: number | null;
   /** Present on every claim after the run's first. */
   previousClaim?: { reason: NonNullable<(typeof runs.$inferSelect)["lastClaimEnd"]> };
 };
@@ -194,7 +200,8 @@ const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, 
  * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
  * person's message, `messages.ts`) is never left worse than `completed`: its open threads end
  * `cancelled`, `correction.ended` records what happened, and the run ends `completed` with its
- * earlier results. `set` adds columns to the update (a recovery's lease reset).
+ * earlier results. On the agent loop only the workers and the root end, and main stays cut off
+ * (`cancelReviewWorkers`). `set` adds columns to the update (a recovery's lease reset).
  */
 async function endUnfinished(
   tx: Tx,
@@ -205,8 +212,16 @@ async function endUnfinished(
 ) {
   const reopenId = await openCorrection(tx, runId);
   const correcting = reopenId !== null;
-  if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
-  if (correcting) await endCorrection(tx, runId, reopenId, status, error);
+  const [{ harness } = { harness: null }] = correcting
+    ? await tx.select({ harness: runs.harness }).from(runs).where(eq(runs.id, runId))
+    : [];
+  if (correcting && harness === "agents") {
+    // Review on the agent loop (`cancelReviewWorkers`): main is cut off, not ended, and no correction span exists.
+    await cancelReviewWorkers(tx, runId, status === "cancelled");
+  } else {
+    if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
+    if (correcting) await endCorrection(tx, runId, reopenId, status, error);
+  }
   await tx
     .update(runs)
     .set({
@@ -217,6 +232,37 @@ async function endUnfinished(
       error: correcting ? null : (error ?? null),
     })
     .where(eq(runs.id, runId));
+}
+
+/**
+ * The first researcher write the ending claim never saw (`lateResearcherWrite`), from raw columns:
+ * the payload is read only of `thread.started`, in JS, as a json operator would fail on `\u0000`.
+ */
+async function lateWrite(tx: Tx, runId: string, readSeq: number | undefined) {
+  const rows = await tx
+    .select({
+      id: events.id,
+      type: events.type,
+      seq: events.seq,
+      threadId: events.threadId,
+      payload: sql<unknown>`CASE WHEN ${events.type} = 'thread.started' THEN ${events.payload} END`,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.runId, runId),
+        inArray(events.type, [
+          "thread.started",
+          "thread.ended",
+          "run.reopened",
+          "person.message",
+          "approval.given",
+          "approval.declined",
+        ]),
+      ),
+    )
+    .orderBy(asc(events.seq));
+  return lateResearcherWrite(rows, readSeq);
 }
 
 /** A run's error when its org is gone from config: a clause read after "The run stopped: ". */
@@ -386,8 +432,8 @@ export function pgRunQueue(
     models: () => modelChoices(modelOverride),
 
     /**
-     * Creates one run `queued` on a scan of an existing study. Refuses a study the reader
-     * can't read (or the example's), a scan the study lacks, an input still uploading, a
+     * Creates one run `queued` on an input of an existing study. Refuses a study the reader
+     * can't read (or the example's), an input the study lacks, an input still uploading, a
      * limit already reached, and a visitor run when the vault is full.
      */
     start: (
@@ -402,13 +448,16 @@ export function pgRunQueue(
           .where(and(readableStudies(reader), eq(studies.id, request.studyId)));
         if (!study) throw new HTTPException(404, { message: "unknown study" });
         if (study.example) throw new HTTPException(403, { message: "Examples are read-only." });
-        const [scan] = await tx
-          .select({ inputId: studyScans.inputId })
-          .from(studyScans)
+        const [member] = await tx
+          .select({ inputId: studyMembers.inputId })
+          .from(studyMembers)
           .where(
-            and(eq(studyScans.studyId, request.studyId), eq(studyScans.inputId, request.inputId)),
+            and(
+              eq(studyMembers.studyId, request.studyId),
+              eq(studyMembers.inputId, request.inputId),
+            ),
           );
-        if (!scan) throw new HTTPException(404, { message: "unknown input" });
+        if (!member) throw new HTTPException(404, { message: "unknown input" });
         await checkInputs(tx, reader, caller, [request.inputId]);
         await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
@@ -418,7 +467,7 @@ export function pgRunQueue(
       }),
 
     /**
-     * Creates a study, its scans and a `queued` run for each of `starts.runs`, in one
+     * Creates a study, its inputs and a `queued` run for each of `starts.runs`, in one
      * transaction: any refusal (an input, a limit, the vault) refuses the whole call and
      * leaves nothing. Returns the study's id.
      */
@@ -428,10 +477,10 @@ export function pgRunQueue(
       request: {
         study: Omit<typeof studies.$inferInsert, "labId" | "createdBy" | "example" | "createdAt">;
         /** `subject` absent: the input's name. */
-        scans: (Omit<typeof studyScans.$inferInsert, "studyId" | "position" | "subject"> & {
+        inputs: (Omit<typeof studyMembers.$inferInsert, "studyId" | "position" | "subject"> & {
           subject?: string;
         })[];
-        /** The runs to start now, one per scan to start. */
+        /** The runs to start now, one per input to start. */
         starts: Starts;
       },
     ) =>
@@ -441,17 +490,17 @@ export function pgRunQueue(
           tx,
           reader,
           caller,
-          request.scans.map((scan) => scan.inputId),
+          request.inputs.map((input) => input.inputId),
         );
         await tx.insert(studies).values({
           ...request.study,
           labId: reader.labId,
           createdBy: caller.userId,
         });
-        await tx.insert(studyScans).values(
-          request.scans.map((scan, position) => ({
-            ...scan,
-            subject: scan.subject ?? found.get(scan.inputId)!.name,
+        await tx.insert(studyMembers).values(
+          request.inputs.map((input, position) => ({
+            ...input,
+            subject: input.subject ?? found.get(input.inputId)!.name,
             studyId: request.study.id,
             position,
           })),
@@ -488,13 +537,14 @@ export function pgRunQueue(
       reader: Reader,
       caller: { userId: string; guest: boolean },
       run: Run,
+      /** A caller inside a transaction passes it: a second pool connection there can exhaust the pool. */
+      tx: Queryable = db,
+      studyWorkflowId?: string,
     ): Promise<string | null> {
-      const refusal = await messageRefusal(
-        db,
-        messageContext(reader).pinsOf,
-        caller,
-        messageTargetOf(run),
-      );
+      const refusal = await messageRefusal(tx, messageContext(reader).pinsOf, caller, {
+        ...messageTargetOf(run),
+        studyWorkflowId,
+      });
       return refusal?.message ?? null;
     },
 
@@ -503,7 +553,7 @@ export function pgRunQueue(
       reader: Reader,
       caller: { userId: string; guest: boolean },
       runId: string,
-      msg: { id: string; payload: PersonMessage },
+      msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) =>
       db.transaction((tx) =>
         decideMessage(tx, messageContext(reader), reader, caller, runId, msg, false),
@@ -514,13 +564,27 @@ export function pgRunQueue(
       reader: Reader,
       caller: { userId: string; guest: boolean },
       runId: string,
-      msg: { id: string; payload: PersonMessage },
+      msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) {
       const result = await locked((tx) =>
         decideMessage(tx, messageContext(reader), reader, caller, runId, msg, true),
       );
       if (!result.duplicate) notifier.notify(runId);
       return result;
+    },
+
+    /** Stores a yes or no to a held call, reopening the run if it had ended; never through admission. */
+    async answerApproval(
+      reader: Reader,
+      caller: { userId: string; guest: boolean },
+      runId: string,
+      requestId: string,
+      body: AnswerApprovalRequest,
+    ) {
+      const { duplicate } = await locked((tx) =>
+        answerApproval(tx, messageContext(reader), reader, caller, runId, requestId, body),
+      );
+      if (!duplicate) notifier.notify(runId);
     },
 
     /**
@@ -616,9 +680,14 @@ export function pgRunQueue(
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
+          const [study] = await tx
+            .select({ budgetUsd: studies.budgetUsd })
+            .from(studies)
+            .where(eq(studies.id, run.studyId));
           return {
             run: await loadRun(tx, run.id),
             leaseToken,
+            budgetUsd: study?.budgetUsd ?? null,
             ...(keys && { keys }),
             ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
           };
@@ -681,10 +750,14 @@ export function pgRunQueue(
         } else if (report.outcome === "failed") {
           await endUnfinished(tx, runId, "failed", report.error);
         } else {
-          await tx
-            .update(runs)
-            .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
-            .where(eq(runs.id, runId));
+          // The researcher wrote while the claim was ending: the run goes back to the queue.
+          const late = run.harness === "agents" ? await lateWrite(tx, runId, report.readSeq) : null;
+          // A reopen already stored for that write cannot queue the run again: it would loop.
+          if (!late || !(await reopen(tx, runId, late, run.startedBy)))
+            await tx
+              .update(runs)
+              .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
+              .where(eq(runs.id, runId));
         }
       });
       notifier.notify(runId);

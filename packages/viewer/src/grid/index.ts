@@ -10,6 +10,7 @@ export {
   type QuadState,
   type QuadView,
   QuadViewer,
+  type QuadViewerHandle,
 } from "./QuadViewer";
 export {
   type Blocks,
@@ -18,6 +19,7 @@ export {
   reviewGrid,
   type StructureDisplay,
   taskBlocks,
+  voxelOf,
 } from "./review";
 export { readView, type StoredView, storedWords, storeView } from "./saved-view";
 export type {
@@ -25,6 +27,7 @@ export type {
   GridMark,
   GridMesh,
   GridScene,
+  MarkEdit,
   MarkTool,
   Overlay,
   PaneView,

@@ -51,9 +51,11 @@ services:
         - tsconfig.base.json
         - pnpm-workspace.yaml
         # @voluma/workflow/bundled imports these (the API's workflow catalog, the web build's
-        # outputs and task titles). No other workflows/**: the API reads no other workflow file.
+        # outputs and task titles); @voluma/workflow/output-catalogs imports outputs.yaml (the
+        # agent loop's catalog, in the web build). No other workflows/**: the build reads no other.
         - workflows/*/outputs.json
         - workflows/*/tasks.json
+        - workflows/*/outputs.yaml
     envVars:
       - fromGroup: voluma-shared
       # Neon's direct (unpooled) connection string, not the pooler's: prepared statements need

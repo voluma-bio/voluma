@@ -1,20 +1,20 @@
 /**
  * A study's page (`/studies/:id`): which sample needs me. Its samples grouped Needs you, Running,
  * Done (then Not started), each row with its picture, group and knee, its bar of measurements,
- * one line of status and when it last changed; a row opens the scan review at the first item that
- * needs you, else the scan. `?status=<place>` shows one group. On the right: the study's details,
+ * one line of status and when it last changed; a row opens the input review at the first item that
+ * needs you, else the input. `?status=<place>` shows one group. On the right: the study's details,
  * its headline measurement with the way to Compare, and recent activity. Nothing here judges or
  * changes a result.
  */
 import { runThumbnailUrl } from "@voluma/api-client";
-import type { StudyScanDetail } from "@voluma/contracts/study";
+import type { StudyInputDetail } from "@voluma/contracts/study";
 import {
+  inputStatus,
   kneeOf,
   liveStatus,
   needsYouOf,
-  needsYouText,
   plural,
-  scanStatus,
+  toCheckText,
   useNow,
   whenText,
 } from "@voluma/run-view";
@@ -34,6 +34,7 @@ import { Link, useSearchParams } from "react-router";
 import { SampleBar } from "./sample-bar";
 import { useStudy } from "./study-layout";
 import {
+  actHref,
   changedAt,
   hasBar,
   kneeWord,
@@ -41,9 +42,7 @@ import {
   type Place,
   placeOf,
   placeParam,
-  reviewHref,
   type Section,
-  scanHref,
   sectionsOf,
   segmentOf,
   stoppedLine,
@@ -56,13 +55,13 @@ export function StudyPage() {
   const [search] = useSearchParams();
   const only = placeParam(search.get("status"));
   const sections = sectionsOf(workflow);
-  const live = detail.scans.some((s) => s.runs[0] && s.runs[0].state.status !== "ended");
+  const live = detail.inputs.some((s) => s.runs[0] && s.runs[0].state.status !== "ended");
   const now = useNow(live);
-  const knees = detail.scans.some((s) => kneeOf(s) !== null);
+  const knees = detail.inputs.some((s) => kneeOf(s) !== null);
   const groups = PLACES.map((p) => ({
     ...p,
-    scans: detail.scans.filter((s) => placeOf(s, detail.study.example) === p.place),
-  })).filter((g) => g.scans.length > 0 && (!only || g.place === only));
+    inputs: detail.inputs.filter((s) => placeOf(s, detail.study.example) === p.place),
+  })).filter((g) => g.inputs.length > 0 && (!only || g.place === only));
 
   return (
     <>
@@ -70,7 +69,7 @@ export function StudyPage() {
         <PageHead
           className="border-b-0 bg-transparent"
           title={detail.study.name}
-          subtitle={`${workflow.name} · ${plural(detail.scans.length, INPUT_WORD.one, INPUT_WORD.many)}`}
+          subtitle={`${workflow.name} · ${plural(detail.inputs.length, INPUT_WORD.one, INPUT_WORD.many)}`}
         />
         {only && (
           <p className="m-0 flex items-baseline gap-3 px-6 text-sm text-muted-foreground">
@@ -95,13 +94,14 @@ export function StudyPage() {
                   className="m-0 flex items-center gap-2 px-2 text-sm font-semibold"
                 >
                   {g.title}
-                  <Count>{g.scans.length}</Count>
+                  <Count>{g.inputs.length}</Count>
                 </h2>
                 <ul className="m-0 grid list-none p-0">
-                  {g.scans.map((scan) => (
+                  {g.inputs.map((input) => (
                     <SampleRow
-                      key={scan.scan.inputId}
-                      scan={scan}
+                      studyId={detail.study.id}
+                      key={input.member.inputId}
+                      input={input}
                       place={g.place}
                       workflow={workflow}
                       sections={sections}
@@ -129,50 +129,56 @@ export function StudyPage() {
 }
 
 function SampleRow({
-  scan,
+  studyId,
+  input,
   place,
   workflow,
   sections,
   knees,
   now,
 }: {
-  scan: StudyScanDetail;
+  studyId: string;
+  input: StudyInputDetail;
   place: Place;
   workflow: BundledWorkflow;
   sections: Section[];
   knees: boolean;
   now: number;
 }) {
-  const href = place === "needs-you" ? reviewHref(scan) : scanHref(scan);
-  const knee = kneeOf(scan);
-  const changed = changedAt(scan);
-  const about = [scan.scan.group, knees && knee ? `${kneeWord(knee)} knee` : null]
+  const href = actHref(studyId, input, place);
+  const knee = kneeOf(input);
+  const changed = changedAt(input);
+  const about = [input.member.group, knees && knee ? `${kneeWord(knee)} knee` : null]
     .filter(Boolean)
     .join(" · ");
-  const name = <span className="font-mono text-sm font-semibold">{scan.scan.subject}</span>;
+  const name = <span className="font-mono text-sm font-semibold">{input.member.subject}</span>;
   return (
     <li
       className={cx(
-        "group/row relative grid min-h-14 grid-cols-[2.5rem_10rem_7rem_auto_minmax(0,1fr)_5.5rem_1rem] items-center gap-x-4 rounded-md px-2",
+        "group/row relative grid min-h-14 grid-cols-[2.5rem_minmax(0,1fr)_auto_5.5rem_1rem] items-center gap-x-4 rounded-md px-2",
         href && "hover:bg-accent",
       )}
     >
-      <Thumbnail src={scan.runs[0] && runThumbnailUrl(scan.runs[0].id)} />
-      {href ? (
-        <Link
-          to={href}
-          className="truncate after:absolute after:inset-0 after:rounded-md focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
-        >
-          {name}
-        </Link>
-      ) : (
-        name
-      )}
-      <span className="truncate text-sm text-muted-foreground">{about}</span>
+      <Thumbnail src={input.runs[0] && runThumbnailUrl(input.runs[0].id)} />
+      <div className="grid min-w-0 gap-0.5 py-2">
+        <p className="m-0 flex min-w-0 items-baseline gap-3">
+          {href ? (
+            <Link
+              to={href}
+              className="truncate after:absolute after:inset-0 after:rounded-md focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
+            >
+              {name}
+            </Link>
+          ) : (
+            name
+          )}
+          <span className="truncate text-sm text-muted-foreground">{about}</span>
+        </p>
+        <StatusLine input={input} workflow={workflow} sections={sections} />
+      </div>
       <span className="min-w-0">
-        {hasBar(scan) && <SampleBar scan={scan} sections={sections} />}
+        {hasBar(input) && <SampleBar input={input} sections={sections} />}
       </span>
-      <StatusLine scan={scan} workflow={workflow} sections={sections} />
       <span className="text-right text-sm whitespace-nowrap text-fg-subtle tabular-nums">
         {changed && whenText(changed, now)}
       </span>
@@ -186,35 +192,35 @@ function SampleRow({
  * stopped, or that it is done, naming any measurement its result lacks.
  */
 function StatusLine({
-  scan,
+  input,
   workflow,
   sections,
 }: {
-  scan: StudyScanDetail;
+  input: StudyInputDetail;
   workflow: BundledWorkflow;
   sections: Section[];
 }) {
-  const run = scan.runs[0];
-  const status = scanStatus(scan);
+  const run = input.runs[0];
+  const status = inputStatus(input);
   let mark = <StatusMark {...status} />;
   let more: string | null = null;
-  if (run && status.status === "check") {
-    mark = <StatusMark status="check" label={needsYouText(needsYouOf(scan), run.harness)} />;
-    more = waitsOn(scan, workflow) || null;
+  if (run && status.status === "check" && input.waiting === 0) {
+    mark = <StatusMark status="check" label={toCheckText(needsYouOf(input))} />;
+    more = waitsOn(input, workflow) || null;
   } else if (run && (status.status === "running" || status.status === "checking")) {
-    mark = <StatusMark {...liveStatus(run)} />;
+    mark = <StatusMark {...liveStatus({ ...run, waiting: 0 })} />;
   } else if (status.status === "stopped") {
-    more = stoppedLine(scan, workflow);
-  } else if (status.status === "done" && hasBar(scan)) {
+    more = stoppedLine(input, workflow);
+  } else if (status.status === "done" && hasBar(input)) {
     const missing = sections
       .flatMap((s) => s.outputs)
-      .filter((o) => segmentOf(scan, o) === "missing")
+      .filter((o) => segmentOf(input, o) === "missing")
       .map((o) => o.name);
     if (missing.length > 0)
       more = missing.length > 2 ? `${missing.length} missing` : `${missing.join(", ")} missing`;
   }
   return (
-    <span className="flex min-w-0 items-baseline gap-2 text-sm">
+    <span className="flex min-w-0 items-baseline gap-2 overflow-hidden text-sm">
       {mark}
       {more && (
         <span className="truncate text-muted-foreground" title={more}>

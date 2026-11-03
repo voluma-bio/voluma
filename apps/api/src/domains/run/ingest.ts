@@ -70,11 +70,12 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
     const { runnerId, harnesses } = await parseJson(c, claimRequestSchema);
     const claimed = await queue.claim(runnerId, harnesses ?? ["tasks"]);
     if (!claimed) return c.json({ claim: null } satisfies ClaimResponse);
-    const { run, leaseToken, keys, previousClaim } = claimed;
+    const { run, leaseToken, budgetUsd, keys, previousClaim } = claimed;
     return c.json({
       claim: {
         run,
         leaseToken,
+        budgetUsd,
         ...(keys && { keys }),
         ...(previousClaim && { previousClaim }),
       },

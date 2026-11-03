@@ -19,15 +19,23 @@ import {
   type AgentState,
   agentLog,
   agentState,
+  approvalRequestId,
+  givenApprovals,
   type InboxItem,
+  type Notice,
   silentMinutes,
   stalledMinutes,
 } from "@voluma/contracts/agents";
-import { labelOverlaysUnder, refuseOutputsChange } from "@voluma/contracts/final-outputs";
-import type { OutputCatalog, OutputEntry } from "@voluma/contracts/output-catalog";
+import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
+import {
+  labelMapsOf,
+  type OutputCatalog,
+  type OutputEntry,
+} from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "@voluma/contracts/thread-records";
+import type { Interrupted } from "../adapters/pi/history-repair";
 import type { BashRuntime } from "../bash-runtime";
 import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
 import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "../loop-config";
@@ -36,7 +44,8 @@ import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "../messa
 import type { Recorder } from "../recorder";
 import { threadIdOf } from "../thread-id";
 import type { ThreadSpec, Threads } from "../threads";
-import type { Tool } from "../tools/tool";
+import type { Tool, ToolResult } from "../tools/tool";
+import { type ApprovedCall, approvalJobs } from "./approval-jobs";
 import {
   activityReminder,
   agentList,
@@ -47,6 +56,7 @@ import {
   receipts,
   STUCK_REASON,
   STUCK_SUMMARY,
+  WAITING_SUMMARY,
   wrapUpResumeText,
   wrapUpText,
 } from "./deliveries";
@@ -63,8 +73,10 @@ import {
   returnedId,
   startedId,
 } from "./effects";
+import { skillMarker } from "./prompts";
 import type { RunFiles } from "./run-files";
 import type { AgentsApi } from "./tools/coordination";
+import { heldText } from "./tools/gate";
 
 /** Workers open at once (X). */
 const WORKER_LIMIT = 4;
@@ -83,8 +95,12 @@ interface AgentIdentity {
   /** The closed worker it starts from, and the worker it is blind to (`start_worker`'s `from` and `blind`). */
   from?: string;
   blind?: string;
+  /** A worker's limit: the only outputs it may report (`start_worker`'s `outputs`). */
+  outputs?: string[];
   /** Which main this is: 1 for the first, 2 for its replacement. */
   n: number;
+  /** A replacement main in review: its first message is this (what it needs to take over), in place of the run-start prompt. */
+  takeover?: string;
 }
 
 /** What the wiring decides about an agent's thread: its prompts, model and tools. */
@@ -94,7 +110,7 @@ interface AgentSetup extends ModelSetup {
   prompt: string;
   tools: Tool[];
   labelOf(sender: UserSender): string;
-  interrupted(tool: string, toolCallId: string): string | undefined;
+  interrupted: Interrupted;
 }
 
 interface AgentLoopOptions {
@@ -119,6 +135,20 @@ interface AgentLoopOptions {
   prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
+  /** Runs an approved call's tool, not gated, as main's thread (`tools/registry.ts` `approvedTool`). */
+  approved(call: ApprovedCall, api: AgentsApi): Promise<ToolResult>;
+  /** Leaves `outputId` to the researcher after a declined keep or redo; false when there is nothing to leave (`tools/keep-output.ts`). */
+  leave(
+    api: AgentsApi,
+    threadId: string,
+    eventId: string,
+    outputId: string,
+    labels: readonly string[],
+  ): Promise<boolean>;
+  /** Copies a researcher's screenshot (its stored key) into main's `/work` folder, and returns the path main reads; undefined when the file is gone. */
+  stageScreenshot(snapshotKey: string): Promise<string | undefined>;
+  /** The skill block (`prompts.ts` `skillBlock`) for a skill of the run's snapshot, if it has one. */
+  skillBlock(name: string): string | undefined;
   config?: Partial<
     Pick<LoopConfig, "stuckLimit" | "activityMinutes" | "pingMinutes" | "pingCloseMinutes">
   >;
@@ -129,15 +159,14 @@ interface AgentLoopOptions {
 
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
-/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen, with the label overlays they rest on. */
+/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
 export function openingOutputs(
   catalog: readonly OutputEntry[],
   selected: readonly string[] | undefined,
 ) {
-  const chosen = selected
+  return selected
     ? catalog.filter((e) => selected.includes(e.id))
     : catalog.filter((e) => e.selectable);
-  return [...chosen, ...labelOverlaysUnder(catalog, chosen)];
 }
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
@@ -190,7 +219,16 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     skills: o.skills,
     catalog: o.catalog,
     prepareTranscript: o.prepareTranscript,
-    startWorker: async ({ name, brief, skills, from, blind, spawnedBy, parentThreadId }) => {
+    startWorker: async ({
+      name,
+      brief,
+      skills,
+      from,
+      blind,
+      outputs,
+      spawnedBy,
+      parentThreadId,
+    }) => {
       const id = threadIdOf(runId, name);
       await begin(
         {
@@ -202,6 +240,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
           n: 1,
           ...(from && { from }),
           ...(blind && { blind }),
+          ...(outputs && { outputs }),
         },
         startedId(id),
         parentThreadId,
@@ -214,6 +253,15 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     refreshRunFiles: o.runFiles.refresh,
     changed: shell.nudge,
   };
+
+  const jobs = approvalJobs({
+    recorder,
+    approved: (call) => o.approved(call, api),
+    leaveOutput: (threadId, eventId, outputId, labels) =>
+      o.leave(api, threadId, eventId, outputId, labels),
+    signal: o.signal,
+    nudge: shell.nudge,
+  });
 
   const identityOf = (d: AgentLog, r: AgentRecord): AgentIdentity => ({
     id: r.id,
@@ -279,9 +327,17 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   async function resume(r: AgentRecord, text: string, sender: UserSender) {
     const d = derive();
     if (stateOf(r) === "closed") throw new Error(`${r.id} is closed and is never resumed`);
-    await begin(identityOf(d, r), `${r.id}:started:${r.starts + 1}`, r.parentThreadId ?? root, {
-      input: { text, sender },
-    });
+    const agent = identityOf(d, r);
+    const takeover = r.place === "main" ? await takeoverOf(d, r.id, agent.n) : {};
+    await begin(
+      { ...agent, ...takeover },
+      `${r.id}:started:${r.starts + 1}`,
+      r.parentThreadId ?? root,
+      {
+        input: { text, sender },
+        ...(takeover.takeover !== undefined && { covers: d.lastEventId }),
+      },
+    );
   }
 
   async function startup() {
@@ -292,6 +348,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
         by: "runner" as const,
         reason: "The outputs the researcher chose for this run.",
         add: entries,
+        labels: labelMapsOf(o.catalog),
       };
       const why = refuseOutputsChange(undefined, change, o.catalog);
       if (why) throw new Error(`the run's opening outputs were refused: ${why}`);
@@ -300,15 +357,32 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     await o.runFiles.refresh();
   }
 
-  /** The next main (`main`, `main.2`, ...), skipping a name whose thread this process found unresumable. */
-  function startMain(d: AgentLog) {
+  /**
+   * A replacement main in review that has stored no message: its first message is the takeover
+   * text, in place of the run-start prompt (so a replacement cut off before its first message
+   * is stored starts the same way again).
+   */
+  async function takeoverOf(d: AgentLog, id: string, n: number) {
+    if (n < 2 || !d.reviewing || userTexts(id).length > 0) return {};
+    return { takeover: await deliveryOf(d, id, true) };
+  }
+
+  /**
+   * The next main (`main`, `main.2`, ...), skipping a name whose thread this process found
+   * unresumable. A replacement in review gets the takeover prompt: its first message holds the
+   * notices it would otherwise be delivered, and covers them.
+   */
+  async function startMain(d: AgentLog) {
     let n = [...d.records.values()].filter((r) => r.place === "main").length + 1;
     const nameOf = (k: number) => (k === 1 ? "main" : `main.${k}`);
     while (threads.stale(threadIdOf(runId, nameOf(n)))) n++;
     const id = threadIdOf(runId, nameOf(n));
-    return begin({ id, name: nameOf(n), role: "main", n }, startedId(id), root, {
-      ...(n > 1 && { covers: d.lastEventId }),
-    });
+    return begin(
+      { id, name: nameOf(n), role: "main", n, ...(await takeoverOf(d, id, n)) },
+      startedId(id),
+      root,
+      { ...(n > 1 && { covers: d.lastEventId }) },
+    );
   }
 
   const failureOf = (r: AgentRecord) => failureKind(r.end, o.providerError);
@@ -485,6 +559,83 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     return acted;
   }
 
+  /** What the researcher wrote comes before everything else main is told. */
+  const personFirst = (notices: readonly Notice[]) => [
+    ...notices.filter((n) => n.kind === "person"),
+    ...notices.filter((n) => n.kind !== "person"),
+  ];
+
+  /** The user messages a thread has stored, by thread: the skills it was given and whether it has a first message are read from them. */
+  const userTexts = (threadId: string) =>
+    recorder
+      .events()
+      .flatMap((e) =>
+        e.type === "message" && e.threadId === threadId && e.payload.role === "user"
+          ? [e.payload.text]
+          : [],
+      );
+
+  /**
+   * The skills a delivery to `threadId` carries, as the blocks main reads: `researcher` with the
+   * first person notice the thread is told, `corrections` with the first person notice or
+   * out-of-date output in review. Derived from what the thread's stored messages hold, so a
+   * delivery cut off before it was stored sends them again. `all`: a takeover, which tells the
+   * thread what the old one had been told too.
+   */
+  function skillsFor(d: AgentLog, threadId: string, all: boolean): string[] {
+    const person = (all ? d.notices : d.undelivered).some((n) => n.kind === "person");
+    const wanted = [
+      ...(person ? ["researcher"] : []),
+      ...(d.reviewing && (person || outOfDateIds().length > 0) ? ["corrections"] : []),
+    ];
+    if (wanted.length === 0) return [];
+    const texts = userTexts(threadId);
+    return wanted.flatMap((name) => {
+      const block = o.skillBlock(name);
+      return block && !texts.some((t) => t.includes(skillMarker(name))) ? [block] : [];
+    });
+  }
+
+  /** A screenshot that cannot be staged is dropped from the delivery: the notice still carries the text. */
+  async function stagedScreenshot(key: string) {
+    try {
+      return await o.stageScreenshot(key);
+    } catch (error) {
+      if (o.signal?.aborted) throw error;
+      console.error(`could not stage screenshot ${key}:`, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * What main is told in its next delivery, as one text. `takeover`: the text of a replacement
+   * main's first message: the notices it would be delivered, the researcher's messages the one
+   * before had not answered, and the skills its predecessor had.
+   */
+  async function deliveryOf(d: AgentLog, threadId: string, takeover = false): Promise<string> {
+    await o.runFiles.refresh();
+    const events = recorder.events();
+    const cut = d.cursor ? (d.written.get(d.cursor) ?? -1) : -1;
+    const owed = takeover
+      ? [...d.unansweredPerson.filter((n) => !d.undelivered.includes(n)), ...d.undelivered]
+      : d.undelivered;
+    const screenshots = new Map<string, string>();
+    for (const n of owed) {
+      const key = n.kind === "person" ? n.message.snapshotKey : undefined;
+      const path = key && (await stagedScreenshot(key));
+      if (path) screenshots.set(n.eventId, path);
+    }
+    return deliveryText({
+      notices: personFirst(owed).map((n) => noticeLine(n, events, d.approvals, screenshots)),
+      receipts: receipts(d, cut),
+      agents: agentList(d, stateOf, now()),
+      outOfDate: outOfDateIds(),
+      pending: pendingFinal(events),
+      reviewing: d.reviewing,
+      skills: skillsFor(d, threadId, takeover),
+    });
+  }
+
   /**
    * Main has notices: refresh the run files and deliver them, with main's next tool result when it
    * is in a turn (a long wait must not hold a worker's report back), as a new turn when it is idle.
@@ -499,17 +650,10 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const covers = d.lastEventId;
     // One send at a time to a running main: until it is stored, the next would repeat its notices.
     const [outstanding] = handed.get(m.id) ?? [];
+    // A start whose message is not stored yet has already taken these notices; its `onStored` nudge steps the loop again.
+    if (m.inputPending) return false;
     if (running && (!covers || (outstanding && d.cursor !== outstanding))) return false;
-    await o.runFiles.refresh();
-    const events = recorder.events();
-    const cut = d.cursor ? (d.written.get(d.cursor) ?? -1) : -1;
-    const text = deliveryText({
-      notices: d.undelivered.map((n) => noticeLine(n, events)),
-      receipts: receipts(d, cut),
-      agents: agentList(d, stateOf, now()),
-      outOfDate: outOfDateIds(),
-      pending: pendingFinal(events),
-    });
+    const text = await deliveryOf(d, m.id);
     const sender: UserSender = { kind: "runtime", covers };
     if (!running) {
       await resume(m, text, sender);
@@ -591,16 +735,33 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     return false;
   }
 
-  /** Main is idle with nothing new: nudge it a few times, then end the run. */
-  async function stuck(d: AgentLog): Promise<boolean> {
+  /** Something still holds the run open: an approved call not yet settled, or an agent working or closing that has not gone silent for two windows (R1). */
+  const holdsRun = (d: AgentLog) =>
+    givenApprovals(d.approvals).length > 0 ||
+    [...d.records.values()].some(
+      (r) =>
+        ["working", "closing"].includes(stateOf(r)) &&
+        stalledMinutes(r, threads.running(r.id), now()) < 2 * activityMinutes,
+    );
+
+  /**
+   * Main is idle with nothing new and nothing holds the run open. In review with nothing unanswered
+   * from the researcher the claim ends waiting, whether or not a request is open (the log shows
+   * them; an answer reopens the run). Otherwise main is nudged a few times, then the run ends
+   * stuck. Ids carry the span, so a repeat in a later span is a new end.
+   */
+  async function idleEnd(d: AgentLog): Promise<boolean> {
     const m = d.main;
-    if (!m || stateOf(m) !== "idle" || d.undelivered.length > 0) return false;
-    // A working or closing agent holds the run open (main may end its turn while a worker winds
-    // up), unless it is silent for two windows: it did not answer its reminder.
-    const holdsRun = (r: AgentRecord) =>
-      ["working", "closing"].includes(stateOf(r)) &&
-      stalledMinutes(r, threads.running(r.id), now()) < 2 * activityMinutes;
-    if ([...d.records.values()].some(holdsRun)) return false;
+    if (!m || stateOf(m) !== "idle" || d.undelivered.length > 0 || holdsRun(d)) return false;
+    if (d.reviewing && d.unansweredPerson.length === 0) {
+      await o.runFiles.refresh();
+      return recorder.append(
+        root,
+        "thread.ended",
+        { status: "completed", summary: WAITING_SUMMARY },
+        `${root}:waiting:end:${d.span}`,
+      );
+    }
     const events = recorder.events();
     if (d.emptyDeliveries < stuckLimit) {
       const state = `Agents:\n${agentList(d, stateOf, now())}`;
@@ -617,7 +778,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
           reason: STUCK_REASON,
           missing: pending.map((id) => ({ id, reason: STUCK_REASON })),
         },
-        `${root}:stuck:outputs`,
+        `${root}:stuck:outputs:${d.span}`,
       );
     }
     // Every open worker, idle ones too, is cancelled (DIVERGENCE/06): idle workers would otherwise hold the run open, and the run's report shows them closed.
@@ -627,18 +788,17 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
           r.id,
           "thread.ended",
           { status: "cancelled", note: "The run ended." },
-          `${root}:stuck:end:${r.id}`,
+          `${root}:stuck:end:${d.span}:${r.id}`,
         );
       }
     }
     await o.runFiles.refresh();
-    await recorder.append(
+    return recorder.append(
       root,
       "thread.ended",
       { status: "completed", summary: STUCK_SUMMARY },
-      `${root}:stuck:end`,
+      `${root}:stuck:end:${d.span}`,
     );
-    return true;
   }
 
   async function mainFailed(d: AgentLog, m: AgentRecord): Promise<void> {
@@ -665,7 +825,10 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       return "done";
     }
     checkFatal(d);
-    if (!d.main) {
+    const jobFailure = jobs.failure();
+    if (jobFailure !== undefined) throw jobFailure;
+    // Review with a main that was stopped (`stopAll` after its grace): nothing would act on the researcher, so another takes over.
+    if (!d.main || (d.reviewing && stateOf(d.main) === "closed")) {
       await startMain(d);
       return "acted";
     }
@@ -675,6 +838,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       await mainFailed(d, d.main);
       return "acted";
     }
+    if (await jobs.leave(d)) return "acted";
+    if (jobs.start(d)) return "acted";
     if (await finishClosings(d)) return "acted";
     if (await returnUnread(d)) return "acted";
     if (await deliverBashNotices(d)) return "acted";
@@ -683,7 +848,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     if (await deliverPings(d)) return "acted";
     if (await pingIdle(d)) return "acted";
     if (await remindSilent(d)) return "acted";
-    if (await stuck(d)) return "acted";
+    if (await idleEnd(d)) return "acted";
     return "idle";
   }
 
@@ -707,14 +872,18 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
 
 /**
  * The result of a tool call a restart cut off, from the log, when the call took effect. Tools
- * whose event the id table names answer "completed"; the rest get the cautious default text.
+ * whose event the id table names answer "completed"; the rest get the cautious default text. A
+ * held call's result ends the turn, as the live one did.
  */
 export function interruptedResult(
   d: AgentLog,
   threadId: string,
   tool: string,
   toolCallId: string,
-): string | undefined {
+): string | { text: string; terminate: true } | undefined {
+  // A call held for the researcher was answered "held" and the turn ended; the hold is in the log.
+  if (d.written.has(approvalRequestId(threadId, toolCallId)))
+    return { text: heldText(toolCallId), terminate: true };
   const ids: Record<string, string> = {
     message: messageEventId(threadId, toolCallId),
     close: closeEventId(threadId, toolCallId),

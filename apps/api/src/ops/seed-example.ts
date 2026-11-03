@@ -5,13 +5,13 @@
  *
  * The example gets the source's events and history under its own run id (event ids, thread ids
  * and payloads are copied verbatim: rows are keyed by run), `startedBy: "voluma-examples"`, `example: true`,
- * and the Demo org's reference-scan input. It belongs to its own study of one scan
+ * and the Demo org's reference input. It belongs to its own study of one input
  * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence, review assets, message snapshots (`scratch/person/`) and `outputs/` objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
  * example can't point at another run's files). `--backfill` adds the objects a run recorded before
  * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
  * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: a visitor run's
- * outputs are untrusted (`@voluma/contracts/run`), and an example's scan is shown to everyone.
+ * outputs are untrusted (`@voluma/contracts/run`), and an example's input is shown to everyone.
  */
 import { parseArgs } from "node:util";
 import { runIdSchema } from "@voluma/contracts/ids";
@@ -34,7 +34,7 @@ import {
   referenceInput,
   runs,
   studies,
-  studyScans,
+  studyMembers,
 } from "../domains/run/schema";
 import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
 import { databaseUrl } from "./operator";
@@ -106,7 +106,7 @@ if (src.run.state !== "ended" || src.run.outcome !== "completed") {
   throw new Error(`run ${source} has not completed`);
 }
 if (src.run.credentials !== "voluma") throw new Error("never seed an example from a visitor run");
-if (src.input.source !== "reference") throw new Error("an example reads the reference scan");
+if (src.input.source !== "reference") throw new Error("an example reads the reference input");
 if (src.run.example) throw new Error(`run ${source} is itself an example`);
 
 // Replace an earlier seeding of this example, and nothing else.
@@ -145,7 +145,7 @@ await db.transaction(async (tx) => {
   await tx.delete(piMessages).where(eq(piMessages.runId, exampleId));
   await tx.delete(events).where(eq(events.runId, exampleId));
   await tx.delete(runs).where(eq(runs.id, exampleId));
-  await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
+  await tx.delete(studyMembers).where(eq(studyMembers.studyId, studyId));
   await tx.delete(studies).where(eq(studies.id, studyId));
 
   const reference = referenceInput(demoLabId);
@@ -158,7 +158,7 @@ await db.transaction(async (tx) => {
     createdBy: EXAMPLES_OPERATOR,
     example: true,
   });
-  await tx.insert(studyScans).values({
+  await tx.insert(studyMembers).values({
     studyId,
     inputId: reference.id as string,
     subject: reference.name,

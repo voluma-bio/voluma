@@ -26,7 +26,7 @@ description: >
     the orientation was worked out, anything that changes how a number is read.
 
   Do not infer what the notes do not say. The notes are the researcher's account: what you see on the scan goes in
-  your checkpoint, not here.
+  your report, not here.
 - **Clean up the scan.** The field can hold the sample holder, padding and debris beside the specimen; every later
   step, and the researcher's 3D view, reads `hu.npy`. Set what is not the specimen to air (-1000 HU) in `hu.npy`,
   keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar

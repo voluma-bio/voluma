@@ -386,7 +386,7 @@ export function mainTools(deps: MainDeps) {
           threadId: ctx.threadId,
           toolCallId: ctx.toolCallId,
           kind: ctx.kind,
-          batchSize: ctx.batchSize,
+          batch: ctx.batch,
           signal: ctx.signal,
         };
         // Files first, outside the section: a missing one refuses the call before anything is written.

@@ -64,7 +64,7 @@ export function SegmentedControl<V extends string>({
               "h-[22px] cursor-pointer rounded-sm text-sm whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
               option.icon ? "flex w-7 items-center justify-center [&_svg]:size-3.5" : "px-2.5",
               // aria-checked, not data-state: a tooltip trigger sets its own data-state on the item.
-              "aria-checked:bg-card aria-checked:text-foreground aria-checked:inset-ring aria-checked:inset-ring-line-strong",
+              "aria-checked:bg-card aria-checked:font-medium aria-checked:text-foreground aria-checked:inset-ring aria-checked:inset-ring-foreground/40",
               "aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:text-muted-foreground",
               "focus-visible:outline-2 focus-visible:outline-ring",
             )}

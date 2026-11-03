@@ -30,7 +30,16 @@ import {
   Square,
   SunMedium,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { autoContrast, type Contrast } from "./compose";
 import {
   alongAxes,
@@ -49,17 +58,21 @@ import { NumberField } from "./number-field";
 import { CHIP, PANE } from "./pane-style";
 import { holdLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
-import type {
-  Axis,
-  GridMark,
-  GridScene,
-  MarkTool,
-  PaneHandle,
-  PaneStatus,
-  PaneView,
-  ShownMark,
-  Zyx,
+import {
+  type Axis,
+  type GridMark,
+  type GridScene,
+  type MarkEdit,
+  type MarkTool,
+  type PaneHandle,
+  type PaneStatus,
+  type PaneView,
+  pngWithin,
+  type ShownMark,
+  SNAPSHOT_WIDTH,
+  type Zyx,
 } from "./scene";
+import { tokenColor } from "./token-color";
 
 /** What a pane can show: 3D, the three planes, or the plane fitted to an anatomical surface (GP). */
 export type QuadView = "3d" | "xy" | "xz" | "yz" | "gp";
@@ -121,6 +134,17 @@ export type QuadState = {
   views: Partial<Record<QuadView, PaneView>>;
 };
 
+/** The view as it is now, and a picture of it, for a message that carries both. */
+export type QuadViewerHandle = {
+  /** What Save view would save now. */
+  state(): QuadState;
+  /**
+   * The shown panes as one PNG laid out as on screen with their names, at most `maxBytes`; null
+   * while a shown pane has no picture, or when no copy fits.
+   */
+  snapshot(maxBytes: number): Promise<Blob | null>;
+};
+
 const FRAME = { xy: 0, xz: 1, yz: 2 } as const satisfies Partial<Record<QuadView, Axis>>;
 const PLANE_OF = ["XY", "XZ", "YZ"] as const;
 const LABEL: Record<Exclude<QuadView, "gp">, string> = {
@@ -173,11 +197,14 @@ export function QuadViewer({
   tool = null,
   marks,
   onMark,
+  onEdit,
+  onPick,
   onNote,
   onReady,
   targets = [],
   onSave,
   restore,
+  ref,
 }: {
   /** Remount (`key`) for another grid; on the same grid, new overlays redraw in place. */
   scene: GridScene;
@@ -194,6 +221,10 @@ export function QuadViewer({
   marks: readonly ShownMark[];
   /** A new mark, with the frame of the pane it was made in (null in 3D); returns its id, which a point's note is kept under. */
   onMark?(mark: GridMark, plane: MarkPlane | null): string | undefined;
+  /** An end of a movable mark or a published ruler dragged in a slice, with that pane's frame. */
+  onEdit?(edit: MarkEdit, plane: MarkPlane): void;
+  /** A movable mark's end clicked in a slice. */
+  onPick?(id: string): void;
   /** The note typed at a point just placed with Point. */
   onNote?(id: string, note: string): void;
   /** Whether every shown pane has a picture. */
@@ -204,6 +235,7 @@ export function QuadViewer({
   onSave?(state: QuadState): void;
   /** A saved view to show: each new object is applied once. */
   restore?: QuadState;
+  ref?: Ref<QuadViewerHandle>;
 }) {
   const [point, setPoint] = useState<Zyx>(
     () => focus?.at ?? (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
@@ -227,8 +259,8 @@ export function QuadViewer({
   const handles = useRef(
     Object.fromEntries(VIEW_ORDER.map((v) => [v, { current: null as PaneHandle | null }])),
   ).current;
-  const latestMark = useRef({ onMark, tool, onNote, orientation, plate });
-  latestMark.current = { onMark, tool, onNote, orientation, plate };
+  const latestMark = useRef({ onMark, onEdit, onPick, tool, onNote, orientation, plate });
+  latestMark.current = { onMark, onEdit, onPick, tool, onNote, orientation, plate };
   const area = useRef<HTMLDivElement>(null);
 
   // The contrast spans the coarsest level's values, so the first picture already uses it.
@@ -342,20 +374,20 @@ export function QuadViewer({
       setRestoring({ ...restoring, views: waiting });
   }, [restoring, plate, showsGp]);
 
-  const save = () =>
-    onSave?.({
-      orientation,
-      aligned,
-      point,
-      contrast,
-      layout: given,
-      views: Object.fromEntries(
-        VIEW_ORDER.flatMap((v) => {
-          const h = handles[v]?.current;
-          return h ? [[v, h.view()]] : [];
-        }),
-      ),
-    });
+  const state = (): QuadState => ({
+    orientation,
+    aligned,
+    point,
+    contrast,
+    layout: given,
+    views: Object.fromEntries(
+      VIEW_ORDER.flatMap((v) => {
+        const h = handles[v]?.current;
+        return h ? [[v, h.view()]] : [];
+      }),
+    ),
+  });
+  const save = () => onSave?.(state());
 
   // GP while its plane is being fitted holds its cell with a loading pane.
   const mounted: readonly QuadView[] =
@@ -366,6 +398,39 @@ export function QuadViewer({
   const latestReady = useRef(onReady);
   latestReady.current = onReady;
   useEffect(() => latestReady.current?.(ready), [ready]);
+  useImperativeHandle(ref, () => ({
+    state,
+    async snapshot(maxBytes) {
+      const host = area.current?.getBoundingClientRect();
+      if (!ready || !host?.width || !host.height) return null;
+      const scale = Math.min(globalThis.devicePixelRatio, SNAPSHOT_WIDTH / host.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(host.width * scale);
+      canvas.height = Math.round(host.height * scale);
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = tokenColor("--viewer-well");
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.font = `${Math.round(12 * scale)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textBaseline = "top";
+      for (const view of shown) {
+        // Each pane draws and is copied in the same task: a WebGL buffer doesn't outlive it.
+        const layers = handles[view]?.current?.layers() ?? [];
+        const rect = layers[0]?.getBoundingClientRect();
+        if (!rect?.width || !rect.height) return null;
+        const x = (rect.left - host.left) * scale;
+        const y = (rect.top - host.top) * scale;
+        for (const layer of layers)
+          ctx.drawImage(layer, x, y, rect.width * scale, rect.height * scale);
+        // The pane's name, so the picture says which view is which.
+        const name = labelOf(view);
+        ctx.fillStyle = tokenColor("--viewer-chip");
+        ctx.fillRect(x, y, ctx.measureText(name).width + 8 * scale, 18 * scale);
+        ctx.fillStyle = tokenColor("--viewer-chip-fg");
+        ctx.fillText(name, x + 4 * scale, y + 3 * scale);
+      }
+      return pngWithin(canvas, maxBytes);
+    },
+  }));
 
   const anatomyOf = (view: QuadView): Anatomy | undefined => {
     if (!planes || view === "3d") return undefined;
@@ -475,6 +540,16 @@ export function QuadViewer({
     },
     [],
   );
+  /** An end dragged in slice `view`, in that pane's frame. */
+  const editIn = useCallback(
+    (view: Exclude<QuadView, "3d">) => (edit: MarkEdit) => {
+      const { onEdit: edited, orientation: o, plate: gp } = latestMark.current;
+      const basis = view === "gp" ? basisAlong(gp!) : o[FRAME[view]];
+      edited?.(edit, { ...basis, view });
+    },
+    [],
+  );
+  const pickMark = useCallback((id: string) => latestMark.current.onPick?.(id), []);
   const tilts = useMemo(
     () =>
       ([0, 1, 2] as const).map((axis) => (angle: number) => {
@@ -570,6 +645,8 @@ export function QuadViewer({
                 tool={tool}
                 marks={marks}
                 onMark={markIn(view)}
+                onEdit={onEdit && editIn(view)}
+                onPick={pickMark}
                 note={note}
                 clickLines
               />
@@ -594,6 +671,8 @@ export function QuadViewer({
                 tool={tool}
                 marks={marks}
                 onMark={markIn(view)}
+                onEdit={onEdit && editIn(view)}
+                onPick={pickMark}
                 onTilt={tilts[axis]}
                 note={note}
                 planeToken={planeToken}

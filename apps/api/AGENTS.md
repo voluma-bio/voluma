@@ -60,20 +60,25 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `studies.ts` (create, list, get), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
-  recovery) and the key vault, `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
+  recovery) and the key vault. A run carries its loop (`runs.harness`, null = tasks), set at start
+  from the request's `harness` or `DEFAULT_RUN_HARNESS`. The agent loop is allowed only for an
+  organization whose `index.ts` entry sets `agentLoop`: from any other, an explicit `agents` is 403
+  and no `harness` means tasks whatever the default. A claim hands out only runs whose loop the
+  runner lists (`harnesses`, absent = tasks, so an older runner never gets an agent-loop run). Keep
+  the organization gate and the claim filter when you touch start or claim; `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per limit.
-- **Every run belongs to a study** (`studies`, `study_scans`; `runs.study_id` is not null), and
+- **Every run belongs to a study** (`studies`, `study_members`; `runs.study_id` is not null), and
   the study owns the workflow. `readableStudies` (`pg-runs.ts`) is `readableRuns` on the study
   (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
-  it. `queue.createStudy` inserts the study, its scans and the runs to start in one
+  it. `queue.createStudy` inserts the study, its inputs and the runs to start in one
   transaction under the lock: any refusal throws an `HTTPException` (status and text, where it is decided) and rolls the whole call back, and
   `startRuns` reads the counts once and raises them for each run it inserts. Every browser
   write (start, create, cancel, resume) goes through `attempt`: a refusal rolls it back and reaches the
   client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run, and readable from every organization (`readableRuns`/`readableStudies` test `example` before the org); `import:run` restores
-  a dump's original study, scans and inputs, refusing conflicting shared rows. Only legacy dumps
+  a dump's original study, study members and inputs, refusing conflicting shared rows. Only legacy dumps
   without study metadata get a study of one.
 - **Rows are keyed by run.** `events` is `(run_id, id)` and `pi_messages` `(run_id, thread_id, idx)`:
   event ids and thread ids (opaque UUIDs for new threads, `<runId>.<name>` in older runs) are unique within a
@@ -100,8 +105,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` locks
   the run before judging its state. `decide` (review decisions) checks the run has ended before
   taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
-  to a queued or running run (409: one message, one claim) and reopens an ended `completed` one: it
-  writes `run.reopened`, clears `lastClaimEnd`, `stalledClaims` and the lease. A run is in a
+  to a queued or running task-loop run (409: one message, one claim) and reopens an ended `completed` one: it
+  writes `run.reopened`, clears `lastClaimEnd`, `stalledClaims` and the lease. An agent-loop run
+  takes a message while queued or running with no reopen: the message is an event in the log, a
+  running claim pulls it in (the heartbeat's `lastSeq`) and a queued run's first claim reads it, and
+  `report()` reopens the run when its claim ended before reading it (`readSeq`: the last event the
+  claim read). A run is in a
   correction while `corrections(events).open` (`@voluma/contracts/fold`; `openCorrection`: no
   `correction.ended` since the latest `run.reopened`), so its claims are corrections. A correction never ends a run worse than `completed`: every way the queue would
   fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
@@ -141,8 +150,11 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `fold` over the run's whole event log, plus what `fold` leaves to the API. Nothing
   re-validates it on the way out: the fold's resolvers guarantee no duplicate or dangling
   id, and `reviewIntegrityIssues` (`fold-test-log.ts`) checks that in the fold tests.
-- It reads runs and writes human decisions only through `RunRecords` (`src/ports`), wired
-  to Run's `pg-run-records.ts`. Reads use one repeatable-read snapshot. Decisions hold
+- It reads runs and writes human decisions through `RunRecords` (`src/ports`), wired
+  to Run's `pg-run-records.ts`. A researcher's message and an answer to an approval
+  (`POST /runs/:runId/approvals/:requestId`, agent-loop runs) go through `RunMessages` instead
+  (`corrections.ts`): judged like a message and never counted against the run limits (`admission.ts`);
+  they reopen the run only when it has ended. Reads use one repeatable-read snapshot. Decisions hold
   the event lock **before** the run-row lock (both through `lockRun`), then validate and append
   atomically; preserve that order to avoid deadlocking runner appends. Review owns policy;
   Run owns authorization filters, sequence allocation and persistence. No domain imports

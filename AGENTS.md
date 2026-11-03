@@ -54,7 +54,7 @@ areas of the app, never a person's patch.
 
 What the structure still requires:
 
-- Web features (`features/study`, `features/scan`) never import each other,
+- Web features (`features/study`, `features/input`) never import each other,
   and neither do `domains/run` and `domains/review` in the API. They share
   code only through `packages/` (and `apps/api/src/ports` on the server).
 - Web features reach the API only through `@voluma/api-client`.
@@ -187,11 +187,11 @@ they need:
   Every shared component has a story beside it (`*.stories.tsx`) shown in both themes in
   Storybook: `pnpm --filter @voluma/storybook storybook`.
 - Workflows and analysis code live in `workflows/`. `workflows/core/` is shared
-  by every run: the role files (`agents/`) and the generic micro-CT skills
+  by every run: the role files (`agents/` for the task loop, `roles/` for the agent loop) and the generic micro-CT skills
   (`skills/`). A workflow is `workflows/<name>/`: `outputs.json` (every output
   a run can produce), `tasks.json` (the task list), `outputs.yaml` (the same
-  catalog in the agent model's format, `packages/contracts/src/output-catalog.ts`;
-  nothing reads it at runtime yet) and `skills/<skill>/`
+  catalog in the agent loop's format, `packages/contracts/src/output-catalog.ts`;
+  the agent loop reads it from the run's snapshot and the web build bundles it) and `skills/<skill>/`
   (`SKILL.md`, `references/`, `resources/`), e.g. `workflows/mouse-oa`, the mouse
   knee workflow. Models come from runner config. A run snapshots `core/` and its
   workflow's directory and nothing else. Python lives only in

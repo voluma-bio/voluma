@@ -63,6 +63,8 @@ const frontmatterSchema = z.strictObject({
   description: z.string().min(1),
   /** Skills that load beside this one on the agent loop (core skills the method leans on). */
   companions: z.array(z.string().min(1)).optional(),
+  /** `agents`: a skill of the agent loop only; the task loop does not list or load it. */
+  harness: z.literal("agents").optional(),
   ...Object.fromEntries(SKILL_KEYS.map((k) => [k, z.unknown().optional()])),
 });
 
@@ -294,6 +296,7 @@ export async function loadWorkflow(
     if (skills.some((s) => s.name === fm.name)) {
       throw new WorkflowParseError(path, `skill "${fm.name}" is defined twice`);
     }
+    if (fm.harness === "agents" && harness === "tasks") continue;
     skills.push({
       name: fm.name,
       description: fm.description.replace(/\s+/g, " ").trim(),

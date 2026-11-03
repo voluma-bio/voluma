@@ -1,33 +1,37 @@
 /**
  * Postgres adapter for the browser's reads of studies (`@voluma/contracts/study`): Home's
- * list, which carries each scan's newest run in brief, and one study with its scans, runs,
- * values, open checks and each scan's task states and open items. Reads apply the caller's `ReadScope` as
+ * list, which carries each input's newest run in brief, and one study with its inputs, runs,
+ * values, open checks and each input's task states and open items. Reads apply the caller's `ReadScope` as
  * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
- * scans' values, checks and states are read from each fold here. Writes are the queue's.
+ * inputs' values, checks and states are read from each fold here. Writes are the queue's.
+ *
+ * A run's `waiting` is the open calls its fold counted, kept only when the caller can answer
+ * them (`CanAnswer`): the rule the run read applies as `cannotMessage`.
  */
 import { unitAsWritten } from "@voluma/contracts/output-catalog";
-import { finalValues, needingYou } from "@voluma/contracts/output-fold";
-import { latestRevision, scanNeedsYou, shownTasks } from "@voluma/contracts/review-state";
+import { finalValues } from "@voluma/contracts/output-fold";
+import { latestRevision, shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
   StudyDetail,
+  StudyInputDetail,
+  StudyMember,
   StudyRunSummary,
-  StudyScan,
-  StudyScanDetail,
   StudySummary,
 } from "@voluma/contracts/study";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
 import {
+  type Queryable,
   type ResultsLoader,
   type RunResult,
   readableRuns,
   readableStudies,
   toInput,
 } from "./pg-runs";
-import { inputs, runs, studies, studyScans } from "./schema";
+import { inputs, runs, studies, studyMembers } from "./schema";
 
 const toStudy = (row: typeof studies.$inferSelect): Study => ({
   id: row.id,
@@ -38,9 +42,22 @@ const toStudy = (row: typeof studies.$inferSelect): Study => ({
   createdAt: row.createdAt.toISOString(),
 });
 
+/** Whether the caller may answer this run's held calls: the run read's `cannotMessage` is null. */
+export type CanAnswer = (tx: Queryable, run: Run, workflowId: string) => Promise<boolean>;
+
+/** A run's open calls the caller can answer; the check runs only for a run that holds any. */
+async function waitingOf(
+  tx: Queryable,
+  workflowId: string,
+  { run, waiting }: RunResult,
+  canAnswer: CanAnswer,
+) {
+  return waiting > 0 && (await canAnswer(tx, run, workflowId)) ? waiting : 0;
+}
+
 const completed = ({ state }: Run) => state.status === "ended" && state.outcome === "completed";
 
-/** Each scan's newest run (`results` is newest first, so the first seen), and its newest completed run. */
+/** Each input's newest run (`results` is newest first, so the first seen), and its newest completed run. */
 function newestOf(results: RunResult[]) {
   const newest = new Map<string, RunResult>();
   const newestCompleted = new Map<string, RunResult>();
@@ -57,8 +74,8 @@ function newestOf(results: RunResult[]) {
  * agent loop's final values from its output fold (it has no checks to accept here).
  */
 function resultOf({ run, results }: RunResult) {
-  const values: StudyScanDetail["values"] = {};
-  const acceptable: StudyScanDetail["acceptable"] = [];
+  const values: StudyInputDetail["values"] = {};
+  const acceptable: StudyInputDetail["acceptable"] = [];
   for (const [id, { number, unit }] of finalValues(results.outputs))
     values[id] = { value: number, unit: unitAsWritten(unit), confidence: null };
   for (const task of results.revisions.at(-1)?.tasks ?? []) {
@@ -92,20 +109,26 @@ function reviewOf({ run, results }: RunResult): StudyRunSummary["review"] {
     return { acceptable, needsYou, reviewedAt };
   }
   if (!completed(run) || run.harness !== "agents") return null;
-  return { acceptable: 0, needsYou: needingYou(results.outputs).size, reviewedAt: null };
+  return { acceptable: 0, needsYou: results.outputs.toCheck, reviewedAt: null };
 }
 
 /** The newest run's final outputs' status, for a run of the agent loop; empty otherwise. */
-const outputStatusOf = (newest: RunResult | undefined): StudyScanDetail["outputStatus"] =>
+const outputStatusOf = (newest: RunResult | undefined): StudyInputDetail["outputStatus"] =>
   Object.fromEntries(
     (newest?.results.outputs.outputs ?? []).flatMap((o) => (o.final ? [[o.id, o.status]] : [])),
   );
 
-/** The newest run's tasks as the scan review shows them (`shownTasks`); none without a run. */
+/** The newest run's tasks as the input review shows them (`shownTasks`); none without a run. */
 const tasksOf = (newest: RunResult | undefined) =>
   shownTasks(newest && { ...newest, state: newest.run.state, revision: latestRevision(newest) });
 
-function summarize(study: Study, scanCount: number, results: RunResult[]): StudySummary {
+async function summarize(
+  tx: Queryable,
+  study: Study,
+  inputCount: number,
+  results: RunResult[],
+  canAnswer: CanAnswer,
+): Promise<StudySummary> {
   const { newest, newestCompleted } = newestOf(results);
   let lastActivityAt = study.createdAt;
   for (const { run } of results) {
@@ -117,30 +140,26 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
       if (at && at > lastActivityAt) lastActivityAt = at;
     }
   }
-  let needsYou = 0;
-  // Each scan as the study page counts it (`needsYouOf`): the same function on the same fields.
-  for (const [id, result] of newest) {
-    const done = newestCompleted.get(id);
-    needsYou += scanNeedsYou(reviewOf(result), done ? resultOf(done).acceptable.length : 0);
-  }
   return {
     ...study,
-    scanCount,
-    scansCompleted: newestCompleted.size,
-    needsYou,
+    inputCount,
+    inputsCompleted: newestCompleted.size,
     lastActivityAt,
-    newestRuns: [...newest.values()].map(
-      (result): StudyRunSummary => ({
-        runId: result.run.id,
-        inputId: result.run.input.id,
-        inputName: result.run.input.name,
-        state: result.run.state,
-        tasks: result.run.tasks,
-        ...(result.run.outputs && { outputs: result.run.outputs }),
-        ...(result.run.harness && { harness: result.run.harness }),
-        review: reviewOf(result),
-        example: result.run.example,
-      }),
+    newestRuns: await Promise.all(
+      [...newest.values()].map(
+        async (result): Promise<StudyRunSummary> => ({
+          runId: result.run.id,
+          inputId: result.run.input.id,
+          inputName: result.run.input.name,
+          state: result.run.state,
+          tasks: result.run.tasks,
+          ...(result.run.outputs && { outputs: result.run.outputs }),
+          ...(result.run.harness && { harness: result.run.harness }),
+          review: reviewOf(result),
+          waiting: await waitingOf(tx, study.workflowId, result, canAnswer),
+          example: result.run.example,
+        }),
+      ),
     ),
   };
 }
@@ -148,18 +167,18 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
 export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
   return {
     /** The caller's readable studies, newest activity first. */
-    list: (reader: ReadScope) =>
+    list: (reader: ReadScope, canAnswer: CanAnswer) =>
       db.transaction(
         async (tx): Promise<StudySummary[]> => {
           const rows = await tx.select().from(studies).where(readableStudies(reader));
           if (rows.length === 0) return [];
           const ids = rows.map((row) => row.id);
           const counts = await tx
-            .select({ studyId: studyScans.studyId, n: sql<number>`count(*)::int` })
-            .from(studyScans)
-            .where(inArray(studyScans.studyId, ids))
-            .groupBy(studyScans.studyId);
-          const scanCount = new Map(counts.map(({ studyId, n }) => [studyId, n]));
+            .select({ studyId: studyMembers.studyId, n: sql<number>`count(*)::int` })
+            .from(studyMembers)
+            .where(inArray(studyMembers.studyId, ids))
+            .groupBy(studyMembers.studyId);
+          const inputCount = new Map(counts.map(({ studyId, n }) => [studyId, n]));
           const byStudy = new Map<string, RunResult[]>();
           for (const result of await results(
             tx,
@@ -170,17 +189,24 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             group.push(result);
             byStudy.set(result.run.studyId, group);
           }
-          return rows
-            .map((row) =>
-              summarize(toStudy(row), scanCount.get(row.id) ?? 0, byStudy.get(row.id) ?? []),
-            )
-            .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+          const summaries = await Promise.all(
+            rows.map((row) =>
+              summarize(
+                tx,
+                toStudy(row),
+                inputCount.get(row.id) ?? 0,
+                byStudy.get(row.id) ?? [],
+                canAnswer,
+              ),
+            ),
+          );
+          return summaries.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
         },
         { isolationLevel: "repeatable read" },
       ),
 
-    /** One study with its scans and runs; null when absent or unreadable. */
-    get: (reader: ReadScope, studyId: string) =>
+    /** One study with its inputs and runs; null when absent or unreadable. */
+    get: (reader: ReadScope, studyId: string, canAnswer: CanAnswer) =>
       db.transaction(
         async (tx): Promise<StudyDetail | null> => {
           const [row] = await tx
@@ -188,12 +214,12 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             .from(studies)
             .where(and(readableStudies(reader), eq(studies.id, studyId)));
           if (!row) return null;
-          const scans = await tx
-            .select({ scan: studyScans, input: inputs })
-            .from(studyScans)
-            .innerJoin(inputs, eq(studyScans.inputId, inputs.id))
-            .where(eq(studyScans.studyId, studyId))
-            .orderBy(asc(studyScans.position));
+          const members = await tx
+            .select({ member: studyMembers, input: inputs })
+            .from(studyMembers)
+            .innerJoin(inputs, eq(studyMembers.inputId, inputs.id))
+            .where(eq(studyMembers.studyId, studyId))
+            .orderBy(asc(studyMembers.position));
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
             skipSummaryless: true,
             stopped: "newest",
@@ -203,21 +229,30 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           for (const { run } of found) {
             runsOf.set(run.input.id, [...(runsOf.get(run.input.id) ?? []), run]);
           }
+          const waiting = new Map(
+            await Promise.all(
+              [...newest].map(
+                async ([inputId, r]) =>
+                  [inputId, await waitingOf(tx, row.workflowId, r, canAnswer)] as const,
+              ),
+            ),
+          );
           return {
             study: toStudy(row),
-            scans: scans.map(({ scan, input }) => {
-              const result = newestCompleted.get(scan.inputId);
-              const newestRun = newest.get(scan.inputId);
+            inputs: members.map(({ member, input }) => {
+              const result = newestCompleted.get(member.inputId);
+              const newestRun = newest.get(member.inputId);
               return {
-                scan: {
-                  inputId: scan.inputId,
-                  subject: scan.subject,
-                  group: scan.group,
-                  attributes: scan.attributes,
-                } satisfies StudyScan,
+                member: {
+                  inputId: member.inputId,
+                  subject: member.subject,
+                  group: member.group,
+                  attributes: member.attributes,
+                } satisfies StudyMember,
                 input: toInput(input),
-                runs: runsOf.get(scan.inputId) ?? [],
+                runs: runsOf.get(member.inputId) ?? [],
                 review: newestRun ? reviewOf(newestRun) : null,
+                waiting: waiting.get(member.inputId) ?? 0,
                 outputStatus: outputStatusOf(newestRun),
                 resultRunId: result?.run.id ?? null,
                 ...(result ? resultOf(result) : { values: {}, acceptable: [] }),

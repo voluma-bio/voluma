@@ -75,6 +75,8 @@ export type Notice = { eventId: string; at: number; agent: string } & (
   | {
       kind: "approval";
       outcome: "done" | "declined" | "refused" | "withdrawn";
+      /** The request this answers or settles (`approvalRequestId`). */
+      requestId: string;
       toolCallId: string;
       text: string;
     }
@@ -103,12 +105,18 @@ export interface AgentLog {
   rootEnded: boolean;
   /** The root ended since its latest start (this claim's). */
   rootEndedThisClaim: boolean;
+  /** Review: a `run.reopened` has no root `completed` end after it (`review.md`). */
+  reviewing: boolean;
+  /** The id of the latest `run.reopened`, else `run`: loop-written ids that can recur carry it, so one span's id is never found in the next. */
+  span: string;
   /** Why the previous claim ended, from the latest `claim.started`. */
   after: ClaimEndReason | undefined;
   /** `tool.call`s by thread and call id (`callKey`), for rebuilding a cut-off tool's result. */
   calls: ThreadRecords<AgentRecord>["calls"];
-  /** Who spoke last to the researcher: a person's message is unanswered while it follows main's last message to `researcher`. */
-  hasUnansweredPerson: boolean;
+  /** The researcher's messages main has not answered: those that follow its last message to `researcher`. */
+  unansweredPerson: Extract<Notice, { kind: "person" }>[];
+  /** Every `approval.requested`, in log order, with its answer and whether it is settled. */
+  approvals: ApprovalRecord[];
 }
 
 /** Calls that say nothing was done, so a ping turn made of them is not an answer to the ping. */
@@ -168,11 +176,12 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   let cursor: string | undefined;
   let rootId: string | undefined;
   let rootEnded = false;
+  let reviewing = false;
+  let span = "run";
   let rootStartAt = -1;
   let rootEndAt = -1;
   let after: ClaimEndReason | undefined;
   let main: AgentRecord | undefined;
-  let personAt = -1;
   let answeredAt = -1;
 
   /** An input reached `record`: a ping's own delivery clears the pending ping; any other input also restarts the count of pings in a row. */
@@ -193,10 +202,17 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     }
     if (e.type === "thread.ended" && e.threadId === rootId) {
       rootEndAt = at;
-      if (e.payload.status === "completed") rootEnded = true;
+      if (e.payload.status === "completed") {
+        rootEnded = true;
+        reviewing = false;
+      }
     }
     if (e.type === "claim.started") after = e.payload.after;
-    if (e.type === "run.reopened") rootEnded = false;
+    if (e.type === "run.reopened") {
+      rootEnded = false;
+      reviewing = true;
+      span = e.id;
+    }
     const before = fold.threads.get(e.threadId);
     const { record, firstEnd } = fold.apply(e);
     const name = record?.name ?? "";
@@ -310,7 +326,6 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
         break;
       }
       case "person.message":
-        personAt = at;
         notices.push({
           kind: "person",
           eventId: e.id,
@@ -326,6 +341,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
           at,
           agent: "researcher",
           outcome: "declined",
+          requestId: approvalOf(e.id),
           toolCallId: e.payload.toolCallId,
           text: e.payload.text ?? "",
         });
@@ -336,6 +352,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
           eventId: e.id,
           at,
           agent: "researcher",
+          requestId: approvalOf(e.id),
           ...e.payload,
         });
         break;
@@ -350,7 +367,13 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
           }
         } else if (sender.kind === "runtime" && sender.covers) {
           delivered.add(sender.covers);
-          if (record.place === "main" && !pingIds.has(sender.covers)) {
+          // Never backwards: a resend of an earlier snapshot is not a new delivery.
+          const to = written.get(sender.covers) ?? -1;
+          if (
+            record.place === "main" &&
+            !pingIds.has(sender.covers) &&
+            to > (cursor === undefined ? -1 : (written.get(cursor) ?? -1))
+          ) {
             cursor = sender.covers;
             deliveries.push({ at: written.get(sender.covers) ?? -1 });
           }
@@ -413,29 +436,84 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     written,
     rootEnded,
     rootEndedThisClaim: rootEndAt > rootStartAt,
+    reviewing,
+    span,
     after,
     calls: fold.calls,
-    hasUnansweredPerson: personAt > answeredAt,
+    unansweredPerson: notices.filter(
+      (n): n is Extract<Notice, { kind: "person" }> => n.kind === "person" && n.at > answeredAt,
+    ),
+    approvals: approvalRecords(events),
   };
   memo.set(events, { length: events.length, value });
   return value;
 }
 
 /**
- * A held call the researcher has not answered: an `approval.requested` whose log holds neither
- * its answer (`<request id>:answer`, `approval.given` or `approval.declined`) nor
- * `<request id>:settled`. `requestId` is the request event's id, the one the answer route takes.
+ * The ids of a held call's events, written once here. The request is `<thread>:approval:<toolCallId>`;
+ * the researcher's answer (given or declined, so only one lands) is `<request>:answer`; the
+ * runner's outcome is `<request>:settled`; an output left to the researcher after a declined
+ * keep or redo is `<request>:left:<output>`.
  */
-export function openApprovals(
-  events: readonly RunEvent[],
-): (Payload<"approval.requested"> & { requestId: string })[] {
-  const ids = new Set(events.map((e) => e.id));
-  return events.flatMap((e) =>
-    e.type === "approval.requested" && !ids.has(`${e.id}:answer`) && !ids.has(`${e.id}:settled`)
-      ? [{ requestId: e.id, ...e.payload }]
-      : [],
-  );
+export const approvalRequestId = (threadId: string, toolCallId: string) =>
+  `${threadId}:approval:${toolCallId}`;
+export const approvalAnswerId = (requestId: string) => `${requestId}:answer`;
+export const approvalSettledId = (requestId: string) => `${requestId}:settled`;
+export const approvalLeftId = (requestId: string, outputId: string) =>
+  `${requestId}:left:${outputId}`;
+/** The ids of the outputs left after `requestId`'s decline start with this. */
+export const approvalLeftPrefix = (requestId: string) => approvalLeftId(requestId, "");
+/** The request an answer or settled event's id belongs to. */
+export const approvalOf = (answerOrSettledId: string) =>
+  answerOrSettledId.slice(0, answerOrSettledId.lastIndexOf(":"));
+
+/** A held call and what became of it. `requestId` is the request event's id, the one the answer route takes. */
+export type ApprovalRecord = Payload<"approval.requested"> & {
+  requestId: string;
+  /** The thread that made the call. */
+  threadId: string;
+  /** The researcher's answer (`<request id>:answer`), if given; `at` is its position in the log. */
+  answer?: { kind: "given" | "declined"; text: string; at: number };
+  /** `<request id>:settled`, if stored: how the call ended, and where in the log. */
+  settled?: { outcome: "done" | "refused" | "withdrawn"; at: number };
+};
+
+/** Every `approval.requested`, in log order, with its answer and whether it is settled. `agentLog` holds it as `approvals`. */
+export function approvalRecords(events: readonly RunEvent[]): ApprovalRecord[] {
+  const answers = new Map<string, NonNullable<ApprovalRecord["answer"]>>();
+  const settled = new Map<string, NonNullable<ApprovalRecord["settled"]>>();
+  for (const [at, e] of events.entries()) {
+    if (e.type === "approval.given" || e.type === "approval.declined")
+      answers.set(e.id, {
+        kind: e.type === "approval.given" ? "given" : "declined",
+        text: e.payload.text ?? "",
+        at,
+      });
+    else if (e.type === "approval.settled") settled.set(e.id, { outcome: e.payload.outcome, at });
+  }
+  return events.flatMap((e) => {
+    if (e.type !== "approval.requested") return [];
+    const answer = answers.get(approvalAnswerId(e.id));
+    const done = settled.get(approvalSettledId(e.id));
+    return [
+      {
+        requestId: e.id,
+        threadId: e.threadId,
+        ...e.payload,
+        ...(answer && { answer }),
+        ...(done && { settled: done }),
+      },
+    ];
+  });
 }
+
+/** A held call the researcher has not answered and nothing has settled (a close withdraws it). */
+export const openApprovals = (approvals: readonly ApprovalRecord[]): ApprovalRecord[] =>
+  approvals.filter((a) => !a.answer && !a.settled);
+
+/** Approved calls whose job has not settled: work in flight. */
+export const givenApprovals = (approvals: readonly ApprovalRecord[]): ApprovalRecord[] =>
+  approvals.filter((a) => a.answer?.kind === "given" && !a.settled);
 
 const idOf = (idByName: Map<string, string>, name: string) => idByName.get(name) ?? "";
 

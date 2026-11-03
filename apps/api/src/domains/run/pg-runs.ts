@@ -4,6 +4,7 @@
  * is just absent. Every state change is in pg-queue.ts.
  */
 
+import { approvalRecords, openApprovals } from "@voluma/contracts/agents";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
 import { outputsIn } from "@voluma/contracts/output-fold";
@@ -257,12 +258,15 @@ export type RunFold = {
   open: readonly string[];
   /** The threads whose latest end failed (`failedThreads`). */
   failed: ReadonlySet<string>;
+  /** The calls main holds for the researcher's answer (`openApprovals`); who may answer is the reader's. */
+  waiting: number;
   /** The stored fold events that did not parse and are missing from `results`. */
   skipped: number;
 };
 
 const foldRun = (log: RunEvent[], skipped = 0): RunFold => ({
   skipped,
+  waiting: openApprovals(approvalRecords(log)).length,
   results: reviewState(log),
   correcting: openCorrectionRevision(log),
   open: openThreads(log),
@@ -326,7 +330,7 @@ interface LoadOptions {
   /**
    * Which failed or cancelled runs to fold. A stopped run's row says all a list shows of it
    * (`review` and `tasks` are null), so the lists take `none`; the study read takes `newest`, a
-   * scan's newest run, to show where it stopped; one run's read (default) takes `all`. A run
+   * input's newest run, to show where it stopped; one run's read (default) takes `all`. A run
    * left out reads as having no events.
    */
   stopped?: "all" | "newest" | "none";
@@ -338,7 +342,7 @@ async function loadResults(
   { cache = newCache(), skipSummaryless = false, stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
-  // Rows are newest first, so a scan's first row is its newest run.
+  // Rows are newest first, so an input's first row is its newest run.
   const seen = new Set<string>();
   const foldRows = rows.filter(({ run }) => {
     const newest = !seen.has(run.inputId);

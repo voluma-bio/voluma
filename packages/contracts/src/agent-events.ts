@@ -36,7 +36,12 @@ export const toCheckItemSchema = z.object({ title: nonEmpty, focus: focusSchema.
  * `change_outputs`, and the stuck-run rule writes `missing`. `add` carries whole catalog entries
  * so the fold needs no workflow files; they are stored loose (`id`, `kind`, the rest passes
  * through) and checked against the catalog by the writer. `sections` replaces the grouping;
- * `expect` appends lines to an output's own.
+ * `expect` appends lines to an output's own. `labels` maps each label overlay to the map whose
+ * voxels it holds (`{overlayId: mapId}`); the runner records the catalog's whole map once, at the
+ * start, so the fold resolves a link to an overlay that no list entry carries. It sits on the
+ * change, not on `add` entries, because it is the catalog's, not part of the list. It must ride
+ * on a change that also adds: a parser from before `labels` drops it, and a change left with
+ * nothing else fails "a change changes something".
  */
 export const outputsChangedSchema = z
   .object({
@@ -49,6 +54,7 @@ export const outputsChangedSchema = z
       .array(z.object({ title: nonEmpty, outputs: z.array(outputRefSchema).min(1) }))
       .optional(),
     expect: z.array(z.object({ id: outputRefSchema, lines: z.array(nonEmpty).min(1) })).optional(),
+    labels: z.record(outputRefSchema, outputRefSchema).optional(),
   })
   .refine((p) => Object.keys(p).some((k) => k !== "by" && k !== "reason"), {
     message: "a change changes something",
@@ -162,6 +168,10 @@ export const approvalRequestedSchema = z.object({
   args: z.unknown(),
   fileHashes: z.record(relativePathSchema, sha256Schema),
   summary: nonEmpty,
+  /** The outputs the call names (`Tool.changesResults.outputs`), by catalog id: what it changes, and what a decline leaves to the researcher. */
+  outputs: z.array(outputRefSchema).optional(),
+  /** The outputs the call makes out of date if it runs (the transitive dependents of what it changes), for the researcher's card. */
+  outOfDate: z.array(outputRefSchema).optional(),
 });
 
 /** The researcher's answer to an `approval.requested`; written by the API. */
@@ -287,6 +297,8 @@ export const markPlacedSchema = z.looseObject({
  * does not oblige a migration of stored messages; it carries only what the notice to main needs.
  */
 export const attachedMarkSchema = z.looseObject({
+  /** The mark's id: how a later message finds what main was last told of it (`was`). */
+  id: z.uuid().optional(),
   output: outputRefSchema,
   tag: nonEmpty,
   volume: nonEmpty,
@@ -300,10 +312,11 @@ export const attachedMarkSchema = z.looseObject({
 export const attachedWasSchema = attachedMarkSchema.pick({ world: true, plane: true });
 
 /**
- * A mark attached to a researcher's message. `change`: `delete` (a `mark.deleted` follows its last
- * `mark.placed`), `move` (an earlier `mark.placed` of this id exists) or `place`. `was` is the state
- * main last saw, for a move of the researcher's own mark. `version` is the output's latest version
- * when the message was sent.
+ * A mark attached to a researcher's message, as `changeOf` (review-state.ts) judges it against
+ * what that person's previous messages froze: `place` (never told, or placed again after a told
+ * delete), `move` (a told mark's position, plane or shape changed; `was` is the state main last
+ * saw) or `delete` (a told mark deleted since). A told mark unchanged is not attached at all.
+ * `version` is the output's latest version when the message was sent.
  */
 export const attachedSchema = z.object({
   change: z.enum(["place", "move", "delete"]),

@@ -7,7 +7,13 @@ import {
   refuseOutputsChange,
 } from "./final-outputs";
 import { type OutputCatalog, outputCatalogSchema } from "./output-catalog";
-import { finalOutputs, outputsFold, pendingFinal, undecidedOutOfDate } from "./output-fold";
+import {
+  finalOutputs,
+  outputsFold,
+  outputsIn,
+  pendingFinal,
+  undecidedOutOfDate,
+} from "./output-fold";
 
 type Link = { id: string; version: number; role: "on" | "base" | "input" };
 const sha = (n: string) => n.padEnd(64, "0");
@@ -189,6 +195,72 @@ describe("label overlays", () => {
     expect(stale(r.events)).toEqual([]);
     r.publish("labels", 2, { "l.npy": "a2" });
     expect(stale(r.events)).toContain("femurvol");
+  });
+});
+
+describe("labels the change records", () => {
+  const labelled = () => {
+    const r = run();
+    r.push("outputs.changed", {
+      by: "runner",
+      reason: "start",
+      add: [scan, overlay("labels"), overlay("femur")],
+      labels: { femur: "labels", patella: "labels" },
+    });
+    return r;
+  };
+
+  it("resolves a label no list entry carries, and its status is its map's", () => {
+    const r = labelled();
+    r.publish("labels", 1, { "l.npy": "a1" }, [], { toCheck: [{ title: "edge" }] });
+    r.publish("pv", 1, { "p.json": "p1" }, [{ id: "patella", version: 1, role: "input" }]);
+    const fold = outputsFold(r.events);
+    expect(fold.labels.get("patella")).toBe("labels");
+    expect(fold.byId.get("femur")).toMatchObject({ status: "to-check" });
+    expect(fold.byId.get("femur")?.latest).toBeUndefined();
+    r.publish("labels", 2, { "l.npy": "a2" });
+    expect(undecidedOutOfDate(r.events)).toEqual([]);
+    expect(stale(r.events)).toEqual(["pv"]);
+  });
+
+  it("takes a label's out-of-date from its map, whose v2 is made from its v1", () => {
+    const r = labelled();
+    r.publish("labels", 1, { "l.npy": "a1" });
+    r.publish("labels", 2, { "l.npy": "a2" }, [{ id: "labels", version: 1, role: "input" }]);
+    const fold = outputsFold(r.events);
+    expect(fold.byId.get("labels")?.outOfDate).toBe(false);
+    expect(fold.byId.get("femur")).toMatchObject({ outOfDate: false, status: "reported" });
+  });
+
+  it("counts a reported label as in", () => {
+    const r = labelled();
+    r.final(scan, overlay("labels"), overlay("femur"));
+    r.publish("labels", 1, { "l.npy": "a1" });
+    expect(outputsIn(outputsFold(r.events))).toEqual({ done: 2, total: 3 });
+  });
+});
+
+describe("to check count", () => {
+  it("counts the map's open item once, however many final outputs rest on it", () => {
+    const r = run();
+    r.final(scan, overlay("labels"), {
+      kind: "overlay",
+      id: "femur",
+      name: "femur",
+      base: "scan",
+      label: { of: "labels", value: 1 },
+    } as OutputEntry);
+    r.publish("labels", 1, { "l.npy": "a1" }, [], { toCheck: [{ title: "edge" }] });
+    r.publish("femurvol", 1, { "f.json": "f1" }, [{ id: "femur", version: 1, role: "input" }]);
+    expect(outputsFold(r.events).toCheck).toBe(1);
+    r.push("tocheck.resolved", {
+      output: "labels",
+      version: 1,
+      item: 0,
+      by: "u",
+      outcome: "accepted",
+    });
+    expect(outputsFold(r.events).toCheck).toBe(0);
   });
 });
 

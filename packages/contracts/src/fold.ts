@@ -185,6 +185,24 @@ export type FoldedRevision = {
 };
 
 /**
+ * Some runs stored a whole `toCheck` array, as a malformed JSON string, in the title field: the
+ * task-loop harness (`task-runtime.ts`) refuses a title only when it parses as JSON, so a malformed
+ * array still gets written. Read the `"title"` inside it. Total: it runs over stored model text
+ * inside `fold`, so it never throws. Delete once the write side refuses any title starting `[{`
+ * (`packages/contracts/.context/TODO.md`) and the last such run is gone.
+ */
+function readStoredTitle(title: string): string {
+  if (!title.startsWith("[{")) return title;
+  const m = /"title":\s*"((?:[^"\\]|\\.)*)"/.exec(title);
+  if (!m) return title;
+  try {
+    return JSON.parse(`"${m[1]}"`) as string;
+  } catch {
+    return (m[1] as string).replace(/\\(["\\])/g, "$1");
+  }
+}
+
+/**
  * The status the runtime's `check-result` rule gives a task whose check thread
  * ended, computed from `fold` of the log: `done` only for a `passed` verdict
  * with nothing open and no required output missing, otherwise `to-check`.
@@ -445,7 +463,8 @@ type Attempt = {
 
 /**
  * Every event type `fold` (and `reviewState`'s overlay of `check.accepted` and
- * `review.completed`, its `outputsFold` and its `marksOf`) reads: a reader that loads only these gets the same result as one that
+ * `review.completed`, its `outputsFold` and its `marksOf`) reads, and the `approval.*` events the study reads
+ * count open calls from (`approvalRecords`): a reader that loads only these gets the same result as one that
  * loads the whole log. Add a type here when `fold` or `corrections` starts to read it.
  */
 export const FOLD_EVENT_TYPES = [
@@ -473,6 +492,10 @@ export const FOLD_EVENT_TYPES = [
   "tocheck.resolved",
   "mark.placed",
   "mark.deleted",
+  "approval.requested",
+  "approval.given",
+  "approval.declined",
+  "approval.settled",
 ] as const satisfies readonly RunEvent["type"][];
 
 /** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */
@@ -954,7 +977,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
         if (toCheck)
           a.toChecks.push({
             id: e.id,
-            title: toCheck.title,
+            title: readStoredTitle(toCheck.title),
             detail: text,
             status: "open",
             ...(toCheck.focus && { focus: toCheck.focus }),

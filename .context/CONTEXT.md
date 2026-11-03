@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame with its rail (one `QueryClient` in `SignedIn`); features/study (Home, studies, Workflows) and features/scan (the scan review) own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame with its rail (one `QueryClient` in `SignedIn`); features/study (Home, studies, Workflows) and features/input (the input review) own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
@@ -15,7 +15,7 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
-apps/runner     The runner service: claims runs from the API and runs the run loop on each (Run lane)
+apps/runner     The runner service: claims runs from the API and runs each on the loop it is pinned to (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats; the fold (a row per plan task, stale-task graph)
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
@@ -35,11 +35,22 @@ Dependencies point down: apps → feature code → packages. `contracts` and
 
 ## The agent runtime
 
-The agent loop is Pi's (`@earendil-works/pi-agent-core`), used as it comes;
+The harness has two run loops over one shell (`loop-shell.ts`: waking the loop, starting
+threads, stopping them, the root's end): the **task loop** (`run-loop.ts`: a task graph,
+a worker per task, a check on every submit, fix rounds) and the **agent loop** (`agents/loop.ts`:
+main and up to 4 named workers, messages, published output versions). A run's loop is chosen when
+it is created (`runs.harness`, null = tasks; `DEFAULT_RUN_HARNESS` and the organization's
+`agentLoop` flag in `apps/api/src/index.ts`); at its first claim the runner copies it onto the root
+`thread.started` (`harness`), and a resumed run keeps that pinned loop. The task loop is the default
+and the only loop an organization without the flag gets (guests, the hackathon's judges). This section
+describes the task loop unless a bullet says otherwise; the agent loop is in
+`packages/harness/.context/CONTEXT.md`, its roles in `workflows/core/roles/`.
+
+Each model thread runs on Pi (`@earendil-works/pi-agent-core`), used as it comes;
 we add our own pieces only when a real run needs them. The agent runs
 outside the sandbox, so credentials never enter it. A run is a tree of
-threads: a supervisor (the root, code), the main agent, workers (one per task),
-and check threads.
+threads: a supervisor (the root, code), the main agent, and below it workers
+(task loop: one per task, plus check threads; agent loop: named workers).
 - **Event log.** Ours, kept separately from Pi's history: the `events`
   table in Postgres, behind the run domain's API, keyed `(run_id, id)`. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the
@@ -158,8 +169,8 @@ and check threads.
   A stale mark stops every worker and check of the dependent the same way, whatever its status.
   A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
   cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
-- **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates:
-  it starts workers (`start_agent`), steers them or sends feedback on a rejected task
+- **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates.
+  In the task loop it starts workers (`start_agent`), steers them or sends feedback on a rejected task
   (`message`), answers a checker's or worker's question (`answer`; a worker's `ask` does not end its turn, and the answer joins its inbox), accepts a rejected task, changes the plan
   (`change_plan`, recorded as `plan.changed` before it applies; each running worker gets a one-line inbox message of what changed) and ends the run
   (`finish_run`). Its tools are `tools/main-tools.ts`; each writes under an id derived from the
@@ -190,7 +201,7 @@ and check threads.
   5 s), so the lease is renewed soon after the API answers again. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our model key; a `visitor` run uses the claim's Meta key, in that run's scope
   only. Every sandbox runs on our Modal token. A guest may start only `visitor` runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are what its role file lists (`workflows/core/agents/`), built from the registry (`packages/harness/src/tools/registry.ts`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). In the task loop the plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. In the agent loop the event log holds no plan: the final outputs are the selected catalog entries of `outputs.yaml` (the catalog's `selectable` ones if none were sent), written as the run's opening `outputs.changed` (`openingOutputs`, `agents/wire.ts`) and changed by main with `change_outputs`; main's plan is a note it writes (`/work/main/plan.md`). The task loop's prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`); the agent loop's are `agents/prompts.ts`. Every role's tools are what its role file lists: `workflows/core/agents/` through `packages/harness/src/tools/registry.ts` for the task loop, `workflows/core/roles/` through `packages/harness/src/agents/tools/registry.ts` for the agent loop; `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can
@@ -359,22 +370,22 @@ The viewer's colours (axes, bone, rulers, labels) are tokens too. Canvas and
 WebGL code reads them with `getComputedStyle` rather than copying values, so
 the CSS stays the one source.
 
-## Scan review
+## Input review
 
-One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (the user's theme, dark image wells),
-with the selection in the URL (`task`, `item`, `agent`); the old `/runs/:id/live` and
+One input's run, live and for review, is `apps/web/src/features/input` at `/studies/:studyId/inputs/:inputId` (the user's theme, dark image wells; the input's newest run in that study, `?run=` an earlier one),
+with the selection in the URL (`task`, `item`, `agent`); the old `/scans/:runId`, `/runs/:id/live` and
 `/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
 conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and
 files. What any screen needs to show a run is `packages/run-view`; the grid viewer is
 `packages/viewer`. No synthetic measurements or simulated services are mounted.
 
 Images come only from the run: each task's grid and what is drawn on it are the run's published
-blocks and converted assets. The [scan review specification][scan-spec] covers the URL, the two
+blocks and converted assets. The [input review specification][input-spec] covers the URL, the two
 sources and reconnecting; the [run view specification][run-view-spec] the run model and
 transcripts; the [viewer specification][viewer-spec] how a task's grid is chosen, the viewer's
 geometry, loading and verification coverage.
 
-[scan-spec]: ../apps/web/src/features/scan/.context/CONTEXT.md
+[input-spec]: ../apps/web/src/features/input/.context/CONTEXT.md
 [run-view-spec]: ../packages/run-view/.context/CONTEXT.md
 [viewer-spec]: ../packages/viewer/.context/CONTEXT.md
 

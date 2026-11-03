@@ -52,8 +52,7 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 - **Needs:** `scan`, `frame`, `bone-pieces`.
 - **Check first:** the keyframe cuts femur and tibia through the joint, with the joint space dark between them; every
   piece intake named is one you can find.
-- **Makes:** `bone-labels` (the femur, tibia, patella, fibula and labels 5 to 12 are values in it: reporting `bone-labels`
-  reports them, so report none of them on its own), `bone-threshold`, `disagreement`, and the label volumes #1–3
+- **Makes:** `bone-labels` (with the structures in it), `bone-threshold`, `disagreement`, and the label volumes #1–3
   (protocol step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason and the
   view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`, `anatomy.md`
   "Segmentation notes").
@@ -113,7 +112,7 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
 
 ## 8. Distal femur (`femoral-geometry`)
 
-- **Needs:** `scan`, the femur in `bone-labels`.
+- **Needs:** `scan`, the femur in `bone-labels`, `frame`.
 - **Check first:** at the condyles and the intercondylar groove the femur label holds no patella, sesamoid or tibia
   voxels and covers the condyles' surface; orient the femur for its own views (`orient-joint`).
 - **Makes:** points `a` to `d`, `dfl-ruler`, `dfw-ruler`, #26–28 (protocol step 9), and the Amira landmarks file

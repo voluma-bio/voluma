@@ -2,9 +2,9 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { StripPlot } from "./strip-plot";
 
 /**
- * **What:** one measurement compared across groups of scans: every scan a dot, a tick for each
- * group's mean, and only a scan far from its group in amber with its name. **Why:** groups hold
- * one to eight scans, and a bar or box would hide them. **Where:** the study's Results (one plot
+ * **What:** one measurement compared across groups of inputs: every input a dot, a tick for each
+ * group's mean, and only an input far from its group in amber with its name. **Why:** groups hold
+ * one to eight inputs, and a bar or box would hide them. **Where:** the study's Results (one plot
  * per value) and a value's row in the overview. Hover or focus a dot for its value; arrow keys
  * move between dots.
  */

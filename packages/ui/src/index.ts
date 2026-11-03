@@ -47,6 +47,7 @@ export {
   PopoverClose,
   type PopoverProps,
 } from "./popover";
+export { type Theme, ThemeScope } from "./portal";
 export { Progress, type ProgressProps } from "./progress";
 export { Readout, type ReadoutProps, type ReadoutValue } from "./readout";
 export {

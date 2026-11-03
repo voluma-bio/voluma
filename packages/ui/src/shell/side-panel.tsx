@@ -2,7 +2,7 @@
  * A screen's side panel: one per side, between the rail and the main area or at the right edge.
  * Its head holds tabs (the left side: Conversation, Scans) or a title with tools (the right
  * side: Final outputs), and a fold button. The seam beside it resizes it; each side's width is
- * kept across pages and visits, so the study and a scan open at the widths last used. Folded (its
+ * kept across pages and visits, so the study and an input open at the widths last used. Folded (its
  * button, `\` or `]`, F for both) it is a 28 px strip with its icon and badge and no text; what
  * is inside stays mounted, so a conversation keeps its scroll and its draft.
  */

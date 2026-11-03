@@ -1,5 +1,9 @@
 # mouse-oa TODO
 
+- **`femoral_frame.py`'s femur-length gate sits at the edge of real scans.** `MIN_FEMUR_MM` 4.5 was set from two scans; femur
+  length along the shaft on threshold-split labels of five lab scans: OA6-2RK 5.86, OA6-1RK 5.31, OA7-1L 5.19, OA7-4R 5.14,
+  OA8-17L 4.57 mm. A scan framed a little lower stops the femoral step with a To check. Next: fit the shaft on narrow
+  diaphysis slices so a shorter stub still gives the right axis, then lower the gate; check on the OA8 series.
 - **`tibia_frame.py` on flexed or bowed tibiae (unconfirmed).** Preparing 17 lab scans for the growth-plate dataset, 4 gave
   oblique aligned grids (OA7-5L, OA7-6L, OA7-8L, OA8-1R: shaft leaving the grid, plateau sloping steeply across coronal
   sections, no clean plate level). Their tibia labels came from a quick threshold-and-erosion split
@@ -31,3 +35,9 @@
   (141 and 51 µm) and run f45f630f's wrong ones at the top of the epiphysis (669 and 575 µm). Re-judge it on the next runs. The check
   does not judge where along the face the ends are: two points anywhere on the face over the tibia, on one section, pass, so whether
   they are the fibula–tibia junction and the prominent point opposite is still judged by eye.
+- **Workers name scan axes from crops whose axes they do not label.** On OA6-2RK run 0ed8e7d3 the femoral worker plotted
+  axial crops with pixel offsets on both axes and read the condyles as side by side along y (they sit along x), as the
+  f45f630f worker had. `femoral_frame.py` now confirms its axis against the bending plane, so the femoral step catches it,
+  but any landmark step that reads directions off a worker-made crop can repeat it. Next: one knee-axes helper (from
+  `frame.json`'s bending-plane normal and shaft axes) that prints which scan axis runs side to side, front to back and
+  along the shafts, for workers and scripts to read instead of their own crops.

@@ -18,7 +18,8 @@
  *   name (a value: its number and unit), so a redo that produces the same files changes nothing,
  *   a kept version (same files) clears everything below it, and a change to a support file counts.
  *   A link to the output's own earlier version is ignored. A link to a label overlay (an entry
- *   of an `outputs.changed` with `label: {of}`) is a link to its map.
+ *   of an `outputs.changed` with `label: {of}`, or the change's `labels` map) is a link to its map. The fold resolves each overlay once: an overlay's `status` and `outOfDate`
+ *   are its map's, and readers take `labels` instead of re-resolving.
  * - **Undecided**: out of date and in the trail of a final output (the output itself, or
  *   something its latest version was made from, through latest versions). Main's `close` is
  *   refused while one exists.
@@ -103,9 +104,21 @@ export interface OutputsFold {
   /** Final outputs in section order, then the other published ones in order of first version. */
   outputs: OutputState[];
   byId: Map<string, OutputState>;
-  /** Each label overlay the log names, to the map whose version a link to it means. */
+  /** Each label overlay the log names (`outputs.changed`'s `labels`, a list entry's `label`), to the map whose version a link to it means. */
   labels: Map<string, string>;
+  /**
+   * The open To check items a person can answer, as `itemKey`s: those on the latest version of each
+   * final or undeclared output and of everything it was made from. The one source every screen
+   * counts To check from for an agent-loop run (the output panel and its filter, the Samples tree,
+   * the study row, the heading); a value that only rests on an open item has its own status.
+   */
+  openItems: Set<string>;
+  /** `openItems.size`. */
+  toCheck: number;
 }
+
+/** The key of To check item `item` of version `version` of output `id`: the URL's `item`. */
+export const itemKey = (id: string, version: number, item: number) => `${id}/${version}/${item}`;
 
 const isLabel = (e: FinalEntry): e is FinalEntry & { label: { of: string } } =>
   typeof e.label === "object" &&
@@ -156,6 +169,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
         break;
       case "outputs.changed": {
         list = applyOutputsChange(list, e.payload, e.createdAt);
+        for (const [overlay, map] of Object.entries(e.payload.labels ?? {}))
+          labels.set(overlay, map);
         for (const entry of e.payload.add ?? [])
           if (isLabel(entry)) labels.set(entry.id, entry.label.of);
         break;
@@ -193,7 +208,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   const latestOf = (id: string) => versions.get(mapOf(id))?.at(-1);
   const memo = new Map<string, boolean>();
   const visiting = new Set<string>();
-  const outOfDate = (id: string): boolean => {
+  const outOfDate = (of: string): boolean => {
+    const id = mapOf(of);
     const cached = memo.get(id);
     if (cached !== undefined) return cached;
     const latest = latestOf(id);
@@ -223,6 +239,23 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   // A final label overlay is walked as its map, so only the map is ever undecided.
   for (const e of finalEntries) walk(mapOf(e.id));
 
+  // Open items: the trails of the finals and of the undeclared outputs, which need a person too.
+  const counted = new Set<string>();
+  const count = (id: string) => {
+    if (counted.has(id)) return;
+    counted.add(id);
+    for (const link of latestOf(id)?.madeFrom ?? []) count(mapOf(link.id));
+  };
+  for (const e of finalEntries) count(mapOf(e.id));
+  for (const id of versions.keys()) if (id.includes("/")) count(mapOf(id));
+  const openItems = new Set<string>();
+  for (const id of counted) {
+    const latest = latestOf(id);
+    latest?.toCheck.forEach((t, i) => {
+      if (!t.resolved) openItems.add(itemKey(id, latest.version, i));
+    });
+  }
+
   const sectionOf = new Map<string, string>();
   for (const s of sectionsOf(list)) for (const o of s.outputs) sectionOf.set(o.id, s.title);
   const missing = new Map((list?.missing ?? []).map((m) => [m.id, m.reason]));
@@ -235,8 +268,9 @@ function compute(events: readonly RunEvent[]): OutputsFold {
     const stale = outOfDate(id);
     const kind = kinds.get(id);
     const baseOf = kind?.base ?? (typeof entry?.base === "string" ? entry.base : undefined);
-    // A label has no version of its own: its map's version covers it.
-    const covered = latest ?? latestOf(id);
+    // A label has no version of its own: its map's version covers it. `latest` stays its own, so
+    // a map's files are listed once.
+    const covered = latestOf(id);
     const missingId = missing.has(id) ? id : mapOf(id);
     const isMissing = missing.has(missingId);
     const status: OutputStatus = !covered
@@ -264,7 +298,14 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       ...(latest && { latest }),
     } as OutputState;
   });
-  return { ...(list && { list }), outputs, byId: new Map(outputs.map((o) => [o.id, o])), labels };
+  return {
+    ...(list && { list }),
+    outputs,
+    byId: new Map(outputs.map((o) => [o.id, o])),
+    labels,
+    openItems,
+    toCheck: openItems.size,
+  };
 }
 
 const memo = new WeakMap<object, { length: number; fold: OutputsFold }>();
@@ -285,39 +326,21 @@ export function outputsFold(events: readonly RunEvent[]): OutputsFold {
 export const finalOutputs = (events: readonly RunEvent[]): OutputState[] =>
   outputsFold(events).outputs.filter((o) => o.final);
 
-/** Final outputs with a version, of all final outputs: what "1 of 2 in" counts. */
+/** Final outputs with a version (a label overlay has its map's), of all final outputs: what "1 of 2 in" counts. */
 export function outputsIn(fold: OutputsFold): { done: number; total: number } {
   const final = fold.outputs.filter((o) => o.final);
-  return { done: final.filter((o) => o.latest).length, total: final.length };
+  return { done: final.filter(hasVersion).length, total: final.length };
 }
+
+/** A version covers it: its own, or its map's for a label overlay. */
+export const hasVersion = (o: OutputState): boolean =>
+  o.status !== "pending" && o.status !== "missing";
 
 /** Each final value's latest number and UCUM unit, by output id: what the run reported. */
 export function finalValues(fold: OutputsFold): Map<string, { number: number; unit: string }> {
   return new Map(
     fold.outputs.flatMap((o) => (o.final && o.latest?.value ? [[o.id, o.latest.value]] : [])),
   );
-}
-
-/**
- * The final outputs that need a person: each with an open To check item on its latest version or
- * on one it was made from, through latest versions (a link to a label overlay with no version of
- * its own goes to its map, as the run's list names it). What "Needs you" counts on the sample page
- * and on every row that shows an agent-loop sample, so the number seen before opening a sample is
- * the one found on it.
- */
-export function needingYou(fold: OutputsFold): Set<string> {
-  const to = (id: string) => (fold.byId.get(id)?.latest ? id : (fold.labels.get(id) ?? id));
-  const open = (id: string) => fold.byId.get(id)?.latest?.toCheck.some((t) => !t.resolved);
-  const needs = (root: string) => {
-    // A final label overlay with no version of its own is its map's, as any link to it is.
-    const seen = new Set([to(root)]);
-    for (const id of seen) {
-      if (open(id)) return true;
-      for (const link of fold.byId.get(id)?.latest?.madeFrom ?? []) seen.add(to(link.id));
-    }
-    return false;
-  };
-  return new Set(fold.outputs.filter((o) => o.final && needs(o.id)).map((o) => o.id));
 }
 
 /** Final outputs with no version that are not marked missing. */

@@ -1,4 +1,5 @@
 /** Human review overlays scientific results; it never changes the scientific fold. */
+import type { Attached } from "./agent-events";
 import type { RunEvent } from "./events";
 import { corrections, type FoldedTask, fold } from "./fold";
 import type { TaskState, TaskStatus } from "./ids";
@@ -63,19 +64,78 @@ export function reviewState(events: readonly RunEvent[], { live = false } = {}) 
 type Placed = Extract<RunEvent, { type: "mark.placed" }>["payload"];
 
 /**
- * The researchers' marks the log holds, by id, in the order first placed: `mark.placed` makes one
- * or, from its author, replaces it; the author's `mark.deleted` takes it away. Another person's
- * write to it changes nothing.
+ * Every mark the log ever held, by id, in the order first placed, with whether it was deleted
+ * since: `mark.placed` makes one or, from its author, replaces it; the author's `mark.deleted`
+ * flags it. Another person's write to it changes nothing. `by` keeps only that person's writes
+ * (their own view of ids they placed), so a mark someone else placed under the same id is not theirs.
  */
+export function markStatesOf(
+  events: readonly RunEvent[],
+  by?: string,
+): Map<string, { mark: Placed; deleted: boolean; seq: number }> {
+  const marks = new Map<string, { mark: Placed; deleted: boolean; seq: number }>();
+  for (const e of events) {
+    if (e.type === "mark.placed" && (by === undefined || e.payload.by === by)) {
+      const had = marks.get(e.payload.id);
+      if (!had || had.mark.by === e.payload.by)
+        marks.set(e.payload.id, { mark: e.payload, deleted: false, seq: e.seq });
+    } else if (e.type === "mark.deleted" && (by === undefined || e.payload.by === by)) {
+      const had = marks.get(e.payload.id);
+      if (had?.mark.by === e.payload.by) had.deleted = true;
+    }
+  }
+  return marks;
+}
+
+/** What the caller's previous messages froze of each mark, and the change that message told. */
+export type ToldMark = { mark: Attached["mark"]; change: Attached["change"] };
+
+/**
+ * What main was last told of each mark `by` placed: the state their latest message naming it
+ * froze (`person.message` attached), by mark id.
+ */
+export function toldMarks(events: readonly RunEvent[], by: string): Map<string, ToldMark> {
+  const own = markStatesOf(events, by);
+  const told = new Map<string, ToldMark>();
+  for (const e of events)
+    if (e.type === "person.message")
+      for (const a of e.payload.attached ?? [])
+        if (a.mark.id && own.has(a.mark.id))
+          told.set(a.mark.id, { mark: a.mark, change: a.change });
+  return told;
+}
+
+/** Key order is not meaning: stored JSON may come back reordered. */
+export const canon = (v: unknown): string =>
+  JSON.stringify(v, (_k, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : x,
+  );
+
+/**
+ * What to tell main of a mark now, against what it was last told (`toldMarks`): `place` for a mark
+ * never told, or placed again after a told delete; `move` when a told mark's position, plane or
+ * shape (its note too) changed; `delete` for a told mark deleted since; undefined when there is
+ * nothing new (unchanged, or deleted though main never saw it).
+ */
+export function changeOf(
+  current: { mark: Attached["mark"]; deleted: boolean },
+  told: ToldMark | undefined,
+): Attached["change"] | undefined {
+  const toldLive = told !== undefined && told.change !== "delete";
+  if (current.deleted) return toldLive ? "delete" : undefined;
+  if (!toldLive) return "place";
+  const { mark, world, plane } = current.mark;
+  return canon([mark, world, plane]) === canon([told.mark.mark, told.mark.world, told.mark.plane])
+    ? undefined
+    : "move";
+}
+
+/** The researchers' marks the log holds now, by id, in the order first placed. */
 export function marksOf(events: readonly RunEvent[]): Map<string, Placed> {
   const marks = new Map<string, Placed>();
-  for (const e of events) {
-    if (e.type === "mark.placed") {
-      const had = marks.get(e.payload.id);
-      if (!had || had.by === e.payload.by) marks.set(e.payload.id, e.payload);
-    } else if (e.type === "mark.deleted" && marks.get(e.payload.id)?.by === e.payload.by)
-      marks.delete(e.payload.id);
-  }
+  for (const [id, m] of markStatesOf(events)) if (!m.deleted) marks.set(id, m.mark);
   return marks;
 }
 
@@ -115,7 +175,7 @@ type ItemFacts = Pick<FoldedTask, "status" | "checks" | "rejected" | "checker" |
 
 /**
  * A To check task with no check gets one card nobody can accept, saying why: the second AI sent
- * it back, values are missing, or the AI marked it. Null for any other task. The scan review
+ * it back, values are missing, or the AI marked it. Null for any other task. The input review
  * draws the card; the study read counts it.
  */
 export function cardWithoutCheck(task: ItemFacts): Unacceptable | null {
@@ -126,7 +186,7 @@ export function cardWithoutCheck(task: ItemFacts): Unacceptable | null {
 }
 
 /**
- * A task's items that need a person, as the scan review counts them: its checks not yet
+ * A task's items that need a person, as the input review counts them: its checks not yet
  * accepted, or its card without a check (`cardWithoutCheck`). A done task can still carry open
  * checks. What every screen calls To check; `progress().acceptable` is only the accept flow's.
  */
@@ -136,7 +196,7 @@ export function openItems(task: ItemFacts): number {
 }
 
 /**
- * A scan's newest run as the scan review shows its tasks, for the study read: each plan task's
+ * An input's newest run as the input review shows its tasks, for the study read: each plan task's
  * state (`taskStates`), its items that need a person where it has any (`openItems`), and why a
  * card without a check is there. `revision` is the one the review reads (`latestRevision`); no
  * run, or no plan yet, reads as no tasks.
@@ -178,7 +238,7 @@ export function shownTasks(
 }
 
 /**
- * The revision the scan review reads: a correction in progress's own, else the latest. The
+ * The revision the input review reads: a correction in progress's own, else the latest. The
  * study read takes its task states and items from the same one.
  */
 export const latestRevision = <R>(fold: {
@@ -187,12 +247,14 @@ export const latestRevision = <R>(fold: {
 }): R | undefined => fold.correcting ?? fold.results.revisions.at(-1);
 
 /**
- * What needs a person on a scan, the count Home, the study pages and the queues call To check:
+ * What needs a person on an input, the count Home, the study pages and the queues call To check:
  * its newest run's items (`ReviewSummary.needsYou`) when that run completed, else the acceptable
  * checks of its newest completed result (a live or stopped rerun's items show on its tasks only).
  */
-export const scanNeedsYou = (newest: Pick<ReviewSummary, "needsYou"> | null, acceptable: number) =>
-  newest ? newest.needsYou : acceptable;
+export const inputNeedsYou = (
+  newest: Pick<ReviewSummary, "needsYou"> | null,
+  acceptable: number,
+) => (newest ? newest.needsYou : acceptable);
 
 /** What `taskStates` reads of a folded task. */
 export type StateFacts = Pick<FoldedTask, "id" | "status" | "skipped" | "satisfied" | "threads">;
@@ -210,7 +272,7 @@ export type RunStateFacts =
 type RunHalt = "stopped" | "waiting" | "paused" | undefined;
 
 /**
- * Every plan task's state, the one rule the scan review and the study both show. It reads fold
+ * Every plan task's state, the one rule the input review and the study both show. It reads fold
  * fields only (status, skipped, satisfied, the attempt's threads), never a sentence, and the run's
  * `state`. `open`: the threads started and not ended (`openThreads`); they run only while the run
  * does. `failed`: the threads whose latest end failed (`failedThreads`); they count only when the

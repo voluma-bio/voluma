@@ -1,4 +1,6 @@
 // Token swatches for the Foundations pages: each colour role in the theme it is shown in.
+import { ThemeScope } from "@voluma/ui";
+
 const roles: [string, string][] = [
   ["background", "The chassis: the seams between panels"],
   ["card", "Every panel"],
@@ -16,9 +18,9 @@ const roles: [string, string][] = [
   ["done-solid", "Done"],
   ["destructive-solid", "Stopped, failed"],
   ["idle", "Waiting, paused"],
-  ["mark-mine", "Your marks on the scan"],
+  ["mark-mine", "Your marks on the input"],
   ["mark-mine-text", "Your mark tags in text"],
-  ["mark-ai", "The AI's marks on the scan"],
+  ["mark-ai", "The AI's marks on the input"],
   ["plane-coronal", "Coronal plane: its pane, chip and crosshair"],
   ["plane-sagittal", "Sagittal plane"],
   ["plane-axial", "Axial plane"],
@@ -29,7 +31,7 @@ export function Swatches() {
   return (
     <div className="grid grid-cols-2 gap-px bg-border">
       {(["light", "dark"] as const).map((t) => (
-        <div key={t} data-theme={t} className="bg-card p-4">
+        <ThemeScope key={t} theme={t} className="bg-card p-4">
           <div className="mb-3 font-medium">{t === "light" ? "Light" : "Dark"}</div>
           {roles.map(([name, use]) => (
             <div key={name} className="flex items-center gap-3 py-1">
@@ -41,7 +43,7 @@ export function Swatches() {
               <span className="text-sm text-muted-foreground">{use}</span>
             </div>
           ))}
-        </div>
+        </ThemeScope>
       ))}
     </div>
   );

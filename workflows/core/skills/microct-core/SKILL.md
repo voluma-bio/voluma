@@ -10,8 +10,7 @@ description: >
 
 ## Words for the researcher
 
-Anything a researcher reads (a To check title, a checkpoint `summary` or `text`, a check's `text`, an output's note or missing reason, a `finish_run` or
-`accept` summary, a `reply`) never says worker, checker, check thread, model, thread, agent or a task id.
+Anything a researcher reads (a To check title, an output's note or missing reason, a summary, a reply) never says worker, checker, check thread, model, thread, agent or a task id.
 Say "the AI" for the one that did the work, "a second AI check" for the check, and the task's plain title
 ("Scan intake") for a task. Say what was found, not who found it.
 
@@ -54,7 +53,7 @@ volume", "kind": "measurement"}}}`, under the output ids you give it, so `report
 cross-check) helps you judge a measurement and is not an output. A script that refuses exits 2 with a sentence
 saying what to change: fix the input and run it again.
 
-Report a value outside the range the anatomy reference gives as it is, and say why in the checkpoint. A result that looks wrong has its
+Report a value outside the range the anatomy reference gives as it is, and say why in your report. A result that looks wrong has its
 cause in the data, the mask, the threshold or the method; never in a number adjusted to fit.
 
 ## Two thresholds
@@ -66,7 +65,7 @@ cause in the data, the mask, the threshold or the method; never in a number adju
   themselves. BV is the region and HU above it, never gated by a label; BV/TV is in %. When the calibration
   exists the protocol's threshold wins: a different value in the scan's notes is reported beside the measurement,
   not used. When `hu.json` has no calibration the scripts stop until you pass `--threshold`: use the value the
-  scan's notes give, name them as its source, and raise a To check item (a `checkpoint` with `toCheck`).
+  scan's notes give, name them as its source, and raise a To check item.
 
 ## The scan's notes outrank your expectation
 
