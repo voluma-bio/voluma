@@ -49,7 +49,8 @@ export interface PasteTarget {
   /** The size the prompt claimed (even sides). */
   paddedWidth: number;
   paddedHeight: number;
-  known: Set<number>;
+  /** The label an object id of the response stands for; undefined: an id nobody prompted. */
+  labelOf(id: number): number | undefined;
   /** Steps in `labels` along a slice, a row and a column. */
   strides: [number, number, number];
   labels: Uint8Array;
@@ -106,8 +107,8 @@ function pasteRecord(
   box: string,
   mask: string,
 ) {
-  const label = Number(id);
-  if (!t.known.has(label))
+  const label = t.labelOf(Number(id));
+  if (label === undefined)
     throw new Error(`the response names object ${id}, which was not prompted`);
   if (num(box, "w") !== t.paddedWidth || num(box, "h") !== t.paddedHeight) {
     throw new Error(

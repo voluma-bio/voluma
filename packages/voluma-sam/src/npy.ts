@@ -1,5 +1,5 @@
 /**
- * Just enough of the NumPy `.npy` format for 3D volumes: read a box of one as a windowed 8-bit
+ * Just enough of the NumPy `.npy` format for 3D volumes (and 2D images): read a box of one as a windowed 8-bit
  * volume by positional reads (a scan is gigabytes; one plane of it and the 8-bit copy are
  * held), and write the header of a uint8 one.
  */
@@ -19,6 +19,8 @@ const DTYPES = {
 
 export interface Npy {
   shape: Vec3;
+  /** A 2D array (one image), read as a stack of one slice: shape is `[1, rows, cols]`. */
+  flat: boolean;
   dtype: keyof typeof DTYPES;
   /** Byte offset of the first voxel. */
   dataStart: number;
@@ -49,12 +51,14 @@ export async function openNpy(path: string): Promise<Npy> {
         ?.split(",")
         .filter((s) => s.trim())
         .map(Number) ?? [];
-    if (dims.length !== 3) throw new Error(`expected a 3D array, got ${dims.length} dimensions`);
-    const shape = dims as Vec3;
+    if (dims.length !== 3 && dims.length !== 2)
+      throw new Error(`expected a 3D or 2D array, got ${dims.length} dimensions`);
+    const flat = dims.length === 2;
+    const shape = (flat ? [1, ...dims] : dims) as Vec3;
     const size = (await file.stat()).size;
     if (size < end + shape[0] * shape[1] * shape[2] * DTYPES[dtype].size)
       throw new Error("the .npy file is truncated");
-    return { shape, dtype, dataStart: end, file };
+    return { shape, flat, dtype, dataStart: end, file };
   } catch (error) {
     await file.close();
     throw error;
@@ -131,7 +135,7 @@ export async function readRegion(
 }
 
 /** The header of a uint8 `.npy` of `shape`: version 1.0, padded so the data is 64-byte aligned. */
-export function u8Header(shape: Vec3): Buffer {
+export function u8Header(shape: number[]): Buffer {
   let header = `{'descr': '|u1', 'fortran_order': False, 'shape': (${shape.join(", ")}), }`;
   header += " ".repeat(63 - ((10 + header.length) % 64)) + "\n";
   const out = Buffer.alloc(10 + header.length);

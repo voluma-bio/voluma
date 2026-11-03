@@ -2,7 +2,7 @@
 
 After a small structure ends, SAM keeps its object alive and it picks up whatever sits at the same spot on later frames (a
 neighbouring bone, unlabelled bone). For every object in the sidecar `segment_sam` writes beside its labels (`--tracks`,
-default `<labels>.json`), this keeps the unbroken run of slices around its prompt frame in which the object has a mask
+default `<labels>.json`), this keeps, around each of its prompt frames, the unbroken run of slices in which the object has a mask
 with confidence >= `--min-conf`, and clears its label elsewhere. Run it on the small-structure request only, and
 give `--only 5 7 8` to limit it to some labels. Slices are axis 0, so pass labels on the stack `segment_sam` was given,
 before `to_scan.py`. `--like` is that stack's sidecar (`oriented.json`). `segment_sam`'s own sidecar has no grid, so stamp
@@ -22,9 +22,9 @@ import sidecar
 
 
 def load_tracks(path):
-    """{label: {'prompt_frame': int, 'confidence': {slice: float}}} from the sidecar `segment_sam` writes beside its labels.
+    """{label: {'prompt_frames': [int], 'confidence': {slice: float}}} from the sidecar `segment_sam` writes beside its labels.
 
-    The one place that knows the file's format: `{axis, shape, prompt, objects: [{label, name, promptFrame, box,
+    The one place that knows the file's format: `{axis, shape, prompt, objects: [{label, name, prompts: [{frame, box, points}],
     confidence: {"<slice>": 0-1}}]}`. A slice missing from `confidence` had no mask.
     """
     raw = json.loads(Path(path).read_text())
@@ -32,22 +32,26 @@ def load_tracks(path):
         sidecar.fail(f'{path} has no "objects": it is not the sidecar segment_sam writes beside its labels')
     if raw.get('axis', 0) != 0:
         sidecar.fail(f'{path} was sliced along axis {raw["axis"]}: trim_tracks needs slices on axis 0 (an oriented stack)')
-    return {o['label']: {'prompt_frame': o['promptFrame'],
+    for o in raw['objects']:
+        if not o.get('prompts'):
+            sidecar.fail(f'{path}: object {o["label"]} has no prompts (a concept prompt picks its own frames): trim_tracks needs a prompted frame')
+    return {o['label']: {'prompt_frames': [p['frame'] for p in o['prompts']],
                          'confidence': {int(f): c for f, c in o['confidence'].items()}}
             for o in raw['objects']}
 
 
-def trim(confidence, frame, n_frames, min_conf=0.5):
-    """Boolean per-slice keep vector: the unbroken run around `frame` where confidence >= min_conf."""
+def trim(confidence, frames, n_frames, min_conf=0.5):
+    """Boolean per-slice keep vector: the union, over `frames`, of the unbroken run around each where confidence >= min_conf."""
     keep = np.zeros(n_frames, bool)
-    if confidence.get(frame, 0.0) < min_conf:
-        return keep
-    keep[frame] = True
-    for step in (1, -1):
-        f = frame + step
-        while 0 <= f < n_frames and confidence.get(f, 0.0) >= min_conf:
-            keep[f] = True
-            f += step
+    for frame in frames:
+        if confidence.get(frame, 0.0) < min_conf:
+            continue
+        keep[frame] = True
+        for step in (1, -1):
+            f = frame + step
+            while 0 <= f < n_frames and confidence.get(f, 0.0) >= min_conf:
+                keep[f] = True
+                f += step
     return keep
 
 
@@ -77,7 +81,7 @@ if __name__ == '__main__':
     for label, t in tracks.items():
         if a.only and label not in a.only:
             continue
-        keep = trim(t['confidence'], t['prompt_frame'], labels.shape[0], a.min_conf)
+        keep = trim(t['confidence'], t['prompt_frames'], labels.shape[0], a.min_conf)
         before = int((labels == label).sum())
         labels[(labels == label) & ~keep[:, None, None]] = 0
         report[label] = {'kept_slices': int(keep.sum()), 'slices': labels.shape[0], 'voxels_before': before,

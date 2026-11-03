@@ -240,7 +240,7 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on an input of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
+/** Starts a run on an input of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 403 `no-key` and 429: the limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return read(runSchema, await request("/run/runs", { method: "POST", body: req }));
 }
@@ -269,7 +269,7 @@ export async function getRun(id: string): Promise<RunRead> {
   return read(runReadSchema, await request(`/run/runs/${encodeURIComponent(id)}`));
 }
 
-/** The caller's org's runs (only the caller's own under scope `self`), newest first. */
+/** The caller's org's runs (only the caller's own, plus the examples), newest first. */
 export async function listRuns(): Promise<Run[]> {
   return (await read(listRunsResponseSchema, await request("/run/runs"))).runs;
 }

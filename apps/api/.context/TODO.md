@@ -54,3 +54,4 @@
 - **Delete the `scans` alias** in `createStudyRequestSchema` (`packages/contracts/src/study.ts`)
   once the deploy that renamed it to `inputs` is live and old `/new` tabs are gone.
 - **Heartbeat after cancel drops usage.** A heartbeat that arrives after the run is cancelled does not add its cost to `runs.model_cost_usd`, so the org spend limit undercounts that tail. Decide whether the cancel path should accept a final usage report.
+- **One "may use Voluma's key" rule.** `caller.guest` (`GUEST_KEYS_MESSAGE` in `pg-queue.ts` and `corrections.ts`, `runs.ts`) and the `limits.voluma` map (`no-key` in `admission.ts`) both decide whether a caller has Voluma's key. Replace `caller.guest` with one flag and fold it into `no-key`.

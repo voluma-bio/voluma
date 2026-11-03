@@ -27,7 +27,7 @@ export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0]
 
 /**
  * An example run is readable by every organization; any other run needs `lab_id = labId AND
- * (ownerId IS NULL OR started_by = ownerId)`. Every run for `EVERY_LAB`. Reading is all an
+ * started_by = ownerId`. Every run for `EVERY_LAB`. Reading is all an
  * example allows: decisions, messages, starts and cancels refuse it (`example` checks).
  */
 export const readableRuns = (scope: ReadScope): SQL | undefined =>
@@ -35,32 +35,21 @@ export const readableRuns = (scope: ReadScope): SQL | undefined =>
     ? undefined
     : or(
         eq(runs.example, true),
-        and(
-          eq(runs.labId, scope.labId),
-          scope.ownerId === null ? undefined : eq(runs.startedBy, scope.ownerId),
-        ),
+        and(eq(runs.labId, scope.labId), eq(runs.startedBy, scope.ownerId)),
       );
 
-/** The same rule on a study: examples to everyone, else `lab_id = labId AND (ownerId IS NULL OR created_by = ownerId)`. */
+/** The same rule on a study: examples to everyone, else `lab_id = labId AND created_by = ownerId`. */
 export const readableStudies = (scope: ReadScope): SQL | undefined =>
   scope === EVERY_LAB
     ? undefined
     : or(
         eq(studies.example, true),
-        and(
-          eq(studies.labId, scope.labId),
-          scope.ownerId === null ? undefined : eq(studies.createdBy, scope.ownerId),
-        ),
+        and(eq(studies.labId, scope.labId), eq(studies.createdBy, scope.ownerId)),
       );
 
 /** The input rule: the caller's upload, or the org's reference scan. */
 export const readableInputs = ({ labId, ownerId }: Reader): SQL | undefined =>
-  and(
-    eq(inputs.labId, labId),
-    ownerId === null
-      ? undefined
-      : or(eq(inputs.uploadedBy, ownerId), eq(inputs.source, "reference")),
-  );
+  and(eq(inputs.labId, labId), or(eq(inputs.uploadedBy, ownerId), eq(inputs.source, "reference")));
 
 type Row = {
   run: typeof runs.$inferSelect;

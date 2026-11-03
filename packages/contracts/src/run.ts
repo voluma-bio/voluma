@@ -59,8 +59,8 @@
  *
  * Until complete succeeds the input is its uploader's alone: it isn't listed, complete
  * and `startRun` answer 404 to everyone else, and `startRun` answers 409 to the uploader.
- * Once complete, it is read like any input (scoping below): under scope `self` only the
- * uploader lists and starts on it, under `lab` the whole org does. One PUT per file, no
+ * Once complete, it is read like any input (scoping below): only the
+ * uploader lists and starts on it. One PUT per file, no
  * multipart: a file is at most `MAX_UPLOAD_FILE_BYTES`, the object store's single-PUT
  * limit; a scan is a folder of slices, or one volume of a few GB at most, so a retry
  * re-sends one file. Creating an upload needs a member account (judges included; a guest
@@ -68,15 +68,12 @@
  * unexpired uploads a member may have open.
  *
  * Org scoping, enforced by the server on every call and every read:
- *   - Every read by a user is filtered by the caller's `labId`. Another org's run
- *     or input answers 404, never 403. (The debug token reads every org's runs.)
- *   - When the caller's server-side scope is `self` (not in `meResponseSchema`),
- *     reads are also filtered to the caller: a run when `startedBy` is the
- *     caller's `userId` or the run is an `example`; an input when `uploadedBy`
- *     is the caller or it is the org's reference scan (`source: "reference"`),
- *     which every reader of the org can read, list and start on, so it must be
- *     cleared for public use in an org that has guests. Scope `lab`
- *     sees the org.
+ *   - Every read by a user is filtered by the caller's `labId` and to the caller:
+ *     a run when `startedBy` is the caller's `userId` or the run is an `example`; an
+ *     input when `uploadedBy` is the caller or it is the org's reference scan
+ *     (`source: "reference"`), which every reader of the org can read, list and start on,
+ *     so it must be cleared for public use in an org that has guests. Another user's
+ *     or org's run or input answers 404, never 403. (The debug token reads every org's runs.)
  *   - Example runs are read-only to everyone. Only server-side seeding (an
  *     operator script, under a dedicated operator id) sets `example`, never
  *     `startRun` or a fork, and it never changes afterwards; to change an

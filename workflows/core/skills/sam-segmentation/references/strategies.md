@@ -11,7 +11,7 @@ structures.
   request). One request per structure costs several times as much and gives overlapping masks.
 - **Keep structures of very different size in separate requests, even when the small one touches a big one.** A
   small structure in a request of big ones costs the mid-size one beside it its track. This wins over the rule
-  above: the small structure's own request is what finds it, and where its mask and a big bone's overlap,
+  above: the small structure's own request is what finds it, and where its mask and a big structure's overlap,
   `merge_labels.py` decides which keeps the voxels. Find the small ones on the scan grid first (`unlabelled.py`), give
   each a slice and a box (`map_points.py --pieces`), and send them together, one temporary label per 3D piece. A
   piece the stack's edge cuts needs a wider orientation margin first.
