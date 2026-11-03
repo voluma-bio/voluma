@@ -62,6 +62,5 @@ export {
   isLive,
   kneeOf,
   needsYouOf,
-  StudyPanel,
-} from "./study-panel";
+} from "./study-inputs";
 export { useNow } from "./use-now";

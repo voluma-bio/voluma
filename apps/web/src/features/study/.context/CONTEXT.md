@@ -28,16 +28,17 @@ hackathon judges' notes link the example's study), so keep these until there is 
   page, Compare and "Next sample that needs you" all use, so a sample sits in the same group
   everywhere; an example's samples are always Done, since nobody can change an example.
   `?status=<place>` shows one group, on the study page and on Compare.
+- **Measurements, names and units** come from the workflow's `outputs.yaml`, bundled
+  (`outputCatalogOf`, through `measurementsOf` in `workflow-measurements.tsx`): every `value`
+  entry, in catalog order, with its UCUM unit written as people write it (`unitAsWritten`), the
+  form the study read carries values in. Headlines are the entries marked `headline`. The catalog
+  has no grouping, so the bar and Compare list measurements flat.
 - **A sample's bar** (`SampleBar`, rule in `study-model.ts`'s header and `segmentOf`): one segment
-  per measurement of the workflow (29 for mouse OA today, the mockup's "28" plus bone threshold),
-  in task order, each from the study read's own fields: its task's state in the newest run
-  (`taskState`, `needsYou`), and whether the newest completed run reported a value. An agent-loop
-  run (`harness: agents`) has no tasks: its segments come from its final outputs' status
-  (`outputStatus`, from the API's output fold), and a measurement outside its final outputs reads
-  as outside the plan. A run with neither yet has no bar rather than an invented one. Its values
-  are its final values, in the units `outputs.json` writes (`unitAsWritten`), so Compare and the
-  headline read them as they read the task loop's.
-- **Recent activity** is built from the runs' own times (created, started, ended, reviewed); the
+  per measurement of the workflow (29 for mouse OA today), in catalog order, each from the newest
+  run's final outputs' status (`outputStatus`, from the API's output fold) and whether a value was
+  reported; a measurement outside the run's final outputs reads as outside its plan. A run with no
+  final outputs listed yet has no bar rather than an invented one.
+- **Recent activity** is built from the runs' own times (created, started, ended); the
   study read has no event feed, so To check raised and corrections are not lines yet.
 - **Run on new samples** keeps no outputs checklist and no notes: a study runs every output (the
   request sends no `selectedOutputs`). Grouping dropped files into scans is `input-files.ts` (the
@@ -47,9 +48,9 @@ hackathon judges' notes link the example's study), so keep these until there is 
 - **No page state at frame rate on `/new`**: intake is memoized on the scan names and the sheet,
   and upload bytes live in `uploads.ts`'s progress store, read only by each scan's `UploadBar`.
   A study-sized drop re-ran intake for every row on every progress frame before.
-- **Task text** for researchers is each task's `summary` in `tasks.json`, shown in See tasks and
-  on Workflows; a task without one shows its title and measurements. Never show `instructions`:
-  they are the agent's (paths, skill names). See tasks links to Workflows in a new tab, since
+- **See measurements** on `/new` and the Workflows page list the workflow's measurements by name
+  and unit. Never show a catalog entry's `description` or `expect`: they are written for the agents
+  (paths, label numbers, deck references). See measurements links to Workflows in a new tab, since
   leaving `/new` drops its uploads.
 - **Uploads** (`uploads.ts`) run one scan at a time under the server's open-upload limit, so a
   study of many never hits its 429; the old single-scan panel's machinery (4 PUTs at once, 3
@@ -66,39 +67,28 @@ hackathon judges' notes link the example's study), so keep these until there is 
 - **Excel sample sheets**: `xlsx.ts` reads the first worksheet with `fflate` (unzip) and
   `DOMParser`, loaded only when an `.xlsx` is dropped.
 - **Shared with `features/input`** through `@voluma/run-view`: the run status words
-  (`runStatus`, a word and a `StatusMark` state: Running, N to check, Checked, Reviewed, Failed,
-  Stopped, Waiting, Needs your keys (paused)), `liveStatus` ("Task N of M" while a task-loop run runs, "Running · N of M in" while an agent-loop
-  run does, from `outputs`, its final outputs in),
+  (`runStatus`, a word and a `StatusMark` state: Running, N to check, Checked, Failed,
+  Stopped, Waiting, Needs your keys (paused)), `liveStatus` ("Running · N of M in" while a run
+  runs, from `outputs`, its final outputs in),
   `inputStatus` (a sample's: its newest run's, "Not started" with no run), the Samples tree's data
-  (`sampleTree`), the run and item links, `ItemToCheck`, the formatters (`whenText` included), and visitor keys.
-  `runStatus` and `inputHref` take a run's `state` and `review`. A `newestRuns` entry and a study
-  input's `review` hold it for either loop (an agent-loop run's open To check items on its final outputs and what they rest on, `OutputsFold.toCheck`, the sample page's "To check" count, worded "N to check" by `toCheckText`; a group of samples says its unit, "1 sample needs you", so a count of items and a count of samples never read alike);
-  a full `Run`'s `review` is the task loop's only, so `inputStatus` reads the input's. Every page uses this mapping; don't add another.
+  (`sampleTree`), `inputHref`, the formatters (`whenText` included), and visitor keys.
+  `runStatus` takes a run's `state` and its review in brief: a `newestRuns` entry's or a study
+  input's `review` (the run's open To check items on its final outputs and what they rest on,
+  `OutputsFold.toCheck`, the sample page's "To check" count, worded "N to check" by `toCheckText`;
+  a group of samples says its unit, "1 sample needs you", so a count of items and a count of
+  samples never read alike). Every page uses this mapping; don't add another.
 - **A study's pages** sit under `study/study-layout.tsx`, which loads the study once, renders the
   header line (breadcrumb, "Next sample that needs you") and the Samples tree on the left side
   (`SidePanel`, `SampleTree` from `@voluma/ui`), and hands the study to each page through
   `useStudy`. A page renders the centre and, if it has one, its right side beside the tree. They
   derive everything from one `StudyDetail` in `study/study-model.ts` (pure; its header states the
   far-from-group rule, the unit rule and the bar). Nothing on them judges or changes a result:
-  every row, cell and dot opens the scan review (Compare's cells at their task, `?task=`).
-- **Task states come from the server**: the study read's `taskState` per input is `taskStates`
-  (`@voluma/contracts/review-state`) over the input's newest run, the rule the scan review uses.
-  It takes the run's state and threads and derives the rest itself. During a correction both read
-  the correction's own revision (`openCorrectionRevision` on the server), while the study's values
-  and open checks stay on the last completed result. Don't re-derive a task's state here; a
-  workflow task missing from it is outside the run's plan. Each task's items that need a person
-  come with it (`needsYou`, counted as the scan review counts them, from the same run), and
-  `shownStatus` turns state and count into the status every page shows.
-- **To check means needs you.** Two counts, named apart in contracts: `needsYou` (what needs a
-  person: open checks plus the card of a To check task with no check, such as one the second AI
-  sent back) is what every "N to check" reads (an agent-loop run: its open To check items, each once, so a value that only rests on one is not counted; it keeps its own status and says "rests on a To check"): a scan's status and "Next sample that needs you"
-  (`inputNeedsYou` / `needsYouOf`). `acceptable` is only what "Looks right" can accept, which only
-  the scan review offers; here it gives a sample's line its items' titles (`waitsOn`, with each
-  card nobody can accept as "<task>: <why>"). A live or stopped rerun's items show on its tasks,
-  not in the counts.
-- **Links into the scan review**: a sample opens at `inputHref`; a Needs you sample opens at its
-  first open item (`reviewHref`, `itemHref`: `?task=&item=`), so the review shows exactly that
-  item. Adding samples to an existing study isn't designed, so there is no
+  every row, cell and dot opens the input review (Compare's cells on their measurement, `?output=`).
+- **To check means needs you.** `needsYou` in the study read's `review` (the newest completed
+  run's open To check items, each once: a value that only rests on one is not counted; it keeps its
+  own status and says "rests on a To check") is what every "N to check" reads: a sample's status
+  and "Next sample that needs you" (`needsYouOf`).
+- **Links into the input review**: a sample opens at `inputHref`. Adding samples to an existing study isn't designed, so there is no
   "Add samples". The knee reads from `attributes.knee`, as intake stores it.
 - **"N to check" on a row is a `StatusMark`** (status check); `Count` is only a bare number
   beside a heading.
