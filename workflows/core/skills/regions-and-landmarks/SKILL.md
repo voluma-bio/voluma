@@ -38,7 +38,7 @@ region.
 ## A researcher's mark
 
 A mark comes in world mm. `marks_to_grid.py` maps it onto the grid you work on with that grid's own header: `--curve`
-writes a path drawn along one section as that section's curve, into a copy of your annotations; `--seed` gives a labelled
+splices a line or path drawn along a face on one section into that section's curve, in a copy of your annotations; `--seed` gives a labelled
 voxel inside an outline and says whether its piece stands apart from the bone, to take the piece out of its label
 (`segmentation-check`). The mark replaces your work only where it lies: look at it on that section's view, and bring the
 neighbouring sections and the rest of the region to meet it.
