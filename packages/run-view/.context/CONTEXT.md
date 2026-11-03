@@ -46,7 +46,7 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   shows when no key is stored or a send fails. `/keys` doesn't check the key: a revoked one fails the
   run at its first model call (401). Other users see that the run waits for its starter.
 - **A run's status** (`runStatus`, `liveStatus`: a word and a `StatusMark` state) and the
-  formatters (`formatUsd`, `formatDuration`, `plural`) are `@voluma/run-view`, shared with Home;
+  formatters (`formatUsd`, `formatDuration`, `plural`) are `@voluma/run-view`, shared with the study pages;
   `use-now.ts` is the clock. A completed run with open To check items reads "N to check"
   (`review.needsYou`, the study reads' brief), else "Checked"; a running one with its final
   outputs listed reads "Running · N of M in". A run's cost is `runCost` (model calls plus gateway
