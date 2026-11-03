@@ -5,7 +5,7 @@
  * sidecar last, because an R2 mount takes whole files only; the sidecar marks a complete result.
  */
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { encode } from "./encode";
