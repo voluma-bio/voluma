@@ -221,7 +221,7 @@ export function QuadViewer({
   marks: readonly ShownMark[];
   /** A new mark, with the frame of the pane it was made in (null in 3D); returns its id, which a point's note is kept under. */
   onMark?(mark: GridMark, plane: MarkPlane | null): string | undefined;
-  /** With Navigate, an end of a movable mark or a published ruler dragged in a slice, with that pane's frame. */
+  /** An end of a movable mark or a published ruler dragged in a slice, with that pane's frame. */
   onEdit?(edit: MarkEdit, plane: MarkPlane): void;
   /** A movable mark's end clicked in a slice. */
   onPick?(id: string): void;

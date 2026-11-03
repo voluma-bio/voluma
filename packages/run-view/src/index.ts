@@ -20,10 +20,12 @@ export {
   type OutputItem,
   type OutputRow,
   type OutputsReview,
+  openItemsOf,
   outputBlocks,
   outputName,
   outputsReview,
   reviewAssetsOf,
+  rowsToCheck,
   shownOf,
   undrawn,
 } from "./outputs-model";

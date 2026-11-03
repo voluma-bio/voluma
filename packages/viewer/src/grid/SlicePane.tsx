@@ -109,7 +109,7 @@ export function SlicePane({
   tool: MarkTool | null;
   marks: readonly ShownMark[];
   onMark(mark: GridMark): void;
-  /** With no tool, an end of a movable mark or a published ruler dragged; absent, none can be. */
+  /** An end of a movable mark or a published ruler dragged; absent, none can be. */
   onEdit?(edit: MarkEdit): void;
   /** A movable mark's end clicked. */
   onPick?(id: string): void;

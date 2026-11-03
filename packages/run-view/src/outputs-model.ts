@@ -15,7 +15,7 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { type OutputCatalog, unitAsWritten } from "@voluma/contracts/output-catalog";
 import {
-  needingYou,
+  itemKey,
   type OutputState,
   type OutputsFold,
   type OutputVersion,
@@ -75,8 +75,8 @@ export type OutputsReview = {
    * undeclared: what "Other outputs so far" lists while the run goes.
    */
   others: OutputRow[];
-  /** The final outputs that need a person (`needingYou`): what To check counts. */
-  needing: Set<string>;
+  /** The open To check items a person can answer (`OutputsFold.openItems`): what To check counts. */
+  open: Set<string>;
   /** Final outputs with a version, of all final outputs. */
   progress: { done: number; total: number };
 };
@@ -104,7 +104,7 @@ export const unitText = (ucum: string): string => (ucum === "1" ? "" : unitAsWri
 /** The To check items version `v` of output `id` raised; `key` is the URL's `item`. */
 export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
   return v.toCheck.map((t, item) => ({
-    key: `${id}/${v.version}/${item}`,
+    key: itemKey(id, v.version, item),
     output: id,
     version: v.version,
     item,
@@ -150,6 +150,27 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
   };
 }
 
+/** The items of `row`'s trail still open: the value's own and those of what it rests on. */
+export const openItemsOf = (row: OutputRow): OutputItem[] => row.items.filter((i) => !i.resolved);
+
+/**
+ * What "only To check" lists: the rows whose own items are open, plus a row for each open item no
+ * listed row owns (a label map the values rest on), so one open item is one row, not every value
+ * that rests on it.
+ */
+export function rowsToCheck(review: OutputsReview): { listed: OutputRow[]; behind: OutputRow[] } {
+  const listed = [...review.sections.flatMap((s) => s.rows), ...review.undeclared];
+  const owns = (r: OutputRow) => openItemsOf(r).some((i) => i.output === r.id);
+  const shown = new Set(listed.map((r) => r.id));
+  const behind = new Set<string>();
+  for (const r of listed)
+    for (const i of openItemsOf(r)) if (!shown.has(i.output)) behind.add(i.output);
+  return {
+    listed: listed.filter(owns),
+    behind: [...behind].flatMap((id) => review.rows.get(id) ?? []),
+  };
+}
+
 export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): OutputsReview {
   const rows = new Map(fold.outputs.map((o) => [o.id, rowOf(fold, catalog, o)]));
   const sections: OutputsReview["sections"] = (fold.list?.sections ?? []).map((s) => ({
@@ -166,7 +187,7 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     others: [...rows.values()].filter(
       (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
     ),
-    needing: needingYou(fold),
+    open: fold.openItems,
     progress: outputsIn(fold),
   };
 }

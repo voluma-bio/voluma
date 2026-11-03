@@ -4,9 +4,10 @@
  * or right drag pans, and a press on a tilt handle turns the other planes. With a marking tool,
  * left click or drag marks: Point a voxel, Box a drag's rectangle, Line a drag's two ends (or two
  * clicks, with `clickLines`), Angle three clicks (the vertex second), Outline a freehand loop,
- * Probe reads the value under the pointer and keeps it as a point on click. With no tool, a press
- * on an end of an editable mark (`ShownMark.movable`: a point, a line, an angle) or of a published
- * ruler drags that end (`onEdit`); a click on a mark's end without moving picks it (`onPick`).
+ * Probe reads the value under the pointer and keeps it as a point on click. Whatever the tool, a
+ * drag that starts within `END_HIT_PX` of an end of an editable mark (`ShownMark.movable`: a point, a
+ * line, an angle) or of a published ruler moves that end (`onEdit`); a click there goes to the tool
+ * (places, probes, adds a line end), and with no tool picks the mark (`onPick`).
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { angleAbout, type Basis, type Slab, unit, type Vec3 } from "./frame";
@@ -68,8 +69,8 @@ const OUTLINE_STEP_PX = 3;
 const OUTLINE_MAX = 500;
 /** How near a tilt handle a press must land (CSS px). */
 const HANDLE_HIT_PX = 9;
-/** How near a mark's end a press must land to drag it (CSS px). */
-const END_HIT_PX = 8;
+/** How near a mark's end a press must land to drag it (CSS px), whatever the zoom: the dot drawn is smaller. */
+const END_HIT_PX = 10;
 
 /** A mark or ruler end under the pointer: which vertex of which mark. */
 type End = { from: MarkEdit["from"]; id: string; mark: GridMark; index: number };
@@ -173,10 +174,12 @@ export function useSliceGestures(args: {
     let clicks: Zyx[] = [];
     // The editable end nearest the pointer on this slice, within `END_HIT_PX`: your marks first,
     // so a ruler you already moved drags as yours.
+    // Box, Outline and Probe never grab: a press there always draws or reads.
     const endAt = (event: { clientX: number; clientY: number }): End | null => {
-      const { onEdit, marks, annotations, slab, toPane: tp } = latest.current;
+      const { onEdit, marks, annotations, slab, toPane: tp, tool: now } = latest.current;
       const v = view.current;
       if (!onEdit || !v) return null;
+      if (now && now !== "point" && now !== "line" && now !== "angle") return null;
       const rect = element.getBoundingClientRect();
       const px = (p: Zyx) => {
         const [x, y] = tp(p);
@@ -272,11 +275,13 @@ export function useSliceGestures(args: {
                 HANDLE_HIT_PX,
             )
           : undefined;
-      const end = !pan && !tool && !hit ? endAt(event) : null;
+      // Mid-way through a click-made line or angle, a press adds its next end, even on an old one.
+      // Under a tool the end is only a candidate: `move` makes it a drag once the pointer leaves.
+      const end = !pan && !hit && !clicks.length ? endAt(event) : null;
       layer.start(event);
       const from = toPosition(event);
       drag = {
-        mode: pan ? "pan" : hit ? "tilt" : end ? "end" : (tool ?? "cross"),
+        mode: pan ? "pan" : hit ? "tilt" : end && !tool ? "end" : (tool ?? "cross"),
         x: event.clientX,
         y: event.clientY,
         at: latest.current.point,
@@ -292,7 +297,8 @@ export function useSliceGestures(args: {
     const move = (event: PointerEvent) => {
       const tool = latest.current.tool;
       if (!drag) {
-        if (!tool && latest.current.onEdit) element.style.cursor = endAt(event) ? "grab" : "";
+        if (latest.current.onEdit)
+          element.style.cursor = !clicks.length && endAt(event) ? "grab" : "";
         if (tool === "point" || tool === "line" || tool === "angle") {
           layer.hover = toVoxel(event);
           if (clicks.length) layer.draft = clickDraft(tool, toPosition(event));
@@ -312,6 +318,12 @@ export function useSliceGestures(args: {
         if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
           return;
         drag.moved = true;
+        // Under a tool, a press near an end is settled on release: past the threshold it is an end
+        // drag; a click goes to the tool.
+        if (drag.end && drag.mode !== "end") {
+          drag.mode = "end";
+          layer.hover = null;
+        }
         // On the slice the gesture began on, even if the wheel stepped since.
         const to = toPosition(event, drag.at);
         if (drag.mode === "end") {

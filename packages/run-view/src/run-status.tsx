@@ -89,7 +89,7 @@ export function liveStatus(
     : runStatus(run);
 }
 
-/** What needs a person on one run, final outputs on the agent loop and items on the task loop, never samples ("3 to check"). */
+/** What needs a person on one run: open To check items on either loop, never samples ("3 to check"). */
 export const toCheckText = (n: number) => `${n} to check`;
 
 /** A run with a held call the researcher can answer (`StudyRunSummary.waiting`): whatever its row says. */
