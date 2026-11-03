@@ -398,17 +398,18 @@ Evidence may be given as a plain path (`/outputs/<task>/x`, `/scratch/<thread>/x
 is always relative to `/outputs/<task>/`: `keep` never strips another task-id segment, which could name a real subfolder.
 
 **Provider errors.** Pi is the only retry layer, and it retries only the request up to its response headers.
-`run.ts` passes it `maxRetries: 10`, `maxRetryDelayMs: 30 s` and `timeoutMs: 60 s` for every role. Pi retries a 408,
-409, 429 (waiting the server's `retry-after`; a longer ask than 30 s fails the call at once), 5xx or dropped
-connection, with a backoff that doubles from 0.5 s to a cap of 8 s: ten retries are about 50 s of provider trouble
-(measured: 11 attempts over 50.5 s against a stub that answered 503), longer when the server sends `retry-after`
-(10 × 30 s at most), and a quota 429 is retried the same 10 times before it fails. Pi has no total budget and logs
+`run.ts` passes it `maxRetries: 4`, `maxRetryDelayMs: 60 s` and `timeoutMs: 60 s` for every role. Pi retries a 408,
+409, 429 (waiting the server's `retry-after`; a longer ask than 60 s fails the call at once), 5xx or dropped
+connection, with a backoff that doubles from 0.5 s to a cap of 8 s: four retries are about 7.5 s of provider trouble,
+longer when the server sends `retry-after` (4 × 60 s at most; Meta answers an overload with a 503 and `retry-after:
+60`), and a quota 429 is retried the same 4 times before it fails. No call on record (staging and local, to 2 Nov)
+needed a retry to succeed. Pi has no total budget and logs
 nothing, so `model-fetch.ts` hands it a `fetch` that logs every failed attempt (`<role> model call attempt N failed:
 HTTP 503 …`, `timed out waiting for the response`, or the network error with its cause). The timeout is the SDK's: it
 covers the wait for the response headers only (the SDK clears its timer when `fetch` resolves), so a healthy stream
 is never cut. Meta sends its headers after prefill (24.7 s at most, measured at 805k tokens), so 60 s holds. A
-request that hangs before its headers is retried every time: a dead endpoint holds a call for up to 11 × 60 s plus
-the backoff, about 12 minutes, before the thread fails. A stream that stalls after its headers is cut by nothing
+request that hangs before its headers is retried every time: a dead endpoint holds a call for up to 5 × 60 s plus
+the backoff, about 5 minutes, before the thread fails. A stream that stalls after its headers is cut by nothing
 but the run's end (a thread in that state counts as running, so the loop's `stuckLimit` never fires).
 
 **After the headers nothing retries.** A stream that drops, an error sent inside the stream (Meta's `server_error`

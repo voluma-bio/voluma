@@ -102,13 +102,16 @@ const RELEASE_FLUSH_MS = 15_000;
 const DRAIN_MS = 10 * 60_000;
 /**
  * Pi's retries of a model call (408, 409, 429, 5xx, dropped connections) are the only ones: the
- * backoff doubles from 0.5 s, so 4 retries cover about 7.5 s of provider trouble; a server asking
- * for more than MODEL_MAX_RETRY_DELAY_MS fails the call at once. Kept low because each retry
- * re-sends the whole prompt and a hung endpoint costs MODEL_REQUEST_TIMEOUT_MS per attempt: at 10
- * retries one dead endpoint held a thread for about 11 minutes.
+ * backoff doubles from 0.5 s, so 4 retries cover about 7.5 s of provider trouble, longer when the
+ * server sends `retry-after`; a server asking for more than MODEL_MAX_RETRY_DELAY_MS fails the call
+ * at once. Kept low because a hung endpoint costs MODEL_REQUEST_TIMEOUT_MS per attempt: at 10
+ * retries one dead endpoint held a thread for about 11 minutes. No recorded call has needed a
+ * retry to succeed (2 Nov). The delay cap is 60 s because Meta answers an overload with a 503 and
+ * `retry-after: 60`: waiting costs no tokens, and refusing it fails the call, which on main fails
+ * the run.
  */
 const MODEL_RETRIES = 4;
-const MODEL_MAX_RETRY_DELAY_MS = 30_000;
+const MODEL_MAX_RETRY_DELAY_MS = 60_000;
 /**
  * Time the provider gets to answer a request with its headers (the SDK clears the timer then,
  * so a streaming body is not cut). Meta sends them after prefill: 24.7 s at most, measured at
