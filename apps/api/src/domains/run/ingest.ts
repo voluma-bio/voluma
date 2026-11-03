@@ -74,7 +74,7 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
     const { run, leaseToken, budgetUsd, keys, previousClaim } = claimed;
     return c.json({
       claim: {
-        run,
+        run: { ...run, harness: "agents" },
         leaseToken,
         budgetUsd,
         ...(keys && { keys }),

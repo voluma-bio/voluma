@@ -151,8 +151,12 @@ export const claimRequestSchema = z.object({
 
 export const claimSchema = z
   .object({
-    /** In state `running`. */
-    run: runSchema,
+    /**
+     * In state `running`. `harness` is a literal for the deploy overlap: a runner built before the
+     * task loop was deleted reads `run.harness ?? "tasks"` (TODO: drop with `runs.harness`,
+     * `packages/contracts/.context/TODO.md`).
+     */
+    run: runSchema.extend({ harness: z.literal("agents") }),
     /** Changes with every claim; see Lease. */
     leaseToken: z.string().min(1),
     /** Present exactly for a `visitor` run; returned once. */

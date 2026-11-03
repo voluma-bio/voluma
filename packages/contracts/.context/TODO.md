@@ -34,3 +34,9 @@ Readers that take an output's status from `fold.byId` by its own id (`hasVersion
 `outputsIn`, the panel's not-in list) are right only while label overlays stay off the final list.
 One fold helper, `stateOf(fold, id)`, that resolves the label to its map first and is the only way
 readers get a state, would end that class (`chainOf` needed the same step, #489).
+
+## Drop the deploy-overlap leftovers of the task loop
+
+Once no runner or API built before "Delete the task loop" is live: delete `harness: z.literal("agents")` from
+`claimSchema.run` (`src/runner.ts`, filled by `ingest.ts`) and the claim's `harnesses`, together with the
+`runs.harness` column. The API's TODO (`apps/api/.context/TODO.md`) lists the rest.
