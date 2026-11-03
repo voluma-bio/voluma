@@ -116,13 +116,16 @@ schema is `regions-and-landmarks`'):
   `b` go on a long view of the femur that shows the shaft and the groove side-on; `c` and `d` can go on the
   joint-face view. `femoral_frame.py` refuses a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
   (`a` and `b` placed end-on, as on the first full run), an `a`-`b` that runs side to side or a `c`-`d` that does not
-  (against the femur's mediolateral axis, which it finds from the label and prints: the sides and the front swapped, as
-  on OA6-2RK run f45f630f, where OA6-1RK's axes were taken for its own) or an SI axis pointing away from the femur:
-  re-place the points; the refusal is not a warning to explain. The printed axis says which scan direction runs side
-  to side, not which side is lateral or where the front is: read those from a render of this scan. Two refusals are
-  not about the points, so do not move them: a femur label too short along its shaft to give the axes (the labels
-  or the field of view cut the shaft off), and a printed axis that a render of this scan contradicts (the condyles
-  side by side along another direction). For either, stop and raise a To check item naming it.
+  (against the femur's mediolateral axis, which it finds from the label, checks against the knee's bending plane in the
+  `frame` output and prints: the sides and the front swapped, as on OA6-2RK, where workers twice read its condyles as
+  side by side along scan y; they sit along x) or an SI axis pointing away from the femur: re-place the points; the
+  refusal is not a warning to explain. The printed axis says which scan direction runs side to side, not which side is
+  lateral or where the front is: read those from a render of this scan. When the refusal says the axis is confirmed,
+  a render that seems to disagree has its image axes mislabelled: name the scan axis along each image axis, then
+  re-place. Three refusals are not about the points, so do not move them: a femur label too short along its shaft to
+  give the axes (the labels or the field of view cut the shaft off); points whose two rulers both fit the knee's bending plane
+  but not the label's axis (the refusal says so); and an axis the bending plane does not confirm that a render of this scan,
+  its image axes named, contradicts. For each, stop and raise a To check item naming it.
 
 `oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (A and B, no C) in that schema, with
 the `grid_id` of the frame it was traced on: a worked example of the keys and the point order, and a record of that
