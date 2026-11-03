@@ -47,7 +47,10 @@ EPIPHYSIS_MM = 1.5  # the distal end of the femur whose widest cross-axis is tak
 # to 0.05 and 0.99.
 MAX_LENGTH_ML = 0.5
 MIN_WIDTH_ML = 0.7
-# |cos| between the label's ML axis and the bending-plane normal at or above which the axis counts as confirmed. AGREE_NOTE
+# |cos| between the label's ML axis and the bending-plane normal at or above which the axis counts as confirmed (about 32
+# degrees). On threshold-split labels of ten lab scans with a bending plane in the frame: OA7-1L 0.996, OA6-1RK 0.98, OA6-2RK
+# 0.95, OA6-9RK 0.90, OA6-17LK9 0.86 confirm; OA7-3R 0.76, OA8-17L 0.58, OA8-19L 0.53 do not (OA6-14LK3 and OA7-4R had no
+# bending plane). A confirmed axis can be off by this much and correct points still pass both ruler checks.
 MIN_ML_AGREE = 0.85
 BENDING_PLANE = 'span of the two shaft axes'  # orient_joint.py's plane_rule when the normal is the bending-plane normal
 # The femur label must run at least this far along its shaft for its axes to be read. Whole labels: OA6-1RK 5.31 mm,
