@@ -101,7 +101,7 @@ export function WorkflowPanel({
         <TaskList workflow={workflow} />
       </div>
       <footer className="border-t border-border px-5 py-3">
-        {/* A new tab: leaving Run on new scans would drop the uploads under way. */}
+        {/* A new tab: leaving Run on new samples would drop the uploads under way. */}
         <Button asChild variant="link" className="text-sm">
           <Link to="/workflows" target="_blank" rel="noreferrer">
             Open in Workflows

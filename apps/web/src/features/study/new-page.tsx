@@ -1,5 +1,5 @@
 /**
- * Run on new samples (`/new`): the samples first (dropped or picked, grouped by `scan-files.ts`,
+ * Run on new samples (`/new`): the samples first (dropped or picked, grouped by `input-files.ts`,
  * uploading at once; or scans uploaded before), the intake table (`intake.ts`), the workflow,
  * then, for several scans, the study's name and how much runs now. One scan starts a study of
  * one named after it and opens its run; several start a study and open it.
