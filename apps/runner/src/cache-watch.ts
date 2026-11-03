@@ -3,7 +3,9 @@
  * run's stored events from the API's run stream (`GET /api/run/runs/:id/stream`, debug token)
  * and judges every model call with `cacheStep`, the rule the run page uses, then reports misses
  * per thread. A miss is expected when it is the call right after a "Tools changed" notice in its
- * own thread; every other miss is unexpected and is printed with what surrounds it. A
+ * own thread, or when the thread sat idle `CACHE_IDLE_MS` before the call (previous reply to the
+ * call's input: the thread's latest tool result or delivered message, the best event-only stand-in
+ * for the request start); every other miss is unexpected and is printed with what surrounds it. A
  * compaction summary counts as a call, is not judged, and resets the thread's baseline, as in
  * `spend`. Holds one stream open, resumes it after a drop or an API restart, prints the summary
  * every `--every` seconds, and stops at the run's end or after `--watch` minutes. Writes nothing.
@@ -17,6 +19,7 @@
 import { parseArgs } from "node:util";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
+  CACHE_IDLE_MS,
   type CacheState,
   cacheStep,
   isToolsChangedNotice,
@@ -66,6 +69,8 @@ type Thread = {
   /** Whether each call was an unexpected miss, newest last. */
   recent: boolean[];
   toolsChangedSince?: number;
+  /** When the thread last received input (a tool result or a non-assistant message). */
+  inputAt?: number;
   lastResult?: { name: string; output: string; at: number };
 };
 
@@ -123,6 +128,7 @@ function ingest(e: RunEvent, out: string[]) {
       toolName.set(e.payload.toolCallId, e.payload.name);
       break;
     case "tool.result":
+      t().inputAt = at;
       t().lastResult = {
         name: toolName.get(e.payload.toolCallId) ?? "?",
         output: e.payload.output,
@@ -132,6 +138,7 @@ function ingest(e: RunEvent, out: string[]) {
     case "message": {
       const m = e.payload;
       const th = t();
+      if (m.role !== "assistant") th.inputAt = at;
       if (isToolsChangedNotice(m)) {
         th.toolsChangedSince = at;
         markers.push({ at, what: `${e.threadId}: ${clip(m.text, 80)}` });
@@ -144,7 +151,8 @@ function ingest(e: RunEvent, out: string[]) {
       th.cache = step.next;
       if (prompt === 0) break; // unreported, not a call
       const prev = m.compaction ? undefined : th.prev;
-      const kind = missKind(step.miss, th.toolsChangedSince !== undefined);
+      const idleMs = prev ? Math.max(0, (th.inputAt ?? at) - prev.at) : 0;
+      const kind = missKind(step.miss, th.toolsChangedSince !== undefined, idleMs);
       th.calls++;
       calls++;
       th.recent.push(kind === "unexpected");
@@ -153,6 +161,13 @@ function ingest(e: RunEvent, out: string[]) {
         th.misses++;
         misses++;
       }
+      if (
+        kind === "expected" &&
+        prev &&
+        idleMs >= CACHE_IDLE_MS &&
+        th.toolsChangedSince === undefined
+      )
+        out.push(`IDLE  ${e.threadId}  seq ${e.seq}  expected miss after ${mmss(idleMs)} idle`);
       if (kind === "unexpected" && prev) {
         th.unexpected++;
         unexpected++;
@@ -165,7 +180,7 @@ function ingest(e: RunEvent, out: string[]) {
           [
             `MISS  ${e.threadId}  seq ${e.seq}  ${e.createdAt}  (+${mmss(at - (startMs ?? at))})`,
             `      prompt ${prompt}  cacheRead ${u.cacheRead}  cacheWrite ${u.cacheWrite}  input ${u.input}  | previous prompt ${prev.prompt}`,
-            `      since previous call ${((at - prev.at) / 1000).toFixed(0)}s  | tool result before: ${result}`,
+            `      since previous call ${((at - prev.at) / 1000).toFixed(0)}s, idle before input ${(idleMs / 1000).toFixed(0)}s  | tool result before: ${result}`,
             `      between the two calls: ${between.length ? between.join("; ") : "no claim.started / tools-changed notice"}`,
           ].join("\n"),
         );

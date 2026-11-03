@@ -130,16 +130,26 @@ export const isToolsChangedNotice = (m: { role: string; text: string }) =>
   m.role === "system" && m.text.startsWith("Tools changed");
 
 /**
+ * How long a thread may sit idle before a miss is expected whatever the provider: providers drop
+ * a cached prefix after minutes idle (Anthropic about 5, Meta 20 to 40), and the agent loop's
+ * main thread sleeps between worker reports. One threshold for every provider.
+ */
+export const CACHE_IDLE_MS = 5 * 60_000;
+
+/**
  * A `cacheStep` miss judged against what came before it in its thread: `expected` right after a
- * "Tools changed" notice (`isToolsChangedNotice`), else `unexpected`; undefined for a hit or an
- * unreported call. A compaction summary is not judged at all: callers reset the baseline there.
+ * "Tools changed" notice (`isToolsChangedNotice`) or when the thread was idle at least
+ * `CACHE_IDLE_MS` (`idleMs`: from the end of its previous call to the start of this call's
+ * request), else `unexpected`; undefined for a hit or an unreported call. A compaction summary is
+ * not judged at all: callers reset the baseline there.
  */
 export function missKind(
   miss: boolean | undefined,
   toolsChanged: boolean,
+  idleMs: number,
 ): "expected" | "unexpected" | undefined {
   if (!miss) return undefined;
-  return toolsChanged ? "expected" : "unexpected";
+  return toolsChanged || idleMs >= CACHE_IDLE_MS ? "expected" : "unexpected";
 }
 
 const sum = (spends: Iterable<Spend>): Spend => {

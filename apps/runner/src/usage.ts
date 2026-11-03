@@ -64,29 +64,38 @@ export function usageMeter(limits: StopLimits) {
   >();
   // Cache state per thread: a miss is judged against the same thread's previous call.
   const cache = new Map<string, CacheState>();
+  // When each thread's previous call finished, for the idle time before the next.
+  const lastEnd = new Map<string, number>();
   // Per thread: unexpected misses in a row, and whether a "Tools changed" notice came since its last call.
   const streaks = new Map<string, number>();
   const toolsChanged = new Set<string>();
   return {
     /**
      * One model call's usage: its cost goes to the heartbeat, its tokens and cache miss to the
-     * per-role totals. Returns why the run must stop, or undefined.
+     * per-role totals. `startedAt` is when the call's request began; the call ends now. A miss
+     * after `CACHE_IDLE_MS` idle is expected (the provider dropped the prefix). Returns why the
+     * run must stop, or undefined.
      */
     addModelCall(
       role: string,
       threadId: string,
       used: ModelUsage | undefined,
+      startedAt: number,
     ): StopReason | undefined {
       if (!used) return;
       this.addModelCost(used.costUsd);
       const { miss, next } = cacheStep(cache.get(threadId), used);
       cache.set(threadId, next);
-      const kind = missKind(miss, toolsChanged.has(threadId));
+      const idleMs = startedAt - (lastEnd.get(threadId) ?? startedAt);
+      lastEnd.set(threadId, Date.now());
+      const kind = missKind(miss, toolsChanged.has(threadId), idleMs);
       if (miss !== undefined) toolsChanged.delete(threadId);
+      // Only a hit clears the streak: an expected miss, like an unreported call, says nothing
+      // about whether the cache works, so a broken cache can't hide behind idle gaps.
       const streak =
         kind === "unexpected"
           ? (streaks.get(threadId) ?? 0) + 1
-          : miss === undefined
+          : kind === "expected" || miss === undefined
             ? (streaks.get(threadId) ?? 0)
             : 0;
       streaks.set(threadId, streak);
@@ -115,6 +124,7 @@ export function usageMeter(limits: StopLimits) {
     addMessage(threadId: string, m: { role: string; text: string; compaction?: true }) {
       if (m.compaction) {
         cache.delete(threadId);
+        lastEnd.delete(threadId);
         streaks.delete(threadId);
       } else if (isToolsChangedNotice(m)) toolsChanged.add(threadId);
     },
