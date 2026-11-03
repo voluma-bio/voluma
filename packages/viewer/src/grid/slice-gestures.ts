@@ -436,7 +436,9 @@ export function useSliceGestures(args: {
         if (zyx.length >= 3 && area > 0) return { outline: { zyx, areaMm2: area } };
       }
       if (made && "path" in made) {
-        const zyx = thin(made.path.zyx, OUTLINE_MAX);
+        // Thinned with its last point kept: an open line ends where it was drawn to.
+        const all = made.path.zyx;
+        const zyx = [...thin(all.slice(0, -1), OUTLINE_MAX - 1), all[all.length - 1]!];
         const length = pathLengthMm(zyx, scene.spacingZyx);
         if (zyx.length >= 2 && length > 0) return { path: { zyx, lengthMm: length } };
       }
