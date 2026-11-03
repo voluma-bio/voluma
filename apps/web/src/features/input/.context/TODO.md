@@ -48,8 +48,11 @@ None of these stops a review; each makes it slower.
 
 ## Outputs review
 
-- Marks made on an agent-loop run's panes are drawn but never sent: the conversation is read-only
-  there until corrections (phase 7). Send them, with the panes' snapshot, with the message.
+- **A published ruler's end dragged** is not yet seen on real data: no agent-loop run draws rulers
+  yet. The drag shares the mark-end path that was walked; the ruler's candidates come from the
+  scene's 2-point annotations.
+- Ends drag only in slices, not in 3D; boxes, outlines and probes have no handles.
+- A sent message's picture isn't shown in the chat (`runMessageSnapshotUrl` is there).
 - Rests on rows have no swatch or eye: the panes can't yet show or hide one overlay from the list
   (mockup C's legend). The slices' Lat/Med letters are Andrew's call.
 - The task review still uses the shell's docked `ShellPanel`s; it goes with the task loop
@@ -64,13 +67,10 @@ None of these stops a review; each makes it slower.
   marks this tab has seen. Cosmetic.
 - Probe and Point share the letter P in `QUAD_TOOLS`; tags stay unique (one counter), but a tag
   can't tell the kind.
-- `useSavedViews` (`outputs-review.tsx`) never clears `pendingFor`: after one save, any later
+- `useSavedViews` (`saved-views.ts`) never clears `pendingFor`: after one save, any later
   `view.saved` for that output, another person's included, becomes the one shown.
-- `outputs-review.tsx` is about 900 lines: split `useSavedViews` with `savedViews`, and
-  `MainConversation`, into their own files before more lands.
-- Per-event costs: `savedViews(events)` runs twice per durable event, each zod-parsing every saved
-  view; `marksOf`, `waitingApprovals` and `conversation` each rescan the whole log. Compute
-  `savedViews` once and pass it down.
+- Per-event costs: `marksOf`, `toldMarks`, `agentLog` and `conversation` each rescan the whole
+  log per durable event.
 
 ## Outputs review while a run goes (#466)
 

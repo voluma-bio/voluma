@@ -20,7 +20,7 @@ import {
   type Zyx,
 } from "@voluma/viewer/grid";
 import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler, Trash2 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * A mark of yours, as the viewer draws it: `volumeId` the grid's image it was made on,
@@ -46,10 +46,28 @@ export type YourMark = {
  */
 export type MarkStore = {
   marks: readonly YourMark[];
+  /** Every tag given out so far that a new mark must not reuse. */
+  tags: readonly string[];
   full: boolean;
   place(mark: YourMark): void;
   erase(id: string): void;
+  /** Your changes that wait for your next message to main; none where marks aren't sent so. */
+  changes: readonly MarkChange[];
+  /** Undoes a waiting change. */
+  discard(id: string): void;
 };
+
+/** A change of yours to a mark that your next message carries: its id is the `markIds` entry. */
+export type MarkChange = {
+  id: string;
+  tag: string;
+  /** The output it was made on. */
+  output: string;
+  /** `place`: main has not seen it; `move`: moved or its note changed; `delete`: deleted since. */
+  change: "place" | "move" | "delete";
+};
+
+const NO_CHANGES: readonly MarkChange[] = [];
 
 /**
  * Marks the page holds until a message carries them, lost on reload: the task review's, capped
@@ -57,8 +75,11 @@ export type MarkStore = {
  */
 export function useLocalMarks(cap?: number) {
   const [marks, setMarks] = useState<YourMark[]>([]);
+  const tags = useMemo(() => marks.map((m) => m.tag), [marks]);
+  const erase = useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []);
   return {
     marks,
+    tags,
     full: cap !== undefined && marks.length >= cap,
     place: useCallback(
       (mark: YourMark) =>
@@ -71,7 +92,9 @@ export function useLocalMarks(cap?: number) {
         ),
       [cap],
     ),
-    erase: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
+    erase,
+    changes: NO_CHANGES,
+    discard: erase,
     /** Keeps only the marks on these grids. */
     keep: useCallback((grids: ReadonlySet<string>) => {
       setMarks((had) =>
@@ -344,7 +367,7 @@ export function useMarking(tools: readonly Tool[], store: MarkStore) {
         if (capped) return undefined;
         const id = crypto.randomUUID();
         if (issued.current.of !== kept.marks) issued.current = { of: kept.marks, tags: [] };
-        const tag = nextTag([...kept.marks.map((m) => m.tag), ...issued.current.tags], mark, made);
+        const tag = nextTag([...kept.tags, ...issued.current.tags], mark, made);
         issued.current.tags.push(tag);
         kept.place({
           id,

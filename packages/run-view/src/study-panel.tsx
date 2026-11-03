@@ -33,8 +33,12 @@ export function inputStatus(input: StudyInputDetail): InputStatus {
   const [run] = input.runs;
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
   // The input's `review` is its newest run's, of either loop (a `Run` has one for the task loop only).
-  const { label, status } = liveStatus({ ...run, review: input.review });
-  const open = status === "check" ? needsYouOf(input) : 0;
+  const { label, status } = liveStatus({
+    ...run,
+    review: input.review,
+    waiting: input.waiting,
+  });
+  const open = status === "check" && input.waiting === 0 ? needsYouOf(input) : 0;
   return { label: open > 0 ? needsYouText(open, run.harness) : label, status, open };
 }
 

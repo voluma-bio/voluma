@@ -19,6 +19,7 @@ import {
   GridViewer,
   type GridViewerHandle,
   labelsMiddle,
+  type MarkEdit,
   type MarkPlane,
   type MarkTool,
   type PlaneFit,
@@ -26,6 +27,7 @@ import {
   type QuadLayout,
   type QuadState,
   QuadViewer,
+  type QuadViewerHandle,
   reviewGrid,
   type ShownMark,
   type StructureDisplay,
@@ -33,7 +35,7 @@ import {
   tokenColor,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { type Ref, useEffect, useMemo, useRef, useState } from "react";
+import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { FULL, gridKeyOf, type ShownGrid, TOOLS, type Tool, type YourMark } from "./marks-panel";
 
 /** A task in view: what its numbers are measured on and drawn with, and what it reported. */
@@ -118,6 +120,15 @@ export function SceneViewer({
     onSave?(state: QuadState, grid: string): void;
     /** A saved view to show on its grid: each new object is applied once. */
     restore?: { grid: string; state: QuadState };
+    /**
+     * With Navigate, an end dragged in a slice: of your mark, or of a published ruler (a new mark
+     * of yours on the grid's image `volumeId`), with the pane's frame.
+     */
+    onEdit?(edit: MarkEdit, volumeId: string, gridKey: string, plane: MarkPlane): void;
+    /** A mark of yours clicked at an end. */
+    onPick?(id: string): void;
+    /** The shown grid's view and picture, for a message. */
+    ref?: Ref<SceneHandle>;
   };
 }) {
   const [labels, setLabels] = useState(false);
@@ -180,7 +191,14 @@ export function SceneViewer({
     const byGrid = new Map<string, ShownMark[]>();
     for (const m of marks) {
       const on = byGrid.get(m.gridKey) ?? [];
-      on.push({ id: m.id, tag: m.tag, mark: m.mark, by: "you", selected: m.id === selected });
+      on.push({
+        id: m.id,
+        tag: m.tag,
+        mark: m.mark,
+        by: "you",
+        selected: m.id === selected,
+        movable: !m.theirs,
+      });
       byGrid.set(m.gridKey, on);
     }
     return byGrid;
@@ -232,6 +250,18 @@ export function SceneViewer({
         : had,
     );
   const shownReady = !!live && !!slots.find((k) => k.key === live.key)?.ready;
+  const shownQuad = useRef<QuadViewerHandle>(null);
+  useImperativeHandle(
+    quad?.ref,
+    () => ({
+      view: () => {
+        const state = shownQuad.current?.state();
+        return state && live ? { state, grid: live.imageId } : undefined;
+      },
+      snapshot: async (maxBytes) => (await shownQuad.current?.snapshot(maxBytes)) ?? null,
+    }),
+    [live?.imageId],
+  );
   useEffect(
     () => onShown(gridKey ? { key: gridKey, taskId: subject.id, ready: shownReady } : undefined),
     [gridKey, subject.id, shownReady, onShown],
@@ -297,6 +327,13 @@ export function SceneViewer({
                 targets={k.imageId === live?.imageId ? targets : undefined}
                 onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
                 restore={quad.restore?.grid === k.imageId ? quad.restore.state : undefined}
+                onEdit={
+                  on && quad.onEdit
+                    ? (edit, plane) => quad.onEdit?.(edit, k.imageId, k.key, plane)
+                    : undefined
+                }
+                onPick={quad.onPick}
+                ref={on ? shownQuad : undefined}
               >
                 {bar(on)}
               </QuadViewer>
@@ -321,6 +358,13 @@ export function SceneViewer({
     </>
   );
 }
+
+/** The outputs review's shown grid, as a message takes it: its view (`QuadState` on image `grid`) and a picture. */
+export type SceneHandle = {
+  view(): { state: QuadState; grid: string } | undefined;
+  /** The shown panes as one PNG of at most `maxBytes`; null when they have no picture or none fits. */
+  snapshot(maxBytes: number): Promise<Blob | null>;
+};
 
 /** What a grid's viewer is given; a hidden one keeps what it was last given. */
 type View = {

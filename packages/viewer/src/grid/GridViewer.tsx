@@ -17,15 +17,17 @@ import { Grid3D } from "./Grid3D";
 import { NumberField } from "./number-field";
 import { readLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
-import type {
-  GridMark,
-  GridScene,
-  MarkTool,
-  PaneHandle,
-  PaneStatus,
-  PaneView,
-  ShownMark,
-  Zyx,
+import {
+  type GridMark,
+  type GridScene,
+  type MarkTool,
+  type PaneHandle,
+  type PaneStatus,
+  type PaneView,
+  pngWithin,
+  type ShownMark,
+  SNAPSHOT_WIDTH,
+  type Zyx,
 } from "./scene";
 import { tokenColor } from "./token-color";
 
@@ -56,8 +58,6 @@ export type GridViewerHandle = {
 
 /** How long a snapshot waits for a refining slice before giving up (ms). */
 const SETTLE_MS = 3000;
-/** Picture widths, in pixels, a snapshot tries in turn until one fits. */
-const SNAPSHOT_WIDTHS = [1600, 1200, 800, 560, 400];
 const NO_MARKS: readonly ShownMark[] = [];
 
 /** Each slice plane keeps its axis colour (DESIGN.md): axial z, sagittal y, coronal x. */
@@ -171,23 +171,10 @@ export function GridViewer({
       const host = grid.current?.getBoundingClientRect();
       const latest = now.current;
       if (!host?.width || !host.height || !latest?.ready || latest.standIn) return null;
-      const scale = Math.min(globalThis.devicePixelRatio, SNAPSHOT_WIDTHS[0]! / host.width);
+      const scale = Math.min(globalThis.devicePixelRatio, SNAPSHOT_WIDTH / host.width);
       // Freeze every pane before encoding: later encodes must not reread live viewer state.
       const frozen = latest.sheet(host, scale);
-      if (!frozen) return null;
-      let tried = 0;
-      for (const width of SNAPSHOT_WIDTHS) {
-        const size = Math.min(frozen.width, width);
-        if (size === tried) continue;
-        tried = size;
-        const canvas = document.createElement("canvas");
-        canvas.width = size;
-        canvas.height = Math.round((size / frozen.width) * frozen.height);
-        canvas.getContext("2d")!.drawImage(frozen, 0, 0, canvas.width, canvas.height);
-        const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/png"));
-        if (blob && blob.size <= maxBytes) return blob;
-      }
-      return null;
+      return frozen && pngWithin(frozen, maxBytes);
     },
   }));
   /** The shown panes as one PNG, `scale` picture pixels to a CSS pixel of the grid. */

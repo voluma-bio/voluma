@@ -1,7 +1,7 @@
 /**
  * One version of an output, as Final outputs shows it: the line naming it (version, who made it,
  * when), its report (the worker's own words, the images it was checked on, what it was made
- * from), and To check items with Accept and Show. The data comes from the output fold and
+ * from), and To check items with Accept, Tell main what's wrong, and Show. The data comes from the output fold and
  * `versionWords` (`@voluma/run-view`).
  */
 import { outputFileUrl } from "@voluma/api-client";
@@ -23,6 +23,8 @@ export type Accepting = {
   /** The item being saved. */
   pending?: string;
   error?: { key: string; text: string };
+  /** Tell main what's wrong: starts a message that answers the item. */
+  tell?: (item: OutputItem) => void;
 };
 
 /** `v1 roi3-worker 19:05`, then what follows it on the line (a Report toggle). */
@@ -70,12 +72,19 @@ export function Items({
           error={accepting.error?.key === i.key ? accepting.error.text : undefined}
           className={i.key === item ? "inset-ring-select" : undefined}
           actions={
-            i.focus && (
-              <Button variant="ghost" size="sm" onClick={() => onItem(i)}>
-                <Crosshair aria-hidden />
-                Show
-              </Button>
-            )
+            <>
+              {accepting.tell && !i.resolved && (
+                <Button size="sm" onClick={() => accepting.tell?.(i)}>
+                  Tell main what's wrong
+                </Button>
+              )}
+              {i.focus && (
+                <Button variant="ghost" size="sm" onClick={() => onItem(i)}>
+                  <Crosshair aria-hidden />
+                  Show
+                </Button>
+              )}
+            </>
           }
         />
       ))}
