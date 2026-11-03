@@ -185,6 +185,16 @@ export type FoldedRevision = {
 };
 
 /**
+ * Old runs stored a whole `toCheck` array, as a malformed JSON string, in the title field. Read the
+ * `"title"` inside it. Old data only; delete with the last run recorded before the fix.
+ */
+function readStoredTitle(title: string): string {
+  if (!title.startsWith("[{")) return title;
+  const m = /"title":\s*("(?:[^"\\]|\\.)*")/.exec(title);
+  return m ? (JSON.parse(m[1] as string) as string) : title;
+}
+
+/**
  * The status the runtime's `check-result` rule gives a task whose check thread
  * ended, computed from `fold` of the log: `done` only for a `passed` verdict
  * with nothing open and no required output missing, otherwise `to-check`.
@@ -959,7 +969,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
         if (toCheck)
           a.toChecks.push({
             id: e.id,
-            title: toCheck.title,
+            title: readStoredTitle(toCheck.title),
             detail: text,
             status: "open",
             ...(toCheck.focus && { focus: toCheck.focus }),
