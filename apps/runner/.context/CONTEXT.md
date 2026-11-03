@@ -409,7 +409,7 @@ HTTP 503 …`, `timed out waiting for the response`, or the network error with i
 covers the wait for the response headers only (the SDK clears its timer when `fetch` resolves), so a healthy stream
 is never cut. Meta sends its headers after prefill (24.7 s at most, measured at 805k tokens), so 60 s holds. A
 request that hangs before its headers is retried every time: a dead endpoint holds a call for up to 5 × 60 s plus
-the backoff, about 5 minutes, before the thread fails. A stream that stalls after its headers is cut by nothing
+the backoff, about 5 minutes, before the thread fails (about 9 minutes if every attempt is a slow 503 asking for 60 s). A stream that stalls after its headers is cut by nothing
 but the run's end (a thread in that state counts as running, so the loop's `stuckLimit` never fires).
 
 **After the headers nothing retries.** A stream that drops, an error sent inside the stream (Meta's `server_error`
