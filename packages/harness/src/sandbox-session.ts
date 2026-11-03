@@ -110,11 +110,11 @@ function threadSandbox(
     return entry;
   };
 
-  const destroyEntry = async (entry: Entry | undefined) => {
+  const destroyEntry = async (entry: Entry | undefined, detail?: string) => {
     const sandbox = await entry?.sandbox.catch(() => undefined);
     if (!sandbox) return;
     await sandbox.destroy();
-    onState(threadId, "stopped");
+    onState(threadId, "stopped", detail);
   };
 
   return {
@@ -192,8 +192,12 @@ function threadSandbox(
       const entry = current;
       current = undefined;
       return (async () => {
-        await beforeDestroy?.();
-        await destroyEntry(entry);
+        try {
+          await beforeDestroy?.();
+        } finally {
+          // "released": the thread's previous sandbox, which may stop while a resume's new one runs.
+          await destroyEntry(entry, "released");
+        }
       })();
     },
     async close() {
