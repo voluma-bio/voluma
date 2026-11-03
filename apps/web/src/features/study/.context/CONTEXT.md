@@ -6,10 +6,7 @@ Studies (`/`, `studies-page.tsx`), Run on new samples (`/new`, `new-page.tsx`), 
 Naming: the mouse-OA workflow's noun). Write the word only through `INPUT_WORD` (`@voluma/ui`), so
 a rename is one edit; code names and routes say `input` (`/studies/:id/inputs/:inputId`) and don't change with it. Every run
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose input count is 1,
-shown as its input and linked straight to its page (`/studies/:id/inputs/:inputId`, `inputHref`). `/scans/:runId` and `/runs/:runId(/live)` redirect to it (`features/input/index.tsx`).
-The deleted study pages' paths redirect (`index.tsx`): `check` to `?status=needs-you`, `results` to
-Compare, `scans`, `details` and `workflow` to the study. Links to them are out in the world (the
-hackathon judges' notes link the example's study), so keep these until there is a reason not to.
+shown as its input and linked straight to its page (`/studies/:id/inputs/:inputId`, `inputHref`).
 
 - **Studies** (design: the agent-model `review.md`, "The shell and the study pages"; mockup
   `q24/c-quad-graph/study.html`) is a list with a details pane, like a file browser: a click

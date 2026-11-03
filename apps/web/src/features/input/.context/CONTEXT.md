@@ -4,9 +4,7 @@ One screen, `/studies/:studyId/inputs/:inputId` (the user's theme, dark image we
 run, live while it goes and for review once it ends, always as the outputs review (below). The
 page shows the input's newest run in that study (from the study read, `studyQuery`);
 `?run=<runId>` opens an earlier run of it. The study is in the URL because one input can be in
-several studies, so the input alone can't pick the run. `/scans/:runId`, `/runs/:id/live` and
-`/runs/:runId` redirect here (`index.tsx` reads the run for its study and input, and adds `?run=`
-only when the run isn't the input's newest), keeping the params the page reads (`KEPT`). Links use
+several studies, so the input alone can't pick the run. Links use
 `inputHref` (`@voluma/run-view`); they never carry `?run=` unless they mean an earlier run.
 
 ## The run's stream and the run read

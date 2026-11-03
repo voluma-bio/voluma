@@ -15,7 +15,7 @@ import { OutputsReview } from "./outputs-review";
 import { useRunStream } from "./use-run-stream";
 
 /** The state that stands in for the page while a read is pending, refused or failed; null once it has data. */
-export function Unavailable({ query }: { query: UseQueryResult<unknown> }) {
+function Unavailable({ query }: { query: UseQueryResult<unknown> }) {
   // Laid out as the study page's own loading and not-found states.
   const page = "mx-auto w-full max-w-2xl px-6 py-8";
   if (query.isPending)
