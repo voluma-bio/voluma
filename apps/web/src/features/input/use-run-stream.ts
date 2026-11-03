@@ -1,31 +1,22 @@
 /**
- * Feeds the run's stream into the run store: durable events, and live frames folded until their
- * durable event lands. Published at most once per animation frame: a busy run sends many per
- * second. `events` keeps its identity while only frames arrive, so the event derivations don't
- * rerun per token. Once the stream is over for good, live partials are dropped: nothing will
- * complete them.
+ * Feeds the run's stream into the run store: its durable events, published at most once per
+ * animation frame (a busy run sends many per second). The stream's live frames are not read.
  *
- * Reconnecting keeps what was received and resumes after the last `seq`. It happens when
- * a message is sent, the run resumes or its completed revision changes (including in another tab) and, after a
- * backoff, when the browser gives up on the stream while the run still goes (a non-200 answer,
- * as during a deploy, closes an EventSource for good). A stream the server ended because the run
- * ended stays closed until one of those triggers changes.
+ * Reconnecting keeps what was received and resumes after the last `seq`. It happens when a message
+ * is sent or the run resumes and, after a backoff, when the browser gives up on the stream while
+ * the run still goes (a non-200 answer, as during a deploy, closes an EventSource for good). A
+ * stream the server ended because the run ended stays closed until one of those triggers changes.
  */
 import { subscribe } from "@voluma/api-client";
 import type { RunEvent } from "@voluma/contracts/events";
-import { applyFrame, noLive, type Settled, settle, useRunStore } from "@voluma/run-view";
+import { useRunStore } from "@voluma/run-view";
 import { useEffect, useRef, useState } from "react";
 
 const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
 
 export function useRunStream(
   runId: string,
-  {
-    reopened,
-    revisionId,
-    going,
-    onClosed,
-  }: { reopened: number; revisionId: string | undefined; going: boolean; onClosed: () => void },
+  { reopened, going, onClosed }: { reopened: number; going: boolean; onClosed: () => void },
 ) {
   const store = useRunStore();
   const onClosedRef = useRef(onClosed);
@@ -33,48 +24,32 @@ export function useRunStream(
   const goingRef = useRef(going);
   goingRef.current = going;
   // What every connection of this run adds to; the store is keyed on the run.
-  const received = useRef<{ events: RunEvent[]; settled: Settled }>({
-    events: [],
-    settled: new Set(),
-  });
+  const received = useRef<RunEvent[]>([]);
   const [retry, setRetry] = useState(0);
   const failures = useRef(0);
 
   useEffect(() => {
-    const { events, settled } = received.current;
+    const events = received.current;
     let published = events.slice();
-    let live = noLive;
     let frame: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const publish = (closed: boolean) => {
+    const publish = () => {
       frame = undefined;
       if (published.length !== events.length) published = [...events];
-      store.set({ events: published, live, closed });
+      store.set(published);
     };
-    const schedule = () => {
-      frame ??= requestAnimationFrame(() => publish(false));
-    };
-    publish(false);
+    publish();
     const stop = subscribe(
       runId,
       {
         onEvent: (event) => {
           failures.current = 0;
           events.push(event);
-          live = settle(live, event, settled);
-          schedule();
-        },
-        onLive: (f) => {
-          failures.current = 0;
-          const next = applyFrame(live, f, settled);
-          if (next === live) return;
-          live = next;
-          schedule();
+          frame ??= requestAnimationFrame(publish);
         },
         onClosed: (why) => {
           if (frame !== undefined) cancelAnimationFrame(frame);
-          live = noLive;
-          publish(true);
+          publish();
           onClosedRef.current();
           if (why === "ended" || !goingRef.current) return;
           const wait = BACKOFF_MS[Math.min(failures.current, BACKOFF_MS.length - 1)];
@@ -89,5 +64,5 @@ export function useRunStream(
       if (frame !== undefined) cancelAnimationFrame(frame);
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [runId, store, reopened, revisionId, going, retry]);
+  }, [runId, store, reopened, going, retry]);
 }

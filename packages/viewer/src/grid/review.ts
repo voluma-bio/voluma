@@ -1,15 +1,18 @@
 /**
- * The grid a review subject (a task, or an output of the agent loop) is shown on, and what the
- * viewer draws there, from the run's published blocks: blocks share a grid when their volumes
+ * The grid an output is shown on in review, and what the viewer draws there, from the run's published blocks: blocks share a grid when their volumes
  * share a `gridId`, and every position comes from the run (crop offsets, the volume's own affine).
  * Nothing is aligned or resampled here, and a block on another grid is listed, never drawn.
  */
-import type { Focus, ReviewAssets, ReviewTask, Revision, Volume } from "@voluma/contracts/review";
+import type {
+  Annotation,
+  Focus,
+  ReviewAssets,
+  Structure,
+  Surface,
+  Volume,
+} from "@voluma/contracts/review";
 import { readLevel } from "./planes";
 import type { GridAnnotation, GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
-
-/** The Structures panel's settings, by structure id; opacity in percent. */
-export type StructureDisplay = Record<string, { visible: boolean; opacity: number }>;
 
 /** Label values of a labels volume on the grid; none means every nonzero value. */
 export type FocusLabels = { source: ZarrSource; labels: number[] };
@@ -32,15 +35,19 @@ export type ReviewGrid =
       notes: string[];
     };
 
-/** The blocks a grid is drawn from: a revision's, or those built from output versions. */
-export type Blocks = Pick<Revision, "volumes" | "structures" | "surfaces" | "annotations">;
+/** The blocks a grid is drawn from, built from output versions (`outputBlocks`, run-view). */
+export type Blocks = {
+  volumes: Volume[];
+  structures: Structure[];
+  surfaces: Surface[];
+  annotations: Annotation[];
+};
 
 type Input = {
   revision: Blocks;
-  /** The block ids the subject shows, before the focused check's (`taskBlocks` for a task). */
+  /** The block ids the subject shows, before the focused check's. */
   shown: readonly string[];
   assets: Record<string, ReviewAssets>;
-  display: StructureDisplay;
   labels?: boolean;
   focus?: Focus;
   /** The URL prefix (ending in "/") of a file's converted assets. */
@@ -49,30 +56,10 @@ type Input = {
   token(name: string): string;
 };
 
-/**
- * What a task shows: what its numbers are measured on and drawn with, then the blocks it
- * reported itself.
- */
-export function taskBlocks(revision: Blocks, task: ReviewTask): string[] {
-  const measured = [...task.measurements, ...task.scores];
-  const ids = [
-    ...revision.volumes,
-    ...revision.structures,
-    ...revision.surfaces,
-    ...revision.annotations,
-  ].map((b) => b.id);
-  return [
-    ...measured.flatMap((m) => m.on),
-    ...measured.flatMap((m) => m.context),
-    ...ids.filter((id) => id.startsWith(`${task.id}/`)),
-  ];
-}
-
 export function reviewGrid({
   revision,
   shown,
   assets,
-  display,
   labels: showLabels = false,
   focus,
   assetBase,
@@ -122,12 +109,8 @@ export function reviewGrid({
   const focused = new Set(focus?.on ?? []);
   const focusedLabel = (volume: Volume, label: number) =>
     volume === focusVolume && (focus?.label === undefined || focus.label === label);
-  // Hidden is opacity 0: the mesh stays loaded for when it's shown again.
-  const paint = (id: string, color: string) => {
-    if (focused.has(id)) return { color: token("--check-outline"), opacity: 1 };
-    const d = display[id] ?? { visible: true, opacity: 100 };
-    return { color, opacity: d.visible ? d.opacity / 100 : 0 };
-  };
+  const paint = (id: string, color: string) =>
+    focused.has(id) ? { color: token("--check-outline"), opacity: 1 } : { color, opacity: 1 };
   const overlays: Overlay[] = [];
   const meshes: GridMesh[] = [];
   const mesh = (

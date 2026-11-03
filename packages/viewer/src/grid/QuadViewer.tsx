@@ -648,7 +648,6 @@ export function QuadViewer({
                 onEdit={onEdit && editIn(view)}
                 onPick={pickMark}
                 note={note}
-                clickLines
               />
             );
           else {
@@ -676,7 +675,6 @@ export function QuadViewer({
                 onTilt={tilts[axis]}
                 note={note}
                 planeToken={planeToken}
-                clickLines
               />
             );
           }

@@ -9,64 +9,41 @@
  * two never flags. With n = 3-8 per group a standard deviation is unstable; the range reads in
  * one sentence ("the other DMM samples measure 2.47-2.51 mm").
  *
- * Units: a value counts only in the unit today's `outputs.json` declares. `report_output` already
- * refuses a unit that differs from the run's own plan, but that plan is the snapshot taken when
- * the run started: a run from before a unit change in `outputs.json` carries the old unit
- * (210 µm beside 0.21 mm). Such a value stays out of the plot and the far rule and shows as
- * "reported in µm"; converting would guess what the agent meant.
+ * Units: a value counts only in the unit today's `outputs.yaml` declares (`unitOf`). A run reports
+ * against the catalog it snapshotted when it started, so a run from before a unit change carries
+ * the old unit (210 µm beside 0.21 mm). Such a value stays out of the plot and the far rule and
+ * shows as "reported in µm"; converting would guess what the agent meant.
  *
- * A sample's bar: one segment per measurement of the workflow (`outputs.json`, kind
- * `measurement`), in task order, each read from the sample's own data (`segmentOf`): the task
- * loop's task states, or the agent loop's final outputs' status (`outputStatus`). A newest run
- * with neither (before its plan or its list) has no bar rather than a made-up one.
+ * A sample's bar: one segment per measurement of the workflow (`measurementsOf`), in catalog
+ * order, each read from the newest run's final outputs' status (`outputStatus`, `segmentOf`). A
+ * newest run with none listed yet has no bar rather than a made-up one.
  */
 import type { OutputStatus } from "@voluma/contracts/output-fold";
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
-import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
-  CARD_TITLE,
-  cardId,
   groupNames,
   groupOf,
   inputHref,
   inputStatus,
-  itemHref,
   needsYouOf,
   placeOfStatus,
-  shownStatus,
-  type TaskState,
 } from "@voluma/run-view";
 import type { SampleGroup } from "@voluma/ui";
-import type { BundledWorkflow } from "@voluma/workflow/bundled";
-import { measurementsOf } from "../workflow-tasks";
+import { type Measurement, unitOf } from "../workflow-measurements";
 
-/** An output's declared unit; "" for one without. */
-export const unitOf = (output: OutputEntry) =>
-  "unit" in output && typeof output.unit === "string" ? output.unit : "";
-
-/** The measurements under the task that reports them, in task order: the bar's and table's sections. */
-export type Section = { taskId: string; title: string; outputs: OutputEntry[] };
-
-export const sectionsOf = (workflow: BundledWorkflow): Section[] =>
-  workflow.tasks
-    .map((t) => ({
-      taskId: t.id,
-      title: workflow.taskTitle(t.id),
-      outputs: measurementsOf(workflow).filter((o) => o.task === t.id),
-    }))
-    .filter((s) => s.outputs.length > 0);
+export type { Measurement };
 
 /**
  * A sample's value for an output in its declared unit; null when it has none (not reported, no
  * number, or reported in another unit: `otherUnit`).
  */
-export function inputValue(input: StudyInputDetail, output: OutputEntry): number | null {
+export function inputValue(input: StudyInputDetail, output: Measurement): number | null {
   const reported = input.values[output.id];
   return reported && reported.unit === unitOf(output) ? reported.value : null;
 }
 
 /** The unit a sample reported an output's number in when it isn't the declared one, else null. */
-export function otherUnit(input: StudyInputDetail, output: OutputEntry): string | null {
+export function otherUnit(input: StudyInputDetail, output: Measurement): string | null {
   const reported = input.values[output.id];
   return reported && reported.value !== null && reported.unit !== unitOf(output)
     ? reported.unit
@@ -74,7 +51,7 @@ export function otherUnit(input: StudyInputDetail, output: OutputEntry): string 
 }
 
 /** Every sample's value for an output, in its declared unit. */
-export const valuesOf = (detail: StudyDetail, output: OutputEntry) =>
+export const valuesOf = (detail: StudyDetail, output: Measurement) =>
   detail.inputs.flatMap((s) => inputValue(s, output) ?? []);
 
 export type Far = {
@@ -87,7 +64,7 @@ export type Far = {
  * rule. Each value is compared with the range of the rest, so two similar outliers in one group
  * widen each other's range and neither flags.
  */
-export function farFromGroup(detail: StudyDetail, output: OutputEntry): Map<string, Far> {
+export function farFromGroup(detail: StudyDetail, output: Measurement): Map<string, Far> {
   const grouped = detail.inputs.some((s) => s.member.group !== null);
   const far = new Map<string, Far>();
   for (const group of groupNames(detail)) {
@@ -139,26 +116,19 @@ export const resultRunQuery = (input: StudyInputDetail): { run?: string } =>
     ? { run: input.resultRunId }
     : {};
 
-/** One task of one sample: where its newest run is; outside that run's plan, skipped. */
-function taskState(input: StudyInputDetail, taskId: string): TaskState {
-  const states = input.taskState;
-  return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
-}
-
-/** Whether the sample's newest run has task states or final outputs, which its bar is read from. */
-export const hasBar = (input: StudyInputDetail) =>
-  Object.keys(input.taskState).length > 0 || Object.keys(input.outputStatus).length > 0;
+/** Whether the sample's newest run has listed its final outputs, which its bar is read from. */
+export const hasBar = (input: StudyInputDetail) => Object.keys(input.outputStatus).length > 0;
 
 /**
  * One measurement of one sample, as its bar segment and Compare's cell show it:
- * - `check`: its task is To check with items open (`shownStatus`, the rule every page uses);
- * - `making`: its task is running or under its second check;
- * - `reported`: its task is done;
- * - `missing`: its task is done in the run the values come from, which reported no value for it;
- * - `stale`: its task waits in a newer run (a rerun or a correction), so the value shown is the
- *   last completed run's;
- * - `waiting`: its task waits and there is no value yet (or the task is outside the run's plan);
- * - `stopped`: its task failed or was stopped.
+ * - `check`: it has To check items open;
+ * - `making`: the run is still making it;
+ * - `reported`: it has a value;
+ * - `missing`: the run completed without it;
+ * - `stale`: it is out of date in the newest run (a rerun or a correction), so the value shown is
+ *   the last completed run's;
+ * - `waiting`: there is no value yet, and it is outside the newest run's final outputs;
+ * - `stopped`: the run failed or was stopped before making it.
  */
 export type Segment = "check" | "making" | "reported" | "missing" | "stale" | "waiting" | "stopped";
 
@@ -173,17 +143,13 @@ export const SEGMENT_WORD: Record<Segment, string> = {
 };
 
 /**
- * An agent-loop run's final output as a segment: what the run says of it, and a value it has not
- * reported is being made while the run goes, missing once it completed, else stopped. An output
- * not among the run's final outputs is outside its plan.
+ * What the newest run says of the output, and a value it has not reported is being made while the
+ * run goes, missing once it completed, else stopped. An output not among the run's final outputs
+ * is outside its plan.
  */
-function outputSegment(
-  input: StudyInputDetail,
-  status: OutputStatus | undefined,
-  reported: boolean,
-) {
+export function segmentOf(input: StudyInputDetail, output: Measurement): Segment {
   const state = input.runs[0]?.state;
-  switch (status) {
+  switch (input.outputStatus[output.id] as OutputStatus | undefined) {
     case "to-check":
       return "check";
     case "reported":
@@ -199,31 +165,7 @@ function outputSegment(
           ? "missing"
           : "stopped";
     default:
-      return reported ? "stale" : "waiting";
-  }
-}
-
-export function segmentOf(input: StudyInputDetail, output: OutputEntry): Segment {
-  if (Object.keys(input.outputStatus).length > 0)
-    return outputSegment(
-      input,
-      input.outputStatus[output.id],
-      input.values[output.id] !== undefined,
-    );
-  const status = shownStatus(taskState(input, output.task), input.needsYou[output.task] ?? 0);
-  const reported = input.values[output.id] !== undefined;
-  switch (status) {
-    case "check":
-      return "check";
-    case "running":
-    case "checking":
-      return "making";
-    case "stopped":
-      return "stopped";
-    case "done":
-      return !reported && input.resultRunId === input.runs[0]?.id ? "missing" : "reported";
-    default:
-      return reported ? "stale" : "waiting";
+      return input.values[output.id] !== undefined ? "stale" : "waiting";
   }
 }
 
@@ -255,40 +197,9 @@ export function placeOf(input: StudyInputDetail, example: boolean): Place {
 export const placeParam = (value: string | null): Place | null =>
   PLACES.find((p) => p.place === value)?.place ?? null;
 
-/**
- * Where an input's run stopped or failed, in the word its status uses: "Failed during Segmentation",
- * from the task it stopped or failed in; "Stopped before it finished" when no task says.
- */
-export function stoppedLine(input: StudyInputDetail, workflow: BundledWorkflow): string | null {
-  const run = input.runs[0];
-  if (run?.state.status !== "ended" || run.state.outcome === "completed") return null;
-  const word = run.state.outcome === "failed" ? "Failed" : "Stopped";
-  const id = Object.entries(input.taskState).find(
-    ([, s]) => s === "stopped" || s === "failed",
-  )?.[0];
-  return id ? `${word} during ${workflow.taskTitle(id)}` : `${word} before it finished`;
-}
-
-/** A To check task's card nobody can accept (`unacceptable`): its task and why. */
-const cardsOf = (input: StudyInputDetail) =>
-  Object.entries(input.unacceptable).map(([id, why]) => ({ taskId: id, title: CARD_TITLE[why] }));
-
-/** What waits on a sample, in a line: its acceptable checks' titles, then each card as "<task>: <why>". */
-export const waitsOn = (input: StudyInputDetail, workflow: BundledWorkflow) =>
-  [
-    ...new Set([
-      ...input.acceptable.map((i) => i.title),
-      ...cardsOf(input).map((c) => `${workflow.taskTitle(c.taskId)}: ${c.title}`),
-    ]),
-  ].join(", ");
-
 /** The samples with items that need a person (`needsYouOf`), most first. */
 export const byMostToCheck = (inputs: readonly StudyInputDetail[]) =>
   inputs.filter((s) => needsYouOf(s) > 0).sort((a, b) => needsYouOf(b) - needsYouOf(a));
-
-/** Where a sample you act on opens: a waiting one at its request (the sample page), a needs-you one at its first item. */
-export const actHref = (studyId: string, input: StudyInputDetail, place: Place) =>
-  place === "needs-you" ? reviewHref(studyId, input) : openHref(studyId, input);
 
 /** The sample to act on next: one waiting on you first, else the one with most to check. */
 export function nextToAct(inputs: readonly StudyInputDetail[], example: boolean) {
@@ -296,37 +207,15 @@ export function nextToAct(inputs: readonly StudyInputDetail[], example: boolean)
   return act.find((s) => placeOf(s, example) === "waiting-on-you") ?? byMostToCheck(act)[0];
 }
 
-/** Where a sample opens: its first acceptable item, else its first card, else the input. */
-export const reviewHref = (studyId: string, input: StudyInputDetail) => {
-  const { inputId } = input.member;
-  const newest = input.runs[0]?.id;
-  const [item] = input.acceptable;
-  if (item)
-    // An item belongs to the newest completed run, which a run started since may have passed.
-    return itemHref(studyId, inputId, {
-      ...item,
-      ...(item.runId !== newest && { run: item.runId }),
-    });
-  const [card] = cardsOf(input);
-  return newest && card
-    ? itemHref(studyId, inputId, { taskId: card.taskId, checkId: cardId(card.taskId) })
-    : openHref(studyId, input);
-};
-
-/** The output a folded section shows: its task's headline measurement, else its first. */
-export const keyOutput = (workflow: BundledWorkflow, section: Section): OutputEntry =>
-  // A section has at least one output (`sectionsOf` drops the rest).
-  section.outputs.find((o) => workflow.headline.includes(o)) ?? (section.outputs[0] as OutputEntry);
-
 /** One line of a study's recent activity, from its runs' own times. */
 export type Activity = {
   at: string;
   input: StudyInputDetail;
-  kind: "added" | "started" | "completed" | "failed" | "stopped" | "reviewed";
+  kind: "added" | "started" | "completed" | "failed" | "stopped";
   text: string;
 };
 
-/** Every run's start, end and review across the study, newest first. */
+/** Every run's start and end across the study, newest first. */
 export function activityOf(detail: StudyDetail): Activity[] {
   const lines: Activity[] = [];
   for (const input of detail.inputs) {
@@ -355,7 +244,6 @@ export function activityOf(detail: StudyDetail): Activity[] {
             state.outcome === "failed" ? "run failed" : "run stopped",
           );
       }
-      at(run.review?.reviewedAt, "reviewed", "marked reviewed");
     }
   }
   return lines.sort((a, b) => b.at.localeCompare(a.at));
@@ -367,7 +255,6 @@ export function changedAt(input: StudyInputDetail): string | null {
     run.createdAt,
     run.state.status === "running" || run.state.status === "ended" ? run.state.startedAt : null,
     run.state.status === "ended" ? run.state.endedAt : null,
-    run.review?.reviewedAt ?? null,
   ]);
   return times.reduce<string | null>((a, t) => (t && (!a || t > a) ? t : a), null);
 }

@@ -1,5 +1,5 @@
 /**
- * The outputs-first review of a run of the agent loop (`harness: agents`): its final outputs in
+ * The outputs-first review of a run: its final outputs in
  * their sections, each with its value, status and To check items, and the blocks that draw an
  * output in the input review's 3D scene. Built from the output fold (`outputsFold`, live from the
  * run's events) and the workflow's catalog (`outputs.yaml`, bundled: names, label maps, shapes).
@@ -31,7 +31,6 @@ import type {
   Volume,
 } from "@voluma/contracts/review";
 import { type ChainLink, chainOf, type TrailRow, trailOf } from "./outputs-trail";
-import { formatNumber } from "./run-model";
 
 /** One To check item, on the version it was raised on. */
 export type OutputItem = {
@@ -97,6 +96,12 @@ export function outputName(catalog: OutputCatalog, id: string): string {
   const words = own.replaceAll("-", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/** Up to three significant digits (whole numbers from 1,000). */
+const formatNumber = (value: number) =>
+  new Intl.NumberFormat("en-US", {
+    ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
+  }).format(value);
 
 /** A UCUM unit as a value shows it (`unitAsWritten`); a dimensionless `1` shows nothing. */
 export const unitText = (ucum: string): string => (ucum === "1" ? "" : unitAsWritten(ucum));

@@ -1,20 +1,17 @@
 /**
  * Compare (`/studies/:id/compare`): how the numbers compare. The workflow's headline measurements
- * as strip plots by group, then every sample × every measurement, measurements under the task that
- * reports them (a task folds to its headline measurement), samples grouped as on the study page.
- * A cell shows its value and its state (`segmentOf`); a value far from its group is amber. A cell
- * opens the sample's input review at its task, a dot its input. `?status=<place>` shows one group.
- * "Export values" downloads the values as CSV, one row per sample.
+ * as strip plots by group, then every sample × every measurement in catalog order, samples grouped
+ * as on the study page. A cell shows its value and its state (`segmentOf`); a value far from its
+ * group is amber. A cell opens the sample's input review on that measurement, a dot its input.
+ * `?status=<place>` shows one group. "Export values" downloads the values as CSV, one row per sample.
  */
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
-import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import { inputHref, inputStatus, kneeOf } from "@voluma/run-view";
 import { Button, Count, cx, INPUT_WORD, StatusGlyph, StatusMark } from "@voluma/ui";
-import type { BundledWorkflow } from "@voluma/workflow/bundled";
-import { ChevronDown, ChevronRight, Download } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Download } from "lucide-react";
+import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
-import { measurementsOf } from "../workflow-tasks";
+import { headlinesOf, type Measurement, measurementsOf, unitLabel } from "../workflow-measurements";
 import { SEGMENT_LOOK } from "./sample-bar";
 import { useStudy } from "./study-layout";
 import {
@@ -22,7 +19,6 @@ import {
   farFromGroup,
   hasBar,
   inputValue,
-  keyOutput,
   kneeWord,
   otherUnit,
   PLACES,
@@ -31,9 +27,7 @@ import {
   resultRunQuery,
   SEGMENT_WORD,
   type Segment,
-  sectionsOf,
   segmentOf,
-  unitOf,
   valuesOf,
 } from "./study-model";
 import { MeasurePlot } from "./study-side";
@@ -43,7 +37,7 @@ export function ComparePage() {
   const [search] = useSearchParams();
   const only = placeParam(search.get("status"));
   const outputs = measurementsOf(workflow);
-  const plotted = workflow.headline.filter((o) => valuesOf(detail, o).length > 0);
+  const plotted = headlinesOf(workflow).filter((o) => valuesOf(detail, o).length > 0);
   // Over the samples the table shows, and counting values in another unit, which it shows too.
   const tableHasValues = detail.inputs
     .filter((s) => !only || placeOf(s, detail.study.example) === only)
@@ -58,7 +52,7 @@ export function ComparePage() {
               <figure key={o.id} className="m-0 grid gap-2">
                 <figcaption className="flex items-baseline gap-2 text-sm font-semibold">
                   {o.name}
-                  <span className="font-normal text-fg-subtle">{unitOf(o)}</span>
+                  <span className="font-normal text-fg-subtle">{unitLabel(o)}</span>
                 </figcaption>
                 <MeasurePlot detail={detail} output={o} />
               </figure>
@@ -74,7 +68,7 @@ export function ComparePage() {
       )}
       <ValuesTable
         detail={detail}
-        workflow={workflow}
+        columns={outputs}
         only={only}
         actions={
           finished > 0 && (
@@ -93,36 +87,21 @@ const LEGEND: Segment[] = ["check", "stale", "missing", "making", "waiting"];
 
 function ValuesTable({
   detail,
-  workflow,
+  columns,
   only,
   actions,
 }: {
   detail: StudyDetail;
-  workflow: BundledWorkflow;
+  columns: Measurement[];
   only: ReturnType<typeof placeParam>;
   actions: ReactNode;
 }) {
-  const sections = sectionsOf(workflow);
-  const [folded, setFolded] = useState<Set<string>>(() => new Set());
-  const allFolded = folded.size === sections.length;
-  const shown = sections.map((s) => ({
-    ...s,
-    folded: folded.has(s.taskId),
-    columns: folded.has(s.taskId) ? [keyOutput(workflow, s)] : s.outputs,
-  }));
-  const columns = shown.flatMap((s) => s.columns);
   const far = new Map(columns.map((o) => [o.id, farFromGroup(detail, o)]));
   const digits = new Map(columns.map((o) => [o.id, digitsFor(valuesOf(detail, o))]));
   const groups = PLACES.map((p) => ({
     ...p,
     inputs: detail.inputs.filter((s) => placeOf(s, detail.study.example) === p.place),
   })).filter((g) => g.inputs.length > 0 && (!only || g.place === only));
-  const toggle = (taskId: string) =>
-    setFolded((now) => {
-      const next = new Set(now);
-      if (!next.delete(taskId)) next.add(taskId);
-      return next;
-    });
 
   return (
     <section aria-labelledby="values">
@@ -130,13 +109,6 @@ function ValuesTable({
         <h2 id="values" className="m-0 text-sm font-semibold">
           Results
         </h2>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setFolded(allFolded ? new Set() : new Set(sections.map((s) => s.taskId)))}
-        >
-          {allFolded ? "Unfold tasks" : "Fold tasks"}
-        </Button>
         <ul className="m-0 ml-auto flex list-none flex-wrap items-center gap-x-4 gap-y-1 p-0 text-xs text-muted-foreground">
           {LEGEND.map((s) => (
             <li key={s} className="flex items-center gap-1.5">
@@ -156,58 +128,22 @@ function ValuesTable({
           <thead>
             <tr>
               <th
-                rowSpan={2}
                 scope="col"
                 className="sticky left-0 z-[2] min-w-56 border-r border-b border-border bg-card px-4 py-1.5 text-left align-bottom text-xs font-medium text-muted-foreground"
               >
                 {INPUT_WORD.One}
               </th>
-              {shown.map((s) => (
+              {columns.map((o) => (
                 <th
-                  key={s.taskId}
-                  colSpan={s.columns.length}
-                  scope="colgroup"
-                  className="border-r border-border px-2 pt-2 pb-1 text-left font-semibold whitespace-nowrap"
+                  key={o.id}
+                  scope="col"
+                  className="w-24 max-w-28 border-b border-border px-2 pt-2 pb-1.5 text-right align-bottom text-xs leading-tight font-medium"
                 >
-                  <button
-                    type="button"
-                    aria-expanded={!s.folded}
-                    onClick={() => toggle(s.taskId)}
-                    className="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                  >
-                    {s.folded ? (
-                      <ChevronRight aria-hidden className="size-3.5 text-fg-subtle" />
-                    ) : (
-                      <ChevronDown aria-hidden className="size-3.5 text-fg-subtle" />
-                    )}
-                    {s.title}
-                    {s.folded && s.outputs.length > 1 && (
-                      <span className="font-normal text-fg-subtle">
-                        {" "}
-                        · {s.outputs.length - 1} more
-                      </span>
-                    )}
-                  </button>
+                  {/* "meniscus/osteophyte" may break after its slash, not run into the next column. */}
+                  {o.name.replaceAll("/", "/\u200b")}
+                  <span className="block font-normal text-fg-subtle">{unitLabel(o)}</span>
                 </th>
               ))}
-            </tr>
-            <tr>
-              {shown.flatMap((s) =>
-                s.columns.map((o, i) => (
-                  <th
-                    key={o.id}
-                    scope="col"
-                    className={cx(
-                      "w-24 max-w-28 border-b border-border px-2 pb-1.5 text-right align-bottom text-xs leading-tight font-medium",
-                      i === s.columns.length - 1 && "border-r",
-                    )}
-                  >
-                    {/* "meniscus/osteophyte" may break after its slash, not run into the next column. */}
-                    {o.name.replaceAll("/", "/\u200b")}
-                    <span className="block font-normal text-fg-subtle">{unitOf(o)}</span>
-                  </th>
-                )),
-              )}
             </tr>
           </thead>
           {groups.map((g) => (
@@ -250,38 +186,33 @@ function ValuesTable({
                         <StatusMark {...inputStatus(input)} className="ml-auto text-xs" />
                       </span>
                     </th>
-                    {shown.flatMap((s) =>
-                      s.columns.map((o, i) => (
-                        <td
-                          key={o.id}
-                          className={cx(
-                            "border-b border-border p-0 text-right group-hover/row:bg-accent",
-                            i === s.columns.length - 1 && "border-r",
-                          )}
-                        >
-                          {/* The row's sample link is the keyboard way in; a cell is a mouse shortcut to its task, or the agent loop's value. */}
-                          {run ? (
-                            <Link
-                              to={inputHref(detail.study.id, input.member.inputId, {
-                                ...(run.harness === "agents" ? { output: o.id } : { task: o.task }),
-                                ...resultRunQuery(input),
-                              })}
-                              tabIndex={-1}
-                              className="block px-2 py-1.5"
-                            >
-                              <Cell
-                                input={input}
-                                output={o}
-                                digits={digits.get(o.id) ?? 2}
-                                far={far.get(o.id)?.has(input.member.inputId) ?? false}
-                              />
-                            </Link>
-                          ) : (
-                            <span className="block px-2 py-1.5" />
-                          )}
-                        </td>
-                      )),
-                    )}
+                    {columns.map((o) => (
+                      <td
+                        key={o.id}
+                        className="border-b border-border p-0 text-right group-hover/row:bg-accent"
+                      >
+                        {/* The row's sample link is the keyboard way in; a cell is a mouse shortcut to its value. */}
+                        {run ? (
+                          <Link
+                            to={inputHref(detail.study.id, input.member.inputId, {
+                              output: o.id,
+                              ...resultRunQuery(input),
+                            })}
+                            tabIndex={-1}
+                            className="block px-2 py-1.5"
+                          >
+                            <Cell
+                              input={input}
+                              output={o}
+                              digits={digits.get(o.id) ?? 2}
+                              far={far.get(o.id)?.has(input.member.inputId) ?? false}
+                            />
+                          </Link>
+                        ) : (
+                          <span className="block px-2 py-1.5" />
+                        )}
+                      </td>
+                    ))}
                   </tr>
                 );
               })}
@@ -301,7 +232,7 @@ function Cell({
   far,
 }: {
   input: StudyInputDetail;
-  output: OutputEntry;
+  output: Measurement;
   digits: number;
   far: boolean;
 }) {
@@ -340,7 +271,7 @@ function Cell({
 }
 
 /** One row per sample, one column per measurement (its unit in the head), as a CSV download. */
-function exportCsv(detail: StudyDetail, outputs: OutputEntry[]) {
+function exportCsv(detail: StudyDetail, outputs: Measurement[]) {
   const cell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
   // Typed text (subject, group, names) that a spreadsheet would run as a formula opens as text;
   // a leading tab or carriage return can hide one.
@@ -349,7 +280,7 @@ function exportCsv(detail: StudyDetail, outputs: OutputEntry[]) {
     INPUT_WORD.One,
     "Group",
     "Knee",
-    ...outputs.map((o) => text(`${o.name} (${unitOf(o) || "-"})`)),
+    ...outputs.map((o) => text(`${o.name} (${unitLabel(o) || "-"})`)),
   ];
   const row = (s: StudyInputDetail) => [
     text(s.member.subject),

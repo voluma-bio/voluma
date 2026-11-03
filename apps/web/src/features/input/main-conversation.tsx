@@ -12,7 +12,7 @@ import { ApprovalCard, approvalWords, Markdown } from "@voluma/run-view";
 import { Button, Chip, cx, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
 import { Bookmark, Send, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
-import type { MarkChange } from "./marks-panel";
+import type { MarkChange } from "./marking";
 import type { SavedView } from "./saved-views";
 import type { useAnswers, useMainMessage } from "./use-main-message";
 import { clockOf } from "./version-report";
