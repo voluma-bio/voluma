@@ -29,35 +29,39 @@ import { convertRun, type FileCheck, type NewEvent, type RunReport } from "./con
 import { r2FromEnv } from "./r2-dir";
 
 const MIGRATION_TAIL = `
--- Every database, whatever its runs hold. Task runs are those with no harness or "tasks".
+-- Every database, whatever its runs hold. Task runs are those with no harness or "tasks"; only
+-- ended ones are touched, since a live task-loop run still needs its task events.
+-- A payload holding \u0000 makes the jsonb casts and ->> below fail, which aborts the migration; the
+-- staging runs hold it only in tool.result, which no statement here reads.
 -- reply -> agent.message
 UPDATE "events"
 SET "type" = 'agent.message',
     "payload" = jsonb_build_object('from', 'main', 'to', 'researcher', 'text', "payload"->>'text')::json
-WHERE "type" = 'reply';
+WHERE "type" = 'reply'
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended');
 --> statement-breakpoint
 -- person.message loses its task fields (a Go and marks name a task's blocks); a message left with no text was only that.
 UPDATE "events"
 SET "payload" = ("payload"::jsonb - 'taskId' - 'itemId' - 'go' - 'marks')::json
 WHERE "type" = 'person.message'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
   AND CASE WHEN "type" = 'person.message' THEN "payload"::jsonb ?| ARRAY['taskId', 'itemId', 'go', 'marks'] END;
 --> statement-breakpoint
 DELETE FROM "events"
 WHERE "type" = 'person.message'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
   AND CASE WHEN "type" = 'person.message' THEN btrim(coalesce("payload"->>'text', '')) END = '';
 --> statement-breakpoint
 -- The task loop's own events, and the outputs backups only its corrections wrote.
 DELETE FROM "events"
 WHERE "type" IN ('attempt.opened', 'task', 'checkpoint', 'output', 'plan.changed', 'revision.started', 'ask', 'answer', 'check.accepted', 'review.completed', 'outputs.backed-up', 'outputs.restored', 'outputs.discarded')
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks');
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended');
 --> statement-breakpoint
 -- The root thread names its loop.
 UPDATE "events"
 SET "payload" = ("payload"::jsonb || '{"harness": "agents"}'::jsonb)::json
 WHERE "type" = 'thread.started'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NULL;
 --> statement-breakpoint
 -- A task or check thread is a worker, any other child the main agent; the task fields go.
@@ -67,16 +71,16 @@ SET "payload" = (
   || jsonb_build_object('role', CASE WHEN "payload"->>'task' IS NOT NULL OR "payload"->>'attemptId' IS NOT NULL THEN 'worker' ELSE 'main' END)
 )::json
 WHERE "type" = 'thread.started'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE "harness" IS NULL OR "harness" = 'tasks')
+  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NOT NULL
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'role' END IS NULL;
 --> statement-breakpoint
 -- Runs pinned to a workflow directory the repo has since renamed read the bundled catalog of its new name.
 UPDATE "runs"
 SET "workflows" = replace("workflows"::text, 'workflows/workflow-mouse-oa', 'workflows/mouse-oa')::json
-WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "workflows"::text LIKE '%workflows/workflow-mouse-oa%';
+WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended' AND "workflows"::text LIKE '%workflows/workflow-mouse-oa%';
 --> statement-breakpoint
-UPDATE "runs" SET "harness" = 'agents' WHERE "harness" IS NULL OR "harness" = 'tasks';
+UPDATE "runs" SET "harness" = 'agents' WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended';
 `;
 
 const { values } = parseArgs({
@@ -184,9 +188,11 @@ async function fileCheckOf(runId: string): Promise<FileCheck> {
 
 const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
+/** Applies only to the run (or a copy of its log) exactly as fetched: same event count and same last event, so a run that has moved on, or is not ended, is left unconverted. */
 function insertOf(run: StoredRun, events: NewEvent[], allIds: string[]): string {
   const first = run.events.find((e) => e.type === "revision.started");
-  if (!first || events.length === 0) return "";
+  const last = run.events.at(-1);
+  if (!first || !last || events.length === 0) return "";
   const rows = events
     .map(
       (e, i) =>
@@ -200,9 +206,10 @@ FROM (
   SELECT e."run_id", (SELECT max(m."seq") FROM "events" m WHERE m."run_id" = e."run_id") AS "last_seq"
   FROM "events" e
   WHERE e."id" = ${quote(first.id)} AND e."type" = 'revision.started'
-    AND (e."run_id" = ${quote(run.id)}
-      OR (e."run_id" NOT IN (${allIds.map(quote).join(", ")})
-        AND (SELECT count(*) FROM "events" c WHERE c."run_id" = e."run_id") = ${run.events.length}))
+    AND (e."run_id" = ${quote(run.id)} OR e."run_id" NOT IN (${allIds.map(quote).join(", ")}))
+    AND EXISTS (SELECT 1 FROM "runs" x WHERE x."id" = e."run_id" AND x."state" = 'ended')
+    AND (SELECT count(*) FROM "events" c WHERE c."run_id" = e."run_id") = ${run.events.length}
+    AND (SELECT l."id" || ':' || l."seq" FROM "events" l WHERE l."run_id" = e."run_id" ORDER BY l."seq" DESC LIMIT 1) = ${quote(`${last.id}:${last.seq}`)}
 ) r
 CROSS JOIN (VALUES
   ${rows}

@@ -29,22 +29,27 @@ size and single-part ETag) and writes the SQL. Delete both, with the task fold, 
 | `person.message` | task fields (`taskId`, `itemId`, `go`, `marks`) removed; one left with no text is deleted |
 
 Not converted, and listed in the report: outputs the catalog lacks (`oriented-volume`), scores, an output
-whose file is in `scratch/`, To check items that name no output ("Marked to check", a skip), the mask
-files the example's backfill stored only under `evidence/`.
+whose file is in `scratch/`, To check items that name no output ("Marked to check", a skip).
 
 New event ids are `convert:<runId>:<output>`; `seq` continues after the run's last.
 
 ## Which databases
 
 The per-run INSERT applies to the run with that id, or to a copy of its log under another id (a
-`seed:example` example): the same first `revision.started` and the same event count. Every other
+`seed:example` example): the same first `revision.started`, the same event count and the same last event id and seq, on an ended run (a run that gained
+events since the fetch is left as it is). Every other
 database (a worktree's) gets only the tail: `reply`, `thread.started`, `person.message`, the deletes of the task-only types,
-`harness` set to `agents` on task runs and their root thread, and the pinned path
+`harness` set to `agents` on ended task runs (a task run not `ended` is left alone) and their root thread, and the pinned path
 `workflows/workflow-mouse-oa` renamed to `workflows/mouse-oa` (the web bundles the catalog by that path). Those runs keep their
 conversation and lose their task outputs.
 
-A converted run's `pi_messages` and its R2 snapshot are the task loop's. A message sent to a converted
-completed run would start an agent-loop claim with no `outputs.yaml` snapshot: nothing reads it as a
-conversation to continue.
+A converted run's `pi_messages` and its R2 snapshot are the task loop's. `messageRefusal` refuses a
+message to a run whose `harness` is not `agents` (409), so no task run gains events before the deploy.
+A converted run, once `agents`, could be reopened on the task loop's snapshot, which has no
+`outputs.yaml`: delete its `runs/<id>/workflow/.snapshot-done` marker (after the deletion PR is live) so a
+reopen re-snapshots.
+
+`\u0000` in a `reply`, `person.message` or `thread.started` payload would fail the tail's casts and
+abort the deploy; staging holds none (only two `tool.result` rows).
 
 The 24 raw streams are in `~/.local/share/voluma-backups/task-loop-streams/`.

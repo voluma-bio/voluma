@@ -171,17 +171,13 @@ export async function messageRefusal(
     };
   // Only a run on Voluma's keys is left here, and a guest has none of their own to reopen it on.
   if (caller.guest) return { status: 403, message: GUEST_KEYS_MESSAGE };
-  // An agent run takes the researcher's words while it goes: the claim pulls them in.
-  if (run.state === "queued" || run.state === "running") {
-    if (run.harness === "agents") return null;
+  if (run.harness !== "agents")
     return {
       status: 409,
-      message:
-        (await openCorrection(tx, run.id)) !== null
-          ? "The run is still answering your last message. Wait for its reply, or cancel it."
-          : "The run has not finished yet.",
+      message: "This run came from an earlier version of Voluma and can't be reopened yet.",
     };
-  }
+  // An agent run takes the researcher's words while it goes: the claim pulls them in.
+  if (run.state === "queued" || run.state === "running") return null;
   if (run.state !== "ended" || run.outcome !== "completed")
     return { status: 409, message: "Only a run that completed can be reopened; rerun this one." };
   const workflowId =

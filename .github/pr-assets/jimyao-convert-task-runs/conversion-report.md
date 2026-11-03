@@ -541,30 +541,8 @@ To check items dropped (1):
 
 ## example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b
 
-2396 events before; 29 listed outputs: 44 published versions, 0 listed as missing.
+2396 events before; 29 listed outputs: 52 published versions, 0 listed as missing.
 
-Reported outputs not converted (8):
-- iioc/roi-iioc: its file is missing from R2
-- subchondral-plate/roi-subchondral-plate-medial: its file is missing from R2
-- subchondral-plate/roi-subchondral-plate-lateral: its file is missing from R2
-- metaphyseal-roi/roi-metaphyseal: its file is missing from R2
-- cortical/roi-cortex-100um: its file is missing from R2
-- cortical/roi-cortex-1000um: its file is missing from R2
-- cortical/cortex: its file is missing from R2
-- trabecular-roi/roi-iioc-trabecular: its file is missing from R2
-
-To check items dropped (3):
+To check items dropped (2):
 - orientation: Marked to check (it points at no output)
 - segmentation: Marked to check (it points at no output)
-- cortical: Cortical mask includes the fibula (its output has no version)
-
-R2 misses (9):
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/segmentation/iioc/iioc.json (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/iioc/backfill/roi-iioc.npy (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/subchondral-plate/backfill/roi-subchondral-plate-medial.npy (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/subchondral-plate/backfill/roi-subchondral-plate-lateral.npy (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/metaphyseal-roi/backfill/roi-metaphyseal.npy (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/cortical/backfill/roi-cortex-100um.npy (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/cortical/backfill/roi-cortex-1000um.npy (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/cortical/backfill/cortex.npy (no object)
-- runs/example-ce5a0f21-c948-4e20-a03f-04ff7f0e707b/outputs/trabecular-roi/backfill/roi-iioc-trabecular.npy (no object)
