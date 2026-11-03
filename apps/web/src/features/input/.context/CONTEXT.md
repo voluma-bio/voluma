@@ -135,7 +135,7 @@ stopped.
 `outputs-review.tsx`, for a run whose log has final outputs (`isAgentsRun`). It lays out the
 shell's two `SidePanel`s around the centre. Left: Conversation (default; badged with the
 calls main still holds, `openApprovals`) and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree`
-over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds Needs you and
+over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.toCheck`; a value resting on one keeps its own status and says "rests on a To check") and
 Whole run. The value picked opens in place under its row: its version line and Report, its open
 To check items (with those of what it rests on), and Rests on (direct links, ordered measured
 on, beside, made from, drawn on) with Further back (the rest of `trailOf`, nearest first, each

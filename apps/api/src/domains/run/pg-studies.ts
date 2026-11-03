@@ -9,7 +9,7 @@
  * them (`CanAnswer`): the rule the run read applies as `cannotMessage`.
  */
 import { unitAsWritten } from "@voluma/contracts/output-catalog";
-import { finalValues, needingYou } from "@voluma/contracts/output-fold";
+import { finalValues } from "@voluma/contracts/output-fold";
 import { latestRevision, shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
@@ -109,7 +109,7 @@ function reviewOf({ run, results }: RunResult): StudyRunSummary["review"] {
     return { acceptable, needsYou, reviewedAt };
   }
   if (!completed(run) || run.harness !== "agents") return null;
-  return { acceptable: 0, needsYou: needingYou(results.outputs).size, reviewedAt: null };
+  return { acceptable: 0, needsYou: results.outputs.toCheck, reviewedAt: null };
 }
 
 /** The newest run's final outputs' status, for a run of the agent loop; empty otherwise. */

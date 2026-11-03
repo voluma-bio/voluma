@@ -15,7 +15,6 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { type OutputCatalog, unitAsWritten } from "@voluma/contracts/output-catalog";
 import {
-  needingYou,
   type OutputState,
   type OutputsFold,
   type OutputVersion,
@@ -75,8 +74,8 @@ export type OutputsReview = {
    * undeclared: what "Other outputs so far" lists while the run goes.
    */
   others: OutputRow[];
-  /** The final outputs that need a person (`needingYou`): what To check counts. */
-  needing: Set<string>;
+  /** The open To check items a person can answer (`OutputsFold.toCheck`): what To check counts. */
+  toCheck: number;
   /** Final outputs with a version, of all final outputs. */
   progress: { done: number; total: number };
 };
@@ -150,6 +149,9 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
   };
 }
 
+/** The items of `row`'s trail still open: the value's own and those of what it rests on. */
+export const openItemsOf = (row: OutputRow): OutputItem[] => row.items.filter((i) => !i.resolved);
+
 export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): OutputsReview {
   const rows = new Map(fold.outputs.map((o) => [o.id, rowOf(fold, catalog, o)]));
   const sections: OutputsReview["sections"] = (fold.list?.sections ?? []).map((s) => ({
@@ -166,7 +168,7 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     others: [...rows.values()].filter(
       (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
     ),
-    needing: needingYou(fold),
+    toCheck: fold.toCheck,
     progress: outputsIn(fold),
   };
 }

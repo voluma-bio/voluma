@@ -4,9 +4,10 @@
  * or right drag pans, and a press on a tilt handle turns the other planes. With a marking tool,
  * left click or drag marks: Point a voxel, Box a drag's rectangle, Line a drag's two ends (or two
  * clicks, with `clickLines`), Angle three clicks (the vertex second), Outline a freehand loop,
- * Probe reads the value under the pointer and keeps it as a point on click. With no tool, a press
- * on an end of an editable mark (`ShownMark.movable`: a point, a line, an angle) or of a published
- * ruler drags that end (`onEdit`); a click on a mark's end without moving picks it (`onPick`).
+ * Probe reads the value under the pointer and keeps it as a point on click. Whatever the tool, a
+ * press within `END_HIT_PX` of an end of an editable mark (`ShownMark.movable`: a point, a line, an
+ * angle) or of a published ruler drags that end (`onEdit`), and only a press outside every end
+ * starts a new mark; a click on a mark's end without moving picks it (`onPick`).
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { angleAbout, type Basis, type Slab, unit, type Vec3 } from "./frame";
@@ -68,8 +69,8 @@ const OUTLINE_STEP_PX = 3;
 const OUTLINE_MAX = 500;
 /** How near a tilt handle a press must land (CSS px). */
 const HANDLE_HIT_PX = 9;
-/** How near a mark's end a press must land to drag it (CSS px). */
-const END_HIT_PX = 8;
+/** How near a mark's end a press must land to drag it (CSS px), whatever the zoom: the dot drawn is smaller. */
+const END_HIT_PX = 10;
 
 /** A mark or ruler end under the pointer: which vertex of which mark. */
 type End = { from: MarkEdit["from"]; id: string; mark: GridMark; index: number };
@@ -272,7 +273,8 @@ export function useSliceGestures(args: {
                 HANDLE_HIT_PX,
             )
           : undefined;
-      const end = !pan && !tool && !hit ? endAt(event) : null;
+      // Mid-way through a click-made line or angle, a press adds its next end, even on an old one.
+      const end = !pan && !hit && !clicks.length ? endAt(event) : null;
       layer.start(event);
       const from = toPosition(event);
       drag = {
@@ -292,7 +294,8 @@ export function useSliceGestures(args: {
     const move = (event: PointerEvent) => {
       const tool = latest.current.tool;
       if (!drag) {
-        if (!tool && latest.current.onEdit) element.style.cursor = endAt(event) ? "grab" : "";
+        if (latest.current.onEdit)
+          element.style.cursor = !clicks.length && endAt(event) ? "grab" : "";
         if (tool === "point" || tool === "line" || tool === "angle") {
           layer.hover = toVoxel(event);
           if (clicks.length) layer.draft = clickDraft(tool, toPosition(event));

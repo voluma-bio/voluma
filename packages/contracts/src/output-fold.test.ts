@@ -9,7 +9,6 @@ import {
 import { type OutputCatalog, outputCatalogSchema } from "./output-catalog";
 import {
   finalOutputs,
-  needingYou,
   outputsFold,
   outputsIn,
   pendingFinal,
@@ -217,7 +216,7 @@ describe("labels the change records", () => {
     r.publish("pv", 1, { "p.json": "p1" }, [{ id: "patella", version: 1, role: "input" }]);
     const fold = outputsFold(r.events);
     expect(fold.labels.get("patella")).toBe("labels");
-    expect(fold.byId.get("femur")).toMatchObject({ status: "to-check", needsYou: true });
+    expect(fold.byId.get("femur")).toMatchObject({ status: "to-check" });
     expect(fold.byId.get("femur")?.latest).toBeUndefined();
     r.publish("labels", 2, { "l.npy": "a2" });
     expect(undecidedOutOfDate(r.events)).toEqual([]);
@@ -241,8 +240,8 @@ describe("labels the change records", () => {
   });
 });
 
-describe("needing you", () => {
-  it("counts a final label overlay and a value on it through the map's open item", () => {
+describe("to check count", () => {
+  it("counts the map's open item once, however many final outputs rest on it", () => {
     const r = run();
     r.final(scan, overlay("labels"), {
       kind: "overlay",
@@ -253,7 +252,7 @@ describe("needing you", () => {
     } as OutputEntry);
     r.publish("labels", 1, { "l.npy": "a1" }, [], { toCheck: [{ title: "edge" }] });
     r.publish("femurvol", 1, { "f.json": "f1" }, [{ id: "femur", version: 1, role: "input" }]);
-    expect([...needingYou(outputsFold(r.events))]).toEqual(["labels", "femur"]);
+    expect(outputsFold(r.events).toCheck).toBe(1);
     r.push("tocheck.resolved", {
       output: "labels",
       version: 1,
@@ -261,7 +260,7 @@ describe("needing you", () => {
       by: "u",
       outcome: "accepted",
     });
-    expect(needingYou(outputsFold(r.events)).size).toBe(0);
+    expect(outputsFold(r.events).toCheck).toBe(0);
   });
 });
 

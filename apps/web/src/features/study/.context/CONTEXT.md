@@ -72,7 +72,7 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `inputStatus` (a sample's: its newest run's, "Not started" with no run), the Samples tree's data
   (`sampleTree`), the run and item links, `ItemToCheck`, the formatters (`whenText` included), and visitor keys.
   `runStatus` and `inputHref` take a run's `state` and `review`. A `newestRuns` entry and a study
-  scan's `review` hold it for either loop (an agent-loop run's final outputs that need a person, `needingYou`, the sample page's "To check" count, worded "N to check" by `toCheckText`; a group of samples says its unit, "1 sample needs you", so a count of items and a count of samples never read alike);
+  scan's `review` hold it for either loop (an agent-loop run's open To check items on its final outputs and what they rest on, `OutputsFold.toCheck`, the sample page's "To check" count, worded "N to check" by `toCheckText`; a group of samples says its unit, "1 sample needs you", so a count of items and a count of samples never read alike);
   a full `Run`'s `review` is the task loop's only, so `inputStatus` reads the scan's. Every page uses this mapping; don't add another.
 - **A study's pages** sit under `study/study-layout.tsx`, which loads the study once, renders the
   header line (breadcrumb, "Next scan that needs you") and the scan tree on the left side
@@ -91,7 +91,7 @@ hackathon judges' notes link the example's study), so keep these until there is 
   `shownStatus` turns state and count into the status every page shows.
 - **To check means needs you.** Two counts, named apart in contracts: `needsYou` (what needs a
   person: open checks plus the card of a To check task with no check, such as one the second AI
-  sent back) is what every "N to check" reads: a scan's status and "Next scan that needs you"
+  sent back) is what every "N to check" reads (an agent-loop run: its open To check items, each once, so a value that only rests on one is not counted; it keeps its own status and says "rests on a To check"): a scan's status and "Next scan that needs you"
   (`inputNeedsYou` / `needsYouOf`). `acceptable` is only what "Looks right" can accept, which only
   the scan review offers; here it gives a sample's line its items' titles (`waitsOn`, with each
   card nobody can accept as "<task>: <why>"). A live or stopped rerun's items show on its tasks,

@@ -20,6 +20,7 @@ export {
   type OutputItem,
   type OutputRow,
   type OutputsReview,
+  openItemsOf,
   outputBlocks,
   outputName,
   outputsReview,

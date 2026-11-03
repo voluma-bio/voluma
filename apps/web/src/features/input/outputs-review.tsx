@@ -73,7 +73,7 @@ import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
 import { MainConversation } from "./main-conversation";
 import { gridKeyOf, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
-import { FinalOutputs, statusOf } from "./outputs-panel";
+import { FinalOutputs, restsOnOpen, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
@@ -204,7 +204,7 @@ export function OutputsReview({
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
   const [onlyNeeds, setOnlyNeeds] = useState(false);
-  const needing = review.needing.size;
+  const needing = review.toCheck;
   const [leftTab, setLeftTab] = useState("conversation");
   const said = useMemo(() => conversation(events), [events]);
   const runMarks = useRunMarks({
@@ -615,10 +615,7 @@ function SceneBar({
   if (!inView || !root) return null;
   const { status, word } = statusOf(inView, live);
   // A reported value can still rest on something to check.
-  const inherited =
-    !trailOpen &&
-    inView.state.status === "reported" &&
-    inView.items.some((i) => !i.resolved && i.output !== inView.id);
+  const inherited = !trailOpen && restsOnOpen(inView);
   return (
     <header className={bar}>
       {trailOpen ? (
@@ -644,11 +641,10 @@ function SceneBar({
           <span className="text-muted-foreground"> {inView.value.unit}</span>
         </span>
       )}
-      <StatusMark
-        status={inherited ? "check" : status}
-        label={inherited ? "Rests on a To check" : word}
-        className="shrink-0"
-      />
+      <StatusMark status={status} label={word} className="shrink-0" />
+      {inherited && (
+        <span className="shrink-0 text-muted-foreground text-xs">rests on a To check</span>
+      )}
       <span className="flex-1" />
       {viewError && (
         <span className="text-xs text-destructive" role="alert">

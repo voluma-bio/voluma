@@ -22,6 +22,7 @@ import {
   type OutputItem,
   type OutputRow,
   type OutputsReview,
+  openItemsOf,
   ROLE_WORD,
   type TrailRow,
 } from "@voluma/run-view";
@@ -44,6 +45,10 @@ export const statusOf = (row: OutputRow, live: boolean) =>
   live && row.state.status === "pending"
     ? { ...OUTPUT_STATUS.pending, word: "not yet" }
     : OUTPUT_STATUS[row.state.status];
+
+/** A reported value whose own status is fine but which rests on an open To check item. */
+export const restsOnOpen = (row: OutputRow) =>
+  row.state.status === "reported" && openItemsOf(row).some((i) => i.output !== row.id);
 
 export type FinalOutputsProps = {
   review: OutputsReview;
@@ -89,12 +94,14 @@ function Values(props: FinalOutputsProps) {
         </EmptyState>
       </div>
     );
-  const needing = review.needing;
   const groups = [
     ...sections,
     ...(undeclared.length > 0 ? [{ title: "Not in the workflow", rows: undeclared }] : []),
   ]
-    .map((s) => ({ ...s, rows: onlyNeeds ? s.rows.filter((r) => needing.has(r.id)) : s.rows }))
+    .map((s) => ({
+      ...s,
+      rows: onlyNeeds ? s.rows.filter((r) => openItemsOf(r).length > 0) : s.rows,
+    }))
     .filter((s) => s.rows.length > 0);
   if (groups.length === 0)
     return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing to check.</p>;
@@ -106,8 +113,9 @@ function Values(props: FinalOutputsProps) {
           {...props}
           title={s.title}
           rows={s.rows}
-          needing={needing}
-          opens={onlyNeeds || s.rows.some((r) => r.id === selected?.id || needing.has(r.id))}
+          opens={
+            onlyNeeds || s.rows.some((r) => r.id === selected?.id || openItemsOf(r).length > 0)
+          }
         />
       ))}
     </div>
@@ -117,19 +125,17 @@ function Values(props: FinalOutputsProps) {
 function Section({
   title,
   rows,
-  needing,
   opens,
   ...props
 }: FinalOutputsProps & {
   title: string;
   rows: OutputRow[];
-  needing: Set<string>;
   opens: boolean;
 }) {
   // Opens by itself when it comes to hold the selection or an item; a click overrides until then.
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const open = toggled && toggled.when === opens ? toggled.open : opens;
-  const toCheck = rows.filter((r) => needing.has(r.id)).length;
+  const toCheck = new Set(rows.flatMap((r) => openItemsOf(r).map((i) => i.key))).size;
   // While the run goes, a tick only once every row has a version (the panel head counts them).
   const notIn = props.live ? rows.filter((r) => !hasVersion(r.state)).length : 0;
   const first = rows.find((r) => r.value);
@@ -221,6 +227,9 @@ function ValueRow({
       <span className={cx("min-w-0 truncate", row.state.outOfDate && "line-through")}>
         {row.name}
       </span>
+      {restsOnOpen(row) && (
+        <span className="shrink-0 truncate text-muted-foreground text-xs">rests on a To check</span>
+      )}
       {row.provisional && (
         <span className="shrink-0 rounded-sm px-1 font-mono text-[11px] text-muted-foreground inset-ring inset-ring-border">
           provisional

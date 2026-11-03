@@ -25,7 +25,7 @@
  * `GET /runs` would show the caller, so a `self` caller sees only the runs they started in
  * an example study.
  *
- * Two counts, never swapped: `needsYou` is what needs a person, what every screen calls To check;
+ * Two counts, never swapped: `needsYou` is the open To check items a person can answer, what every screen calls To check (a run of the agent loop: `OutputsFold.toCheck`);
  * `acceptable` is only what "Looks right" can accept.
  *
  * `values` and `acceptable` come from each input's **newest completed run** only (`resultRunId`):
@@ -103,8 +103,8 @@ export type Study = z.infer<typeof studySchema>;
 
 /**
  * A completed run's review in brief, of either loop: the task loop's `runSchema.review` (items to
- * check), or for a run of the agent loop its final outputs that need a person (`needingYou`, what
- * its sample page's Needs you counts), with no task-loop checks to accept (`acceptable` 0), never
+ * check), or for a run of the agent loop the open To check items on its final outputs and what they rest on (`OutputsFold.toCheck`, what
+ * its sample page's To check counts), with no task-loop checks to accept (`acceptable` 0), never
  * reviewed. Null for a run that has not completed.
  */
 export const runReviewBriefSchema = z

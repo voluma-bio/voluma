@@ -18,8 +18,8 @@
  *   name (a value: its number and unit), so a redo that produces the same files changes nothing,
  *   a kept version (same files) clears everything below it, and a change to a support file counts.
  *   A link to the output's own earlier version is ignored. A link to a label overlay (an entry
- *   of an `outputs.changed` with `label: {of}`, or the change's `labels` map) is a link to its map. The fold resolves each overlay once: an overlay's `status`, `outOfDate` and
- *   `needsYou` are its map's, and readers take `labels` instead of re-resolving.
+ *   of an `outputs.changed` with `label: {of}`, or the change's `labels` map) is a link to its map. The fold resolves each overlay once: an overlay's `status` and `outOfDate`
+ *   are its map's, and readers take `labels` instead of re-resolving.
  * - **Undecided**: out of date and in the trail of a final output (the output itself, or
  *   something its latest version was made from, through latest versions). Main's `close` is
  *   refused while one exists.
@@ -93,8 +93,6 @@ export interface OutputState {
   outOfDate: boolean;
   /** Out of date, and in a final output's trail: main must decide it before it closes. */
   undecided: boolean;
-  /** Final, with an open To check item on its latest version or on one it was made from. */
-  needsYou: boolean;
   /** Oldest first. */
   versions: OutputVersion[];
   latest?: OutputVersion;
@@ -108,6 +106,13 @@ export interface OutputsFold {
   byId: Map<string, OutputState>;
   /** Each label overlay the log names (`outputs.changed`'s `labels`, a list entry's `label`), to the map whose version a link to it means. */
   labels: Map<string, string>;
+  /**
+   * The open To check items a person can answer: those on the latest version of each final output
+   * and of everything it was made from, each counted once. The one number every screen calls To
+   * check for an agent-loop run (the output panel, the Samples tree, the study row, the heading);
+   * a value that only rests on an open item has its own status and is not counted for it.
+   */
+  toCheck: number;
 }
 
 const isLabel = (e: FinalEntry): e is FinalEntry & { label: { of: string } } =>
@@ -229,22 +234,8 @@ function compute(events: readonly RunEvent[]): OutputsFold {
   // A final label overlay is walked as its map, so only the map is ever undecided.
   for (const e of finalEntries) walk(mapOf(e.id));
 
-  // Needs you: an output whose own or any made-from latest version has an open To check item.
-  const openMemo = new Map<string, boolean>();
-  const opening = new Set<string>();
-  const needsYou = (id: string): boolean => {
-    const at = mapOf(id);
-    const cached = openMemo.get(at);
-    if (cached !== undefined) return cached;
-    const latest = latestOf(at);
-    if (!latest || opening.has(at)) return false;
-    opening.add(at);
-    const open =
-      latest.toCheck.some((t) => !t.resolved) || latest.madeFrom.some((l) => needsYou(l.id));
-    opening.delete(at);
-    openMemo.set(at, open);
-    return open;
-  };
+  let toCheck = 0;
+  for (const id of trail) toCheck += latestOf(id)?.toCheck.filter((t) => !t.resolved).length ?? 0;
 
   const sectionOf = new Map<string, string>();
   for (const s of sectionsOf(list)) for (const o of s.outputs) sectionOf.set(o.id, s.title);
@@ -284,12 +275,17 @@ function compute(events: readonly RunEvent[]): OutputsFold {
       ...(isMissing && !covered && { missingReason: missing.get(missingId) }),
       outOfDate: stale,
       undecided: stale && trail.has(id),
-      needsYou: !!entry && needsYou(id),
       versions: vs,
       ...(latest && { latest }),
     } as OutputState;
   });
-  return { ...(list && { list }), outputs, byId: new Map(outputs.map((o) => [o.id, o])), labels };
+  return {
+    ...(list && { list }),
+    outputs,
+    byId: new Map(outputs.map((o) => [o.id, o])),
+    labels,
+    toCheck,
+  };
 }
 
 const memo = new WeakMap<object, { length: number; fold: OutputsFold }>();
@@ -326,15 +322,6 @@ export function finalValues(fold: OutputsFold): Map<string, { number: number; un
     fold.outputs.flatMap((o) => (o.final && o.latest?.value ? [[o.id, o.latest.value]] : [])),
   );
 }
-
-/**
- * The final outputs that need a person: each with an open To check item on its latest version or
- * on one it was made from, through latest versions (`OutputState.needsYou`). What "Needs you"
- * counts on the sample page and on every row that shows an agent-loop sample, so the number seen
- * before opening a sample is the one found on it.
- */
-export const needingYou = (fold: OutputsFold): Set<string> =>
-  new Set(fold.outputs.filter((o) => o.needsYou).map((o) => o.id));
 
 /** Final outputs with no version that are not marked missing. */
 export const pendingFinal = (events: readonly RunEvent[]): string[] =>
