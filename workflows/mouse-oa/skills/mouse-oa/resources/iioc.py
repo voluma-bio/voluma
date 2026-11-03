@@ -15,7 +15,9 @@ or from another grid is refused). This script reads these keys; any other key is
                           `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused, naming the section, and so
                           is a face that leaves bone at plate level untraced: over a section's bone, points more than `max_gap_um` of the spec (entry
                           plate-faces) apart or the first or last point more than that short of the bone's ends; over the rows with tibia at plate
-                          level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count
+                          level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count;
+                          and so is a face that jumps between neighbouring traced sections: a median W change, over the U columns both cover on the
+                          tibia's footprint (when they share at least `jump_overlap_um`), of more than `max_jump_um` plus the sections' distance apart
   plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
                           of the curve, any U range (integers, first <= last). It never replaces points: the section's curve must
                           reach both ends of every marked range, or the script stops naming the section and U range; inside
@@ -71,6 +73,7 @@ from annotations import (
     need,
     off_tibia,
     refuse_gaps,
+    refuse_jumps,
     refuse_off_tibia,
     tibia_margin,
     traced_surface,
@@ -210,12 +213,14 @@ def main():
     gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
     refuse_off_tibia(ann, 'growth_plate_curves', tib, a.spec, vox)
     refuse_gaps(ann, 'growth_plate_curves', tib, a.spec, vox)
+    on_bone = footprint(tib)
+    refuse_jumps(ann, 'growth_plate_curves', on_bone, a.spec, vox)
     wp = np.array(need(ann, 'width_points_uvw', 'two [u, v, w] points on the growth plate\'s proximal face, on one coronal section: '
                        'the centre of the fibula-tibia junction on the tibial surface, and the prominent point on the other side'), float)
     # against the face as traced: --gp-shift-mm moves the cut, not the plate
     refuse_width_points(wp, gp, tib, spec['width_point_off_face_um'], tibia_margin(a.spec, vox), vox)
     gp = gp + a.gp_shift_mm / vox
-    _, plate = eroded_marks(ann, 'growth_plate_curves', h.shape, footprint(tib))
+    _, plate = eroded_marks(ann, 'growth_plate_curves', h.shape, on_bone)
     env = envelope(tib, gp, vox)
     w = np.arange(h.shape[0])[:, None, None]
     roi = env & (w < gp[None])

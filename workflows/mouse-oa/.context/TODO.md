@@ -41,3 +41,9 @@
   but any landmark step that reads directions off a worker-made crop can repeat it. Next: one knee-axes helper (from
   `frame.json`'s bending-plane normal and shaft axes) that prints which scan axis runs side to side, front to back and
   along the shafts, for workers and scripts to read instead of their own crops.
+- **A distal face copied from the proximal one is not refused.** Refuse a constant-offset distal face only where it misses the
+  plate's lower edge in HU; a geometric test can't tell it from honest thin-plate traces typed as (U, proximal, distal) triples.
+  Needs 0ed8e7d3's aligned HU rebuilt to calibrate. On 6 of the 9 by-eye traces in `~/experiments/plate-data/scans/<scan>/trace/`,
+  5 to 13 sections keep the distal face within a 0.5-voxel band of one offset from the proximal over 100 or more columns
+  (OA6-2RK's plate-test-opus trace: 12 of 19); run 0ed8e7d3's copied faces: 15 of 28. The same HU check would catch one misread
+  section between sparse neighbours, which `refuse_jumps` passes when it is less than about 330 to 420 µm off with neighbours 16 to 20 apart.

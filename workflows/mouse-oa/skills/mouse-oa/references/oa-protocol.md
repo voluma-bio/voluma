@@ -72,7 +72,8 @@ schema is `regions-and-landmarks`'):
   curves leave bone at plate level uncovered, by the spec's `max_gap_um` (about 24 rows): on a section, points more than that apart over its bone or the first or last point more than that short of
   the bone's ends; across V, sections more than that apart over the rows with tibia at plate level or the first or last more than that short of those rows' ends. A span over columns
   without bone does not count. A short section among full ones is refused: its points must cover its own bone. They name the V rows and U ranges; they also stop on a point more than
-  `off_tibia_margin_um` off the tibia mask. Say where the proposal covered and where you traced. Copy its two curve keys
+  `off_tibia_margin_um` off the tibia mask, and on a face that jumps between neighbouring traced sections by more than `max_jump_um` plus
+  their distance apart (the median W change over the bone both cover): trace each section they name from its own image. Say where the proposal covered and where you traced. Copy its two curve keys
   (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
   The proposal is a search, not a trace: it follows the plate well where the plate exists and goes wrong in two known ways, jumping up into
   dark marrow spaces of the epiphysis and drawing a convincing sheet on the wrong structure where the plate is eroded.
