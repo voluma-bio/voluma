@@ -123,8 +123,8 @@ schema is `regions-and-landmarks`'):
   lateral or where the front is: read those from a render of this scan. When the refusal says the axis is confirmed,
   a render that seems to disagree has its image axes mislabelled: name the scan axis along each image axis, then
   re-place. Three refusals are not about the points, so do not move them: a femur label too short along its shaft to
-  give the axes (the labels or the field of view cut the shaft off); points that fit the knee's bending plane but not
-  the label's axis (the refusal says so); and an axis the bending plane does not confirm that a render of this scan,
+  give the axes (the labels or the field of view cut the shaft off); points whose two rulers both fit the knee's bending plane
+  but not the label's axis (the refusal says so); and an axis the bending plane does not confirm that a render of this scan,
   its image axes named, contradicts. For each, stop and raise a To check item naming it.
 
 `oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (A and B, no C) in that schema, with

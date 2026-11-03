@@ -15,9 +15,9 @@ joint face puts a and b across the notch and DFL comes out a third of its size);
 most 0.5) and c-d across the condyles (|cos| to ML at least 0.7), so points placed with the sides and the front swapped
 are refused on any knee, left or right; and SI (b to a) pointing toward the shaft. Also refused: a missing landmark,
 coincident landmarks, a points file or frame on another grid.
-A ruler that fails against the label's ML axis is refused one of three ways. It fails against the bending-plane normal
-too and the two axes agree: re-place the points, with no way out (a render that seems to disagree has its image axes
-mislabelled). It fits the normal: the label's axis may be wrong, so leave the points and raise a To check item. Otherwise
+A ruler that fails against the label's ML axis is refused one of three ways. A ruler fails against the bending-plane
+normal and the two axes agree: re-place the points, with no way out (a render that seems to disagree has its image axes
+mislabelled). Both rulers fit the normal: the label's axis may be wrong, so leave the points and raise a To check item. Otherwise
 (the axes disagree, or the frame has no bending plane: a knee bent under 20 degrees or a shaft out of the field):
 re-place the points, unless a render of the scan, its image axes named as scan axes, shows the condyles along another
 direction; then leave them and raise a To check item. A femur label shorter than 4.5 mm along its shaft, whose axes
@@ -171,35 +171,45 @@ def main():
                      "too little shaft is labelled or in the field of view to find the femur's axes, so the labels or the scan "
                      'are the problem, not the points. Do not move the points: raise a To check item naming this')
     normal = unit(np.array(knee['normal_zyx'], float))  # voxel-index direction; frames need isotropic voxels, so mm agrees
-    checks['bending_plane'] = knee.get('plane_rule') == BENDING_PLANE and (knee.get('bend_deg') or 0) >= MIN_BEND_DEG
-    checks['ml_cos_to_bending_normal'] = abs(ml @ normal)
-    agree = checks['ml_cos_to_bending_normal']
-    for name, ends, limit, fits, wrong, rule in (
+    plane = checks['bending_plane'] = knee.get('plane_rule') == BENDING_PLANE and (knee.get('bend_deg') or 0) >= MIN_BEND_DEG
+    agree = abs(ml @ normal)
+    checks['ml_cos_to_bending_normal'] = agree if plane else None
+    rulers = (
         ('a-b', 'a and b', f'at most {MAX_LENGTH_ML}', lambda c: c <= MAX_LENGTH_ML, 'side to side',
          'DFL runs from the front of the groove to the notch, in the sagittal plane'),
         ('c-d', 'c and d', f'at least {MIN_WIDTH_ML}', lambda c: c >= MIN_WIDTH_ML, 'not side to side',
          'DFW spans the two condyles'),
-    ):
+    )
+    fit_ml, fit_normal = {}, {}
+    for name, _, _, fits, _, _ in rulers:
         v = unit(pm[name[0]] - pm[name[2]])
-        to_ml = checks[f'{name[0]}_{name[2]}_cos_to_ml'] = abs(v @ ml)
-        to_normal = checks[f'{name[0]}_{name[2]}_cos_to_bending_normal'] = abs(v @ normal)
-        if fits(to_ml):
-            continue
-        head = (f'{name} runs along {direction(v)}, {wrong} (|cos| {to_ml:.2f} to the mediolateral axis in the femur label, '
-                f"{limit}), but {rule}. The label's axis runs along {direction(ml)}")
-        if checks['bending_plane'] and fits(to_normal):
-            sidecar.fail(f"{head}; {name} does fit the knee's bending plane, whose normal runs along {direction(normal)} "
-                         f'(|cos| {to_normal:.2f}). The two reads of the mediolateral axis differ (|cos| {agree:.2f}), so the '
-                         f"label's axis may be wrong, not the points: leave them and raise a To check item naming both axes.")
-        if checks['bending_plane'] and agree >= MIN_ML_AGREE:
+        key = f'{name[0]}_{name[2]}'
+        checks[f'{key}_cos_to_ml'] = abs(v @ ml)
+        checks[f'{key}_cos_to_bending_normal'] = abs(v @ normal) if plane else None
+        fit_ml[name] = fits(abs(v @ ml))
+        fit_normal[name] = plane and fits(abs(v @ normal))
+    failing = [r for r in rulers if not fit_ml[r[0]]]
+    if failing:
+        name, ends, limit, _, wrong, rule = failing[0]
+        v = unit(pm[name[0]] - pm[name[2]])
+        head = (f"{name} runs along {direction(v)}, {wrong} (|cos| {checks[f'{name[0]}_{name[2]}_cos_to_ml']:.2f} to the "
+                f"mediolateral axis in the femur label, {limit}), but {rule}. The label's axis runs along {direction(ml)}")
+        if all(fit_normal.values()):
+            sidecar.fail(f"{head}. Both a-b and c-d fit the knee's bending plane, whose normal runs along {direction(normal)}; "
+                         f"the two reads of the mediolateral axis {'agree only roughly' if agree >= MIN_ML_AGREE else 'differ'} "
+                         f"(|cos| {agree:.2f}), so the label's axis may be wrong, not the points: leave them and raise a To "
+                         'check item naming both axes.')
+        if plane and agree >= MIN_ML_AGREE:
+            misfit = [r[0] for r in rulers if not fit_normal[r[0]]]
+            misfit = f"{' and '.join(misfit)} {'fails' if len(misfit) == 1 else 'fail'}"
             sidecar.fail(f'{head}, confirmed by the normal of the plane the femur and tibia shafts bend in (frame.json, |cos| '
-                         f'{agree:.2f}), and {name} fails against that normal too (|cos| {to_normal:.2f}). The condyles sit side '
-                         'by side along that direction on this scan. A render that seems to show them along another direction '
-                         'has its image axes mislabelled: name the scan axis along each image axis of that render before you '
-                         'place the points again. Which side is lateral and where the front is still come from a render of this '
-                         f'scan. Re-place {ends}.')
-        why = (f'its normal runs along {direction(normal)}, |cos| {agree:.2f} to the label\'s axis, at least {MIN_ML_AGREE}'
-               if checks['bending_plane'] else
+                         f'{agree:.2f}), and {misfit} against that normal too. The condyles sit side by side along that '
+                         'direction on this scan. A render that seems to show them along another direction has its image axes '
+                         'mislabelled: name the scan axis along each image axis of that render before you place the points '
+                         f'again. Which side is lateral and where the front is still come from a render of this scan. Re-place '
+                         f'{ends}.')
+        why = (f"its normal runs along {direction(normal)}, |cos| {agree:.2f} to the label's axis, at least {MIN_ML_AGREE}"
+               if plane else
                f'frame.json has none: the knee bends less than {MIN_BEND_DEG:.0f} degrees or a shaft is out of the field')
         sidecar.fail(f'{head}; the bending plane does not confirm it ({why}). Re-place {ends}. If a render of this scan, with '
                      'each image axis named as a scan axis, shows the condyles side by side along another direction, leave '
