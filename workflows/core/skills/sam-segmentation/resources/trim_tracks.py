@@ -24,7 +24,7 @@ import sidecar
 def load_tracks(path):
     """{label: {'prompt_frame': int, 'confidence': {slice: float}}} from the sidecar `segment_sam` writes beside its labels.
 
-    The one place that knows the file's format: `{axis, shape, prompt, objects: [{label, name, promptFrame, box,
+    The one place that knows the file's format: `{axis, shape, prompt, objects: [{label, name, prompts: [{frame, box, points}],
     confidence: {"<slice>": 0-1}}]}`. A slice missing from `confidence` had no mask.
     """
     raw = json.loads(Path(path).read_text())
@@ -32,7 +32,10 @@ def load_tracks(path):
         sidecar.fail(f'{path} has no "objects": it is not the sidecar segment_sam writes beside its labels')
     if raw.get('axis', 0) != 0:
         sidecar.fail(f'{path} was sliced along axis {raw["axis"]}: trim_tracks needs slices on axis 0 (an oriented stack)')
-    return {o['label']: {'prompt_frame': o['promptFrame'],
+    for o in raw['objects']:
+        if not o.get('prompts'):
+            sidecar.fail(f'{path}: object {o["label"]} has no prompts (a concept prompt picks its own frames): trim_tracks needs a prompted frame')
+    return {o['label']: {'prompt_frame': min(p['frame'] for p in o['prompts']),
                          'confidence': {int(f): c for f, c in o['confidence'].items()}}
             for o in raw['objects']}
 

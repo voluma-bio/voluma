@@ -224,7 +224,7 @@ The tool (`packages/harness/src/tools/segment-sam.ts`) checks the paths and runs
 (`packages/voluma-sam`, baked into the sandbox image with Node 24 and `ffmpeg`) in the calling
 thread's sandbox, with the run's abort signal and a 30-minute timeout; the runner holds no
 volume and does none of the work. The program reads the `.npy` by position (never whole), crops it (`subVolume`, else
-the tissue plus a margin, always including the boxes), encodes lossless H.264, sends it to Meta
+the tissue plus a margin, always including the prompts), encodes lossless H.264, sends it to Meta
 through the gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the bearer; the
 sandbox's network uses the gateway's SNI or dedicated IPv4; only a sandbox whose role is granted `segment_sam` gets the
 network and the token, so a check sandbox stays `network: none` with no token), decodes the masks (`sam-mask.ts`, a port of Meta's
