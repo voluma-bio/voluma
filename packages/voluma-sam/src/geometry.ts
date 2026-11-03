@@ -3,6 +3,7 @@
  * lower of the other two axes and its columns along the higher. Every function here reads or
  * writes volume-ordered (z-major) data through strides, so no reordered copy is ever made.
  */
+import type { Prompt } from "./input";
 import type { Vec3 } from "./npy";
 
 export type Axis = 0 | 1 | 2;
@@ -20,17 +21,25 @@ export interface Box {
   hi: Vec3;
 }
 
-/** The slice-space box `[row0, col0, row1, col1]` (ends inclusive) on slice `frame`, as a volume box. */
-export function boxOnSlice(axis: Axis, frame: number, box: [number, number, number, number]): Box {
+/** The volume box that holds a prompt's box and points, on slice `prompt.frame`. */
+export function extentOnSlice(axis: Axis, prompt: Prompt): Box {
   const [ra, ca] = sliceAxes(axis);
+  const rows = [
+    ...(prompt.box ? [prompt.box[0], prompt.box[2]] : []),
+    ...prompt.points.map((p) => p.row),
+  ];
+  const cols = [
+    ...(prompt.box ? [prompt.box[1], prompt.box[3]] : []),
+    ...prompt.points.map((p) => p.col),
+  ];
   const lo: Vec3 = [0, 0, 0];
   const hi: Vec3 = [0, 0, 0];
-  lo[axis] = frame;
-  hi[axis] = frame + 1;
-  lo[ra] = box[0];
-  hi[ra] = box[2] + 1;
-  lo[ca] = box[1];
-  hi[ca] = box[3] + 1;
+  lo[axis] = prompt.frame;
+  hi[axis] = prompt.frame + 1;
+  lo[ra] = Math.min(...rows);
+  hi[ra] = Math.max(...rows) + 1;
+  lo[ca] = Math.min(...cols);
+  hi[ca] = Math.max(...cols) + 1;
   return { lo, hi };
 }
 
