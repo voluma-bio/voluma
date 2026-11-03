@@ -1,7 +1,7 @@
 /**
  * A run's stream record writer, and the runtime's view of the run. One ordered queue
  * delivers every event, `emit` and `append` alike, so `seq` follows enqueue order. An event
- * joins the view (`events()`; `fold` reads it, `task-tools.ts`) only once the store has
+ * joins the view (`events()`, which the agent log reads) only once the store has
  * acknowledged it, in delivery order, so the view is always a prefix of the store: a
  * recorder started with the stored events (a resume) holds exactly the view the run had.
  * An event with an id the recorder already holds or has queued is a no-op, so a resumed run

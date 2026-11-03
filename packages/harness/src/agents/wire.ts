@@ -1,15 +1,15 @@
 /**
  * The agent loop's half of `superviseRun`'s wiring: each agent's layout (its own `/work` folder
  * and the read-only shared mounts), the tools its role holds, its prompts and model, and the
- * loop on the shared shell's pool and lock. Task-loop wiring is `tasks-wire.ts`.
+ * loop on the shared shell's pool and lock.
  */
 import { type AgentLog, agentLog } from "@voluma/contracts/agents";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
-import type { AgentsDefinition } from "@voluma/workflow/definition";
+import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
 import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
-import { EvidenceNotFound } from "../ports/evidence";
+import { FileNotFound } from "../ports/publish";
 import type { Recorder } from "../recorder";
 import { keepNotes } from "./keep-notes";
 import { agentLoop, interruptedResult, openingOutputs } from "./loop";
@@ -24,36 +24,22 @@ import { prepareTranscript } from "./transcript";
 
 interface AgentsWireOptions {
   runId: string;
-  inputId: string;
   inputPrefix: string;
   recorder: Recorder;
-  definition: AgentsDefinition;
+  definition: WorkflowDefinition;
   /** Whether a gateway is configured (`segment_sam` is held only where it can be used). */
   gateway: boolean;
 }
 
 export function agentsWire(o: AgentsWireOptions): Wire {
   const { recorder, definition } = o;
-  const roles = Object.fromEntries(
-    Object.values(definition.agents).map(
-      ({ name, tools, scratch, outputs, checkedBy, subagents }) => [
-        name,
-        {
-          scratch,
-          outputs,
-          checkedBy,
-          subagents,
-          tools: tools.filter((t) => t !== "segment_sam" || o.gateway),
-        },
-      ],
-    ),
-  );
+  /** Each role's tools: its file's list, less `segment_sam` where no gateway is configured. */
+  const toolsOf = (role: "main" | "worker") =>
+    (definition.agents[role]?.tools ?? []).filter((t) => t !== "segment_sam" || o.gateway);
   const layout = runLayout({
     runId: o.runId,
-    inputId: o.inputId,
     inputPrefix: o.inputPrefix,
     skills: definition.skills,
-    roles,
   });
   const recordOf = (threadId: string) => {
     const record = agentLog(recorder.events()).records.get(threadId);
@@ -71,7 +57,7 @@ export function agentsWire(o: AgentsWireOptions): Wire {
       role,
       blind,
       ...(from && { from }),
-      tools: roles[role]?.tools ?? [],
+      tools: toolsOf(role),
       // A sandbox mounts the folders of the agents that exist when it is created; a new one is seen after the idle timeout.
       peers: [...agentLog(recorder.events()).records.values()].map((r) => r.name),
     });
@@ -98,7 +84,7 @@ const startedFrom = (d: AgentLog, name: string) => ({
 
 async function runAgents(
   o: Shared,
-  definition: AgentsDefinition,
+  definition: WorkflowDefinition,
   forAgent: (name: string, role: "main" | "worker", blind: boolean, from?: string) => ThreadLayout,
 ): Promise<void> {
   const { recorder } = o;
@@ -155,7 +141,7 @@ async function runAgents(
       try {
         await o.publish.copy(snapshotKey, `${main.scratch.prefix}${file}`, { signal: o.signal });
       } catch (error) {
-        if (error instanceof EvidenceNotFound) return undefined;
+        if (error instanceof FileNotFound) return undefined;
         throw error;
       }
       return `${main.dir}/${file}`;
@@ -182,7 +168,6 @@ async function runAgents(
       );
       return tool.execute(tool.input.parse(call.args), {
         threadId: call.threadId,
-        kind: "main",
         agent: { name: record.name, role: "main" },
         toolCallId: call.toolCallId,
         batch: [],

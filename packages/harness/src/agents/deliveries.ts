@@ -1,7 +1,7 @@
 /**
  * Every string the agent loop tells an agent: main's delivery (notices, the agent list, what is
  * out of date or pending), a worker's wrap-up request, the cut-off and liveness lines, and the
- * refusals and results of the coordination tools. The task loop's are `messages.ts`.
+ * refusals and results of the coordination tools.
  */
 import {
   type AgentLog,

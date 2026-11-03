@@ -4,8 +4,8 @@
  * leaves nothing. The copy is server-side and safe to repeat, so a close cut off finishes on retry.
  */
 import { notesKey, workPrefix } from "@voluma/contracts/r2";
-import { EvidenceNotFound } from "../ports/evidence";
 import type { Publish } from "../ports/publish";
+import { FileNotFound } from "../ports/publish";
 
 export async function keepNotes(
   publish: Publish,
@@ -21,6 +21,6 @@ export async function keepNotes(
       signal,
     });
   } catch (e) {
-    if (!(e instanceof EvidenceNotFound)) throw e;
+    if (!(e instanceof FileNotFound)) throw e;
   }
 }

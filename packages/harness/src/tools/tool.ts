@@ -5,15 +5,11 @@
 
 import type { z } from "zod";
 import type { Sandbox } from "../ports/sandbox";
-import type { Role } from "../thread-log";
 
 export interface ToolContext {
   threadId: string;
-  /** The calling thread's kind and, for a worker or check thread, its task. */
-  kind: "main" | Role;
-  taskId?: string;
-  /** The agent model's thread: its name and role. Absent in the task loop. */
-  agent?: { name: string; role: "main" | "worker" };
+  /** The calling thread's name and role. */
+  agent: { name: string; role: "main" | "worker" };
   toolCallId: string;
   /** The names of the tool calls the reply that made this call holds, itself included. */
   batch: string[];
@@ -61,8 +57,6 @@ export interface Tool<S extends z.ZodType = z.ZodType> {
    * what models send by habit when the meaning is unambiguous.
    */
   prepare?(args: unknown): unknown;
-  /** Runs one call at a time within its thread (the task tools, whose appends must not interleave). */
-  sequential?: boolean;
   /**
    * Agent loop: the tool changes results. While the run is reviewing, main's call is held for the
    * researcher (`agents/tools/gate.ts`). `preflight` throws a `Refusal` for a call the tool would

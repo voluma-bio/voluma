@@ -40,9 +40,8 @@ export interface BashStart {
   timeoutMin: number;
   background: boolean;
   sandbox: Sandbox;
-  /** Where the full output goes when it is cut, and whether the thread can `read` it. */
+  /** Where the full output goes when it is cut. */
   spillPath: string;
-  canRead: boolean;
   /** Aborts the command while the call waits for it; once it is backgrounded, only `kill` does. */
   signal: AbortSignal;
   /** Live chunks for people watching, while the call waits. */
@@ -138,7 +137,7 @@ export class BashRuntime {
       o.signal.removeEventListener("abort", stop);
     }
     if (cmd.failure !== undefined) throw cmd.failure;
-    const view = await modelView(cmd.output, o.sandbox, o.spillPath, o.canRead, o.signal);
+    const view = await modelView(cmd.output, o.sandbox, o.spillPath, o.signal);
     return { kind: "ended", exit: cmd.exit, view };
   }
 
@@ -271,14 +270,14 @@ export class BashRuntime {
       cmd.end();
       return;
     }
-    const { threadId, sandbox, spillPath, canRead } = cmd.start;
+    const { threadId, sandbox, spillPath } = cmd.start;
     clearTimeout(cmd.pingTimer);
     try {
       await cmd.recorded;
       if (this.#deps.cutOff.aborted) return;
       if (cmd.failure !== undefined)
         cmd.output.add(`\n[command stream failed: ${String(cmd.failure)}]\n`);
-      const view = await modelView(cmd.output, sandbox, spillPath, canRead);
+      const view = await modelView(cmd.output, sandbox, spillPath);
       await this.#deps.recorder.append(
         threadId,
         "bash.ended",

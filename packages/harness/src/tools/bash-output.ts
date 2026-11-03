@@ -53,20 +53,16 @@ export interface ModelView {
   truncated: boolean;
 }
 
-/** `canRead`: the thread holds `read`, so a cut output's note points at it (a role file from before `read` does not). */
 export async function modelView(
   output: OutputBuffer,
   sandbox: Sandbox,
   path: string,
-  canRead: boolean,
   signal?: AbortSignal,
 ): Promise<ModelView> {
   if (!output.cut) return { output: output.head + output.tail, truncated: false };
   const text = output.stored();
   const omitted = output.total - HEAD_CHARS - TAIL_CHARS;
-  let note = canRead
-    ? `${omitted} of ${output.total} characters omitted. read ${path} for the rest of the output`
-    : `${omitted} of ${output.total} characters omitted; full output at ${path}`;
+  let note = `${omitted} of ${output.total} characters omitted. read ${path} for the rest of the output`;
   let stored = true;
   try {
     await sandbox.writeFile(path, new TextEncoder().encode(text), signal);

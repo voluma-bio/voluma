@@ -1,6 +1,6 @@
 /**
- * Runs one run to the end: the harness's own wiring of the workflow's roles, thread pool, task
- * runtime, tools, sandboxes and run loop, so a host supplies only what holds keys and machines
+ * Runs one run to the end: the harness's own wiring of the workflow's roles, thread pool, tools,
+ * sandboxes and agent loop, so a host supplies only what holds keys and machines
  * (the stored record, evidence, a model, a way to create a sandbox, the gateway's token). Each
  * role's tools, system prompt and first messages come from the workflow definition, each thread's
  * sandbox from its layout (`specOf`), and the review-asset conversion runs in one more sandbox of
@@ -14,15 +14,12 @@
  * one that lands during the drain, records nothing permanent: the next claim resumes. `close`
  * destroys the sandboxes, which the host orders after the lease and the report.
  */
+
+import { agentLog } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
-import type { Harness } from "@voluma/contracts/ids";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import {
-  type AgentsDefinition,
-  OLDER_VERSION_MESSAGE,
-  type WorkflowDefinition,
-} from "@voluma/workflow/definition";
+import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
 import type { UserSender } from "./adapters/pi/start-thread";
 import { agentsWire } from "./agents/wire";
@@ -32,39 +29,29 @@ import type { ProviderError } from "./failure-policy";
 import { convertLayout, type SandboxLayout } from "./layout";
 import type { LoopConfig, ModelSetup } from "./loop-config";
 import { runLock, type Wire } from "./loop-shell";
-import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
-import type { Outputs } from "./ports/outputs";
 import type { Publish } from "./ports/publish";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { failUnfinishedAssets, type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
-import type { PlanTask } from "./task-runtime";
-import { type TasksWireOptions, tasksWire } from "./tasks-wire";
 import { ROOT_NAME, threadIdOf } from "./thread-id";
-import { threadLog } from "./thread-log";
 import { type Threads, threads } from "./threads";
 
 /** The sender of a background command's notices. */
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
 
-export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
+export type { LoopConfig, ModelSetup, ProviderError };
 
 /** How long threads get to end after a cut-off or `fail` before the result settles anyway. */
 const WIND_DOWN_MS = 5_000;
 
-/** The loops this build can run; a runner lists them on its claim, so it is handed no other run. */
-export const HARNESSES: readonly Harness[] = ["tasks", "agents"];
-
 /** What `prepare` returns: the workflow and what depends on its roles. */
 export interface Prepared {
-  /** The role files, skills and task files of the run's workflow snapshot. */
-  definition: WorkflowDefinition | AgentsDefinition;
-  /** The plan computed from the user's selection; the run starts with it (the main agent may change it). */
-  plan: readonly PlanTask[];
+  /** The role files, skills and output catalog of the run's workflow snapshot. */
+  definition: WorkflowDefinition;
   /**
    * The model, thinking level and call function of a thread of `role`. `recorded` is the model
    * (`provider/id`) a resumed thread started on, which it must keep.
@@ -90,20 +77,12 @@ export interface SuperviseRunOptions {
   inputPrefix: string;
   /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
   previousClaim?: ClaimEndReason;
-  /**
-   * The loop that drives the run: the pin's, or the runner's setting for a run's first claim.
-   * Every claim writes it on the root, so pass the pinned value (`pinOf`), never the config's.
-   */
-  harness: Harness;
   /** The workflow packages the run starts from; the root's first event records each at the snapshot's commit. */
   workflows: WorkflowPin[];
   recorder: Recorder;
   history: History;
-  evidence: Evidence;
-  /** The run's bucket, read and written host-side by `view_image` and `read`. */
+  /** The run's bucket, read host-side by `read`. */
   files: Files;
-  /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
-  outputs: Outputs;
   /** How an agent's named file becomes a published output version (the agent loop's `report_output`). */
   publish: Publish;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
@@ -141,23 +120,21 @@ export interface Supervised {
   close(): Promise<void>;
 }
 
-/** What a run began on, read from its root's `thread.started`: the sandbox image and the loop. */
+/** What a run began on, read from its root's `thread.started`: the sandbox image. */
 export interface Pin {
   image: string;
-  harness: Harness;
 }
 
 /**
  * The pin of a run, or undefined for a run with no log yet. The first claim's root decides and
- * every later one copies it, so a resumed run keeps its dependencies and its image. The loop is
- * decided earlier, by `runs.harness` at the claim (which only hands a runner a run of a loop it
- * lists); the root's `harness` records it for log readers. A root with no `harness` is a task run. A log whose root is not the one this version mints
- * (`<runId>.supervisor`, an id from before ids were derived), or whose root records no image, was
- * made by an older Voluma: resuming it would mint a second root or change its dependencies, so it
- * is refused.
+ * every later one copies it, so a resumed run keeps its image. A log whose root is not the one
+ * this version mints (`<runId>.supervisor`, an id from before ids were derived), or whose root
+ * records no image, was made by an older Voluma: resuming it would mint a second root or change
+ * its dependencies, so it is refused.
  */
 export function pinOf(runId: string, log: readonly RunEvent[]): Pin | undefined {
-  if (threadLog(log).root.id === undefined) return undefined;
+  if (!log.some((e) => e.type === "thread.started" && e.payload.parentThreadId === null))
+    return undefined;
   const root = threadIdOf(runId, ROOT_NAME);
   const first = log.find(
     (e) => e.type === "thread.started" && e.threadId === root && e.payload.sandboxImage,
@@ -165,28 +142,11 @@ export function pinOf(runId: string, log: readonly RunEvent[]): Pin | undefined 
   if (first?.type !== "thread.started" || !first.payload.sandboxImage) {
     throw new Error(OLDER_VERSION_MESSAGE);
   }
-  return { image: first.payload.sandboxImage, harness: first.payload.harness ?? "tasks" };
-}
-
-/** The pinned loop's wire; the definition is that loop's own kind (the runner loaded it for the pin). */
-function wireOf(
-  harness: Harness,
-  o: Omit<TasksWireOptions, "definition"> & { definition: Prepared["definition"] },
-): Wire {
-  const { definition } = o;
-  if (harness === "agents") {
-    if (!("outputCatalog" in definition)) throw new Error("an agents run loaded a task workflow");
-    return agentsWire({ ...o, definition });
-  }
-  if (!("files" in definition)) throw new Error("a tasks run loaded an agents workflow");
-  return tasksWire({ ...o, definition });
+  return { image: first.payload.sandboxImage };
 }
 
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, signal: cutOff } = options;
-  if (!HARNESSES.includes(options.harness)) {
-    throw new Error(`this build has no ${options.harness} loop`);
-  }
   const rootThreadId = threadIdOf(runId, ROOT_NAME);
   const CONVERT = `${runId}.convert`;
   // Ends the run's own threads: after `fail`, and once the loop has settled.
@@ -200,13 +160,11 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   let worker: ReviewAssetsWorker | undefined; // set once `prepare` has resolved
   const world = options.prepare(loopSignal).then((prepared) => {
     const { definition } = prepared;
-    const wire = wireOf(options.harness, {
+    const wire = agentsWire({
       runId,
-      inputId: options.inputId,
       inputPrefix: options.inputPrefix,
       recorder,
       definition,
-      plan: prepared.plan,
       gateway: options.gateway !== undefined,
     });
     const convert = convertLayout({ runId, inputId: options.inputId, skills: definition.skills });
@@ -257,13 +215,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       kind: "supervisor",
       workflows: options.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
       sandboxImage: options.sandbox.image,
-      harness: options.harness,
     });
     // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
     // `claim.started` has one again, and says that instead. The schema's rule is
     // `resumed === (after !== undefined || reopened)`; deriving it here keeps the two in step,
     // and covers a claim cut off before any event reached the API (no log, but a `previousClaim`).
-    const reopened = threadLog(recorder.events()).reopenPending && !options.previousClaim;
+    const reopened = agentLog(recorder.events()).reopenPending && !options.previousClaim;
     recorder.emit(rootThreadId, "claim.started", {
       resumed: options.previousClaim !== undefined || reopened,
       ...(options.previousClaim && { after: options.previousClaim }),
@@ -285,8 +242,8 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
         recorder,
         history: withImageRefs(options.history, options.files, runId, wire.nameOf),
         sandbox: (id) => session.get(id),
-        // Each end of a task thread releases its sandbox; an agent keeps its sandbox between
-        // turns (the idle timeout ends it) and is released when its loop says it really ended.
+        // An agent keeps its sandbox between turns (the idle timeout ends it) and is released when
+        // its loop says it really ended.
         release: (id) => {
           if (!wire.keepsSandbox(id)) void release(id);
         },
@@ -317,8 +274,6 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       providerError: options.providerError,
       files: options.files,
       history: options.history,
-      evidence: options.evidence,
-      outputs: options.outputs,
       publish: options.publish,
       session,
       pool,

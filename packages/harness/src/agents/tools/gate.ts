@@ -35,7 +35,7 @@ export const gatedNames = (tools: readonly Tool[]) =>
 /** Wraps one of main's tools; `gated` is `gatedNames` of all of them. */
 export function gate(tool: Tool, gated: ReadonlySet<string>, deps: GateDeps): Tool {
   const { api } = deps;
-  const holds = (ctx: ToolContext) => ctx.agent?.role === "main" && api.log().reviewing;
+  const holds = (ctx: ToolContext) => ctx.agent.role === "main" && api.log().reviewing;
   const flag = tool.changesResults;
   if (!flag) {
     return {
