@@ -1,6 +1,6 @@
 # Suggested plan for a mouse knee
 
-The order a lab would work in, as eight steps. Write the run's own plan from it and from the scan: drop a step whose
+The order a lab would work in, as seven steps. Write the run's own plan from it and from the scan: drop a step whose
 anatomy is not in the field, split or merge steps across workers, and change the plan when the scan calls for it.
 Each step names the outputs it reads and reports by id; an output's latest files are listed in `/run/outputs.yaml`.
 A step's heading ends with its section in `examples/README.md`, what correct looks like for what it places.
@@ -35,31 +35,30 @@ patella) goes on the affected outputs as an expect line.
 Look at the labels in 3D before the steps that measure on them start, and at the landmarks before the lengths:
 a wrong label or frame makes every step after it out of date.
 
-The tibial steps (3 to 7) share a frame, a traced growth plate and a feel for this tibia; one worker that owns them
-keeps what it learns. The femur (step 8) is independent of the tibia after segmentation and can run beside it.
+The tibial steps (2 to 6) share a frame, a traced growth plate and a feel for this tibia; one worker that owns them
+keeps what it learns. The femur (step 7) is independent of the tibia after intake and can run beside it.
 
-## 1. Intake (`intake`)
+## 1. Intake and segmentation (`intake`, `segmentation`)
+
+Intake finds out what the scan holds, and labelling the bones is how it does: one worker reads the scan, cleans
+and roughly orients it, and segments the bones, so the orientation and the labels check each other. Finer
+segmentation a later step needs (the growth plate traced closely) is that step's.
 
 - **Needs:** `/inputs`.
-- **Check first:** the spacing the researcher stated against the header (a mismatch is a To check item).
+- **Check first:** the spacing the researcher stated against the header (a mismatch is a To check item). Before
+  labelling, the keyframe cuts femur and tibia through the joint, with the joint space dark between them, and the
+  femur sits where the orientation puts it; every piece the cleanup found is one you can find in the labels.
 - **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask), `frame` (the
-  rough orientation and its keyframe), `scan-notes` and `bone-pieces` (`scan-intake`, `orient-joint`).
-- **Leaves:** every step reads `scan`. Segmentation starts from `bone-pieces`. A new `scan` puts everything out
-  of date.
+  rough orientation and its keyframe), `scan-notes` and `bone-pieces` (`scan-intake`, `orient-joint`); then
+  `bone-labels` (with the structures in it), `bone-threshold`, `disagreement`, and the label volumes #1–3 (protocol
+  step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason
+  and the view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`,
+  `anatomy.md` "Segmentation notes").
+- **Leaves:** every step reads `scan`, and steps 2 to 7 read the tibia or the femur from `bone-labels`. A new
+  `scan` puts everything out of date and a new `bone-labels` all of steps 2 to 7, so settle the labels here, on
+  the 3D sheet, before anyone measures.
 
-## 2. Segmentation (`segmentation`)
-
-- **Needs:** `scan`, `frame`, `bone-pieces`.
-- **Check first:** the keyframe cuts femur and tibia through the joint, with the joint space dark between them; every
-  piece intake named is one you can find.
-- **Makes:** `bone-labels` (with the structures in it), `bone-threshold`, `disagreement`, and the label volumes #1–3
-  (protocol step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason and the
-  view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`, `anatomy.md`
-  "Segmentation notes").
-- **Leaves:** steps 3 to 8 read the tibia or the femur from `bone-labels`. A new version of it puts all of them out
-  of date, so settle the labels here, on the 3D sheet, before anyone measures.
-
-## 3. Tibial frame and IIOC, ROI-1 (`iioc`)
+## 2. Tibial frame and IIOC, ROI-1 (`iioc`)
 
 - **Needs:** `scan`, the tibia in `bone-labels`.
 - **Check first:** from the articular surface to about 1 mm below the growth plate, the tibia label holds no femur,
@@ -73,26 +72,26 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
   `qc-faces` sheet),
   `articular-surface`, `roi-iioc`, the four rulers and #4–10 (steps 3 and 7). Report both height definitions with
   the plane residual (protocol, "What the deck says").
-- **Leaves:** steps 4 to 7 work on `tibia-grid` and read `roi-iioc` and the faces. A new `tibia-grid` or proximal
-  face puts steps 4 to 7 out of date.
+- **Leaves:** steps 3 to 6 work on `tibia-grid` and read `roi-iioc` and the faces. A new `tibia-grid` or proximal
+  face puts steps 3 to 6 out of date.
 
-## 4. Subchondral bone plate (`subchondral-plate`)
+## 3. Subchondral bone plate (`subchondral-plate`)
 
 - **Needs:** `tibia-grid`, `roi-iioc` (its plate runs), `articular-surface`.
-- **Check first:** each compartment's patch sits on the side step 3 recorded as medial or lateral, under the
+- **Check first:** each compartment's patch sits on the side step 2 recorded as medial or lateral, under the
   articular top surface.
 - **Makes:** `roi-subchondral-plate-medial` and `-lateral`, #11–12 (protocol step 8).
-- **Leaves:** step 5 removes the plate from ROI-1.
+- **Leaves:** step 4 removes the plate from ROI-1.
 
-## 5. IIOC trabecular bone, ROI-2 (`trabecular-roi`)
+## 4. IIOC trabecular bone, ROI-2 (`trabecular-roi`)
 
-- **Needs:** `tibia-grid`, `roi-iioc` (its `iioc-tissue.npy`), `growth-plate-proximal-face`, the plate from step 4.
+- **Needs:** `tibia-grid`, `roi-iioc` (its `iioc-tissue.npy`), `growth-plate-proximal-face`, the plate from step 3.
 - **Check first:** the plate is visible as a band under the articular surface across ROI-1's whole front-to-back
   extent; where it is not, say how you placed the boundary there.
 - **Makes:** `under-plate-boundary` (annotation B), `roi-iioc-trabecular`, #13–15 (protocol steps 4, 5, 7).
   ROI-2 covers the trabecular core over ROI-1's whole front-to-back extent, not only the sections you traced.
 
-## 6. Proximal tibial metaphysis, ROI-3 (`metaphyseal-roi`)
+## 5. Proximal tibial metaphysis, ROI-3 (`metaphyseal-roi`)
 
 - **Needs:** `tibia-grid`, `growth-plate-proximal-face` (with where it was traced), the tibia below the growth plate.
 - **Check first:** below the growth plate, where ROI-3 and the cortex go, the tibia label holds no fibula voxels:
@@ -101,16 +100,16 @@ keeps what it learns. The femur (step 8) is independent of the tibia after segme
   over the whole tibia from `plate_faces.py`'s proposal and open every `qc-faces` sheet), `cortex`, `roi-metaphyseal`, #16–23 (protocol steps 6, 7).
   Where the plate is eroded, report the eroded ranges and `plate-eroded-fraction` from `roi3.json` with the face, and
   raise a To check item naming them.
-- **Leaves:** step 7 measures on this `cortex` and distal face and never traces the face again. A new distal face
-  puts step 7 out of date.
+- **Leaves:** step 6 measures on this `cortex` and distal face and never traces the face again. A new distal face
+  puts step 6 out of date.
 
-## 7. Tibial cortical thickness (`cortical`)
+## 6. Tibial cortical thickness (`cortical`)
 
 - **Needs:** `cortex` (its `cortex.npy`), `growth-plate-distal-face`, `tibia-grid`.
 - **Check first:** at both levels the cortex mask is the wall only, all round, with no marrow, trabeculae or fibula.
 - **Makes:** `roi-cortex-100um`, `roi-cortex-1000um`, #24–25 (protocol step 8).
 
-## 8. Distal femur (`femoral-geometry`)
+## 7. Distal femur (`femoral-geometry`)
 
 - **Needs:** `scan`, the femur in `bone-labels`, `frame`.
 - **Check first:** at the condyles and the intercondylar groove the femur label holds no patella, sesamoid or tibia
