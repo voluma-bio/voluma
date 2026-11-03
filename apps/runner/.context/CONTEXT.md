@@ -556,7 +556,7 @@ role's set level against its model (the role files load per run); both use `thin
 only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
 guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
 DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
-without asking Muse for an unsupported effort. With `run.model`, the role file's level goes to the nearest level the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`), and `RUNNER_THINKING` is checked against the aliases only. Visitor runs always use `"off"`. The level is
+without asking Muse for an unsupported effort. With `run.model`, the role file's level goes to the nearest level the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`), and `RUNNER_THINKING` is checked against the aliases only. Visitor runs get the same levels as anyone's (fitted with `nearestThinking` to the model they run on). The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
