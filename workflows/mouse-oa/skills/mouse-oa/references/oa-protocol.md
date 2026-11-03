@@ -91,9 +91,9 @@ schema is `regions-and-landmarks`'):
   (add a section beside the span if it spills over), and trace the remaining bone there with both faces, the section's curve reaching both ends of the range: the mark
   never replaces the points. Retrace a stretch that is wrong but not flagged the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
   eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. A growth-plate line or path the researcher drew
-  on a coronal section of the tibia grid goes into that section's curve of the face it lies on (`marks_to_grid.py --curve
-  --into annotations.json --key growth_plate_curves`, or `growth_plate_distal_curves` for the distal face;
-  `regions-and-landmarks`); a large `moved_vox` on a short mark means the other face's key. Retrace the sections beside it
+  on a coronal section of the tibia grid goes into that section's curve of the face it was drawn on, which the delivery names
+  (`marks_to_grid.py --curve --into annotations.json --key growth_plate_curves` for growth-plate-proximal-face,
+  `growth_plate_distal_curves` for growth-plate-distal-face; `regions-and-landmarks`). Retrace the sections beside it
   to meet it. Where part of the tibia label is really femur or fibula
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
   only what lies below. The U index of each plateau compartment's middle (a height point outside ROI-1's footprint

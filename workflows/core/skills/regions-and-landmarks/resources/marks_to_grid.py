@@ -1,8 +1,8 @@
 """A researcher's mark in world mm onto a grid: a section's curve in annotations, or a seed in an outline.
 
 A mark arrives in world mm, (x, y, z), as your delivery prints it: "at (8.12, 5.03, 129.4)–(8.20, 5.10, 129.4)– ... mm".
-`--world` takes that line as it is: it reads the bracketed triples and nothing else, and for a moved mark ("from (...)–(...)
-to (...)–(...) mm") only those after the last " to ". `--grid` is the header of the grid you work on: the scan's `hu.json`,
+`--world` takes that line as it is: it reads the bracketed triples after whichever of " at " and " to " comes last (a moved
+mark, "from (...) to (...) mm", gives its new place), so numbers in the tag, the version or the length are not read as points. `--grid` is the header of the grid you work on: the scan's `hu.json`,
 or a frame's `frame.json` (an aligned stack such as the tibia's `tibia-frame.json`). Its `affine_xyz_to_world_mm` maps indices
 to the same world mm as the review, so the mark lands on that grid without other maths.
 
@@ -10,19 +10,21 @@ Two modes, give exactly one:
 
 `--curve`: the mark is a line or path drawn along a face on one section, and becomes that section's curve in the curve schema
 (`regions-and-landmarks`): {"axis": A, "height": "row", "slices": {"<s>": [[row, col], ...]}}, where A is `--axis` (default
-1, V on the tibia grid, so a point is [W, U]) and <s> the section it lies on. Refused: a mark whose points lie more than
+1, V on the tibia grid, so a point is [W, U]) and <s> the section it lies on. The points keep the order drawn; a point that does not
+advance along the section (a hand wavering on a steep stretch) is dropped. Refused: a mark whose points lie more than
 `--max-off-section` voxels apart along A (drawn across sections: ask for it on one section of that grid); a mark that turns
-back along the section (an outline drawn around the plate, a path that doubles back), since a curve has one row per column;
-points outside the grid. With `--into annotations.json --key <curve key>` the mark is spliced into that section of a copy of
+back along the section more than a few voxels (an outline drawn around the plate, a path that doubles back), since a curve has
+one row per column; points outside the grid. With `--into annotations.json --key <curve key>` the mark is spliced into that section of a copy of
 the file, written to `--out`: the section's points within the mark's column range are replaced, those beyond its ends kept,
-and every other key and section stays as it was (the file's `grid_id` must be this grid's). `moved_vox` is the median row
-change over the columns the old and new curve share: a large one on a short mark means the wrong key (the other face) or the
-wrong section. Without `--into`, `--out` gets the curve alone, with the grid's `grid_id`. Check the result on that section's
+and every other key and section stays as it was (the file's `grid_id` must be this grid's). `--key` is the curve of the face the mark
+was drawn on, which the delivery names by its output; `moved_vox` is the median row change over the columns the old and new
+curve share (how far the researcher moved the face there). Without `--into`, `--out` gets the curve alone, with the grid's `grid_id`. Check the result on that section's
 view as you would your own trace, and trace the neighbouring sections to meet it.
 
 `--seed --labels labels.npy`: the mark is an outline drawn around a piece that does not belong to the region (an ossicle on the
 plateau, a patella fragment). It prints a seed: a labelled voxel inside the outline, on the outline's plane, as far from the
-outline's edge as it can be, in the apart piece the outline takes in most of (else the part it takes in most of). `apart` is true when the
+outline's edge as it can be, in the apart piece of at least 50 voxels the outline takes in most of (else the part it takes in most of): smaller
+specks are listed but never chosen. `apart` is true when the
 26-connected part of the label under the seed is not that label's largest; `pieces` lists each part the outline takes in.
 `--labels` must be on `--grid`. A piece apart: `relabel.py --at <seed>` moves that part whole. A piece joined to the bone
 (`apart` false): `relabel.py` would move the whole bone, so split it with `classic_segment.py --within <label> --seeds`, a seed
@@ -46,14 +48,16 @@ from scipy import ndimage as ndi
 
 NUMBER = r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'
 TRIPLE = re.compile(rf'\(\s*({NUMBER})\s*,\s*({NUMBER})\s*,\s*({NUMBER})\s*\)')
-TURN_BACK_VOX = 1.0  # how far a path may step back along the section before it counts as turning back (hand jitter)
+TURN_BACK_VOX = 5.0  # how far a path may step back along the section before it counts as turning back (hand tremor on a steep step)
+MIN_PIECE_VOX = 50  # an apart part smaller than this is noise, never the piece an outline is drawn around
 SPLICE_MARGIN_VOX = 1.0  # old points this close to the mark's ends are replaced too, so the seam has no near-duplicate column
 
 
 def world_points(text):
-    """The (x, y, z) mm triples in `text`, in order; for a moved mark, the ones after the last ' to '."""
-    if ' to ' in text:
-        text = text.rsplit(' to ', 1)[1]
+    """The (x, y, z) mm triples in `text`, in order, after whichever of ' at ' and ' to ' comes last: the tag comes before both."""
+    cut = max(text.rfind(' at '), text.rfind(' to '))
+    if cut >= 0:
+        text = text[cut + 4:]
     found = TRIPLE.findall(text)
     if not found:
         sidecar.fail('--world holds no (x, y, z) point: pass the mark\'s points as your delivery prints them, "(8.12, 5.03, 129.4)–..."')
@@ -103,7 +107,10 @@ def curve(a, g, zyx):
         sidecar.fail(f'the mark turns back along the section (at column {cols[i]:g}, {back[i]:.1f} voxels back): it is an outline drawn '
                      'around the plate or a path that doubles back, and a curve has one row per column; trace that section yourself from '
                      'its image, or ask for a path along the one face')
-    pts.sort(key=lambda q: q[1])
+    ahead = np.r_[True, cols[1:] > np.maximum.accumulate(cols)[:-1]]
+    pts = [p for p, keep in zip(pts, ahead) if keep]
+    if len(pts) < 2:
+        sidecar.fail('the mark spans less than one column of the section: draw it along the face')
     lo, hi = pts[0][1], pts[-1][1]
     kept, moved = 0, None
     if a.into:
@@ -186,7 +193,7 @@ def seed(a, g, zyx):
         pieces.append({'label': label, 'apart': bool(apart[on][0]), 'piece_voxels': size_of[(label, k)], 'inside_voxels': int(on.sum()),
                        'part': k})
     # The seed's piece: the apart piece the outline takes in most of, else the part it takes in most of.
-    target = max(pieces, key=lambda p: (p['apart'], p['inside_voxels']))
+    target = max(pieces, key=lambda p: (p['apart'] and p['piece_voxels'] >= MIN_PIECE_VOX, p['inside_voxels']))
     pool = np.flatnonzero((lab == target['label']) & (part_of == target.pop('part')))
     for p in pieces:
         p.pop('part', None)
