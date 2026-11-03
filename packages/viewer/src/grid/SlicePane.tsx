@@ -452,12 +452,13 @@ export function SlicePane({
       );
       const object = new LineSegments(
         geometry,
-        new LineBasicMaterial({ color, opacity, transparent: opacity < 1, depthTest: false }),
+        new LineBasicMaterial({ color, opacity, transparent: true, depthTest: false }),
       );
       object.renderOrder = 2;
       objects.push(object);
     };
-    const dotSize = Math.max(s[ra], s[ca]) * 2;
+    // About 4 px at the fitted zoom, so a ruler's end can be seen to grab.
+    const dotSize = Math.max(scene.shapeZyx[ra]! * s[ra], scene.shapeZyx[ca]! * s[ca]) * 0.016;
     for (const m of traceMeshes) line(traceSegments.get(m.id) ?? [], m.color, m.opacity);
     for (const a of scene.annotations) {
       if (a.opacity <= 0) continue;
@@ -478,7 +479,7 @@ export function SlicePane({
           new MeshBasicMaterial({
             color: a.color,
             opacity: a.opacity,
-            transparent: a.opacity < 1,
+            transparent: true,
             depthTest: false,
           }),
         );

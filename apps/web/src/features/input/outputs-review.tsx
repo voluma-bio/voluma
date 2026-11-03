@@ -201,6 +201,13 @@ export function OutputsReview({
   const focusKey = item?.focus && JSON.stringify(item.focus);
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
+  // A selected published ruler or point puts the slices through its (first) end, so a Navigate drag
+  // can take it; the same object until another output is in view, so panning isn't undone.
+  const inViewId = inView?.id;
+  const rulerFocus = useMemo(
+    () => (blocks.annotations.some((a) => a.id === inViewId) ? { on: [inViewId!] } : undefined),
+    [blocks, inViewId],
+  );
   const [onlyNeeds, setOnlyNeeds] = useState(false);
   const needing = review.needing.size;
   const [leftTab, setLeftTab] = useState("conversation");
@@ -390,7 +397,7 @@ export function OutputsReview({
         subject={inView.id}
         shown={shownOf(inView)}
         nameOf={nameOf}
-        focus={trailOpen ? undefined : focus}
+        focus={(trailOpen ? undefined : focus) ?? rulerFocus}
         marking={marking}
         quad={{
           layout,
