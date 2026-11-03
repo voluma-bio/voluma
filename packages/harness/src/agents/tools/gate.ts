@@ -9,7 +9,8 @@
  * also has `report_output`, and its limit is `outputs`.
  */
 
-import { approvalRequestId } from "@voluma/contracts/agents";
+import { isDeepStrictEqual } from "node:util";
+import { approvalRequestId, openApprovals } from "@voluma/contracts/agents";
 import type { Tool, ToolContext } from "../../tools/tool";
 import { madeStale } from "../approvals";
 import type { AgentsApi } from "./coordination";
@@ -17,6 +18,9 @@ import { Refusal } from "./refusal";
 
 export const heldText = (toolCallId: string) =>
   `Held for the researcher (approval ${toolCallId}). Your turn ends; the answer arrives as a delivery.`;
+
+export const alreadyWaitingText = (tool: string) =>
+  `Refused: this ${tool} call is already waiting on the researcher, with the same arguments. Do not send it again; end your turn and wait for the answer, which arrives as a delivery.`;
 
 export interface GateDeps {
   api: AgentsApi;
@@ -59,6 +63,13 @@ export function gate(tool: Tool, gated: ReadonlySet<string>, deps: GateDeps): To
       try {
         // A preflight takes the run's section itself when it reads the log to decide.
         if (!api.log().written.has(requestId)) {
+          // Main re-issues a call after a nudge or a repeated delivery; one change gets one card.
+          if (
+            openApprovals(api.log().approvals).some(
+              (a) => a.tool === tool.name && isDeepStrictEqual(a.args, input),
+            )
+          )
+            return { output: alreadyWaitingText(tool.name), isError: true, truncated: false };
           await flag.preflight(input, ctx);
           const fileHashes: Record<string, string> = {};
           for (const f of flag.files?.(input, ctx) ?? [])
