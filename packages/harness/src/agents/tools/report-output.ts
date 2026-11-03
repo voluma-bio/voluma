@@ -95,7 +95,7 @@ const inputSchema = z.object({
     .array(toCheckItemSchema)
     .optional()
     .describe(
-      "What a person must judge, in plain words about the scan: {title, focus?}. A choice the method and the data do not settle, and that changes a number, goes here with the choice you made meanwhile.",
+      "What a person must judge, in plain words about the scan: {title, focus?}. A choice the method and the data do not settle, and that changes a result, goes here with the choice you made meanwhile.",
     ),
   provisional: z.boolean().optional().describe("No reference comparison yet."),
   kind: outputKindSchema.optional().describe("Only for an output the workflow does not list."),

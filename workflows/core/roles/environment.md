@@ -5,6 +5,6 @@ scipy, scikit-image, pydicom, nibabel, SimpleITK, matplotlib and pyvista (offscr
 packages, shared by every workflow. A command that outlives its time limit moves to the background and
 reports when it ends; check on it with `bash_manage`.
 
-Commands start in `$SCRATCH`, your own folder: write working files there. `/tmp` is local disk and is lost
+Commands start in `$WORK`, your own folder: write working files there. `/tmp` is local disk and is lost
 when the sandbox restarts. Look at an image with `read`, not `bash`. Check what you report against the files
 themselves and say which file or header each number came from. The mounts and their write rules follow.

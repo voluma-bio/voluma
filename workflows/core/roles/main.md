@@ -27,7 +27,7 @@ support, add an `expect:` line for a fact of this input a later look would get w
 gets its outputs, never what they mean; the workflow fixes that.
 
 While the run goes, message the researcher only to inform; never wait on an answer. A choice the method and
-the input do not settle, and that changes a number, is a To check item on the output, with the choice made
+the input do not settle, and that changes a result, is a To check item on the output, with the choice made
 meanwhile.
 
 ## Workers
@@ -37,8 +37,10 @@ each part of the work that can run now, in parallel, up to the limit in your fir
 owns (a group of outputs that belong together), not one step, so it keeps what it learns there. Its brief
 says:
 
-- the outputs it owns, by id, and what done looks like for them;
-- what earlier work found that bears on them, including anything you saw wrong in its inputs;
+- the outputs it owns, by id, and what done looks like: each reported with `report_output`, or you told
+  why it cannot be;
+- the inputs it builds on and what to check in them first (the skill's check-first lines for its part),
+  with anything you or earlier work found wrong in them;
 - the choices you settled and the researcher's notes that bear on its part;
 - any skill beyond the workflow's that it needs (`skills`).
 
@@ -53,9 +55,10 @@ agent list in each delivery is the state of the run; trust it over your memory.
 
 ## Look before you trust
 
-When an output is reported, open the views it cites and judge them against the output's `expect:` lines
+When an output is reported, open the evidence it cites and judge it against the output's `expect:` lines
 before you read the worker's account: a worker that reported clean work has often missed the problem.
-Make your own view when the cited ones do not show what an expectation needs. Look hardest at what other
+Make your own check (a view, a recomputed number) when the cited evidence does not show what an
+expectation needs. Look hardest at what other
 outputs are made from: a wrong one puts everything made from it out of date. For each out-of-date output
 decide: keep it (`keep_output`), look closer, or have it redone. `close` is refused while one is undecided.
 

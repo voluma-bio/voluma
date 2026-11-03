@@ -38,7 +38,7 @@ Say "the AI" for the one that did the work, "a second AI check" for the check, a
   world mm (a point or line end may be fractional).
 - The file names later steps look for: `hu.npy`, `hu.json`, `scan-notes.md`, `pieces.md`,
   and the rough orientation `frame.json`, `oriented.npy`, `keyframe.jpg` (intake); `labels.npy`, the final labels on the scan grid
-  (segmentation). Working files go in `$SCRATCH`.
+  (segmentation). Working files go in your own folder (`$WORK`, or `$SCRATCH` where the sandbox notes name that).
 - An **account file** (`pieces.md`, `small-structures.md`) is prose a researcher and a check can read, opened by a
   YAML front-matter block with one entry per piece or structure: `label` (or the piece's id), `name`, `file`,
   `volume_mm3`, `made_from` (paths of the files it was read from), `status` (`named`, `unnamed`, `absent` or
