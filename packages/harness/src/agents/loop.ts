@@ -677,6 +677,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const [outstanding] = handed.get(m.id) ?? [];
     // A start whose message is not stored yet has already taken these notices; its `onStored` nudge steps the loop again.
     if (m.inputPending) return false;
+    // So has a start whose first message is not stored yet: it carries them (a review main's handover holds its delivery).
+    if (userTexts(m.id).length === 0) return false;
     if (running && (!covers || (outstanding && d.cursor !== outstanding))) return false;
     const text = await deliveryOf(d, m.id);
     const sender: UserSender = { kind: "runtime", covers };
