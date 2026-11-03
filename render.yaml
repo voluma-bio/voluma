@@ -78,6 +78,9 @@ services:
         sync: false
       - key: WORKOS_COOKIE_PASSWORD
         sync: false
+      # Seals an own-key run's keys in the database while the run lives (apps/api/.context/deploy.md).
+      - key: RUN_KEY_SECRET
+        generateValue: true
       - key: WORKOS_LAB_ORGANIZATION_ID
         sync: false
       - key: WORKOS_JUDGES_ORGANIZATION_ID

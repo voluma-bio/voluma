@@ -36,9 +36,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   /** The run with what `user` may do on it now (`runReadSchema`); no user: the debug token. */
   const readOf = async (user: UserPrincipal | undefined, run: Run): Promise<RunRead> => ({
     ...run,
-    cannotMessage: user
-      ? await queue.cannotMessage(readerOf(user), callerOf(user), run)
-      : READ_ONLY_TOKEN,
+    cannotMessage: user ? await queue.cannotMessage(run) : READ_ONLY_TOKEN,
     cannotAccept: user ? (acceptRefusal(run)?.message ?? null) : READ_ONLY_TOKEN,
   });
   const userOf = (principal: Principal) => (principal.kind === "user" ? principal : undefined);

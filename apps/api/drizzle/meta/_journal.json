@@ -183,6 +183,13 @@
       "when": 1793744768724,
       "tag": "0025_run_thinking",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793746044636,
+      "tag": "0026_run_sealed_keys",
+      "breakpoints": true
     }
   ]
 }

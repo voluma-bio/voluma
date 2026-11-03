@@ -11,6 +11,7 @@
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID to let anyone in as a guest (the repo .env).
+ * RUN_KEY_SECRET (at least 32 characters): seals an own-key run's keys in the database while the run lives (domains/run/run-keys.ts).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
  * DEFAULT_RUN_HARNESS (tasks|agents, default agents): the loop of a run whose start names none.
  * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
@@ -39,7 +40,6 @@ import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
 import type { KeyLimits, Limits } from "./domains/run/admission";
-import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
@@ -48,6 +48,7 @@ import { pgRunRecords } from "./domains/run/pg-run-records";
 import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
 import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
+import { keySealer } from "./domains/run/run-keys";
 import { modelOverride } from "./domains/run/run-models";
 import { createUser } from "./domains/user";
 import { pgUserSettings } from "./domains/user/pg-settings";
@@ -120,10 +121,12 @@ const results = resultsLoader();
 const reads = pgRunReads(db, results);
 const studies = pgStudyReads(db, results);
 const notifier = createNotifier();
+const runKeySecret = required("RUN_KEY_SECRET");
+if (runKeySecret.length < 32) throw new Error("RUN_KEY_SECRET must be at least 32 characters");
 const queue = pgRunQueue(
   db,
   limits,
-  new KeyVault(),
+  keySealer(runKeySecret),
   notifier,
   // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
   (id) => {

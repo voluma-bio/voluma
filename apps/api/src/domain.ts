@@ -3,6 +3,7 @@
  * (auth.ts) and answers 401 itself when there is no principal, so a domain reads a
  * non-null `principal` and checks only its `kind`.
  */
+import type { VisitorKeys } from "@voluma/contracts/run";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
@@ -14,6 +15,12 @@ type UserBase = {
   name: string | null;
   /** The user's WorkOS organization: the tenant every record is filed under. */
   labId: string;
+  /**
+   * Whether this account runs on Voluma's key: true for members of the pre-created organizations
+   * (the ones with an entry in `Limits.voluma`, which is what the API enforces), false for a guest.
+   * The browser reads it from `/me` to decide whether a run needs the user's own key.
+   */
+  volumaKey: boolean;
 };
 
 export type Principal =
@@ -38,11 +45,11 @@ export function readerOf(user: UserPrincipal): Reader {
   return { labId: user.labId, ownerId: user.userId };
 }
 
-/** Who starts a run or sends a message: a guest is a visitor principal. */
-export type Caller = { userId: string; guest: boolean };
+/** Who starts a run or sends a message, and the own keys the request carries (a reopen of an own-key run needs them). */
+export type Caller = { userId: string; keys?: VisitorKeys };
 
-export function callerOf(user: UserPrincipal): Caller {
-  return { userId: user.userId, guest: user.account === "visitor" };
+export function callerOf(user: UserPrincipal, keys?: VisitorKeys): Caller {
+  return { userId: user.userId, ...(keys && { keys }) };
 }
 
 /**

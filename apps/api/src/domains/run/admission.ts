@@ -75,8 +75,7 @@ export async function usage(
 /**
  * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
  * claim is for `voluma` runs, since an own-key run's cap was checked when it was queued. A reopen
- * (a correction) of a `voluma` run (the route refuses own-key runs first) is judged by the spend
- * limit. A claim refuses on spend only a run that never started (one start request can queue
+ * (a correction) of a `voluma` run is judged by the spend limit, of an own-key run by the own-key cap. A claim refuses on spend only a run that never started (one start request can queue
  * many runs under the limit); a run that started keeps going after a deploy or a reopen, so a
  * live run is never refused.
  */
@@ -88,7 +87,7 @@ export function admit(
   run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
   if (run.credentials === "visitor") {
-    return stage !== "reopen" && u.ownKeyActive >= limits.ownKeyActive ? "own-key-active" : null;
+    return u.ownKeyActive >= limits.ownKeyActive ? "own-key-active" : null;
   }
   const org = limits.voluma.get(labId);
   if (!org) return "no-key";
