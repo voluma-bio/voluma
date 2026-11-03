@@ -20,10 +20,9 @@
  * a time. The stored input row is the confirmed one: nothing runs until the researcher
  * confirms intake.
  *
- * Reads. `readableStudies` is the run rule on the study: the org matches and, under scope
- * `self`, the caller created it or it is the seeded example. A study's runs are the ones
- * `GET /runs` would show the caller, so a `self` caller sees only the runs they started in
- * an example study.
+ * Reads. `readableStudies` is the run rule on the study: the org matches and the caller
+ * created it or it is the seeded example. A study's runs are the ones `GET /runs` would
+ * show the caller, so they see only the runs they started in an example study.
  *
  * Two counts, never swapped: `needsYou` is the open To check items a person can answer, what every screen calls To check (a run of the agent loop: `OutputsFold.toCheck`);
  * `acceptable` is only what "Looks right" can accept.

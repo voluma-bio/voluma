@@ -87,7 +87,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   app.post("/runs/:id/keys", requireUser, async (c) => {
     const { keys } = await parseJson(c, resendKeysRequestSchema);
     const user = c.var.user;
-    const result = await queue.resume(readerOf(user), user.userId, c.req.param("id"), keys);
+    const result = await queue.resume(readerOf(user), c.req.param("id"), keys);
     return c.json(await readOf(user, result.run));
   });
 

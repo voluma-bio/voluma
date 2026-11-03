@@ -162,8 +162,6 @@ export async function messageRefusal(
   run: MessageTarget,
 ): Promise<{ status: 403 | 409; message: string } | null> {
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
-  if (run.startedBy !== caller.userId)
-    return { status: 403, message: "Only the person who started the run can write to it." };
   if (run.credentials === "visitor")
     return {
       status: 403,
@@ -302,7 +300,13 @@ export async function decideMessage(
   // A run still going was admitted already; only a finished one is reopened through admission.
   const reopening = run.state === "ended";
   if (reopening) {
-    const refused = admit("reopen", o.limits, reader.labId, await usage(tx, reader.labId), run);
+    const refused = admit(
+      "reopen",
+      o.limits,
+      reader.labId,
+      await usage(tx, reader.labId, run.credentials),
+      run,
+    );
     if (refused) throw new HTTPException(409, { message: refusalMessage[refused] });
   }
   if (!write) return { eventId, state: await stateNow(), duplicate: false };

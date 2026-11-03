@@ -49,20 +49,27 @@ export const refusalError: Record<Refusal, string> = {
 export type Usage = {
   /** The org's `voluma` runs running now. */
   running: number;
-  /** Own-key runs queued or running, over every org. An `awaiting-keys` run holds neither keys nor a runner. */
+  /** Own-key runs queued or running, over every org; 0 unless the usage was read for an own-key run. An `awaiting-keys` run holds neither keys nor a runner. */
   ownKeyActive: number;
   /** Model dollars spent by the org's runs on Voluma's keys, every run ever (the heartbeat adds to `runs.model_cost_usd`). */
   spentUsd: number;
 };
 
-export async function usage(tx: Tx, labId: string): Promise<Usage> {
-  const [row] = await tx.execute<Usage>(sql`
+export async function usage(
+  tx: Tx,
+  labId: string,
+  credentials: Run["credentials"],
+): Promise<Usage> {
+  const [row] = await tx.execute<Pick<Usage, "running" | "spentUsd">>(sql`
     SELECT
-      (count(*) FILTER (WHERE lab_id = ${labId} AND credentials = 'voluma' AND state = 'running'))::int AS "running",
-      (count(*) FILTER (WHERE credentials = 'visitor' AND state IN ('queued', 'running')))::int AS "ownKeyActive",
-      (coalesce(sum(model_cost_usd) FILTER (WHERE lab_id = ${labId} AND credentials = 'voluma'), 0))::float8 AS "spentUsd"
-    FROM runs WHERE NOT example`);
-  return row as Usage;
+      (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
+      (coalesce(sum(model_cost_usd) FILTER (WHERE credentials = 'voluma'), 0))::float8 AS "spentUsd"
+    FROM runs WHERE lab_id = ${labId} AND NOT example`);
+  if (credentials === "voluma") return { ...row, ownKeyActive: 0 } as Usage;
+  const [own] = await tx.execute<{ n: number }>(sql`
+    SELECT count(*)::int AS n FROM runs
+    WHERE credentials = 'visitor' AND state IN ('queued', 'running') AND NOT example`);
+  return { ...row, ownKeyActive: own.n } as Usage;
 }
 
 /**

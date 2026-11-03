@@ -338,23 +338,20 @@ export function pgRunQueue(
     return workflow;
   };
 
-  /** Every input must be readable; an uncompleted upload exists only for its uploader. Returns them by id. */
-  const checkInputs = async (tx: Tx, reader: Reader, caller: { userId: string }, ids: string[]) => {
+  /** Every input must be readable (an uncompleted upload is readable only by its uploader). Returns them by id. */
+  const checkInputs = async (tx: Tx, reader: Reader, ids: string[]) => {
     const found = await tx
       .select({
         id: inputs.id,
         name: inputs.name,
         status: inputs.status,
-        uploadedBy: inputs.uploadedBy,
       })
       .from(inputs)
       .where(and(readableInputs(reader), inArray(inputs.id, ids)));
     const byId = new Map(found.map((input) => [input.id, input]));
     for (const id of ids) {
       const input = byId.get(id);
-      if (!input || (input.status !== "ready" && input.uploadedBy !== caller.userId)) {
-        throw new HTTPException(404, { message: "unknown input" });
-      }
+      if (!input) throw new HTTPException(404, { message: "unknown input" });
     }
     if (found.some((input) => input.status !== "ready"))
       throw new HTTPException(409, { message: "The scan is still uploading." });
@@ -385,7 +382,7 @@ export function pgRunQueue(
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
     const harness = starts.harness ?? defaultHarness;
-    const used = await usage(tx, reader.labId);
+    const used = await usage(tx, reader.labId, credentials);
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limits, reader.labId, used, { credentials });
       if (refused) throw limitRefusal(refused);
@@ -439,7 +436,7 @@ export function pgRunQueue(
             ),
           );
         if (!member) throw new HTTPException(404, { message: "unknown input" });
-        await checkInputs(tx, reader, caller, [request.inputId]);
+        await checkInputs(tx, reader, [request.inputId]);
         await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
           runs: [{ id: request.id, inputId: request.inputId }],
@@ -470,7 +467,6 @@ export function pgRunQueue(
         const found = await checkInputs(
           tx,
           reader,
-          caller,
           request.inputs.map((input) => input.inputId),
         );
         await tx.insert(studies).values({
@@ -568,17 +564,21 @@ export function pgRunQueue(
 
     /**
      * `awaiting-keys` → `queued`, for the run's own starter, holding the new keys. The run
-     * stays as it was when the visitor cap is reached or the vault is full.
+     * stays as it was when the own-key cap is reached or the vault is full.
      */
-    resume: (reader: Reader, userId: string, runId: string, keys: VisitorKeys) =>
+    resume: (reader: Reader, runId: string, keys: VisitorKeys) =>
       attempt(async (tx, hold) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
         if (!run) throw new HTTPException(404, { message: "not found" });
-        if (run.startedBy !== userId)
-          throw new HTTPException(403, { message: "Only the run's starter can resend keys." });
         if (run.state.status !== "awaiting-keys")
           throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        const refused = admit("resume", limits, reader.labId, await usage(tx, reader.labId), run);
+        const refused = admit(
+          "resume",
+          limits,
+          reader.labId,
+          await usage(tx, reader.labId, run.credentials),
+          run,
+        );
         if (refused) throw limitRefusal(refused);
         hold(runId, reader.labId, keys);
         await tx
@@ -630,7 +630,7 @@ export function pgRunQueue(
         const usages = new Map<string, Usage>();
         for (const run of queued) {
           if (run.credentials === "voluma") {
-            const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
+            const used = usages.get(run.labId) ?? (await usage(tx, run.labId, "voluma"));
             usages.set(run.labId, used);
             const refused = admit("claim", limits, run.labId, used, {
               credentials: "voluma",
