@@ -90,7 +90,9 @@ schema is `regions-and-landmarks`'):
   `plate_eroded` (`{"<V>": [{"u": [first, last], "eroded": "<why>"}]}`, integer U) on every traced section it reaches, flagged or not
   (add a section beside the span if it spills over), and trace the remaining bone there with both faces, the section's curve reaching both ends of the range: the mark
   never replaces the points. Retrace a stretch that is wrong but not flagged the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
-  eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. Where part of the tibia label is really femur or fibula
+  eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. A growth-plate path the researcher drew on a
+  coronal section of the tibia grid becomes that section's curve (`marks_to_grid.py --curve --into annotations.json --key
+  growth_plate_curves`, `regions-and-landmarks`); retrace the sections beside it to meet it. Where part of the tibia label is really femur or fibula
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
   only what lies below. The U index of each plateau compartment's middle (a height point outside ROI-1's footprint
   stops the script: move it). The two width points (#10), within 2 sections of each other and on the growth plate's
