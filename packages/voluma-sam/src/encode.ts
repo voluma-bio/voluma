@@ -14,17 +14,32 @@ export async function encode(
   crop: Box,
   axis: Axis,
   path: string,
+  /** A one-slice crop as a lossless PNG, with no padding, instead of the MP4. */
+  image: boolean,
 ): Promise<{ width: number; height: number }> {
   const [ra, ca] = sliceAxes(axis);
   const cd = dimsOf(crop.lo, crop.hi);
   const [height, width] = [cd[ra], cd[ca]];
+  const input = [
+    "-v",
+    "error",
+    "-y",
+    "-f",
+    "rawvideo",
+    "-pix_fmt",
+    "gray",
+    "-s",
+    `${width}x${height}`,
+  ];
   const ffmpeg = spawn(
     "ffmpeg",
-    [
-      ...["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "gray", "-s", `${width}x${height}`],
-      ...["-r", "25", "-i", "-", "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264"],
-      ...["-qp", "0", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path],
-    ],
+    image
+      ? [...input, "-i", "-", "-frames:v", "1", path]
+      : [
+          ...input,
+          ...["-r", "25", "-i", "-", "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264"],
+          ...["-qp", "0", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path],
+        ],
     { stdio: ["pipe", "ignore", "pipe"] },
   );
   let stderr = "";
@@ -61,5 +76,5 @@ export async function encode(
     throw error;
   }
   if (code !== 0) throw new Error(`ffmpeg failed (${code}): ${stderr.slice(0, 500)}`);
-  return { width: width + (width % 2), height: height + (height % 2) };
+  return image ? { width, height } : { width: width + (width % 2), height: height + (height % 2) };
 }
