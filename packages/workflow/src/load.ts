@@ -8,7 +8,7 @@
  * Both directories hold skills, `skills/<name>/SKILL.md` with optional `references/` and
  * `resources/`. `core/` also holds the role files, the same for every workflow: `agents/<role>.md`
  * for the task loop, `roles/<role>.md` for the agent loop (with `roles/words.md` and
- * `roles/environment.md`, text every role's prompt ends with). The workflow's directory adds
+ * `roles/environment.md`, text every role's prompt ends with, and `roles/review.md`, the review main's). The workflow's directory adds
  * `outputs.json` and `tasks.json` for the task loop, `outputs.yaml` for the agent loop. `core/convert/`
  * (the review converter, run by the runner's convert sandbox) is snapshotted too; nothing else
  * in either directory is.
@@ -72,7 +72,7 @@ const frontmatterSchema = z.strictObject({
 const ROLE_DIRS = [`${CORE}/agents`, `${CORE}/roles`];
 const rolesDirOf = (harness: Harness) => ROLE_DIRS[harness === "agents" ? 1 : 0] as string;
 /** Files of `roles/` appended to every role's prompt, not roles. */
-const PROMPT_TEXTS = ["words.md", "environment.md"];
+const PROMPT_TEXTS = ["words.md", "environment.md", "review.md"];
 const agentSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -430,5 +430,6 @@ export async function loadWorkflow(
     suggestedPlan: texts.get(`${own.slice(0, -"/SKILL.md".length)}/references/suggested-plan.md`),
     words: promptText("words.md"),
     environment: promptText("environment.md"),
+    ...(texts.has(`${rolesDir}/review.md`) && { review: promptText("review.md") }),
   };
 }

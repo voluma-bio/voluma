@@ -21,6 +21,11 @@ export type AgentState = "working" | "idle" | "closing" | "closed" | "failed" | 
 export interface AgentRecord extends ThreadBase {
   /** `main` or `worker`; the agent model gives every thread one. */
   place: "main" | "worker";
+  /**
+   * Its first `thread.started` was written while the run was reviewing: a main like that is the
+   * review main (its prompt has the researcher skill and `review.md`). Derived, not stored.
+   */
+  review: boolean;
   /** Log positions of its latest start and of its latest end (-1: none). */
   startedAt: number;
   endedAt: number;
@@ -145,6 +150,7 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     return {
       ...base,
       place: base.place === "main" ? "main" : "worker",
+      review: prev?.review ?? reviewing,
       parentThreadId: started.parentThreadId,
       spawnedBy: prev?.spawnedBy ?? started.spawnedBy,
       from: prev?.from ?? started.from,

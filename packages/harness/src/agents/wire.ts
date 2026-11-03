@@ -6,14 +6,22 @@
 import { type AgentLog, agentLog } from "@voluma/contracts/agents";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
 import type { AgentsDefinition } from "@voluma/workflow/definition";
+import { summarizeRows } from "../adapters/pi/compaction";
 import type { ThreadLayout } from "../layout";
 import { runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
+import { usageOf } from "../model-usage";
 import { EvidenceNotFound } from "../ports/evidence";
 import type { Recorder } from "../recorder";
 import { keepNotes, restoreMainPlan } from "./keep-notes";
 import { agentLoop, interruptedResult, openingOutputs } from "./loop";
-import { type AgentStart, firstMessageOf, skillBlock, systemPromptOf } from "./prompts";
+import {
+  type AgentStart,
+  firstMessageOf,
+  HANDOVER_INSTRUCTION,
+  skillBlock,
+  systemPromptOf,
+} from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
 import type { AgentsApi } from "./tools/coordination";
@@ -143,6 +151,30 @@ async function runAgents(
         agent,
         signal: o.signal,
       }),
+    handoverSummary: async (previous, forThread) => {
+      const rows = await o.history.load(previous.id);
+      if (rows.length === 0) throw new Error("it stored no history");
+      const { model, thinkingLevel, streamFn } = o.model("main", undefined);
+      const { text, reply } = await summarizeRows(
+        { threadId: previous.id, model, thinkingLevel, streamFn },
+        rows,
+        HANDOVER_INSTRUCTION,
+        o.signal,
+      );
+      // The call is spend, like a compaction's: recorded on the thread it summarized.
+      const used = usageOf(reply);
+      await recorder.append(
+        previous.id,
+        "message",
+        { role: "assistant", text, compaction: true, ...(used && { usage: used }) },
+        `${previous.id}:handover:${forThread}`,
+      );
+      if (!text)
+        throw new Error(
+          reply.errorMessage ?? `the model wrote no summary (stop reason ${reply.stopReason})`,
+        );
+      return text;
+    },
     providerError: o.providerError,
     config: o.config,
     signal: o.signal,
@@ -203,7 +235,7 @@ async function runAgents(
               finalOutputs: renderFinalOutputs(recorder.events()),
               selected: openingOutputs(catalog, o.selectedOutputs).length,
               limit: api.limit,
-              ...(agent.takeover !== undefined && { takeover: agent.takeover }),
+              ...(agent.handover && { handover: agent.handover }),
               ...(o.notes && { notes: o.notes }),
             }
           : {
@@ -224,7 +256,7 @@ async function runAgents(
       });
       return {
         ...setup,
-        systemPrompt: systemPromptOf({ definition, layout }),
+        systemPrompt: systemPromptOf({ definition, layout, review: agent.review }),
         prompt: firstMessageOf({ definition, start }),
         tools,
         labelOf: (sender) => {

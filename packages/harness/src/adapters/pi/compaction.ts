@@ -360,6 +360,82 @@ What to do first when you continue.
 
 The most recent messages are kept as they are after your summary, so spend it on the earlier work. Keep exact paths, identifiers and numbers.`;
 
+/** Where a summary call goes: the model and the run's own stream function, so its cost is counted like any model call. */
+interface SummaryTarget {
+  threadId: string;
+  model: Model<Api>;
+  thinkingLevel?: ThinkingLevel;
+  streamFn: StreamFn;
+}
+
+const textOf = (reply: AssistantMessage) =>
+  reply.content
+    .flatMap((b) => (b.type === "text" ? [b.text] : []))
+    .join("")
+    .trim();
+
+/**
+ * One summary call: `request` then `instruction`. A reply that stopped at the length limit is asked
+ * for again with twice the room (reasoning counts inside the output limit on some providers and can
+ * use all of it; the thread's reasoning setting stays, as changing it would miss the cache), and
+ * both calls' usage is billed. `onStarted` fires when a response's headers arrived.
+ */
+async function summaryReply(
+  t: SummaryTarget,
+  request: AgentMessage[],
+  instruction: string,
+  signal?: AbortSignal,
+  onStarted?: () => void,
+): Promise<AssistantMessage> {
+  const call = async (maxTokens: number) => {
+    const stream = await t.streamFn(
+      t.model,
+      normalizeContext({
+        messages: [
+          ...request,
+          { role: "user", content: instruction, timestamp: Date.now() },
+        ] as never,
+      }),
+      {
+        signal,
+        sessionId: t.threadId,
+        // Pi calls this for each event of the response body, so only after the headers arrived.
+        onProviderStreamEvent: () => onStarted?.(),
+        maxTokens,
+        ...(t.thinkingLevel && t.thinkingLevel !== "off" && { reasoning: t.thinkingLevel }),
+      },
+    );
+    return stream.result();
+  };
+  const first = await call(SUMMARY_MAX_TOKENS);
+  if (first.stopReason !== "length") return first;
+  const second = await call(
+    Math.min(SUMMARY_MAX_TOKENS * 2, t.model.maxTokens > 0 ? t.model.maxTokens : Infinity),
+  );
+  return { ...second, usage: addUsage(first.usage, second.usage) };
+}
+
+/**
+ * The cold summary of a stored conversation under another instruction (the review main's handover):
+ * the thread's view as a request would carry it (its system message, its last compaction summary,
+ * the turns since), images left out. `text` is empty when the model wrote none; `reply` carries the
+ * usage either way. Throws what the provider threw.
+ */
+export async function summarizeRows(
+  t: SummaryTarget,
+  rows: string[],
+  instruction: string,
+  signal?: AbortSignal,
+): Promise<{ text: string; reply: AssistantMessage }> {
+  const { messages, compaction } = foldHistory(rows);
+  const request = repairToolPairs(compactedView(messages, compaction), repairLog(t.threadId)).map(
+    withoutImages,
+  );
+  const reply = await summaryReply(t, request, instruction, signal);
+  const wrote = reply.stopReason === "stop" || reply.stopReason === "toolUse";
+  return { text: wrote ? textOf(reply) : "", reply };
+}
+
 export interface Compactor {
   /** The messages a request carries; summarizes the thread first when it is due. */
   prepare(messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]>;
@@ -435,41 +511,6 @@ export function compactor(args: {
 
   const interruptedTexts = new Set<string>();
 
-  /** One summary call; the error text of a failed one is the provider's, unchanged. */
-  async function summarize(request: AgentMessage[], maxTokens: number, signal?: AbortSignal) {
-    // Pi calls this for each event of the response body, so only after the headers arrived.
-    let started = false;
-    const stream = await streamFn(
-      model,
-      normalizeContext({
-        messages: [
-          ...request,
-          { role: "user", content: SUMMARY_INSTRUCTION, timestamp: Date.now() },
-        ] as never,
-      }),
-      {
-        signal,
-        sessionId: threadId,
-        onProviderStreamEvent: () => {
-          started = true;
-        },
-        maxTokens,
-        ...(thinkingLevel && thinkingLevel !== "off" && { reasoning: thinkingLevel }),
-      },
-    );
-    const reply = await stream.result();
-    if (started && reply.stopReason === "error" && reply.errorMessage) {
-      interruptedTexts.add(reply.errorMessage);
-    }
-    return reply;
-  }
-
-  const textOf = (reply: AssistantMessage) =>
-    reply.content
-      .flatMap((b) => (b.type === "text" ? [b.text] : []))
-      .join("")
-      .trim();
-
   async function compact(
     messages: AgentMessage[],
     tokensBefore: number,
@@ -490,17 +531,18 @@ export function compactor(args: {
     const request = cold
       ? requestView(messages.slice(0, cut)).map(withoutImages)
       : requestView(messages);
-    let reply = await summarize(request, SUMMARY_MAX_TOKENS, signal);
-    // Reasoning counts inside the output limit on some providers and can use all of it: once more
-    // with twice the room. The thread's reasoning setting stays, as changing it would miss the cache.
-    if (reply.stopReason === "length") {
-      const first = reply;
-      reply = await summarize(
-        request,
-        Math.min(SUMMARY_MAX_TOKENS * 2, model.maxTokens > 0 ? model.maxTokens : Infinity),
-        signal,
-      );
-      reply = { ...reply, usage: addUsage(first.usage, reply.usage) };
+    let started = false;
+    const reply = await summaryReply(
+      { threadId, model, streamFn, thinkingLevel },
+      request,
+      SUMMARY_INSTRUCTION,
+      signal,
+      () => {
+        started = true;
+      },
+    );
+    if (started && reply.stopReason === "error" && reply.errorMessage) {
+      interruptedTexts.add(reply.errorMessage);
     }
     // A reply that also called a tool still wrote its summary; the calls are ignored.
     const summary =
