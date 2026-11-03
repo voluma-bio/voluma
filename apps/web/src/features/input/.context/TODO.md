@@ -46,6 +46,16 @@ None of these stops a review; each makes it slower.
   stream before the send's `onSuccess`, the stale-answer check in `ai-panel.tsx` clears the answer
   mode and a retry sends a plain message (refused 409). Reasoned from the code, not reproduced.
 
+## Task-loop runs, after the default flips
+
+- **Open task-loop runs read-only once new runs default to the agent loop.** Until then judges'
+  and guests' new runs are task-loop runs (`DEFAULT_RUN_HARNESS` and each organization's
+  `agentLoop` in `apps/api/src/index.ts`), so they keep their full review, corrections included.
+  After the flip: the run read's `cannotMessage` and `cannotAccept` give a reason for every run whose
+  harness isn't `agents` (`messageRefusal` in `apps/api/src/domains/run/corrections.ts`,
+  `acceptRefusal` in `packages/contracts/src/run.ts`; a web-only response, so one step), and the task
+  review's mark tools turn off. The docked `ShellPanel`s can go then (`packages/ui/.context/TODO.md`).
+
 ## Outputs review
 
 - **A published ruler's end dragged** is not yet seen on real data: no agent-loop run draws rulers
