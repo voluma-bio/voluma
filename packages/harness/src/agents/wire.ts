@@ -4,6 +4,7 @@
  * loop on the shared shell's pool and lock. Task-loop wiring is `tasks-wire.ts`.
  */
 import { type AgentLog, agentLog } from "@voluma/contracts/agents";
+import { openingOutputs } from "@voluma/contracts/final-outputs";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
 import type { AgentsDefinition } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
@@ -12,7 +13,7 @@ import type { Shared, Wire } from "../loop-shell";
 import { EvidenceNotFound } from "../ports/evidence";
 import type { Recorder } from "../recorder";
 import { keepNotes } from "./keep-notes";
-import { agentLoop, interruptedResult, openingOutputs } from "./loop";
+import { agentLoop, interruptedResult } from "./loop";
 import { type AgentStart, firstMessageOf, skillBlock, systemPromptOf } from "./prompts";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";

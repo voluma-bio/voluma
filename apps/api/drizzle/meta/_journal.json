@@ -176,6 +176,13 @@
       "when": 1793681665559,
       "tag": "0024_drop_study_scans_view",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793742723195,
+      "tag": "0025_convert_task_runs",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,8 @@ user sender in `events.ts`) are new types and optional fields only; today's `out
 untouched. Each narrowing below is a step-2 PR (root `AGENTS.md`, "Contract changes"): re-run the
 conversion, parse every staging run and every `run.json`, then narrow.
 
+- Step 1 is migration `0025_convert_task_runs.sql` (`apps/api/.context/convert-task-runs.md`); step 2 re-runs its tail
+  (`convert-task-runs.ts` `MIGRATION_TAIL`) and deletes the converter and `backfill.ts`.
 - Remove the task-loop events (`output`, `revision.started`, `attempt.opened`, `task`, `checkpoint`,
   `plan.changed`, `ask`, `answer`, `reply`, `outputs.*`, and the human `check.accepted`,
   `review.completed`, `correction.ended`) with the fold's task rows.
