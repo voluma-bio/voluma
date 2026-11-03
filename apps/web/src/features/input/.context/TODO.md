@@ -11,12 +11,6 @@
   Do not synthesize those records or restore spend caps/outage holds. Acceptance status stays
   with #210/#174. Bounded rendering fixes: [#327](https://github.com/voluma-bio/voluma/pull/327).
 
-## Not built yet
-
-- **Snapshots.** A message to main carries a picture of the panes, but saved review snapshots and
-  showing a sent message's picture in the chat wait: `createReviewSnapshot`,
-  `listReviewSnapshots` (`/api/review/runs/:runId/snapshots`) and `runMessageSnapshotUrl`.
-
 ## Outputs review
 
 - **A published ruler's end dragged** is not yet seen on real data: no run draws rulers yet. The drag shares the mark-end path that was walked; the ruler's candidates come from the
