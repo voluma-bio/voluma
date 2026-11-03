@@ -52,5 +52,9 @@ describe("isProgress", () => {
     expect(isProgress({ type: "revision.started", payload: { reason: "run" } })).toBe(false);
     expect(isProgress({ type: "tool.call", payload: {} })).toBe(false);
     expect(isProgress({ type: "message", payload: {} })).toBe(false);
+    expect(isProgress({ type: "output.published", payload: {} })).toBe(true);
+    expect(isProgress({ type: "outputs.changed", payload: { by: "main" } })).toBe(true);
+    expect(isProgress({ type: "outputs.changed", payload: { by: "runner" } })).toBe(false);
+    expect(isProgress({ type: "outputs.changed", payload: { by: "rule" } })).toBe(false);
   });
 });
