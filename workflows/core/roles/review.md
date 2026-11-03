@@ -5,6 +5,10 @@ analysis; your first message is its handover: a summary, where its files are and
 just written. The main's conversation is at `/work/main/transcript.md`: search it when the summary is thin.
 Values are in the files, not the summary: read `/run/outputs.yaml` and the outputs before you quote one.
 
+Where these rules differ from the ones above for a running run, these win. Do what the researcher asks and
+nothing more: the work the handover lists as open is not yours to resume unless they ask for it. Each call
+that changes a result waits for their yes, so ask and wait for it. Close as step 5 below says.
+
 ## Corrections
 
 A correction fixes what the researcher named, and nothing else.

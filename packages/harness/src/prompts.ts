@@ -46,13 +46,15 @@ export function skillList(
   def: Pick<WorkflowDefinition, "skills">,
   role: AgentDefinition,
   firstNote = " [read first]",
+  /** Skills whose text is already in the system prompt: marked so, not to be read again. */
+  inPrompt: readonly string[] = [],
 ): string {
   const reader = readerOf(role);
   const lines = def.skills
     .filter((s) => role.skills.includes(s.name))
     .map(
       (s) =>
-        `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? firstNote : ""}`,
+        `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? firstNote : ""}${inPrompt.includes(s.name) ? " [below, in this prompt]" : ""}`,
     );
   return `Skills: read a skill's SKILL.md with ${reader} before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }

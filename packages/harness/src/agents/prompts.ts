@@ -28,7 +28,7 @@ export function systemPromptOf({
 }): string {
   const role = definition.agents[layout.role];
   if (!role) throw new Error(`${layout.name} runs on ${layout.role}, which is not a role file`);
-  const skills = `${skillList(definition, role, " [in your first message]")}\n\n${toolIndex(definition, role, role.tools.includes("bash"))}`;
+  const skills = `${skillList(definition, role, " [in your first message]", review ? ["researcher"] : [])}\n\n${toolIndex(definition, role, role.tools.includes("bash"))}`;
   const researcher = definition.skills.find((s) => s.name === "researcher");
   return [
     role.body,
