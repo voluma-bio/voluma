@@ -194,6 +194,16 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
     record.pendingPing = undefined;
   };
 
+  /** Inbox items, and main's cursor when this is not a ping. A later message covering the same id is not a second delivery. */
+  const account = (record: AgentRecord, covers: string | undefined) => {
+    if (!covers) return;
+    delivered.add(covers);
+    if (record.place === "main" && !pingIds.has(covers) && cursor !== covers) {
+      cursor = covers;
+      deliveries.push({ at: written.get(covers) ?? -1 });
+    }
+  };
+
   for (const [at, e] of events.entries()) {
     written.set(e.id, at);
     if (e.type === "thread.started" && e.payload.parentThreadId === null) {
@@ -235,7 +245,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
             sender?.kind === "thread" && fold.threads.get(sender.threadId)?.place === "main";
         }
         if (sender?.kind === "thread" && sender.messageId) delivered.add(sender.messageId);
-        if (sender?.kind === "runtime" && sender.covers) delivered.add(sender.covers);
+        // The user message for this input is stored later; the loop's next step reads the start.
+        if (sender?.kind === "runtime") account(record, sender.covers);
         // A start that continues a cut-off turn received nothing new: the first start counted the input.
         if (e.payload.input && !(before && before.end === undefined))
           receive(record, sender?.kind === "runtime" ? sender.covers : undefined);
@@ -365,12 +376,8 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
           if (record.place === "worker" && fold.threads.get(sender.threadId)?.place === "main") {
             record.fromMain = true;
           }
-        } else if (sender.kind === "runtime" && sender.covers) {
-          delivered.add(sender.covers);
-          if (record.place === "main" && !pingIds.has(sender.covers)) {
-            cursor = sender.covers;
-            deliveries.push({ at: written.get(sender.covers) ?? -1 });
-          }
+        } else if (sender.kind === "runtime") {
+          account(record, sender.covers);
         }
         break;
       }
