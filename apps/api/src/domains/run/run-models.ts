@@ -7,7 +7,7 @@
  * (`RUN_MODEL_OVERRIDE`, read in `index.ts`): every run on Voluma's keys gets it whatever was
  * picked; own-key runs keep their pick, since their Meta key can't call DeepSeek.
  */
-import type { RunThinking } from "@voluma/contracts/run";
+import { type RunThinking, runThinkingSchema } from "@voluma/contracts/run";
 import { HTTPException } from "hono/http-exception";
 
 const WONDER = { model: "meta/muse-wonder-1.0", label: "Muse Wonder 1.0", needsVolumaKey: false };
@@ -23,7 +23,6 @@ const DEFAULT_MODEL = WONDER.model;
 
 /** The level in the role files (`workflows/core/roles`). Low, medium and high are ones every offered model takes or is mapped to. */
 export const DEFAULT_THINKING: RunThinking = "medium";
-const THINKING: RunThinking[] = ["low", "medium", "high"];
 
 /** The models `RUN_MODEL_OVERRIDE` may name. */
 const OVERRIDES: Record<string, string> = {
@@ -44,7 +43,7 @@ export function modelChoices(override: string | null) {
   return {
     choices: CHOICES,
     default: DEFAULT_MODEL,
-    thinking: { choices: THINKING, default: DEFAULT_THINKING },
+    thinking: { choices: runThinkingSchema.options, default: DEFAULT_THINKING },
     ...(override && { forced: { model: override, label: OVERRIDES[override] as string } }),
   };
 }

@@ -245,7 +245,7 @@ export async function startRun(req: StartRunRequest): Promise<Run> {
   return read(runSchema, await request("/run/runs", { method: "POST", body: req }));
 }
 
-/** The models a start may pick, per kind of credentials; see `runModelsResponseSchema`. */
+/** The models a start may pick; see `runModelsResponseSchema`. */
 export async function getRunModels(): Promise<RunModelsResponse> {
   return read(runModelsResponseSchema, await request("/run/models"));
 }

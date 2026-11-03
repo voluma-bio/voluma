@@ -106,7 +106,7 @@
  * is on Voluma's Modal account; `keys` is the model key alone.
  *
  * Model (`model`): the API picks the run's model when it creates the run (the request's
- * `model` if it is in the caller's `GET /run/models` list, else the list's default, or the
+ * `model` if it is in the `GET /run/models` list, else the list's default, or the
  * API's debug override for a `voluma` run) and records it; every role of the run uses it.
  * A model marked `needsVolumaKey` is refused (400) on a run with the starter's own keys.
  * A run without `model` predates this.

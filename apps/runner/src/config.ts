@@ -129,7 +129,7 @@ function thinkingLevel(): ModelThinkingLevel | undefined {
   return level;
 }
 
-/** Whether a run's own Meta key and scan may go to this model (a key choice: the run's own Meta key and scan go to Standard-mode Meta only). */
+/** Whether a run's own Meta key and scan may go to this model: Standard-mode Meta only, since a `-contributor` model lets Meta train on what it is sent. */
 export const isVisitorSafe = (ref: ModelRef) =>
   ref.provider === "meta" && !ref.id.endsWith("-contributor");
 
@@ -233,7 +233,7 @@ export function runnerConfig() {
      * `RUNNER_THINKING`: the thinking level of a `voluma` run's roles whose file sets none, or of
      * every role when the model is forced, set as each Pi agent's `thinkingLevel`; main.ts refuses a non-off level an alias's model does
      * not support, since Pi would quietly use another. Unset or "off": no requested effort
-     * (DeepSeek: thinking disabled; Muse: provider default). Visitor runs: "off".
+     * (DeepSeek: thinking disabled; Muse: provider default).
      */
     thinking: thinkingLevel(),
     /**
@@ -241,10 +241,6 @@ export function runnerConfig() {
      * thinking level, at the nearest the forced model supports, unless `RUNNER_THINKING` sets one.
      */
     modelForced: optional("RUNNER_MODEL") !== undefined,
-    /**
-     * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
-     * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
-     */
     modal,
     /**
      * The gateway sandboxes reach providers through, and the secrets their tokens are minted

@@ -224,11 +224,12 @@ export function NewPage() {
                 ? "Add your Meta key first."
                 : undefined;
 
-  // One list for everyone. With the user's own key, a model that needs Voluma's key shows disabled,
-  // and a pick of it falls back to the default.
+  // One list for everyone. On a run that uses the user's own key (they saved one, or a guest must),
+  // a model that needs Voluma's key shows disabled, and a pick of it falls back to the default.
   const list = runModels.data;
-  const forced = keys ? undefined : list?.forced;
-  const usable = (c: { needsVolumaKey: boolean }) => !(keys && c.needsVolumaKey);
+  const ownKey = keys || guest;
+  const forced = ownKey ? undefined : list?.forced;
+  const usable = (c: { needsVolumaKey: boolean }) => !(ownKey && c.needsVolumaKey);
   const model = list?.choices.some((c) => c.model === pickedModel && usable(c))
     ? pickedModel
     : list?.default;
