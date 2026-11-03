@@ -26,13 +26,19 @@ export const headlinesOf = (workflow: Pick<BundledWorkflow, "path">) =>
 /** A measurement's unit as people write it (`mm³`, `HU`), the way a run's values carry it. */
 export const unitOf = (output: Measurement) => unitAsWritten(output.unit);
 
+/** A measurement's unit as a label: none for a plain number (UCUM `1`, a ratio). */
+export const unitLabel = (output: Measurement) => {
+  const unit = unitOf(output);
+  return unit === "1" ? "" : unit;
+};
+
 export function MeasurementList({ workflow }: { workflow: Pick<BundledWorkflow, "path"> }) {
   return (
     <ul aria-label="Measurements" className="grid gap-1">
       {measurementsOf(workflow).map((o) => (
         <li key={o.id} className="flex items-baseline gap-2 text-sm">
           {o.name}
-          <span className="text-fg-subtle">{unitOf(o)}</span>
+          <span className="text-fg-subtle">{unitLabel(o)}</span>
         </li>
       ))}
     </ul>
