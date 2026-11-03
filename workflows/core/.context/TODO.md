@@ -53,3 +53,10 @@ The skills stay readable by both loops until then, so a few lines still speak th
 `agents/words.md`), and "a second AI check". Rewrite them for `report_output`'s `toCheck` and `message` when
 `tasks.json` goes, and add `scan-notes`, `bone-pieces` and `small-structures` as the ids scan-intake and
 microct-core report those files under.
+
+## A researcher's path drawn on a scan plane
+
+`marks_to_grid.py --curve` refuses a path whose points lie more than 2 voxels apart along the target grid's section
+axis: a path drawn on one of the scan's planes cuts across the tibia grid's sections. If researchers draw growth-plate
+paths that way, resample the path onto the tibia-grid sections it crosses (one curve per section, from where the path
+meets each section) instead of refusing it.
