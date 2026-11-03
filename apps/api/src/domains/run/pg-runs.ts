@@ -169,22 +169,39 @@ function toRun({ run, input, position, calls }: Row, results: Results): Run {
 }
 
 /**
- * Runs matching `where`, newest first. A queued `voluma` run's place is counted here, at
- * read time: its place among its org's queued `voluma` runs, oldest first. A visitor run
- * waits only for a runner, so its place is 1.
+ * The order the claim serves queued runs in, and so their places in line. While no own-key run
+ * is running, a queued own-key run goes before the Voluma-key runs (so a backlog of them can't
+ * starve a guest); then by organization priority (`orgs`, first served first; an org not listed
+ * last), then oldest first.
  */
-async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
+export const queueOrder = (orgs: readonly string[]): SQL[] => [
+  sql`(CASE WHEN ${runs.credentials} = 'visitor' AND NOT EXISTS (
+    SELECT 1 FROM runs r WHERE r.state = 'running' AND r.credentials = 'visitor'
+  ) THEN 0 ELSE 1 END)`,
+  sql`coalesce(array_position(ARRAY[${sql.join(
+    orgs.map((id) => sql`${id}`),
+    sql`, `,
+  )}]::text[], ${runs.labId}), ${orgs.length + 1})`,
+  sql`${runs.createdAt}`,
+  sql`${runs.id}`,
+];
+
+/**
+ * Runs matching `where`, newest first. A queued run's place is counted here, at read time:
+ * its place among all queued runs in the claim's order (`queueOrder`).
+ */
+async function loadRows(tx: Tx, where: SQL | undefined, orgs: readonly string[]): Promise<Row[]> {
   const place = tx.$with("place").as(
     tx
       .select({
         id: runs.id,
         position:
-          sql<number>`(row_number() OVER (PARTITION BY ${runs.labId} ORDER BY ${runs.createdAt}, ${runs.id}))::int`.as(
+          sql<number>`(row_number() OVER (ORDER BY ${sql.join(queueOrder(orgs), sql`, `)}))::int`.as(
             "position",
           ),
       })
       .from(runs)
-      .where(and(eq(runs.state, "queued"), eq(runs.credentials, "voluma"))),
+      .where(eq(runs.state, "queued")),
   );
   const rows = await tx
     .with(place)
@@ -329,9 +346,10 @@ interface LoadOptions {
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
+  orgs: readonly string[],
   { cache = newCache(), skipSummaryless = false, stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
-  const rows = await loadRows(tx, where);
+  const rows = await loadRows(tx, where, orgs);
   // Rows are newest first, so an input's first row is its newest run.
   const seen = new Set<string>();
   const foldRows = rows.filter(({ run }) => {
@@ -397,20 +415,24 @@ async function loadResults(
 }
 
 /** `loadResults` through one cache, so the run and study reads fold a run once between them. */
-export function resultsLoader() {
+export function resultsLoader(orgs: readonly string[]) {
   const cache = newCache();
   return (tx: Tx, where: SQL | undefined, options: Omit<LoadOptions, "cache"> = {}) =>
-    loadResults(tx, where, { ...options, cache });
+    loadResults(tx, where, orgs, { ...options, cache });
 }
 export type ResultsLoader = ReturnType<typeof resultsLoader>;
 
-export async function loadRuns(tx: Tx, where: SQL | undefined): Promise<Run[]> {
-  return (await loadResults(tx, where)).map(({ run }) => run);
+export async function loadRuns(
+  tx: Tx,
+  where: SQL | undefined,
+  orgs: readonly string[],
+): Promise<Run[]> {
+  return (await loadResults(tx, where, orgs)).map(({ run }) => run);
 }
 
 /** The run just written, which must exist. */
-export async function loadRun(tx: Tx, runId: string): Promise<Run> {
-  const [run] = await loadRuns(tx, eq(runs.id, runId));
+export async function loadRun(tx: Tx, runId: string, orgs: readonly string[]): Promise<Run> {
+  const [run] = await loadRuns(tx, eq(runs.id, runId), orgs);
   if (!run) throw new Error(`run ${runId} vanished inside its transaction`);
   return run;
 }

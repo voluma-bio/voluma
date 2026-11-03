@@ -240,7 +240,7 @@ export async function decideMessage(
     .select({ id: events.id })
     .from(events)
     .where(and(eq(events.runId, runId), eq(events.id, eventId)));
-  const stateNow = async () => (await loadRun(tx, runId)).state;
+  const stateNow = async () => (await loadRun(tx, runId, [...o.limits.voluma.keys()])).state;
   // A message already stored is answered even though the run is busy answering it.
   if (again && refusal?.status !== 403)
     return { eventId, state: await stateNow(), duplicate: true };
@@ -300,13 +300,7 @@ export async function decideMessage(
   // A run still going was admitted already; only a finished one is reopened through admission.
   const reopening = run.state === "ended";
   if (reopening) {
-    const refused = admit(
-      "reopen",
-      o.limits,
-      reader.labId,
-      await usage(tx, reader.labId, run.credentials),
-      run,
-    );
+    const refused = admit("reopen", o.limits, reader.labId, await usage(tx, reader.labId), run);
     if (refused) throw new HTTPException(409, { message: refusalMessage[refused] });
   }
   if (!write) return { eventId, state: await stateNow(), duplicate: false };
