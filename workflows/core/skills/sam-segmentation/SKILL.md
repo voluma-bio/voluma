@@ -31,7 +31,8 @@ on it; `negative: true` for pixels off it). A prompt needs a box or a positive p
 - **`direction`** (`forward` or `backward`, default `both`): tracks one way from the earliest prompted slice. Meta bills the slices tracked
   (at least 50 per call), so when a structure lies on one side of its prompt, or you only need part of the stack,
   this and a `subVolume` cost less.
-- **`concept`** instead of `structures`: one noun phrase ("bone"), every instance found and tracked (up to 16),
+- **`concept`** instead of `structures`: one noun phrase ("bone"), every instance found and tracked (up to 16 per slice in a volume, any number in an image; the call fails if labels would pass 255, so
+  lower `firstLabel`),
   labels numbered in the order the model first shows them. Use it for "every X" when you have no boxes yet, then
   prompt what it missed or merged with boxes. A phrase that matches nothing is not an error: the call returns no
   objects (`counts` empty). On windowed CT slices, "bone", "femur" and "skeleton" matched nothing when we tried them,

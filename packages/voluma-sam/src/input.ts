@@ -126,7 +126,7 @@ export const samInput = z
       .strict()
       .optional()
       .describe(
-        "Segment every instance of a phrase (up to 16 in a volume); the model decides how many there are. Give this or `structures`, never both.",
+        "Segment every instance of a phrase (a video tracks up to 16 per frame, an image any number); the model decides how many there are, and the call fails if their labels would pass 255. Give this or `structures`, never both.",
       ),
     direction: z
       .enum(["both", "forward", "backward"])

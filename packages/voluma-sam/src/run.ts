@@ -42,7 +42,9 @@ export async function run(
   if (!image && input.axis === undefined) throw new Failure("`axis` is required for a 3D volume");
   if (image && input.direction)
     throw new Failure("`direction` has no meaning for a single image: leave it out");
-  const axis: Axis = input.axis ?? 0;
+  // A 2D array is the slice 0 of a 1 x h x w volume, whatever `axis` the caller passed.
+  const axis: Axis = image ? 0 : (input.axis as Axis);
+  const outShape = image ? npy.shape.slice(1) : npy.shape;
   const [ra, ca] = sliceAxes(axis);
   const dir = await mkdtemp(join(tmpdir(), "sam-"));
   const meta = metaClient({ url: env.gatewayUrl, token: env.token, log });
@@ -87,6 +89,13 @@ export async function run(
       }
       return { label: s.label, name: s.name, prompts };
     });
+    if (
+      input.direction === "backward" &&
+      Math.min(...objects.flatMap((o) => o.prompts.map((p) => p.frame))) === 0
+    )
+      throw new Failure(
+        "`direction: backward` tracks toward slice 0 from the earliest prompted slice, so that slice cannot be 0: prompt a later slice, or use `forward` or `both`",
+      );
     const full: Box = { lo: [0, 0, 0], hi: shape };
 
     // Read: the sub-volume alone, or everything with the extent of the tissue.
@@ -214,7 +223,13 @@ export async function run(
     const instances = new Map<number, number>();
     const labelOf = (id: number): number | undefined => {
       if (!concept) return objects.some((o) => o.label === id) ? id : undefined;
-      if (!instances.has(id)) instances.set(id, first + instances.size);
+      if (!instances.has(id)) {
+        if (first + instances.size > 255)
+          throw new Failure(
+            `the model found more instances of "${concept.phrase}" than labels fit from firstLabel ${first} (labels end at 255): lower \`firstLabel\``,
+          );
+        instances.set(id, first + instances.size);
+      }
       return instances.get(id);
     };
     const labels = new Uint8Array(cd[0] * cd[1] * cd[2]);
@@ -247,7 +262,7 @@ export async function run(
 
     // Write: the labels on the full grid, then the sidecar, each built whole and then copied.
     const out = join(dir, basename(input.output));
-    await writeFullGrid(out, labels, crop, shape, npy.flat);
+    await writeFullGrid(out, labels, crop, shape, outShape);
     const sidecarPath = input.output.replace(/(\.npy)?$/, ".json");
     const requestId = tracked.requestId ?? pasted.responseId;
     // What was asked, per object: the prompts as the caller gave them (the volume's own slices
@@ -262,7 +277,7 @@ export async function run(
     const sidecar = {
       requestId,
       axis,
-      shape: npy.flat ? shape.slice(1) : shape,
+      shape: outShape,
       crop: [crop.lo[0], crop.hi[0] - 1, crop.lo[1], crop.hi[1] - 1, crop.lo[2], crop.hi[2] - 1],
       prompt,
       direction,
@@ -319,11 +334,11 @@ async function writeFullGrid(
   labels: Uint8Array,
   crop: Box,
   shape: Vec3,
-  flat: boolean,
+  outShape: number[],
 ) {
   const file = await open(path, "w");
   try {
-    await file.write(u8Header(flat ? shape.slice(1) : shape));
+    await file.write(u8Header(outShape));
     const cd = dimsOf(crop.lo, crop.hi);
     const plane = new Uint8Array(shape[1] * shape[2]);
     for (let z = 0; z < shape[0]; z++) {

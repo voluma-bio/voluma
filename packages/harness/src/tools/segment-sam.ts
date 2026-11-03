@@ -12,6 +12,15 @@ import type { Tool } from "./tool";
 
 const TIMEOUT_SECONDS = 30 * 60;
 
+/**
+ * A run keeps the sandbox image it started on, which can predate fields this schema advertises.
+ * Its `voluma-sam` then rejects them as an unknown key, or a field it still requires as missing.
+ */
+const OLD_IMAGE_REJECTION =
+  /"code": "unrecognized_keys"|"code": "invalid_type"[^}]*"path": \[\s*"(?:keyframe|axis|structures)"\s*\]|"code": "invalid_union"[\s\S]*?"path": \[\s*"axis"/;
+const OLD_IMAGE_HINT =
+  "\nThis run's sandbox image predates one of these fields: use one box per structure, with `axis` and `keyframe`.";
+
 export function segmentSamTool(layout: ThreadLayout): Tool<typeof samInput> {
   return {
     name: "segment_sam",
@@ -20,7 +29,7 @@ export function segmentSamTool(layout: ThreadLayout): Tool<typeof samInput> {
       "slice (a point can be negative: this pixel is not the structure) and the model tracks it through the whole " +
       "volume; add `otherFrames` prompts on more slices to pull a drifting track back, and `direction` to track only " +
       "one way from the earliest prompted slice (Meta bills the slices tracked). Or give a `concept`, one noun phrase, " +
-      "and the model finds every instance (up to 16) and tracks them; its ids become labels in the order they first " +
+      "and the model finds every instance (up to 16 per slice in a volume, any number in an image) and tracks them; its ids become labels in the order they first " +
       "appear (a phrase that matches nothing returns no objects, not an error). A 2D .npy is one image: its prompts are on slice 0. Returns a uint8 labels .npy of the input's shape " +
       "(0 is background, each structure's voxels carry its label), the voxel count per label and the prompt text " +
       "sent. The structures of one call are tracked together and never share a voxel; a call is one paid request of " +
@@ -70,7 +79,7 @@ export function segmentSamTool(layout: ThreadLayout): Tool<typeof samInput> {
             ? "voluma-sam was killed (exit 137), most likely out of memory: pass a smaller `subVolume`"
             : `voluma-sam exited with code ${exitCode} without a result: ${stderr.slice(-1000)}`);
       return {
-        output: why,
+        output: reply?.error && OLD_IMAGE_REJECTION.test(why) ? why + OLD_IMAGE_HINT : why,
         isError: true,
         truncated: false,
         ...(reply?.infrastructure && { infrastructure: true as const }),
