@@ -55,5 +55,6 @@ describe("isProgress", () => {
     expect(isProgress({ type: "output.published", payload: {} })).toBe(true);
     expect(isProgress({ type: "outputs.changed", payload: { by: "main" } })).toBe(true);
     expect(isProgress({ type: "outputs.changed", payload: { by: "runner" } })).toBe(false);
+    expect(isProgress({ type: "outputs.changed", payload: { by: "rule" } })).toBe(false);
   });
 });
