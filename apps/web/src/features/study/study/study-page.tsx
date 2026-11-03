@@ -196,6 +196,9 @@ function StatusLine({
     mark = <StatusMark status="check" label={toCheckText(needsYouOf(input))} />;
   } else if (run && (status.status === "running" || status.status === "checking")) {
     mark = <StatusMark {...liveStatus({ ...run, review: input.review, waiting: 0 })} />;
+  } else if (status.status === "stopped") {
+    // `label` is "Failed" or "Stopped", from the run's outcome.
+    mark = <StatusMark status="stopped" label={`${status.label} before it finished`} />;
   } else if (status.status === "done" && hasBar(input)) {
     const missing = measurements
       .filter((o) => segmentOf(input, o) === "missing")
