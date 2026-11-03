@@ -327,10 +327,10 @@ export function pgRunQueue(
     }
   };
 
-  const messageContext = (reader: Reader) => ({
+  const messageContext = {
     limits,
     pinsOf: (workflowId: string) => workflowOf(workflowId)?.pins,
-  });
+  };
 
   const workflowFor = (workflowId: string) => {
     const workflow = workflowOf(workflowId);
@@ -522,7 +522,7 @@ export function pgRunQueue(
       tx: Queryable = db,
       studyWorkflowId?: string,
     ): Promise<string | null> {
-      const refusal = await messageRefusal(tx, messageContext(reader).pinsOf, caller, {
+      const refusal = await messageRefusal(tx, messageContext.pinsOf, caller, {
         ...messageTargetOf(run),
         studyWorkflowId,
       });
@@ -536,9 +536,7 @@ export function pgRunQueue(
       runId: string,
       msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) =>
-      db.transaction((tx) =>
-        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, false),
-      ),
+      db.transaction((tx) => decideMessage(tx, messageContext, reader, caller, runId, msg, false)),
 
     /** Stores the message, reopening the run if it had ended; one transaction under the queue lock. */
     async sendMessage(
@@ -548,7 +546,7 @@ export function pgRunQueue(
       msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) {
       const result = await locked((tx) =>
-        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, true),
+        decideMessage(tx, messageContext, reader, caller, runId, msg, true),
       );
       if (!result.duplicate) notifier.notify(runId);
       return result;
@@ -563,7 +561,7 @@ export function pgRunQueue(
       body: AnswerApprovalRequest,
     ) {
       const { duplicate } = await locked((tx) =>
-        answerApproval(tx, messageContext(reader), reader, caller, runId, requestId, body),
+        answerApproval(tx, messageContext, reader, caller, runId, requestId, body),
       );
       if (!duplicate) notifier.notify(runId);
     },
