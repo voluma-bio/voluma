@@ -12,7 +12,7 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (self|lab, default self) to let anyone in as a guest (the repo .env).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
- * DEFAULT_RUN_HARNESS (tasks|agents, default tasks): the loop of a run whose start names none.
+ * DEFAULT_RUN_HARNESS (tasks|agents, default agents): the loop of a run whose start names none.
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
  * _VISITOR_ACTIVE, and _SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
@@ -99,7 +99,6 @@ const members = [
     id: required("WORKOS_LAB_ORGANIZATION_ID"),
     scope: "lab" as const,
     limits: limitsFromEnv("LAB"),
-    // The agent loop is internal until it ships: only the lab's members may start it.
     agentLoop: true,
   },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
@@ -108,7 +107,7 @@ const members = [
           id: process.env.WORKOS_JUDGES_ORGANIZATION_ID,
           scope: "self" as const,
           limits: limitsFromEnv("JUDGES"),
-          agentLoop: false,
+          agentLoop: true,
         },
       ]
     : []),
@@ -118,7 +117,7 @@ const guest = process.env.GUEST_ORGANIZATION_ID
       id: process.env.GUEST_ORGANIZATION_ID,
       scope: guestScope(),
       limits: limitsFromEnv("DEMO"),
-      agentLoop: false,
+      agentLoop: true,
     }
   : null;
 // An org missing here is no longer configured: its queued runs fail and its running ones stop.
@@ -166,7 +165,7 @@ const queue = pgRunQueue(
     );
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
-  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "tasks"),
+  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "agents"),
   (labId) => agentLoop.get(labId) === true,
 );
 const eventLog = pgEventLog(db, notifier);

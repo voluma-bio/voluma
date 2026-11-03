@@ -61,7 +61,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
   recovery) and the key vault. A run carries its loop (`runs.harness`, null = tasks), set at start
-  from the request's `harness` or `DEFAULT_RUN_HARNESS`. The agent loop is allowed only for an
+  from the request's `harness` or `DEFAULT_RUN_HARNESS` (`agents` unless set). The agent loop is allowed only for an
   organization whose `index.ts` entry sets `agentLoop`: from any other, an explicit `agents` is 403
   and no `harness` means tasks whatever the default. A claim hands out only runs whose loop the
   runner lists (`harnesses`, absent = tasks, so an older runner never gets an agent-loop run). Keep

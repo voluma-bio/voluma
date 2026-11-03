@@ -254,7 +254,7 @@ An agent in its own worktree tries a workflow change on the real system like thi
    or the shell: one model for every role). Agents run plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`, never wonder, and never a run on staging (Jimmy). Meta SAM is the only Meta call here, about $0.10 each.
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …] [--harness tasks|agents]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan
-   (with no `--harness` the API's `DEFAULT_RUN_HARNESS` decides, `tasks` unless set; `--harness agents`
+   (with no `--harness` the API's `DEFAULT_RUN_HARNESS` decides, `agents` unless set; `--harness agents`
    needs the test account's organization to set `agentLoop` in `apps/api/src/index.ts`),
    follows the run's event stream until it ends and prints its outcome, per-task status with outputs reported and
    missing (task runs only: an agent-loop run has no tasks, so read its outputs on the run page), cost and the run page. Exit 1 when the run failed or was cancelled, 2 when the script itself broke
