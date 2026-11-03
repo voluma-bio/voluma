@@ -254,7 +254,7 @@ const markShapeSchema = z.union([
     angle: z.object({ aZyx: vec3, vertexZyx: vec3, bZyx: vec3, degrees: z.number() }),
   }),
   z.looseObject({ outline: z.object({ zyx: z.array(vec3), areaMm2: z.number() }) }),
-  z.looseObject({ path: z.object({ zyx: z.array(vec3), lengthMm: z.number() }) }),
+  z.looseObject({ path: z.object({ zyx: z.array(vec3).min(2), lengthMm: z.number() }) }),
 ]);
 
 /** A mark's shape as code holds it (the viewer's `GridMark`): read-only, the known keys only. */
