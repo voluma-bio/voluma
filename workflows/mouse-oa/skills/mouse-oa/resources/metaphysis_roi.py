@@ -12,7 +12,7 @@ depth at which the bone fraction of the outer layers first drops below one half 
 the axial slices `start_um` to `start_um + length_um` below the face's deepest point (recorded as cortex_estimate_slices_w and
 distal_face_deepest_vuw): ROI-3's own depths at that point, on slices wholly below
 the plate, where the outer layers are the wall alone. On the slices ROI-3 spans, a domed plate slopes down the wall and the dense
-bone under its face would count as wall (OA6-2RK: 0.357 mm there, 0.147 mm below the plate). The cortex mask for Ct.Th is the
+bone under its face would count as wall (on one lab knee, 0.36 mm there against 0.15 mm below the plate). The cortex mask for Ct.Th is the
 bone within `cortex_search_factor` times that depth of the outer edge, below the local distal face and down to 1.3 mm past its
 deepest point along W (rounded up to an inclusive slice, clipped to the stack): it can include trabeculae that join the cortex.
 It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, nodes/ends (deck #19-23) are

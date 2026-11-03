@@ -7,7 +7,7 @@ description: >
 
 # Visual check
 
-Render a view, open it with `view_image`, and decide from what you see. Every label you keep,
+Render a view, look at it, and decide from what you see. Every label you keep,
 every frame you accept and every region or point you hand on passes one look first, and the image goes in your
 evidence, so whoever checks it and the researcher see what you saw.
 
@@ -23,9 +23,8 @@ evidence, so whoever checks it and the researcher see what you saw.
 | Which of two segmentations is right here? | disagreement panel | `disagree.py` (`segmentation-check`) |
 
 Pass the workflow's `anatomy.json` as `--names` so the legend names every label, and its display window as
-`--window`. Open up to four images in one `view_image` call; your history is summarized now and then, and an image
-that was summarized away shows only as its text line: call `view_image` again to see it. To compare before and
-after a fix, open both in one call.
+`--window`. To compare before and after a fix, open both at once. An image that has dropped out of your history
+shows only as its text line: open it again before you judge from it.
 
 ## What your eyes are good for
 
