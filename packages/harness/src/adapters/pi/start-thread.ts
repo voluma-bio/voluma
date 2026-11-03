@@ -532,7 +532,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { threadId, agent, sandbox, recorder }: StartThreadOptions,
+  { threadId, agent, sandbox }: StartThreadOptions,
   batchOf: (toolCallId: string) => string[],
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });

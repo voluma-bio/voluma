@@ -46,7 +46,7 @@ const storableRow = historyRowSchema.refine(
   "message contains a NUL byte",
 );
 
-export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
+export function ingestRoutes({ queue, eventLog, history }: RunDeps) {
   const app = new Hono<IngestEnv>();
   app.use("/ingest/*", requireService);
 
