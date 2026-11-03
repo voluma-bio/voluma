@@ -1,5 +1,5 @@
-/** Review's keys in the object store: a run's files, message snapshots and converted assets. */
-import { evidenceKey, reviewAssetKey } from "@voluma/contracts/r2";
+/** Review's keys in the object store: a run's files and converted assets. */
+import { reviewAssetKey } from "@voluma/contracts/r2";
 import { ObjectNotFound, type ObjectStore } from "@voluma/object-store";
 import { HTTPException } from "hono/http-exception";
 

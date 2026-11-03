@@ -14,7 +14,6 @@ import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import { events, inputs, referenceInput, runs, studies } from "./schema";
