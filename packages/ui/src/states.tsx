@@ -6,7 +6,6 @@
 import type { ReactNode } from "react";
 import { Button } from "./button";
 import { cx } from "./cx";
-import type { Density } from "./row";
 import { StatusGlyph } from "./status-mark";
 
 export type EmptyStateProps = {
@@ -25,6 +24,9 @@ export function EmptyState({ title, children, className }: EmptyStateProps) {
     </div>
   );
 }
+
+/** `compact` holds 30 px rows. */
+export type Density = "comfortable" | "compact";
 
 export type LoadingStateProps = {
   /** How many rows to hold; match what usually arrives. */

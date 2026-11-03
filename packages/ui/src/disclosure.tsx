@@ -1,10 +1,10 @@
 /**
  * Depth inside a row: a quiet line with a chevron that opens what sits under it (the AI's steps,
- * a task's files). Same chevron and motion as `Row`.
+ * a reply's files).
  */
-import { type ReactNode, useId } from "react";
+import { ChevronRight } from "lucide-react";
+import { type ReactNode, useId, useState } from "react";
 import { cx } from "./cx";
-import { Chevron, useOpen } from "./row";
 
 export type DisclosureProps = {
   /** What opens, e.g. "Files (6)". */
@@ -32,7 +32,13 @@ export function Disclosure({ label, children, className, ...openProps }: Disclos
           open ? "text-foreground" : "text-muted-foreground",
         )}
       >
-        <Chevron open={open} />
+        <ChevronRight
+          aria-hidden
+          className={cx(
+            "size-3.5 shrink-0 transition-transform duration-150 ease-out motion-reduce:transition-none",
+            open ? "rotate-90 text-foreground" : "text-fg-subtle",
+          )}
+        />
         {label}
       </button>
       {open && (
@@ -42,4 +48,19 @@ export function Disclosure({ label, children, className, ...openProps }: Disclos
       )}
     </div>
   );
+}
+
+/** Open state, controlled when `open` is given. */
+function useOpen({
+  open,
+  defaultOpen = false,
+  onOpenChange,
+}: Pick<DisclosureProps, "open" | "defaultOpen" | "onOpenChange">) {
+  const [own, setOwn] = useState(defaultOpen);
+  const value = open ?? own;
+  const set = (next: boolean) => {
+    if (open === undefined) setOwn(next);
+    onOpenChange?.(next);
+  };
+  return [value, set] as const;
 }
