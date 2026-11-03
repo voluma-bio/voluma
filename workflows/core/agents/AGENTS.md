@@ -1,6 +1,7 @@
 # Run agents
 
-The roles every workflow run uses, one file each, in `workflows/core/agents/`. A file's frontmatter
+The task loop's roles, one file each, in `workflows/core/agents/`. A run pinned `harness: agents` reads
+`workflows/core/roles/` instead (`roles/AGENTS.md`); nothing here reaches it. A file's frontmatter
 says what the role is and holds; its body is that role's job, read by the role on every run. The
 roles are the same for every workflow: what a workflow adds is its skill (`workflows/<name>/skills/`),
 its task list (`tasks.json`, whose `instructions` and `doneWhen` both the worker and the checker of a

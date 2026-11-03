@@ -11,7 +11,7 @@ holds rules, not experiment logs.
   SKILL.md and runs the resources as `python <skill dir>/resources/<x>.py`; so SKILL.md names a resource by file name,
   says when to reach for it and what its result means, and leaves flags, schemas and outputs to the script's `--help`
   (the tool index in every agent's prompt lists each script by its first docstring line). There are no per-workflow agent definitions: the roles shared by every workflow are in
-  `agents/`, and a skill never addresses one role; what a workflow wants checked per task is in its `tasks.json` and
+  `agents/` (task loop) and `roles/` (agent loop), and a skill never addresses one role; what a workflow wants checked per task is in its `tasks.json` and
   `skills/<workflow>/examples/`.
 - Change a skill or role file only on evidence from runs on the models the workflow runs on. A run on a
   cheap stand-in model (DeepSeek) checks plumbing only: never judge or change skill or role text by how it
