@@ -6,7 +6,8 @@
  * never counted. The runner reports `loop-stalled` only when it held that one run for the
  * blocked time; with two runs live a block is `self-stop` for both, so a run that blocks a
  * shared runner is not counted until it is the only one live. Progress is a change to run state
- * (a published output or a change to the outputs); model turns and tool calls are not, since a loop that kills the runner every
+ * (a published output version or main's change to the outputs, not the runner's opening list or the
+ * stuck rule's); model turns and tool calls are not, since a loop that kills the runner every
  * time still makes them. The run row keeps `last_progress_seq` (set on append) and the
  * current claim's `claim_start_seq`; `endClaim` judges a claim when it ends.
  */
@@ -27,8 +28,13 @@ const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
   "assets.ready",
 ]);
 
-/** Whether an appended event is run-state progress. */
-export const isProgress = (event: { type: string }) => PROGRESS_EVENT_TYPES.has(event.type);
+/**
+ * Whether an appended event is run-state progress. The agent loop's opening `outputs.changed` by
+ * the runner is not: a run that crashes its runner right after planning has made none.
+ */
+export const isProgress = (event: { type: string; payload: unknown }) =>
+  PROGRESS_EVENT_TYPES.has(event.type) &&
+  (event.type !== "outputs.changed" || (event.payload as { by?: string }).by === "main");
 
 /** Consecutive claims that end without progress before the run fails. */
 export const STALLED_CLAIMS_LIMIT = 3;

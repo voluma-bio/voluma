@@ -131,6 +131,8 @@ interface AgentLoopOptions {
   release(threadId: string): Promise<void>;
   /** Keeps what an agent leaves in its `/work` folder past the folder's expiry (`keep-notes.ts`). */
   keepNotes(agent: { name: string; role: string }): Promise<void>;
+  /** Puts main's kept plan back in `/work` if it expired, before a main thread's sandbox is built (`keep-notes.ts`). */
+  restoreMainPlan(): Promise<void>;
   /** Renders the agent's conversation for `/work/<name>/transcript.md` (`transcript.ts`). */
   prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
@@ -290,6 +292,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       covers?: string;
     } = {},
   ) {
+    if (agent.role === "main") await o.restoreMainPlan();
     const s = o.setup(agent, api);
     const { systemPrompt, prompt, tools, labelOf, interrupted, ...model } = s;
     const spec = {
