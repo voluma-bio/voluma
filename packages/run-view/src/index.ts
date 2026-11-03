@@ -13,7 +13,7 @@ export { Markdown } from "./chat/markdown";
 export { ThreadNavigationProvider } from "./chat/thread-navigation";
 export { TaskInfo } from "./info";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
-export { KeysForm, loadKeys, RunKeyLine } from "./keys";
+export { KeysForm, keysToReopen, loadKeys, RunKeyLine } from "./keys";
 export {
   inViewOf,
   itemsOfVersion,

@@ -322,6 +322,8 @@ const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
 export function RunAlert({ run, userId, stale }: { run: Run; userId: string; stale: boolean }) {
   const { state } = run;
   if (state.status === "awaiting-keys") return <AwaitingKeys run={run} userId={userId} />;
+  if (state.status === "ended" && state.outcome === "completed" && run.credentials === "visitor")
+    return <ReopenKeys userId={userId} />;
   if (state.status === "ended" && state.outcome === "failed")
     return (
       <p role="alert" className={`${bar} bg-destructive-tint text-destructive`}>
@@ -335,6 +337,26 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
       </p>
     );
   return null;
+}
+
+/**
+ * A finished own-key run holds no key, so a message to it needs the user's. Shown until this browser
+ * has one saved; the messages then carry it (`keysToReopen`).
+ */
+function ReopenKeys({ userId }: { userId: string }) {
+  const [saved, setSaved] = useState(() => !!loadKeys(userId));
+  if (saved) return null;
+  return (
+    <section className={`${bar} grid gap-2 bg-muted text-muted-foreground`}>
+      <p>
+        This run used your own Meta key, which Voluma does not keep once a run ends. Add it to send
+        a correction.
+      </p>
+      <div className="max-w-sm">
+        <KeysForm userId={userId} submitLabel="Save key" onSubmit={() => setSaved(true)} />
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -407,7 +429,7 @@ function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
   const busy = manual && resend.isPending;
   return (
     <section className={`${bar} grid gap-2 bg-check-tint text-check-strong`}>
-      <p>The run is waiting for your keys: the server restarted and no longer has them.</p>
+      <p>The run is waiting for your keys: the server no longer has a usable copy.</p>
       <div className="max-w-sm">
         <KeysForm
           userId={userId}

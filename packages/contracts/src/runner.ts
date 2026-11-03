@@ -49,7 +49,7 @@
  * `released` with its reason, so the run is recovered without waiting out the lease.
  * When a lease expires, or the runner releases it, the run is recovered the
  * same way: a `voluma` run goes back to `queued`, ahead of newer runs; a
- * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
+ * `visitor` run goes back to `queued` too: its sealed keys stay with the run. The runner
  * keeps its `events` already written, and the next claim resumes the thread
  * from them. That claim carries `previousClaim.reason`, why the claim before it ended
  * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
