@@ -60,3 +60,11 @@ microct-core report those files under.
 axis: a path drawn on one of the scan's planes cuts across the tibia grid's sections. If researchers draw growth-plate
 paths that way, resample the path onto the tibia-grid sections it crosses (one curve per section, from where the path
 meets each section) instead of refusing it.
+
+## Touching ossicles on the tibial plateau
+
+Pieces of bone that touch the tibia and carry its label occur on most lab scans: 14 kept by eye on 8 of 10 (none on
+OA6-2RK or OA7-1L), about 0.065-0.076 mm³ each and 1-3% of a label's region volume; several at the plateau's rims sit half
+in the tibia mask (the femur/tibia regrow splits a block touching both along a straight line). List and check images:
+`~/experiments/plate-data/tracing/pieces/RESULTS-L24.md`. Add a check-first line to `segmentation-check`: look for a piece
+joined to the plateau along a dark seam, and split it with `classic_segment.py --within` before the tibial regions are built.
