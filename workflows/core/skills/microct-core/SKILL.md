@@ -2,20 +2,11 @@
 name: microct-core
 description: >
   Load at the start of every micro-CT step, after the workflow's own skill: the grid, sidecar and result-record
-  contract every script shares, the files later steps look for, the two thresholds, the scan's notes that
-  outrank your expectation of the anatomy, and how to word anything a researcher will read.
+  contract every script shares, the files later steps look for, the two thresholds, and the scan's notes that
+  outrank your expectation of the anatomy.
 ---
 
 # Micro-CT core
-
-## Words for the researcher
-
-Anything a researcher reads (a To check title, an output's note or missing reason, a summary, a reply) never says worker, checker, check thread, model, thread, agent or a task id.
-Say "the AI" for the one that did the work, "a second AI check" for the check, and the task's plain title
-("Scan intake") for a task. Say what was found, not who found it.
-
-- Before: "The checker evidence shows the oriented frame is internally consistent; task orient-joint passed."
-- After: "The joint's orientation is consistent with the scan."
 
 ## Grids and files
 
@@ -34,11 +25,11 @@ Say "the AI" for the one that did the work, "a second AI check" for the check, a
 - A thing you place in 3D (a slab mask, a surface, a point, a ruler) is saved with `objects.py` (this skill's resources, a
   library): its writer makes the file and returns the entry that `report_output` takes, on a named grid. Scripts that
   place something write it as `objects` in their result record; `quad_view.py --objects <record>.json` draws it. Every
-  structure, surface and annotation is reported on the grid `outputs.json` declares for it, in voxel indices, never
+  structure, surface and annotation is reported on the grid `outputs.yaml` declares for it, in voxel indices, never
   world mm (a point or line end may be fractional).
 - The file names later steps look for: `hu.npy`, `hu.json`, `scan-notes.md`, `pieces.md`,
   and the rough orientation `frame.json`, `oriented.npy`, `keyframe.jpg` (intake); `labels.npy`, the final labels on the scan grid
-  (segmentation). Working files go in your own folder (`$WORK`, or `$SCRATCH` where the sandbox notes name that).
+  (segmentation). Working files go in your own folder (`$WORK`).
 - An **account file** (`pieces.md`, `small-structures.md`) is prose a researcher and a check can read, opened by a
   YAML front-matter block with one entry per piece or structure: `label` (or the piece's id), `name`, `file`,
   `volume_mm3`, `made_from` (paths of the files it was read from), `status` (`named`, `unnamed`, `absent` or

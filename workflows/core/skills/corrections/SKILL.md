@@ -1,6 +1,5 @@
 ---
 name: corrections
-harness: agents
 description: >
   Load when the researcher asks for a change to a result, or a result goes out of date during review: how to
   fix what they named and no more, and how to decide what the fix made out of date.

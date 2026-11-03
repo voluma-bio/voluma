@@ -16,11 +16,11 @@ BV/TV, and the thickness and node measures, come from `morphometry.py` (`bone-mo
 `--hu-json`, kept apart from `--grid`, the grid the region is on.
 
 **One spec for the numbers.** `/workflow/workflows/mouse-oa/skills/mouse-oa/resources/protocol.json` is keyed by output id
-(`outputs.json`'s ids) and holds every number the protocol fixes and the output ids a script writes its values under: ROI-3's
+(`outputs.yaml`'s ids) and holds every number the protocol fixes and the output ids a script writes its values under: ROI-3's
 start, length and clearance, Ct.Th's depth and slab, the plate patch width, the clearances of ROI-2, the points each femoral
 distance joins. A script takes that path as `--spec` and reads its entry; there is no flag for a protocol number or an output id, and
 the record says what was used (the spec's hash in `inputs`, and its numbers in `params`). A label volume (#1-3) takes its label ids
-from `/workflow/workflows/mouse-oa/outputs.json` (`measure.py --outputs`), the one place the labels are declared. A region script
+from `/workflow/workflows/mouse-oa/outputs.yaml` (`measure.py --outputs`), the one place the labels are declared. A region script
 reads the entry of its own region (`roi-iioc`, `roi-iioc-trabecular`, `roi-metaphyseal`); `morphometry.py` and `measure.py` take
 `--output <id>`, the region's id (or the slab's, or the values' own) whose entry they read. Change a protocol number there, once;
 prose here and in the examples names the quantity, not its value. Every QC image uses the workflow's display window: pass
@@ -45,7 +45,7 @@ on.
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes --output roi-iioc` and `roi-iioc-trabecular`; `trabecular --output roi-metaphyseal` | the QC images `trabecular` writes (`bone-morphometry`) |
 | 8 | Ct.Th at the two levels below the distal face (#24, #25), on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment (#11, #12) on the plate runs `iioc.py` wrote, under the articular top surface | `morphometry.py cortical --output roi-cortex-100um`, `roi-cortex-1000um`, `roi-subchondral-plate-medial` or `-lateral` (the slab's declared id; its depth and thickness are in the spec) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
 | 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
-| 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec <protocol.json> --outputs /workflow/workflows/mouse-oa/outputs.json --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
+| 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec <protocol.json> --outputs /workflow/workflows/mouse-oa/outputs.yaml --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab | `amira_landmarks.py` | the lab opens it in Amira |
 
 `iioc.py --gp-shift-mm` and `tibial_trabecular.py --upper-shift-mm` rerun with a moved trace, to see how much a
@@ -167,7 +167,7 @@ scan, not a starting point for another.
 
 ## The 28 parameters
 
-The only table of the parameters. **Output id** is the id the value is written under (and the id `outputs.json`
+The only table of the parameters. **Output id** is the id the value is written under (and the id `outputs.yaml`
 binds to); `morphometry.py`, `measure.py` and `femoral_frame.py` read it from `protocol.json`, the other scripts write it themselves. Status is what
 the code does today: "computed" means the script produces the number from the regions you traced, not that the
 number is validated against the lab's own software or a second scan. BV/TV is in %. Every thickness record carries
