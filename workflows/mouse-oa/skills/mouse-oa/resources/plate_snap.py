@@ -31,7 +31,7 @@ Writes: in <out>,
 Prints: the result record {out, values, annotations, qc, sections}
 Example: python plate_snap.py --spec protocol.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --annotations annotations.json --out snap/ [--sections 34,46] [--face distal] [--snap-unsure]
 Exits 2 with one sentence on bad input, before writing anything; and when the snapped curves break a rule (`refuse_off_tibia`, `refuse_gaps`,
-`refuse_jumps`, or the faces crossing or coming closer than MIN_SEP) that your curves met: the sentence says the snap caused it.
+`refuse_jumps`, or the faces crossing) that your curves met: the sentence says the snap caused it.
 """
 
 import contextlib
@@ -346,12 +346,6 @@ def main():
         for f in snapped_faces:
             kept[f] = keep & ~np.isnan(snapped[f])
             snapped[f], _ = blend_kept(snapped[f], rows[f], kept[f])
-        sep_in, sep_out = rows['distal'] - rows['proximal'], snapped['distal'] - snapped['proximal']
-        thin = np.flatnonzero(sep_out < MIN_SEP)
-        thin = thin[sep_in[thin] >= MIN_SEP]
-        if len(thin):
-            sidecar.fail(f'the snap would bring the faces on V={v} closer than {MIN_SEP} voxels or across each other (at U={thin[0]}), where yours are not: '
-                         'this is the snap, not your tracing; snap that section on its own with --sections or --face')
         final = {f: np.abs(snapped[f] - rows[f]) for f in snapped_faces}
         sections[str(v)] = {
             'rough': rough,
@@ -370,6 +364,13 @@ def main():
         }
         for f in snapped_faces:
             new[KEYS[f]]['slices'][str(v)] = snapped_points(rough[f], snapped[f], stride, kept[f])
+        # the faces as downstream reads them (the written points, interpolated): a snap that turns them across each other is refused
+        written = {f: face_rows(new[KEYS[f]]['slices'][str(v)] if f in snapped_faces else rough[f], hu.shape[2], max_gap) for f in KEYS}
+        with np.errstate(invalid='ignore'):
+            crossed = np.flatnonzero((written['distal'] - written['proximal'] <= 0) & (rows['distal'] - rows['proximal'] > 0))
+        if len(crossed):
+            sidecar.fail(f'the snap would put the faces on V={v} across each other (at U={crossed[0]}), where yours are not: '
+                         f'this is the snap, not your tracing; leave V={v} out with --sections, or snap one face with --face')
         qc.append((v, [np.asarray(rough[f], float) for f in KEYS], [snapped[f] for f in KEYS], conf, [kept.get(f, np.zeros(hu.shape[2], bool)) for f in KEYS]))
     if not sections:
         sidecar.fail(f'no section could be snapped: {"; ".join(f"V={v}: {why}" for v, why in skipped.items())}')
