@@ -5,28 +5,33 @@ see ../references/oa-protocol.md for how to place them). The spec (--spec, proto
   a  midpoint of the upper line of the intercondylar groove      c  midpoint of the ridge on the lateral condyle
   b  intercondylar notch                                         d  vertex of the medial condyle
 DFL = |a - b|, DFW = |c - d|, W/L = DFW / DFL (deck #26-28), all straight 3D distances through physical spacing, computed by
-`measure.py`'s code from the spec's entries. The script finds the femur's mediolateral (ML) axis from the label alone (the
-long axis of the condyles' cross-section, perpendicular to the shaft), builds a frame (that ML, and SI from b to a made
-perpendicular to it) and checks the points against the femur. A failed check on the points stops the script (exit 2,
-nothing written): re-place the points, do not explain the check away. The checks: each landmark within 0.05 mm of femur
-bone; DFL at least 0.4 of DFW (an end-on view of the joint face puts a and b across the notch and DFL comes out a third of
-its size); a-b in the sagittal plane (|cos| to ML at most 0.5) and c-d across the condyles (|cos| to ML at least 0.7), so
-points placed with the sides and the front swapped (another scan's axes taken for this one's) are refused on any knee, left
-or right; and SI (b to a) pointing toward the shaft. Also refused: a missing landmark, coincident landmarks, a points file
-on another grid, and a femur label shorter than 4.5 mm along its shaft, whose axes cannot be read (a fault of the labels
-or the field of view, not of the points). That refusal, and a printed ML axis that a render of the scan contradicts, are
-raised as a To check item, not answered by moving the points.
+`measure.py`'s code from the spec's entries. The script finds the femur's mediolateral (ML) axis from the label (the long
+axis of the condyles' cross-section, perpendicular to the shaft) and compares it with the normal of the plane the femur
+and tibia shafts bend in (`normal_zyx` in the `frame` output's frame.json, from orient_joint.py): when the two agree, the
+axis is confirmed. It builds a frame (that ML, and SI from b to a made perpendicular to it) and checks the points against
+the femur. A failed check on the points stops the script (exit 2, nothing written): re-place the points, do not explain
+the check away. The checks: each landmark within 0.05 mm of femur bone; DFL at least 0.4 of DFW (an end-on view of the
+joint face puts a and b across the notch and DFL comes out a third of its size); a-b in the sagittal plane (|cos| to ML at
+most 0.5) and c-d across the condyles (|cos| to ML at least 0.7), so points placed with the sides and the front swapped
+are refused on any knee, left or right; and SI (b to a) pointing toward the shaft. Also refused: a missing landmark,
+coincident landmarks, a points file or frame on another grid.
+Two refusals are not about the points and are raised as a To check item, not answered by moving them: a femur label
+shorter than 4.5 mm along its shaft, whose axes cannot be read (the labels or the field of view cut it off), and an axis
+the bending plane does not confirm (the two reads disagree, or the frame has no bending plane: a nearly straight knee or
+a shaft out of the field) that a render of the scan, its image axes named as scan axes, contradicts. A confirmed axis is
+not open to a render's reading: a render that seems to disagree has its image axes mislabelled.
 
 Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
         distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml and si vectors, zyx) and checks;
         `objects` holds dfl-ruler (a to b) and dfw-ruler (c to d), lines on the scan grid
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}, objects}
-Example: python femoral_frame.py --spec protocol.json --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out femoral/
+Example: python femoral_frame.py --spec protocol.json --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --frame orient/frame.json --out femoral/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
 from pathlib import Path
 
+import frame as fr
 import measure
 import numpy as np
 import sidecar
@@ -38,10 +43,13 @@ MAX_OFF_BONE_MM = 0.05  # a landmark further than this from femur bone fails the
 MIN_LENGTH_OVER_WIDTH = 0.4  # DFL / DFW below this fails. One scan (n=1): OA6-1RK reference 0.71, the end-on pick that was wrong 0.27
 EPIPHYSIS_MM = 1.5  # the distal end of the femur whose widest cross-axis is taken as mediolateral
 # |cos| of a ruler's angle to the femur's mediolateral axis. a-b lies in the sagittal plane (0 ideally), c-d runs side to
-# side (1 ideally); the axis itself is within about 20 degrees of the knee's bending-plane normal and the tibial plateau's
-# long axis on OA6-1RK and OA6-2RK. OA6-2RK run f45f630f, axes swapped: a-b 0.81, c-d 0.40; correct placements on both scans 0.02 to 0.05 and 0.99.
+# side (1 ideally). OA6-2RK run f45f630f, axes swapped: a-b 0.81, c-d 0.40; correct placements on OA6-1RK and OA6-2RK 0.02
+# to 0.05 and 0.99.
 MAX_LENGTH_ML = 0.5
 MIN_WIDTH_ML = 0.7
+# |cos| between the label's ML axis and the bending-plane normal at or above which the axis counts as confirmed. AGREE_NOTE
+MIN_ML_AGREE = 0.85
+BENDING_PLANE = 'span of the two shaft axes'  # orient_joint.py's plane_rule when the normal is the bending-plane normal
 # The femur label must run at least this far along its shaft for its axes to be read. Whole labels: OA6-1RK 5.31 mm,
 # OA6-2RK 5.86. Cut to the distal few mm (review of #488), the ML axis swings by up to 42 degrees below 4.5 mm of label and by
 # under 3 degrees above it.
@@ -53,6 +61,12 @@ def unit(v):
     if n == 0:
         sidecar.fail('two landmarks coincide: re-place them')
     return v / n
+
+
+def direction(v):
+    """A direction for a refusal: the unit vector in scan (z, y, x) and the scan axis it runs mostly along."""
+    u = unit(np.asarray(v, float))
+    return f"{np.round(u, 2).tolist()} (scan z, y, x), mostly scan {'zyx'[int(np.argmax(np.abs(u)))]}"
 
 
 def main_axis(p):
@@ -108,9 +122,13 @@ def main():
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid: the landmarks are checked against the femur')
     ap.add_argument('--label', type=int, default=1, help='femur label id')
+    ap.add_argument('--frame', type=sidecar.existing, required=True, help="frame.json of the `frame` output (orient_joint.py): its bending-plane normal confirms the femur's mediolateral axis")
     a = ap.parse_args()
     grid = sidecar.grid(a.hu_json)
     lm = sidecar.load_points(a.landmarks, grid['grid_id'])
+    knee = fr.load(a.frame)
+    if knee['parent_grid_id'] != grid['grid_id'] or 'normal_zyx' not in knee:
+        sidecar.fail(f'{a.frame} is not the frame orient_joint.py cut from this scan: pass the `frame` output\'s frame.json')
     if any(n not in lm for n in NAMES):
         sidecar.fail(f'place a, b (length) and c, d (width); the points files hold {sorted(lm)}')
     if list(lm['a']) == list(lm['b']) or list(lm['c']) == list(lm['d']):
@@ -140,18 +158,33 @@ def main():
                      'are the problem, not the points. Do not move the points: raise a To check item naming this')
     checks['a_b_cos_to_ml'] = abs(unit(pm['a'] - pm['b']) @ ml)
     checks['c_d_cos_to_ml'] = abs(unit(pm['c'] - pm['d']) @ ml)
-    axis = (f"The femur's mediolateral axis (the long axis of its condyles' cross-section in the label) runs along "
-            f'{np.round(ml, 2).tolist()} (scan z, y, x): that is the scan direction that runs side to side on this scan, '
-            'not which side is lateral or where the front is; read those from a render of this scan, never from another scan')
-    way_out = ('If a render of this scan shows the condyles side by side along another direction, the axis is wrong: leave the '
-               'points and raise a To check item naming the printed axis')
+    normal = unit(np.array(knee['normal_zyx'], float))  # voxel-index direction; frames need isotropic voxels, so mm agrees
+    checks['ml_cos_to_bending_normal'] = abs(ml @ normal)
+    checks['bending_plane'] = knee.get('plane_rule') == BENDING_PLANE
+    confirmed = checks['bending_plane'] and checks['ml_cos_to_bending_normal'] >= MIN_ML_AGREE
+    axis = f"the femur's mediolateral axis runs along {direction(ml)}"
+    if confirmed:
+        axis += (f": confirmed by two reads that agree (|cos| {checks['ml_cos_to_bending_normal']:.2f}), the long axis of the "
+                 "condyles' cross-section in the femur label and the normal of the plane the femur and tibia shafts bend in "
+                 '(frame.json). The condyles sit side by side along that direction on this scan. A render that seems to show '
+                 'them along another direction has its image axes mislabelled: name the scan axis along each image axis of '
+                 'that render before you re-place the points. Which side is lateral and where the front is still come from a '
+                 'render of this scan')
+        way_out = ''
+    else:
+        axis += (", read from the long axis of the condyles' cross-section in the femur label; the bending plane does not "
+                 + (f"confirm it (|cos| {checks['ml_cos_to_bending_normal']:.2f} to its normal, at least {MIN_ML_AGREE})"
+                    if checks['bending_plane'] else 'confirm it (frame.json has none: the knee is nearly straight or a shaft is out of the field)'))
+        way_out = (' If a render of this scan, with each image axis named as a scan axis, shows the condyles side by side along '
+                   'another direction, leave the points and raise a To check item naming the printed axis')
     if checks['a_b_cos_to_ml'] > MAX_LENGTH_ML:
-        sidecar.fail(f"a-b runs side to side (|cos| {checks['a_b_cos_to_ml']:.2f} to the mediolateral axis, at most "
-                     f'{MAX_LENGTH_ML}), but DFL runs from the front of the groove to the notch, in the sagittal plane. {axis}. '
-                     f'Re-place a and b. {way_out}')
+        sidecar.fail(f"a-b runs along {direction(pm['a'] - pm['b'])}, side to side (|cos| {checks['a_b_cos_to_ml']:.2f} to the "
+                     f'mediolateral axis, at most {MAX_LENGTH_ML}), but DFL runs from the front of the groove to the notch, in '
+                     f'the sagittal plane: {axis}. Re-place a and b.{way_out}')
     if checks['c_d_cos_to_ml'] < MIN_WIDTH_ML:
-        sidecar.fail(f"c-d does not run side to side (|cos| {checks['c_d_cos_to_ml']:.2f} to the mediolateral axis, at least "
-                     f'{MIN_WIDTH_ML}), but DFW spans the two condyles. {axis}. Re-place c and d. {way_out}')
+        sidecar.fail(f"c-d runs along {direction(pm['c'] - pm['d'])}, not side to side (|cos| {checks['c_d_cos_to_ml']:.2f} to "
+                     f'the mediolateral axis, at least {MIN_WIDTH_ML}), but DFW spans the two condyles: {axis}. Re-place c and '
+                     f'd.{way_out}')
     si_seed = pm['a'] - pm['b']
     si = unit(si_seed - (si_seed @ ml) * ml)
     frame = {
@@ -169,7 +202,8 @@ def main():
     sidecar.emit_values(
         out / 'femoral.json',
         values,
-        meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks, 'inputs': {a.spec: sidecar.sha256_file(a.spec)}},
+        meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks,
+              'inputs': {a.spec: sidecar.sha256_file(a.spec), a.frame: sidecar.sha256_file(a.frame)}},
         objects=placed,
     )
 
