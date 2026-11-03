@@ -154,7 +154,7 @@ export const samInput = z
     output: z
       .string()
       .describe(
-        "Where to write the labels .npy, under /outputs or /scratch. Next to it the tool writes `<output without .npy>.json`.",
+        "Where to write the labels .npy: only in your own $WORK folder (/outputs is read-only). Next to it the tool writes `<output without .npy>.json`.",
       ),
   })
   // The program in the sandbox image is pinned separately from the harness: a field it does not
