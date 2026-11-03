@@ -54,6 +54,8 @@ import {
   type PlaneFit,
   QUAD_START,
   type QuadLayout,
+  voxelOf,
+  type Zyx,
 } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
 import {
@@ -70,7 +72,7 @@ import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
 import { MainConversation } from "./main-conversation";
-import { QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
+import { gridKeyOf, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
 import { FinalOutputs, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
@@ -217,6 +219,29 @@ export function OutputsReview({
   const store = run.example ? exampleMarks : runMarks;
   const settled = runMarks.settled;
   const marking = useMarking(QUAD_TOOLS, store);
+  // Opening a published ruler or point puts the slices through its first end once, so a Navigate
+  // drag can take it; a To check item's own focus wins, and later events leave the slices alone.
+  const inViewId = inView?.id;
+  const aimedFor = useRef<string | undefined>(undefined);
+  const { jumpTo } = marking;
+  const inViewLoaded = !!inView?.state.latest;
+  useEffect(() => {
+    if (!inViewId || item) return;
+    const a = blocks.annotations.find((x) => x.id === inViewId);
+    // Another loaded output in view ends the aim, so coming back to the ruler aims again.
+    if (!a && inViewLoaded) aimedFor.current = undefined;
+    if (aimedFor.current === inViewId) return;
+    const on = a && blocks.volumes.find((v) => v.id === a.volumeId);
+    const image = on && blocks.volumes.find((v) => v.kind === "image" && v.gridId === on.gridId);
+    const gridKey = image && gridKeyOf(image);
+    // The jump needs the image's real shape, which arrives with its converted assets.
+    if (!a || image?.data?.format !== "npy" || !gridKey) return;
+    if (assets[image.data.sha256]?.state !== "ready") return;
+    aimedFor.current = inViewId;
+    const end = voxelOf(image, a.kind === "point" ? a.position : a.a);
+    const at = end.map((n, i) => Math.max(0, Math.min(image.shapeZyx[i]! - 1, Math.round(n))));
+    jumpTo({ at: at as unknown as Zyx, gridKey, taskId: inViewId });
+  }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
   const allViews = useMemo(() => savedViews(events), [events]);
   const views = useSavedViews(run, allViews, reopen);
   const scene = useRef<SceneHandle>(null);
@@ -346,7 +371,8 @@ export function OutputsReview({
     panes = (
       <Centered>
         <EmptyState title="The run is going">
-          The AI's plan is in the conversation. What it makes shows here as it is published.
+          The AI is still setting up. What it makes shows here as it is published, and its plan in
+          the conversation.
         </EmptyState>
       </Centered>
     );
@@ -487,7 +513,7 @@ export function OutputsReview({
           }
           icon={<Sigma />}
           badge={needing || undefined}
-          badgeLabel={`${needing} need you`}
+          badgeLabel={`${needing} to check`}
           tools={
             <>
               {(!live || needing > 0 || onlyNeeds) && (
@@ -498,7 +524,7 @@ export function OutputsReview({
                   disabled={needing === 0 && !onlyNeeds}
                   onClick={() => setOnlyNeeds(!onlyNeeds)}
                 >
-                  Needs you <span className="font-semibold">{needing}</span>
+                  To check <span className="font-semibold">{needing}</span>
                 </Button>
               )}
               <Button

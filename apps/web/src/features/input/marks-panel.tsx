@@ -353,6 +353,7 @@ export function useMarking(tools: readonly Tool[], store: MarkStore) {
     jump,
     shown,
     setShown,
+    jumpTo: setJump,
     jumped: useCallback(() => setJump(undefined), []),
     /** Adds a mark at the cap's mercy; returns its id, or undefined when full. */
     add: useCallback(

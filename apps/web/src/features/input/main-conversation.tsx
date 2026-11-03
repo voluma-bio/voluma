@@ -271,14 +271,20 @@ export function MainConversation({
         <div className="flex items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-xs text-muted-foreground">
             {message.picture && (
-              <label className="flex items-center gap-1.5">
+              <label
+                title={`With ${message.picture}, as you see it`}
+                className="flex min-w-0 max-w-full items-center whitespace-nowrap"
+              >
                 <input
                   type="checkbox"
+                  className="mr-1.5 shrink-0"
                   checked={withPicture}
                   disabled={send.isPending}
                   onChange={(e) => setWithPicture(e.target.checked)}
                 />
-                With {message.picture}, as you see it
+                <span className="shrink-0">With&nbsp;</span>
+                <span className="min-w-0 truncate">{message.picture}</span>
+                <span className="shrink-0">, as you see it</span>
               </label>
             )}
             {attached.length > 0 && <span>{message.picture ? "and" : "With"} your marks:</span>}

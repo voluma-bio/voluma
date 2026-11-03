@@ -285,7 +285,7 @@ export function SlicePane({
     const image = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ transparent: true }));
     const cross = new LineSegments(
       new BufferGeometry(),
-      new LineBasicMaterial({ vertexColors: true, depthTest: false }),
+      new LineBasicMaterial({ vertexColors: true, transparent: true, depthTest: false }),
     );
     cross.renderOrder = 1;
     const drawings = new Group();
@@ -313,6 +313,8 @@ export function SlicePane({
       camera.top = v.center[1] + height / 2 / v.zoom;
       camera.bottom = v.center[1] - height / 2 / v.zoom;
       camera.updateProjectionMatrix();
+      // Ruler-end dots are 5 px radius at any zoom (their geometry is in pixels).
+      for (const o of drawings.children) if (o.userData.dot) o.scale.setScalar(1 / v.zoom);
       renderer.render(sc, camera);
       layer.draw();
       placeNote();
@@ -452,12 +454,11 @@ export function SlicePane({
       );
       const object = new LineSegments(
         geometry,
-        new LineBasicMaterial({ color, opacity, transparent: opacity < 1, depthTest: false }),
+        new LineBasicMaterial({ color, opacity, transparent: true, depthTest: false }),
       );
       object.renderOrder = 2;
       objects.push(object);
     };
-    const dotSize = Math.max(s[ra], s[ca]) * 2;
     for (const m of traceMeshes) line(traceSegments.get(m.id) ?? [], m.color, m.opacity);
     for (const a of scene.annotations) {
       if (a.opacity <= 0) continue;
@@ -474,16 +475,17 @@ export function SlicePane({
       for (const p of dots) {
         if (Math.abs(slab(p)) > 0.5) continue;
         const dotMesh = new Mesh(
-          new CircleGeometry(dotSize, 12),
+          new CircleGeometry(5, 12),
           new MeshBasicMaterial({
             color: a.color,
             opacity: a.opacity,
-            transparent: a.opacity < 1,
+            transparent: true,
             depthTest: false,
           }),
         );
         dotMesh.position.set(...toPane(p), 2);
         dotMesh.renderOrder = 2;
+        dotMesh.userData.dot = true;
         objects.push(dotMesh);
       }
     }

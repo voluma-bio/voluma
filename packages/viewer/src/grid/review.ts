@@ -397,15 +397,21 @@ function focusPoint(
     return [{ min: [...v.offsetZyx], max: v.offsetZyx.map((o, i) => o + v.mask.shapeZyx[i]! - 1) }];
   });
   if (masks.length) return middle(masks);
-  const points = revision.annotations
-    .filter((a) => focus.on.includes(a.id) && sameGrid(a.volumeId))
+  const marks = revision.annotations.filter((a) => focus.on.includes(a.id) && sameGrid(a.volumeId));
+  // One ruler: its first end, since the panes' slices are thin and an end is grabbed only on a
+  // slice through it. Several marks: their middle.
+  if (marks.length === 1) {
+    const [only] = marks as [(typeof marks)[number]];
+    return clamp(voxelOf(image, only.kind === "point" ? only.position : only.a));
+  }
+  const points = marks
     .flatMap((a) => (a.kind === "point" ? [a.position] : [a.a, a.b]))
     .map((world) => voxelOf(image, world));
   return middle(points.map((p) => ({ min: p, max: p })));
 }
 
 /** World mm to voxel (z, y, x): the affine's columns are orthogonal, so each is a projection. */
-function voxelOf(volume: Volume, world: readonly number[]): number[] {
+export function voxelOf(volume: Volume, world: readonly number[]): number[] {
   const m = volume.affine;
   const d = [0, 1, 2].map((r) => world[r]! - m[r]![3]!);
   const xyz = [0, 1, 2].map((j) => {

@@ -75,7 +75,7 @@ export type OutputsReview = {
    * undeclared: what "Other outputs so far" lists while the run goes.
    */
   others: OutputRow[];
-  /** The final outputs that need a person (`needingYou`): what Needs you counts. */
+  /** The final outputs that need a person (`needingYou`): what To check counts. */
   needing: Set<string>;
   /** Final outputs with a version, of all final outputs. */
   progress: { done: number; total: number };

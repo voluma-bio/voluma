@@ -177,13 +177,16 @@ export function HeadlineBlock({
   const output = workflow.headline[0] ?? measurementsOf(workflow)[0];
   if (!output) return null;
   const any = valuesOf(detail, output).length > 0;
+  const others = measurementsOf(workflow).some((o) => valuesOf(detail, o).length > 0);
   return (
     <SideBlock title={output.name} aside={<span className="text-fg-subtle">{unitOf(output)}</span>}>
       {any ? (
         <MeasurePlot detail={detail} output={output} />
       ) : (
         <p className="m-0 text-sm text-muted-foreground">
-          No values yet. Each {INPUT_WORD.one}'s values appear when its run finishes.
+          {others
+            ? "No headline value yet. Other measurements have values."
+            : `No values yet. Each ${INPUT_WORD.one}'s values appear when its run finishes.`}
         </p>
       )}
       {detail.inputs.length > 1 && (

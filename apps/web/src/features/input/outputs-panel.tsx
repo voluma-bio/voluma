@@ -97,7 +97,7 @@ function Values(props: FinalOutputsProps) {
     .map((s) => ({ ...s, rows: onlyNeeds ? s.rows.filter((r) => needing.has(r.id)) : s.rows }))
     .filter((s) => s.rows.length > 0);
   if (groups.length === 0)
-    return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing needs you.</p>;
+    return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing to check.</p>;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 py-1.5">
       {groups.map((s) => (
@@ -134,7 +134,7 @@ function Section({
   const notIn = props.live ? rows.filter((r) => !hasVersion(r.state)).length : 0;
   const first = rows.find((r) => r.value);
   return (
-    <section aria-label={title} className="grid">
+    <section aria-label={title} className="grid grid-cols-[minmax(0,1fr)]">
       <button
         type="button"
         aria-expanded={open}
@@ -169,7 +169,7 @@ function Section({
         </span>
       </button>
       {open && (
-        <ul className="m-0 grid list-none p-0">
+        <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] p-0">
           {rows.map((r) =>
             r.id === props.selected?.id ? (
               <Opened key={r.id} row={r} {...props} />
@@ -499,7 +499,10 @@ function OtherOutputs({ rows, ...props }: FinalOutputsProps & { rows: OutputRow[
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const shown = toggled && toggled.when === holds ? toggled.open : holds;
   return (
-    <section aria-label="Other outputs so far" className="grid px-1.5 pb-3">
+    <section
+      aria-label="Other outputs so far"
+      className="grid grid-cols-[minmax(0,1fr)] px-1.5 pb-3"
+    >
       <button
         type="button"
         aria-expanded={shown}

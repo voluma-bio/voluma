@@ -151,14 +151,14 @@ its Rests on); "not yet" for nothing published; "N of M in" in the panel head (t
 says only Running), with Needs you only once something does; and "Other outputs so far" under the
 values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
 stays open until Esc. A section's tick waits for every value in it. The centre says the run is going and the
-AI's plan is in the conversation until the value has a version, is marked missing, or something
+AI is still setting up (its plan comes in the conversation) until the value has a version, is marked missing, or something
 on its chain has a version; then it shows the nearest such link, the scene bar saying "<value>
 rests on". `studiesQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item` and
 `centre` (`run` for the whole run, `agents`). An `output` that isn't a listed value opens under
-the first value resting on it (`show`, also what a click in the whole run does). The panes'
+the first value resting on it (`show`, also what a click in the whole run does). A published ruler or point in view (an item's own focus wins) puts the slices through its first end once on selecting it, through the one-shot `marking.jump` (not the To check `focus`, so later events and your own panning are left alone), where a Navigate drag can take it; the end is drawn as a dot and shows a grab cursor. The panes'
 layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
 (both sides folded) plus that pane: the page keeps only which view fills and derives the rest
 from the shell, so leaving Full view by any means gives the panes back. The whole run folds Final

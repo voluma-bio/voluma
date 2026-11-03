@@ -65,11 +65,11 @@ export {
   inputLabel,
   itemHref,
   liveStatus,
-  needsYouText,
   plural,
   type RunStatus,
   runCost,
   runStatus,
+  toCheckText,
   whenText,
 } from "./run-status";
 export {
