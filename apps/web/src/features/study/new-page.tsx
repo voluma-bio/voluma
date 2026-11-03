@@ -71,7 +71,8 @@ function startError(error: unknown): string {
     if (error.status === 404) return `A ${INPUT_WORD.one} or the workflow is no longer available.`;
     if (error.status === 409)
       return "You already have a run going. Wait for it to finish or stop it, then start again.";
-    if (error.status === 429) return "The run limit is reached for now. Try again later.";
+    if (error.status === 429)
+      return error.serverMessage ?? "The run limit is reached for now. Try again later.";
   }
   return "Couldn't start. Try again.";
 }

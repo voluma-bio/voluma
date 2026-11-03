@@ -68,18 +68,23 @@ export async function usage(
  * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
  * claim is for `voluma` runs, since a visitor run's caps were checked when it
  * was queued. A reopen (a correction) of a `voluma` run (the route refuses visitor runs first) is
- * judged by the per-caller and spend limits. Checks run in this order. A claim ignores spend: a
- * queued run was admitted, and may go on.
+ * judged by the per-caller and spend limits. Checks run in this order. A claim refuses on spend only
+ * a run that never started (one start request can queue many runs under the limit); a run that
+ * started keeps going after a deploy or a reopen, so a live run is never refused.
  */
 export function admit(
   stage: "start" | "resume" | "reopen" | "claim",
   limits: Limits,
   u: Usage,
-  run: { credentials: Run["credentials"] },
+  run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
   if (stage === "claim" && u.running >= limits.concurrent) return "concurrent";
   if (stage === "reopen" && u.callerUnfinished >= limits.perCaller) return "per-caller";
-  if (stage !== "claim" && run.credentials === "voluma" && u.spentUsd >= limits.spendUsd) {
+  if (
+    !(stage === "claim" && run.started) &&
+    run.credentials === "voluma" &&
+    u.spentUsd >= limits.spendUsd
+  ) {
     return "spend";
   }
   if (stage === "reopen") return null;

@@ -659,7 +659,10 @@ export function pgRunQueue(
           if (run.credentials === "voluma") {
             const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
             usages.set(run.labId, used);
-            const refused = admit("claim", orgLimits, used, { credentials: "voluma" });
+            const refused = admit("claim", orgLimits, used, {
+              credentials: "voluma",
+              started: run.startedAt !== null,
+            });
             if (refused === "concurrent") continue;
             if (refused) {
               await fail(tx, run.id, refusalError[refused]);
