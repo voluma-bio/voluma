@@ -96,7 +96,7 @@ function withEnd(mark: GridMark, index: number, p: Zyx, spacingZyx: Zyx): GridMa
 /** The ends a press can take: a point's voxel (not a probe's), a line's two, an angle's three. */
 function endsOf(mark: GridMark): readonly Zyx[] {
   const probe = "point" in mark && mark.probe;
-  return probe || "box" in mark || "outline" in mark ? [] : markPoints(mark);
+  return probe || "box" in mark || "outline" in mark || "path" in mark ? [] : markPoints(mark);
 }
 
 /**

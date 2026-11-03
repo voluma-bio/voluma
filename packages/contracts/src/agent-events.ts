@@ -232,7 +232,8 @@ const vec3 = z.tuple([z.number(), z.number(), z.number()]);
 
 /**
  * What a mark is, in the grid's voxels (z, y, x) as the viewer draws it: a point (with a note, or
- * the value a probe read), a box, a ruler, an angle or an outline. Loose, so a kind can grow.
+ * the value a probe read), a box, a ruler, an angle, an outline (closed, with its area) or a path
+ * (open, freehand on one pane, with its length). Loose, so a kind can grow.
  */
 const markShapeSchema = z.union([
   z.looseObject({
@@ -253,6 +254,7 @@ const markShapeSchema = z.union([
     angle: z.object({ aZyx: vec3, vertexZyx: vec3, bZyx: vec3, degrees: z.number() }),
   }),
   z.looseObject({ outline: z.object({ zyx: z.array(vec3), areaMm2: z.number() }) }),
+  z.looseObject({ path: z.object({ zyx: z.array(vec3), lengthMm: z.number() }) }),
 ]);
 
 /** A mark's shape as code holds it (the viewer's `GridMark`): read-only, the known keys only. */
@@ -271,7 +273,7 @@ type Known<T> = T extends readonly unknown[]
  * from the same person replaces the mark (a note typed, a mark moved), and `mark.deleted` removes
  * it. To send a mark to main as a correction, `world` and `plane` say where it is without the
  * viewer: `world` holds the mark's vertices in mm (x, y, z), in the order of `mark`'s own
- * (a point's one; a line's a, b; an angle's a, vertex, b; a box's min, max; an outline's), mapped
+ * (a point's one; a line's a, b; an angle's a, vertex, b; a box's min, max; an outline's or a path's, in drawing order), mapped
  * through the affine of image volume `volume`, the grid it was drawn on. `gridKey` is the
  * viewer's identity of that image's bytes: a redo that replaces the image leaves the mark unshown.
  * `plane` is the pane's frame in that grid's mm (z, y, x): `view` is "xy", "xz", "yz" or "gp",
