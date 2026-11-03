@@ -9,7 +9,8 @@
  * also has `report_output`, and its limit is `outputs`.
  */
 
-import { approvalRequestId } from "@voluma/contracts/agents";
+import { isDeepStrictEqual } from "node:util";
+import { approvalRequestId, openApprovals } from "@voluma/contracts/agents";
 import type { Tool, ToolContext } from "../../tools/tool";
 import { madeStale } from "../approvals";
 import type { AgentsApi } from "./coordination";
@@ -17,6 +18,9 @@ import { Refusal } from "./refusal";
 
 export const heldText = (toolCallId: string) =>
   `Held for the researcher (approval ${toolCallId}). Your turn ends; the answer arrives as a delivery.`;
+
+export const alreadyWaitingText = (tool: string) =>
+  `Refused: this ${tool} call is already waiting on the researcher, with the same arguments. Do not send it again; end your turn and wait for the answer, which arrives as a delivery.`;
 
 export interface GateDeps {
   api: AgentsApi;
@@ -64,7 +68,19 @@ export function gate(tool: Tool, gated: ReadonlySet<string>, deps: GateDeps): To
           for (const f of flag.files?.(input, ctx) ?? [])
             fileHashes[f.key] = await deps.hashIn(ctx.threadId, f.path, ctx.signal);
           const outputs = flag.outputs(input);
-          await api.section(async () => {
+          // Main re-issues a call after a nudge or a repeated delivery; one change gets one card.
+          // Checked inside the section so two identical calls in one batch cannot both hold, and
+          // with the file hashes so a re-report of an edited file is a new request.
+          const duplicate = await api.section(async () => {
+            if (
+              openApprovals(api.log().approvals).some(
+                (a) =>
+                  a.tool === tool.name &&
+                  isDeepStrictEqual(a.args, input) &&
+                  isDeepStrictEqual(a.fileHashes, fileHashes),
+              )
+            )
+              return true;
             await api.recorder.append(
               ctx.threadId,
               "approval.requested",
@@ -82,7 +98,10 @@ export function gate(tool: Tool, gated: ReadonlySet<string>, deps: GateDeps): To
               },
               requestId,
             );
+            return false;
           });
+          if (duplicate)
+            return { output: alreadyWaitingText(tool.name), isError: true, truncated: false };
         }
       } catch (error) {
         if (!(error instanceof Refusal)) throw error;
