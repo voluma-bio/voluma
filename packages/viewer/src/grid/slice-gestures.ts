@@ -174,10 +174,12 @@ export function useSliceGestures(args: {
     let clicks: Zyx[] = [];
     // The editable end nearest the pointer on this slice, within `END_HIT_PX`: your marks first,
     // so a ruler you already moved drags as yours.
+    // Box, Outline and Probe never grab: a press there always draws or reads.
     const endAt = (event: { clientX: number; clientY: number }): End | null => {
-      const { onEdit, marks, annotations, slab, toPane: tp } = latest.current;
+      const { onEdit, marks, annotations, slab, toPane: tp, tool: now } = latest.current;
       const v = view.current;
       if (!onEdit || !v) return null;
+      if (now && now !== "point" && now !== "line" && now !== "angle") return null;
       const rect = element.getBoundingClientRect();
       const px = (p: Zyx) => {
         const [x, y] = tp(p);

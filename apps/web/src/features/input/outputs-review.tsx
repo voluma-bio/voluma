@@ -203,7 +203,7 @@ export function OutputsReview({
   const focusKey = item?.focus && JSON.stringify(item.focus);
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
-  const [onlyToCheck, setOnlyNeeds] = useState(false);
+  const [onlyToCheck, setOnlyToCheck] = useState(false);
   const toCheck = review.open.size;
   const [leftTab, setLeftTab] = useState("conversation");
   const said = useMemo(() => conversation(events), [events]);
@@ -522,7 +522,7 @@ export function OutputsReview({
                   variant={onlyToCheck ? "secondary" : "ghost"}
                   aria-pressed={onlyToCheck}
                   disabled={toCheck === 0 && !onlyToCheck}
-                  onClick={() => setOnlyNeeds(!onlyToCheck)}
+                  onClick={() => setOnlyToCheck(!onlyToCheck)}
                 >
                   To check <span className="font-semibold">{toCheck}</span>
                 </Button>

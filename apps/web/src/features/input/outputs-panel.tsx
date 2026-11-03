@@ -141,7 +141,14 @@ function Section({
   // Opens by itself when it comes to hold the selection or an item; a click overrides until then.
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const open = toggled && toggled.when === opens ? toggled.open : opens;
-  const toCheck = new Set(rows.flatMap((r) => openItemsOf(r).map((i) => i.key))).size;
+  // With the filter on, a row counts only the items it owns, so the sections add up to the head.
+  const toCheck = new Set(
+    rows.flatMap((r) =>
+      openItemsOf(r)
+        .filter((i) => !props.onlyToCheck || i.output === r.id)
+        .map((i) => i.key),
+    ),
+  ).size;
   // While the run goes, a tick only once every row has a version (the panel head counts them).
   const notIn = props.live ? rows.filter((r) => !hasVersion(r.state)).length : 0;
   const first = rows.find((r) => r.value);

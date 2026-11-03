@@ -330,7 +330,9 @@ function Row({
         {row.name}
       </span>
       {row.kind === "study" && <span className="flex-1" />}
-      <span className="text-fg-subtle text-xs">{row.count}</span>
+      <span className="text-fg-subtle text-xs">
+        {row.count} {row.count === 1 ? INPUT_WORD.one : INPUT_WORD.many}
+      </span>
     </div>
   );
 }
