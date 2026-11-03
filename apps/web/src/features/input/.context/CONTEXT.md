@@ -158,7 +158,7 @@ rests on". `studiesQuery` refetches while a run is live, so the Samples tab
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item` and
 `centre` (`run` for the whole run, `agents`). An `output` that isn't a listed value opens under
-the first value resting on it (`show`, also what a click in the whole run does). A published ruler or point in view (an item's own focus wins) puts the slices through its first end (`rulerFocus`, `focusPoint`), where a Navigate drag can take it; the end is drawn as a dot and shows a grab cursor. The panes'
+the first value resting on it (`show`, also what a click in the whole run does). A published ruler or point in view (an item's own focus wins) puts the slices through its first end once on selecting it, through the one-shot `marking.jump` (not the To check `focus`, so later events and your own panning are left alone), where a Navigate drag can take it; the end is drawn as a dot and shows a grab cursor. The panes'
 layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
 (both sides folded) plus that pane: the page keeps only which view fills and derives the rest
 from the shell, so leaving Full view by any means gives the panes back. The whole run folds Final
