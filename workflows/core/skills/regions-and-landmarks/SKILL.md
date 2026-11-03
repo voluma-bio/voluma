@@ -35,6 +35,14 @@ slices you have looked at with a pixel grid, where the shape changes and at the 
 five slices across a curved region gives a coarse surface. Look at `region-check.jpg` before you measure in the
 region.
 
+## A researcher's mark
+
+A mark comes in world mm. `marks_to_grid.py` maps it onto the grid you work on with that grid's own header: `--curve`
+splices a line or path drawn along a face on one section into that section's curve, in a copy of your annotations; `--seed` gives a labelled
+voxel inside an outline and says whether its piece stands apart from the bone, to take the piece out of its label
+(`segmentation-check`). The mark replaces your work only where it lies: look at it on that section's view, and bring the
+neighbouring sections and the rest of the region to meet it.
+
 ## Hand the points to the lab: Amira
 
 `amira_landmarks.py` writes points files on the scan grid as one Amira landmark set in physical millimetres, with a

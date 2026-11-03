@@ -27,11 +27,13 @@ export interface SandboxSession {
    */
   get(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;
   /**
-   * Destroys the thread's sandbox (the supervisor calls it when the thread ends) and sends
-   * `stopped`. A thread resumed later gets a fresh sandbox and the restart note. A no-op once
-   * the session is closed.
+   * Destroys the sandbox the thread holds now (the supervisor calls it when the thread ends)
+   * and sends `stopped`. The sandbox is detached at the call, before `beforeDestroy` runs, so a
+   * thread resumed meanwhile gets a fresh sandbox and the restart note, and this release never
+   * destroys it. `beforeDestroy` runs first (stopping the thread's commands). A no-op once the
+   * session is closed.
    */
-  release(threadId: string): Promise<void>;
+  release(threadId: string, beforeDestroy?: () => Promise<void>): Promise<void>;
   /** Destroys every sandbox created; later `get` calls throw. */
   close(): Promise<void>;
 }
@@ -108,6 +110,13 @@ function threadSandbox(
     return entry;
   };
 
+  const destroyEntry = async (entry: Entry | undefined, detail?: string) => {
+    const sandbox = await entry?.sandbox.catch(() => undefined);
+    if (!sandbox) return;
+    await sandbox.destroy();
+    onState(threadId, "stopped", detail);
+  };
+
   return {
     async get(notify: boolean): Promise<Sandbox> {
       assertOpen();
@@ -174,16 +183,30 @@ function threadSandbox(
         },
       };
     },
+    /**
+     * Detaches the thread's current sandbox in this synchronous step, then runs `beforeDestroy`
+     * and destroys that one. Destroy takes ~30 s on Modal; a `get` in that window starts its own
+     * entry, which this release must not see.
+     */
+    release(beforeDestroy?: () => Promise<void>): Promise<void> {
+      const entry = current;
+      current = undefined;
+      return (async () => {
+        try {
+          await beforeDestroy?.();
+        } finally {
+          // "released": the thread's previous sandbox, which may stop while a resume's new one runs.
+          await destroyEntry(entry, "released");
+        }
+      })();
+    },
     async close() {
       // Whatever `current` holds after each await, including a replacement a `get` installed
       // meanwhile.
       while (current) {
         const entry = current;
         current = undefined;
-        const sandbox = await entry.sandbox.catch(() => undefined);
-        if (!sandbox) continue;
-        await sandbox.destroy();
-        onState(threadId, "stopped");
+        await destroyEntry(entry);
       }
     },
   };
@@ -197,6 +220,7 @@ export function sandboxSession(
   restartNote: (threadId: string) => string,
 ): SandboxSession {
   const threads = new Map<string, ReturnType<typeof threadSandbox>>();
+  const pending = new Set<Promise<void>>();
   let closed = false;
   const assertOpen = () => {
     if (closed) throw new Error("the sandbox session is closed");
@@ -211,13 +235,25 @@ export function sandboxSession(
       }
       return thread.get(options?.note !== false);
     },
-    async release(threadId) {
-      if (!closed) await threads.get(threadId)?.close();
+    async release(threadId, beforeDestroy) {
+      const thread = threads.get(threadId);
+      if (closed || !thread) return;
+      const releasing = thread.release(beforeDestroy);
+      pending.add(releasing);
+      try {
+        await releasing;
+      } finally {
+        pending.delete(releasing);
+      }
     },
     async close() {
       closed = true;
-      // Concurrent closes: one thread's slow destroy must not hold up the others'.
-      await Promise.all([...threads.values()].map((t) => t.close()));
+      // Concurrent closes: one thread's slow destroy must not hold up the others'. A release
+      // still destroying its detached sandbox finishes before the claim ends.
+      await Promise.all([
+        ...[...threads.values()].map((t) => t.close()),
+        ...[...pending].map((p) => p.catch(() => {})),
+      ]);
     },
   };
 }
