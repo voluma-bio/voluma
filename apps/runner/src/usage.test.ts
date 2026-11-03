@@ -47,18 +47,20 @@ describe("usage meter stop check", () => {
     meter.addModelCall("main", "t1", call(100, 1900), Date.now()); // hit: resets
     meter.addModelCall("main", "t1", miss, Date.now());
     meter.addMessage("t1", { role: "system", text: "Tools changed: added bash" });
-    expect(meter.addModelCall("main", "t1", miss, Date.now())).toBeUndefined(); // expected
-    meter.addModelCall("main", "t1", miss, Date.now());
+    expect(meter.addModelCall("main", "t1", miss, Date.now())).toBeUndefined(); // expected: streak stays 1
+    expect(meter.addModelCall("main", "t1", miss, Date.now())?.kind).toBe("cache"); // 2
     meter.addMessage("t1", { role: "assistant", text: "summary", compaction: true });
     expect(meter.addModelCall("main", "t1", miss, Date.now())).toBeUndefined(); // new baseline
   });
 
-  it("expects a miss after the thread sat idle, and still counts one after a short gap", () => {
-    const meter = usageMeter(limits({ cacheMissLimit: 1 }));
+  it("expects a miss after the thread sat idle, without clearing the streak", () => {
+    const meter = usageMeter(limits({ cacheMissLimit: 3 }));
     const t0 = Date.now();
     meter.addModelCall("main", "t1", call(1000, 0, 1000), t0);
-    const idle = t0 + CACHE_IDLE_MS + 1000;
-    expect(meter.addModelCall("main", "t1", miss, idle)).toBeUndefined(); // idle: expected
-    expect(meter.addModelCall("main", "t1", miss, Date.now())?.kind).toBe("cache");
+    expect(meter.addModelCall("main", "t1", miss, Date.now())).toBeUndefined(); // unexpected: 1
+    const idle = Date.now() + CACHE_IDLE_MS + 1000;
+    expect(meter.addModelCall("main", "t1", miss, idle)).toBeUndefined(); // idle: expected, still 1
+    expect(meter.addModelCall("main", "t1", miss, Date.now())).toBeUndefined(); // 2
+    expect(meter.addModelCall("main", "t1", miss, Date.now())?.kind).toBe("cache"); // 3
   });
 });

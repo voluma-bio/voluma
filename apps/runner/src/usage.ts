@@ -90,10 +90,12 @@ export function usageMeter(limits: StopLimits) {
       lastEnd.set(threadId, Date.now());
       const kind = missKind(miss, toolsChanged.has(threadId), idleMs);
       if (miss !== undefined) toolsChanged.delete(threadId);
+      // Only a hit clears the streak: an expected miss, like an unreported call, says nothing
+      // about whether the cache works, so a broken cache can't hide behind idle gaps.
       const streak =
         kind === "unexpected"
           ? (streaks.get(threadId) ?? 0) + 1
-          : miss === undefined
+          : kind === "expected" || miss === undefined
             ? (streaks.get(threadId) ?? 0)
             : 0;
       streaks.set(threadId, streak);
