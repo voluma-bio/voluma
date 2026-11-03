@@ -396,10 +396,9 @@ export function pgRunQueue(
     if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
-    // Internal until the agent loop ships: only allowed organizations (never guests) may ask
-    // for it, and the default loop applies to them alone, so flipping it never fails another
-    // account's run.
-    const loopOpen = agentLoopOf(reader.labId) && !caller.guest;
+    // Only organizations whose flag is on may ask for the agent loop, and the default loop
+    // applies to them alone, so flipping it never fails another account's run.
+    const loopOpen = agentLoopOf(reader.labId);
     if (starts.harness === "agents" && !loopOpen)
       throw new HTTPException(403, { message: "The agent loop is not open to this account yet." });
     const harness = starts.harness ?? (loopOpen ? defaultHarness : "tasks");
