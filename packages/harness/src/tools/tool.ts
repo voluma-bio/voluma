@@ -17,8 +17,6 @@ export interface ToolContext {
   signal: AbortSignal;
   /** The calling thread's sandbox, created on first use. */
   sandbox(): Promise<Sandbox>;
-  /** Live output for people watching: queued, best effort, may be dropped. */
-  output(stream: "stdout" | "stderr", text: string): void;
 }
 
 /**

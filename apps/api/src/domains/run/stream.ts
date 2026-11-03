@@ -11,10 +11,6 @@
  * whether the run had ended in the same snapshot as its events (`eventLog.stream`), so a
  * short page from an ended run is the rest of the log: the stream sends `event: end` and closes.
  *
- * Live frames (`notifier.publish`, from the runner's `/ingest/.../live`) are written between
- * log reads as `event: live` with no `id:`; they are not read from the log, and a frame is
- * sent only to streams open when it arrives. A live frame wakes the loop without a log read.
- *
  * Keep-alive: a comment every `KEEPALIVE_MS`, and one at once on connect, since a host
  * proxy may close a response that has sent no byte, or an idle one (Railway's did at 5 minutes
  * idle and 15 minutes total; Render documents only a 100-minute cap on a response). The
@@ -22,7 +18,7 @@
  */
 
 import { setTimeout as sleep } from "node:timers/promises";
-import { END_EVENT, LIVE_EVENT, type LiveFrame } from "@voluma/contracts/stream";
+import { END_EVENT } from "@voluma/contracts/stream";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { type AppEnv, requireReader } from "../../domain";
@@ -39,9 +35,6 @@ function latch() {
 
 const POLL_MS = 5_000;
 const KEEPALIVE_MS = 15_000;
-// A stream that can't keep up drops its oldest frames past either bound.
-const LIVE_QUEUE_MAX = 2_000;
-const LIVE_QUEUE_MAX_CHARS = 1024 * 1024;
 
 export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
   const app = new Hono<AppEnv>();
@@ -62,19 +55,6 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
         reread = true;
         wake.resolve();
       };
-      // Live frames wait here for the loop, so only the loop writes to the response. A
-      // stream that can't keep up loses the oldest; the browser's offset guard copes.
-      let live: LiveFrame[] = [];
-      let liveChars = 0;
-      const sizeOf = (f: LiveFrame) => f.text.length;
-      const onLive = (frame: LiveFrame) => {
-        live.push(frame);
-        liveChars += sizeOf(frame);
-        while (live.length > LIVE_QUEUE_MAX || liveChars > LIVE_QUEUE_MAX_CHARS) {
-          liveChars -= sizeOf(live.shift() as LiveFrame);
-        }
-        wake.resolve();
-      };
       const nap = async () => {
         const timer = new AbortController();
         const timeout = sleep(POLL_MS, undefined, { signal: timer.signal }).then(
@@ -90,7 +70,6 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
       stream.onAbort(poke);
       shutdown.addEventListener("abort", poke, { once: true });
       const offWake = notifier.watch(runId, poke);
-      const offLive = notifier.watchLive(runId, onLive);
       try {
         await stream.write(": connected\n\n");
         let lastWrite = Date.now();
@@ -118,15 +97,6 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
               break;
             }
           }
-          // No `id:`: a live frame must not move the browser's `Last-Event-ID` off the durable `seq`.
-          const frames = live;
-          live = [];
-          liveChars = 0;
-          for (const frame of frames) {
-            await stream.writeSSE({ event: LIVE_EVENT, data: JSON.stringify(frame) });
-          }
-          if (frames.length > 0) lastWrite = Date.now();
-          if (live.length > 0) continue;
           await nap();
           if (Date.now() - lastWrite >= KEEPALIVE_MS) {
             await stream.write(": keep-alive\n\n");
@@ -135,7 +105,6 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
         }
       } finally {
         offWake();
-        offLive();
         shutdown.removeEventListener("abort", poke);
       }
     });

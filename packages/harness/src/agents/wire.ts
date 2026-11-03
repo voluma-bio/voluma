@@ -174,7 +174,6 @@ async function runAgents(
         batch: [],
         signal: o.signal,
         sandbox: () => o.session.get(sandboxThread),
-        output: () => {},
       });
     },
     setup(agent, api) {

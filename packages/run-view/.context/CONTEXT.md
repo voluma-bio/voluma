@@ -12,7 +12,7 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   no request: each screen runs its own accept or answer.
 - **The run's events** live in one store per run page (`RunStoreProvider`, keyed on the run, fed by
   the page's stream; `useEvents`), so the page and its header read one log. Only durable events are
-  kept: the stream's live frames are not read.
+  kept.
 - **Researcher words** everywhere: the AI, main; no paths, file names or tool names. Values take
   the workflow's names (`outputName`, from the bundled `outputs.yaml`), an output's id as words for
   one the catalog lacks.

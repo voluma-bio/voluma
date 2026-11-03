@@ -41,7 +41,6 @@ import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { AGENT_TOOL_NAMES } from "@voluma/harness/agents/tools/registry";
 import { errorText } from "@voluma/harness/error-text";
-import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { usageOf } from "@voluma/harness/model-usage";
 import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
@@ -217,7 +216,6 @@ async function claimBody(
   );
   let lease: ReturnType<typeof holdLease> | undefined;
   let events: Recorder | undefined;
-  let live: LiveBatcher | undefined;
   let supervised: Supervised | undefined;
   let images: ReturnType<typeof metaImages> | undefined;
   let outcome: Outcome | undefined;
@@ -273,7 +271,6 @@ async function claimBody(
     const pin = pinOf(runId, stored);
     const sandboxImage = pin?.image ?? config.sandbox.image;
     log(`sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"})`);
-    live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {
         async append(event) {
@@ -286,7 +283,6 @@ async function claimBody(
       runId,
       () => stop("lease-lost"),
       stored,
-      live,
     );
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.
@@ -525,7 +521,6 @@ async function claimBody(
     shutdown.removeEventListener("abort", onShutdown);
     lease?.halt();
     const wrapUp = (async () => {
-      await live?.flush();
       await events?.flush();
       if (report) await lease?.sendFinalUsage();
     })();
@@ -543,10 +538,6 @@ async function claimBody(
         );
       else if (stored)
         log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
-      if (live) {
-        const { frames, requests, dropped } = live.stats();
-        log(`live frames this claim: ${frames} in ${requests} requests, ${dropped} dropped`);
-      }
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
       if (images) log(`model requests this claim: ${images.summary()}`);

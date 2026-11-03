@@ -487,8 +487,7 @@ export function putUploadFile(
  * in order, once. `EventSource` reconnects by itself and resumes from the last event's `id`.
  * `after` is the highest `seq` the caller already holds, for the first connect only. `onError`
  * is told of a message that fails to parse (a `ContractError` when it doesn't match the schema)
- * or a handler that throws; a dropped connection is not an error. The stream's live frames
- * (`event: live`) are not read.
+ * or a handler that throws; a dropped connection is not an error.
  * `onClosed` fires when the stream is over for good, with why: `"ended"` when the server sent
  * every event of an ended run, `"refused"` when the browser gave up on it (a non-200 answer:
  * a 404, a sign-out, a server restarting; `EventSource` hides which, so refetch the run or call

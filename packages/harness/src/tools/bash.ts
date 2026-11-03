@@ -2,7 +2,7 @@
  * The `bash` tool: runs a command in the thread's sandbox. The model sees the combined output
  * capped to its head and tail (`bash-output.ts`). A command still running after `timeout_min`
  * is not killed: it moves to the background (`bash-runtime.ts`) and its end reaches the thread
- * as a notice. Live chunks go to `ctx.output`, coalesced.
+ * as a notice.
  */
 import { z } from "zod";
 import type { BashRuntime } from "../bash-runtime";
@@ -46,7 +46,6 @@ export function bashTool(layout: ThreadLayout, runtime: BashRuntime): Tool<typeo
         sandbox: await ctx.sandbox(),
         spillPath: layout.toolOutputPath(ctx.toolCallId),
         signal: ctx.signal,
-        output: ctx.output,
       });
       if (started.kind === "backgrounded") {
         const how =

@@ -38,7 +38,6 @@ import {
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
 import { isContextOverflowError } from "../../context-overflow";
-import { replyFrames } from "../../live";
 import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
@@ -339,9 +338,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       }
       if (stored.length > 0) agent.state.messages = stored;
 
-      // The id the reply's live frames carry, picked when it starts and used by its `message`.
-      let replyId: string | undefined;
-      let frames: ReturnType<typeof replyFrames> | undefined;
       // Pi emits a reply's `message_start` as a live partial only once the provider's response
       // headers are in and its own retries are over; a call that failed before them gets
       // `message_start` with the final error message. `lastInterrupted`: the latest reply failed
@@ -351,13 +347,8 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         switch (event.type) {
           case "message_start":
             if (event.message.role === "assistant") {
-              replyId = crypto.randomUUID();
-              frames = replyFrames(threadId, replyId, recorder.live);
               replyStarted = event.message.stopReason !== "error";
             }
-            break;
-          case "message_update":
-            frames?.(event.assistantMessageEvent);
             break;
           case "message_end": {
             const { message } = event;
@@ -385,22 +376,15 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
                 emit("message", { role: "user", text, sender });
               }
             } else if (message.role === "assistant") {
-              // Every reply gets a `message`, even an empty or failed one: it ends the
-              // reply's live partial (`stream.ts`).
+              // Every reply gets a `message`, even an empty or failed one.
               const used = usageOf(message);
               const reasoning = reasoningOf(message);
-              recorder.emit(
-                threadId,
-                "message",
-                {
-                  role: "assistant",
-                  text: textOf(message),
-                  ...(reasoning && { reasoning }),
-                  ...(used && { usage: used }),
-                },
-                replyId,
-              );
-              replyId = frames = undefined;
+              recorder.emit(threadId, "message", {
+                role: "assistant",
+                text: textOf(message),
+                ...(reasoning && { reasoning }),
+                ...(used && { usage: used }),
+              });
             } else if (message.role === "system") {
               // Pi's declaration of a resumed thread's changed tools (the first system message is stored with `persist(system)`).
               // A tool redefined in place comes as a removal and an addition of the same name.
@@ -568,8 +552,6 @@ function toAgentTool(
           batch: batchOf(toolCallId),
           signal: signal ?? new AbortController().signal,
           sandbox: () => sandbox(threadId),
-          output: (stream, text) =>
-            recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
         });
       } catch (error) {
         // Voluma's failure, not the call's: recorded as `infrastructure`, and the run page

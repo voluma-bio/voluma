@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { coalescer, type ModelView, modelView, OutputBuffer } from "./tools/bash-output";
+import { type ModelView, modelView, OutputBuffer } from "./tools/bash-output";
 
 /** A command's exec has no timeout of its own; the sandbox's lifetime ends it (adapters clamp). */
 const EXEC_SECONDS = 4 * 3600;
@@ -44,8 +44,6 @@ export interface BashStart {
   spillPath: string;
   /** Aborts the command while the call waits for it; once it is backgrounded, only `kill` does. */
   signal: AbortSignal;
-  /** Live chunks for people watching, while the call waits. */
-  output(stream: "stdout" | "stderr", text: string): void;
 }
 
 export type BashStarted =
@@ -79,7 +77,6 @@ class Command {
   waiters = 0;
   /** The `bash.backgrounded` write. */
   recorded: Promise<boolean> | undefined;
-  live: ReturnType<typeof coalescer> | undefined;
   failure: unknown;
   result: { exit: number; view: ModelView } | undefined;
   pingTimer: NodeJS.Timeout | undefined;
@@ -114,7 +111,6 @@ export class BashRuntime {
   /** Runs the command; returns its result, or that it moved to the background. */
   async start(o: BashStart): Promise<BashStarted> {
     const cmd = new Command(bashIdOf(o.threadId, o.toolCallId), o);
-    cmd.live = coalescer(o.output);
     const stop = () => cmd.abort.abort();
     if (o.signal.aborted) stop();
     o.signal.addEventListener("abort", stop);
@@ -254,12 +250,10 @@ export class BashRuntime {
           continue;
         }
         cmd.output.add(chunk.data);
-        cmd.live?.add(chunk.type, chunk.data);
       }
     } catch (error) {
       cmd.failure = error;
     }
-    cmd.live?.flush();
   }
 
   /** The stream is over: a foreground call takes the result itself; a background command is recorded. */
@@ -303,8 +297,6 @@ export class BashRuntime {
   /** Stores `bash.backgrounded`, and only then lets the caller tell the agent. */
   async #background(cmd: Command, reason: "asked" | "timeout"): Promise<BashStarted> {
     cmd.phase = "background";
-    cmd.live?.flush();
-    cmd.live = undefined;
     this.#commands.set(cmd.id, cmd);
     const { threadId, command, timeoutMin } = cmd.start;
     cmd.recorded = this.#deps.recorder.append(

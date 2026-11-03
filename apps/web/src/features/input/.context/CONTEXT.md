@@ -10,8 +10,7 @@ several studies, so the input alone can't pick the run. Links use
 ## The run's stream and the run read
 
 `use-run-stream.ts` feeds the run's durable events into the run store (`@voluma/run-view`
-`RunStoreProvider`, read with `useEvents`); everything on the page is derived from them. The
-stream's live frames (tokens as a model writes) are not read. `getRun` is polled every 3 s until
+`RunStoreProvider`, read with `useEvents`); everything on the page is derived from them. `getRun` is polled every 3 s until
 the run ends: queue place and state aren't events.
 
 Every connection appends to the same events and resumes with `subscribe(..., after = last seq)`.

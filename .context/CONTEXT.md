@@ -76,8 +76,8 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   to `History` at `message_end`, synchronously: if a write fails the agent stops and
   nothing more is stored, so the history is always an exact prefix. Tool calls and results
   go through the run's `recorder` (`src/recorder.ts`): a background queue in emission
-  order whose failures never end a thread (events are retried). Live tool output
-  (`ToolContext.output`) streams as live frames (`bash.ts`). `startThread({prompt, input?})`: a new thread sends
+  order whose failures never end a thread (events are retried).
+  `startThread({prompt, input?})`: a new thread sends
   the prompt; a thread with history sends `input`, or continues if there is none. On
   resume it answers a crash's tool calls without a result (appended, never editing history)
   and fails if the stored system message differs from the current prompt and tools. One bad history row

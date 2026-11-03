@@ -4,7 +4,7 @@
  *   POST /ingest/claim                                   take the oldest run the limits allow
  *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease (answers the run's last event seq); end or release the run (an ended report carries the last event seq the runner read)
  *   POST /ingest/runs/:runId/events                      append an event (EventInput); answers its stored seq
- *   POST /ingest/runs/:runId/live                        a batch of live frames, fanned out to the run's open streams, not stored
+ *   POST /ingest/runs/:runId/live                        accepted and dropped (old runners still post)
  *   GET  /ingest/runs/:runId/events?after=               stored events after a seq, one page of 1000 (RunEventsResponse)
  *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
@@ -28,11 +28,10 @@ import {
   type leaseLostSchema,
   reportRequestSchema,
 } from "@voluma/contracts/runner";
-import { liveFrameSchema } from "@voluma/contracts/stream";
 import { HistoryConflict } from "@voluma/harness/ports/history";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { z } from "zod";
+import type { z } from "zod";
 import { type AppEnv, parseJson, requireService } from "../../domain";
 import type { RunDeps } from ".";
 import { afterParam, EVENTS_PAGE } from "./cursor";
@@ -46,8 +45,6 @@ const storableRow = historyRowSchema.refine(
   (row) => !row.message.includes("\0"),
   "message contains a NUL byte",
 );
-
-const liveBatchSchema = z.object({ frames: z.array(liveFrameSchema).max(1000) });
 
 export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
   const app = new Hono<IngestEnv>();
@@ -116,18 +113,9 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
     return c.json({ seq } satisfies z.infer<typeof appendEventResponseSchema>);
   });
 
-  // Live frames are best effort: the lease is checked (a stale runner must not speak for the
-  // run) but nothing is written, and nothing is retried by the runner.
-  app.post("/ingest/runs/:runId/live", async (c) => {
-    const runId = c.req.param("runId");
-    const { frames } = await parseJson(c, liveBatchSchema);
-    if (!frames.every((f) => f.runId === runId)) {
-      throw new HTTPException(400, { message: "frame runId does not match the path" });
-    }
-    await eventLog.checkLease(runId, c.var.leaseToken);
-    for (const frame of frames) notifier.publish(runId, frame);
-    return c.body(null, 204);
-  });
+  // A runner built before live frames were deleted still posts them: accept and drop
+  // (TODO: delete the route, `apps/api/.context/TODO.md`).
+  app.post("/ingest/runs/:runId/live", (c) => c.body(null, 204));
 
   app.get("/ingest/runs/:runId/events", async (c) => {
     const after = afterParam(c.req.query("after"));

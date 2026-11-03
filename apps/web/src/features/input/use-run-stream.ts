@@ -1,6 +1,6 @@
 /**
  * Feeds the run's stream into the run store: its durable events, published at most once per
- * animation frame (a busy run sends many per second). The stream's live frames are not read.
+ * animation frame (a busy run sends many per second).
  *
  * Reconnecting keeps what was received and resumes after the last `seq`. It happens when a message
  * is sent or the run resumes and, after a backoff, when the browser gives up on the stream while
