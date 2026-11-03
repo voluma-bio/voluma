@@ -11,7 +11,7 @@ description: >
 through every slice and writes a uint8 labels `.npy` on the grid of the volume you passed, with a sidecar of its
 prompts and per-slice confidence. It runs in your sandbox and sends the scan to Meta's API (a few minutes and
 about $0.10 per call; results vary slightly between runs); it reads under `/inputs`, `/outputs` or your `$WORK` folder and writes only in `$WORK` (`/outputs` is read-only). It is a first full 3D
-segmentation of every bone and a second opinion on your own; **you own the final labels** (`segmentation-check`).
+segmentation of every structure you prompt and a second opinion on your own; **you own the final labels** (`segmentation-check`).
 
 ## When not to use it
 
@@ -43,17 +43,17 @@ on it; `negative: true` for pixels off it). A prompt needs a box or a positive p
 ## Planning requests
 
 Open `references/strategies.md` before you plan your requests: how to group structures into requests. Then the
-workflow's anatomy reference, for how that applies to its structures.
+workflow's anatomy reference: which structures to prompt, how they group, and which to leave out.
 
 ## What the tool does, so you can plan around it
 
-- **Orient first** (`orient-joint`) and pass the oriented stack with its keyframe. Boxes drawn by eye cut bone
-  edges off: `snap_boxes.py` fits them to the threshold components, and `render_slices.py --boxes` shows them
+- **Orient first** (`orient-joint`) and pass the oriented stack with its keyframe. Boxes drawn by eye cut a
+  structure's edges off: `snap_boxes.py` fits them to the threshold components, and `render_slices.py --boxes` shows them
   before you send.
-- **Survey bare bone first** (`components.py --in <oriented stack>`): with no labels yet, it lists the threshold's
+- **Survey the threshold first** (`components.py --in <oriented stack>`): with no labels yet, it lists the threshold's
   largest connected components (size, box, centre, whether they touch the edge), in 3D or on one slice with `--index`.
-- **A SAM mask spans soft tissue and marrow**, several times a small bone's volume: clip to bone
-  (`clip_to_bone.py`) before any volume means anything, and never refill clipped voxels by nearest label. Read the
+- **A SAM mask spans its structure's surroundings**, several times a small structure's volume: clip it to the
+  structure's intensity range (for bone, `clip_to_bone.py`) before any volume means anything, and never refill clipped voxels by nearest label. Read the
   clipped labels' checks (`segmentation-check`) per label: a label in range keeps SAM's result, and one bad label
   does not discard the request.
 - **Stamp the output's grid** (`sidecar.py --like oriented.json`): `segment_sam`'s own sidecar has no grid, and
