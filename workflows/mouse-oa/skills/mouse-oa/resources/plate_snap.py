@@ -6,10 +6,12 @@ faces' centre (a dark valley between brighter bone, or the dense line of a close
 plate-to-bone edge under the distal one, a thickness near your curves' median, and closeness to your curves; the faces stay inside
 `off_tibia_margin_um` of the tibia and may not cross, so one face cannot slide onto the edge the other belongs to. A move never goes silent: the spans
 where the plate contrast is low or a face reached the edge of its band are listed, and every stretch that moved farther than `CAPTURE_VOXELS`.
+Where it is unsure it keeps your curve: on every such stretch the output has your curve as it was, blended into the snapped one over `RAMP` columns
+each side so no step joins them. `--snap-unsure` keeps the snapped points there instead.
 
 When to run it. After you traced the faces, or after a researcher drew or redrew a curve, and before iioc.py or metaphysis_roi.py. Open the
-`qc-snap-<V>.jpg` of every section: dotted white is the curve that went in, the snapped one is red where the contrast is low, yellow in
-between, green where it is high. Keep the input curve over a span in `low_confidence` or `moved_far`; keep your own judgement over the snap's.
+`qc-snap-<V>.jpg` of every section: dotted white is the curve that went in, the output is cyan where your curve was kept, and otherwise red where the
+contrast is low, yellow in between, green where it is high. Keep your own judgement over the snap's.
 If a researcher redrew one face, pass `--face` with that face and the other, as it stands, only limits the separation.
 
 Limits. It captures a face at most `CAPTURE_VOXELS` (about 10, 0.1 mm) from the plate; a face farther off locks onto the next layer, so trust the flags.
@@ -21,12 +23,13 @@ Reads the entry `plate-faces` of the spec (`off_tibia_margin_um`, `max_gap_um`, 
 Writes: in <out>,
   annotations.json  your annotations with `growth_plate_curves` and `growth_plate_distal_curves` replaced by the snapped curves on the snapped sections (the
                     same U extent, a point every 5 columns or `max_gap_um`, whichever is closer); every other key, section and grid_id copied
-  plate-snap.json  the result record: per section the rough curves that went in, per snapped face the mean and max move (um), the mean confidence,
-                   `moved_beyond_capture`, `moved_far` (stretches that moved more than the capture range, with the face and the largest move), and
-                   `low_confidence`: [{"u": [first, last], "why": ..., "move_um": {face: {"median", "max"}}}] with the move inside that span
-  qc-snap-<V>.jpg  one image per snapped section, rough against snapped
+  plate-snap.json  the result record: per section the rough curves that went in, per snapped face the mean and max move (um) of the output, the mean
+                   confidence, `columns_kept_input` per face, `moved_beyond_capture`, `moved_far` (stretches where the snap moved more than the capture
+                   range, with the face and the largest move) and `low_confidence`: [{"u": [first, last], "why": ..., "move_um": {face: {"median",
+                   "max"}}}], the move being what the snap wanted inside that span; each span and `moved_far` entry has `kept_input`: true unless `--snap-unsure`
+  qc-snap-<V>.jpg  one image per snapped section, rough against the output
 Prints: the result record {out, values, annotations, qc, sections}
-Example: python plate_snap.py --spec protocol.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --annotations annotations.json --out snap/ [--sections 34,46] [--face distal]
+Example: python plate_snap.py --spec protocol.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --annotations annotations.json --out snap/ [--sections 34,46] [--face distal] [--snap-unsure]
 Exits 2 with one sentence on bad input, before writing anything; and when the snapped curves break a rule (`refuse_off_tibia`, `refuse_gaps`,
 `refuse_jumps`) that your curves met.
 """
@@ -68,6 +71,7 @@ CONF_HU = 3000.0  # confidence: contrast (HU) that counts as 1
 CONF_LOW = 0.2  # a confidence below this is low
 MIN_SPAN = 8  # columns: a shorter low-confidence stretch is not listed
 MIN_FAR = 3  # columns: a shorter stretch that moved past the capture range is not listed
+RAMP = 10  # columns: over this many columns beside a kept input stretch the output blends from your curve to the snapped one
 
 
 def two_sided(img):
@@ -216,14 +220,26 @@ def snap_faces(sec, bone, prox, dist, margin, max_gap, held=None):
     return out_p, out_d, conf, edge
 
 
-def snapped_points(points, w, stride):
+def blend_kept(snapped, rough, keep):
+    """`snapped` W per column with your curve `rough` put back on the `keep` columns and blended in linearly over RAMP columns beside them, so
+    no step joins the two. Returns (final W, alpha per column: 1 = your curve)."""
+    if not keep.any():
+        return snapped, np.zeros(len(snapped))
+    alpha = np.clip(1 - ndi.distance_transform_edt(~keep) / (RAMP + 1), 0, 1)
+    return np.where(alpha > 0, alpha * rough + (1 - alpha) * snapped, snapped), alpha
+
+
+def snapped_points(points, w, stride, kept):
     """A face's points with its snapped stretches (`w` per column, NaN elsewhere) in place of the points inside them: a point every `stride`
-    columns and at each stretch's ends; the points past the stretches, and the gaps, stay as they were."""
+    columns and at each stretch's ends; the points past the stretches, and the gaps, stay as they were. On the `kept` columns (your curve
+    as it was) the points stay and no new ones are added, except at the ends of each kept stretch."""
     p = sorted(points, key=lambda q: q[1])
     new = []
     for run in runs_of(np.flatnonzero(~np.isnan(w))):
-        p = [q for q in p if not run[0] - 1 < q[1] < run[-1] + 1]
-        new += [[round(float(w[u]), 2), int(u)] for u in sorted({*run[::stride], run[0], run[-1]})]
+        p = [q for q in p if not run[0] - 1 < q[1] < run[-1] + 1 or kept[min(max(round(q[1]), 0), len(w) - 1)]]
+        have = {q[1] for q in p}
+        cols = {u for u in (*run[::stride], run[0], run[-1]) if not kept[u]} | {r[i] for r in runs_of(run[kept[run]]) for i in (0, -1)}
+        new += [[round(float(w[u]), 2), int(u)] for u in sorted(cols) if u not in have]
     return sorted(p + new, key=lambda q: q[1])
 
 
@@ -231,17 +247,19 @@ def spans(flag, min_len):
     return [(int(r[0]), int(r[-1])) for r in runs_of(np.flatnonzero(flag)) if len(r) >= min_len]
 
 
-def check_image(out, hu, v, window, rough, snapped, conf, vox):
-    """qc-snap-<V>.jpg: the section framed on the curves, the curve that went in dotted white, the snapped faces coloured by confidence."""
+def check_image(out, hu, v, window, rough, snapped, conf, kept, vox):
+    """qc-snap-<V>.jpg: the section framed on the curves, the curve that went in dotted white, the snapped faces coloured by confidence, the columns
+    where your curve was put back in cyan."""
     cols = np.flatnonzero(~np.isnan(snapped[0]))
     heights = np.concatenate([x[:, 0] for x in rough] + [s[cols] for s in snapped])
     crop = (max(int(heights.min()) - 25, 0), max(cols[0] - 25, 0), min(int(heights.max()) + 26, hu.shape[0]), min(cols[-1] + 26, hu.shape[2]))
     x = np.arange(hu.shape[2])
     curves = [(r[:, 1], r[:, 0], 'white', ':') for r in rough]
-    for s in snapped:
+    for s, k in zip(snapped, kept, strict=True):
         for lo, hi, colour in ((0, CONF_LOW, 'red'), (CONF_LOW, 0.5, 'yellow'), (0.5, 1.01, 'lime')):
-            curves.append((x, np.where((conf >= lo) & (conf < hi), s, np.nan), colour))
-    title = f'V={v}: dotted = your curves, snapped: red low contrast, yellow middle, green high'
+            curves.append((x, np.where((conf >= lo) & (conf < hi) & ~k, s, np.nan), colour))
+        curves.append((x, np.where(k, s, np.nan), 'cyan'))
+    title = f'V={v}: dotted = your curves, snapped: red low contrast, yellow middle, green high, cyan = your curve kept'
     return vl.slice_sheet(out / f'qc-snap-{v}.jpg', hu, [], 1, [v], window, crops=[crop], curves=[curves], titles=[title], axis_names=('W', 'V', 'U'), cols=1, voxel_mm=vox)
 
 
@@ -254,6 +272,7 @@ def main():
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--sections', metavar='V,V,...', help='V indices of the sections to snap (default: every section with both faces)')
     ap.add_argument('--face', choices=('proximal', 'distal', 'both'), default='both', help='the face(s) to snap; the other stays as it is and only limits the separation')
+    ap.add_argument('--snap-unsure', action='store_true', help='keep the snapped points on the low-confidence and moved-far stretches (default: your curve is put back there)')
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help='QC display window in HU, or the workflow\'s anatomy.json (default: from the scan)')
     a = ap.parse_args()
     side = sidecar.sidecar_path(a.hu_aligned)
@@ -299,24 +318,40 @@ def main():
         if not len(cols):
             skipped[str(v)] = f'the faces share no stretch with points at most {max_gap * um:.0f} um apart'
             continue
-        move = {f: np.abs(snapped[f] - face_rows(rough[f], hu.shape[2], max_gap)) for f in snapped_faces}  # voxels per column
+        rows = {f: face_rows(rough[f], hu.shape[2], max_gap) for f in snapped_faces}
+        move = {f: np.abs(snapped[f] - rows[f]) for f in snapped_faces}  # what the snap wanted, voxels per column
         low = [(s, 'low plate contrast') for s in spans((conf < CONF_LOW) & ~np.isnan(wp), MIN_SPAN)] + [(s, "a face at the search band's edge") for s in spans(edge, MIN_SPAN)]
+        far = [(f, s) for f, m in move.items() for s in spans(m > CAPTURE_VOXELS, MIN_FAR)]
+        kept, alpha = {}, {}
+        for f in snapped_faces:
+            keep = np.zeros(hu.shape[2], bool)
+            if not a.snap_unsure:
+                for s, _ in low:
+                    keep[s[0] : s[1] + 1] = True
+                for g, s in far:
+                    if g == f:
+                        keep[s[0] : s[1] + 1] = True
+            snapped[f], alpha[f] = blend_kept(snapped[f], rows[f], keep & ~np.isnan(snapped[f]))
+            kept[f] = keep
+        final = {f: np.abs(snapped[f] - rows[f]) for f in snapped_faces}
         sections[str(v)] = {
             'rough': rough,
-            'mean_move_um': {f: round(float(np.nanmean(m)) * um, 1) for f, m in move.items()},
-            'max_move_um': {f: round(float(np.nanmax(m)) * um, 1) for f, m in move.items()},
+            'mean_move_um': {f: round(float(np.nanmean(m)) * um, 1) for f, m in final.items()},
+            'max_move_um': {f: round(float(np.nanmax(m)) * um, 1) for f, m in final.items()},
             'mean_confidence': round(float(conf[cols].mean()), 3),
             'moved_beyond_capture': bool(max(np.nanmax(m) for m in move.values()) > CAPTURE_VOXELS),
-            'moved_far': [{'u': list(s), 'face': f, 'max_move_um': round(float(np.nanmax(m[s[0] : s[1] + 1])) * um, 1)}
-                          for f, m in move.items() for s in spans(m > CAPTURE_VOXELS, MIN_FAR)],
+            'columns_kept_input': {f: int(k.sum()) for f, k in kept.items()},
+            'moved_far': [{'u': list(s), 'face': f, 'max_move_um': round(float(np.nanmax(move[f][s[0] : s[1] + 1])) * um, 1), 'kept_input': not a.snap_unsure}
+                          for f, s in far],
             'low_confidence': sorted(
-                ({'u': list(s), 'why': why, 'move_um': {f: {'median': round(float(np.median(m[s[0] : s[1] + 1])) * um, 1),
-                                                            'max': round(float(np.max(m[s[0] : s[1] + 1])) * um, 1)} for f, m in move.items()}}
+                ({'u': list(s), 'why': why, 'kept_input': not a.snap_unsure,
+                  'move_um': {f: {'median': round(float(np.median(m[s[0] : s[1] + 1])) * um, 1),
+                                  'max': round(float(np.max(m[s[0] : s[1] + 1])) * um, 1)} for f, m in move.items()}}
                  for s, why in low), key=lambda e: e['u']),
         }
         for f in snapped_faces:
-            new[KEYS[f]]['slices'][str(v)] = snapped_points(rough[f], snapped[f], stride)
-        qc.append((v, [np.asarray(rough[f], float) for f in KEYS], [snapped[f] for f in KEYS], conf))
+            new[KEYS[f]]['slices'][str(v)] = snapped_points(rough[f], snapped[f], stride, kept[f])
+        qc.append((v, [np.asarray(rough[f], float) for f in KEYS], [snapped[f] for f in KEYS], conf, [kept.get(f, np.zeros(hu.shape[2], bool)) for f in KEYS]))
     if not sections:
         sidecar.fail(f'no section could be snapped: {"; ".join(f"V={v}: {why}" for v, why in skipped.items())}')
     # the snapped curves obey every rule your curves obeyed
@@ -329,7 +364,7 @@ def main():
     ann_path = out / 'annotations.json'
     ann_path.write_text(json.dumps(new) + '\n')
     load_annotations(ann_path, grid)  # the curves obey the schema every later script reads
-    images = [check_image(out, hu, v, window, rough, [s for s in snapped], conf, vox) for v, rough, snapped, conf in qc]
+    images = [check_image(out, hu, v, window, rough, snapped, conf, kept, vox) for v, rough, snapped, conf, kept in qc]
     far = [v for v, s in sections.items() if s['moved_beyond_capture']]
     low_spans = sum(len(s['low_confidence']) for s in sections.values())
     values = {
