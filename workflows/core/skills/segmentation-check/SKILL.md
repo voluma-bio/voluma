@@ -70,7 +70,10 @@ average or vote.
 ## 4. The fix for each cause
 
 A wrong box or a missing neighbour: a new `segment_sam` request with the prompt fixed. A whole piece with the wrong
-label: `relabel.py`. Two bones under one label: `classic_segment.py --within` with seeds. After any fix, the label
+label: `relabel.py`. Two bones under one label: `classic_segment.py --within` with seeds. A piece the researcher outlined as not part of a
+region: a seed inside it from `marks_to_grid.py --seed` (`regions-and-landmarks`), then `relabel.py` for a piece apart from the
+bone, or `classic_segment.py --within` for one joined to it; the script says which. Give the piece the label of what it
+is, or 0 when it is no structure the workflow reports. After any fix, the label
 checks, the quad view and the 3D sheet again.
 
 ## 5. A To check item that points at the region

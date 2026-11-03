@@ -22,7 +22,10 @@ delivery, with the marks they attached and sometimes a screenshot.
   for the call you made, not for the idea behind it; a no leaves things as they are.
 - **Their marks are annotations, not outputs.** A mark in mm says where they looked or what they would move;
   nothing changed until you change it. Compare it with the output version it names (`/run/outputs.yaml` gives
-  the files) before you judge.
+  the files) before you judge. A line or path drawn along a face on a section is where they want that face (a
+  growth-plate face, say), and an outline drawn around a piece, or marked as not part of the region, is a piece they
+  want taken out: both are corrections a worker applies from the mark's points (`corrections`). Their words say which
+  one they mean.
 - **Write for them.** They read your reply, not your tools: say "the AI" for whoever did the work and name
   an output by its plain title; leave out ids, worker names and paths.
 - **An unanswered message holds the run open.** `close` is refused while the researcher's last message has
