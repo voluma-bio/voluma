@@ -94,8 +94,8 @@ schema is `regions-and-landmarks`'):
   on a coronal section of the tibia grid goes into that section's curve of the face it corrects: the face your brief names, or the
   face output the mark was drawn on (`marks_to_grid.py --curve --into annotations.json --key growth_plate_curves` for
   the proximal face, `growth_plate_distal_curves` for the distal; `regions-and-landmarks`). A mark drawn on anything else
-  names no face, and a correction can sit nearer the other face than its own: with no face named, apply nothing and report
-  that, so the researcher is asked. Retrace the sections beside it to meet it. Where part of the tibia label is really femur or fibula
+  names no face, and a correction can sit nearer the other face than its own: with no face named, or the brief and the mark
+  naming different faces, apply nothing and report that, so the researcher is asked. Retrace the sections beside it to meet it. Where part of the tibia label is really femur or fibula
   above the articular surface, a correction traces the true articular surface over that patch, and ROI-1 keeps
   only what lies below. The U index of each plateau compartment's middle (a height point outside ROI-1's footprint
   stops the script: move it). The two width points (#10), within 2 sections of each other and on the growth plate's
