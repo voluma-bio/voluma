@@ -225,7 +225,7 @@ migrated it, so a plain restore collides with the existing tables. Suspend the A
 runner first (`r -X POST "$B/services/<ID>/suspend"` for each, so nothing writes while the
 tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d "$NEON_DIRECT_URL" dump`, then resume the API and gateway
 (`.../resume`), then the runner. Compare row counts with the source
-(`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
+(`runs`, `events`, `provider_calls`) before trusting it. Never print the URL.
 
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
 (with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, unsettled provider calls,

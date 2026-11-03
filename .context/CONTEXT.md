@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame with its rail (one `QueryClient` in `SignedIn`); features/study (Home, studies, Workflows) and features/input (the input review) own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame with its rail (one `QueryClient` in `SignedIn`); features/study (studies, Workflows) and features/input (the input review) own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
@@ -324,16 +324,15 @@ the CSS stays the one source.
 ## Input review
 
 One input's run, live and for review, is `apps/web/src/features/input` at `/studies/:studyId/inputs/:inputId` (the user's theme, dark image wells; the input's newest run in that study, `?run=` an earlier one),
-with the selection in the URL (`task`, `item`, `agent`); the old `/scans/:runId`, `/runs/:id/live` and
-`/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
-conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and
-files. What any screen needs to show a run is `packages/run-view`; the grid viewer is
+with the selection in the URL (`output`, `item`, `agent`); the old `/scans/:runId`, `/runs/:id/live` and
+`/runs/:runId` redirect there. It reads the run's stream and folds it for the agents, outputs, items and the
+conversation (`outputsFold`, `reviewState`); the assets route serves what the viewer draws. What any screen needs to show a run is `packages/run-view`; the grid viewer is
 `packages/viewer`. No synthetic measurements or simulated services are mounted.
 
-Images come only from the run: each task's grid and what is drawn on it are the run's published
+Images come only from the run: the grid of an output and what is drawn on it are the run's published
 blocks and converted assets. The [input review specification][input-spec] covers the URL, the two
 sources and reconnecting; the [run view specification][run-view-spec] the run model and
-transcripts; the [viewer specification][viewer-spec] how a task's grid is chosen, the viewer's
+transcripts; the [viewer specification][viewer-spec] how a grid is chosen, the viewer's
 geometry, loading and verification coverage.
 
 [input-spec]: ../apps/web/src/features/input/.context/CONTEXT.md
