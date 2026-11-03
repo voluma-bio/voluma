@@ -35,3 +35,4 @@
 - **Delete the pre-pull API fallback (R3p, two-step).** After the API that answers `POST /events` with `{seq}` and heartbeats with `lastSeq` is live on every environment: in `adapters/http/run-client.ts` `append`, drop the `204 → undefined` branch; make `EventLog.append` return a `number`; in `recorder.ts` drop the `seq !== undefined` guard and the `viewSeq() + 1` numbering.
 
 - **Keep `options.input` on a resume with no user message in History.** `start-thread.ts:311-322` drops `options.input` in that branch; add the input after the prompt there (#494 review, note 1).
+- Task loop: the to-check title guard in `task-runtime.ts` refuses a title only when it parses as JSON, so a malformed stringified array (`[{"focus":…` with broken braces, staging run 778f0937) is still stored; the fold repairs it on read (#497). Close the write side (refuse titles starting `[{` or `{"`) only if the task loop outlives the default flip to agents.
