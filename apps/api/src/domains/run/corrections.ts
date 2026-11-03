@@ -302,12 +302,7 @@ export async function decideMessage(
   // A run still going was admitted already; only a finished one is reopened through admission.
   const reopening = run.state === "ended";
   if (reopening) {
-    const refused = admit(
-      "reopen",
-      o.limits,
-      await usage(tx, reader.labId, { userId, credentials: run.credentials }),
-      run,
-    );
+    const refused = admit("reopen", o.limits, reader.labId, await usage(tx, reader.labId), run);
     if (refused) throw new HTTPException(409, { message: refusalMessage[refused] });
   }
   if (!write) return { eventId, state: await stateNow(), duplicate: false };

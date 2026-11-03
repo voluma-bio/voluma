@@ -6,7 +6,7 @@
  *
  *   POST /api/run/studies      body `createStudyRequestSchema` → 200 `studyDetailSchema`
  *                              (404: unknown `workflowId`, or an input the caller can't read;
- *                              409: an input still uploading, or the per-caller limit;
+ *                              409: an input still uploading;
  *                              429: the other limits, see `run.ts`; 400: `start` names a
  *                              input the study lacks, an input twice, or `selectedOutputs` names an
  *                              output that is not a measurement or score of the workflow)

@@ -265,9 +265,6 @@ async function lateWrite(tx: Tx, runId: string, readSeq: number | undefined) {
   return lateResearcherWrite(rows, readSeq);
 }
 
-/** A run's error when its org is gone from config: a clause read after "The run stopped: ". */
-const NO_LIMITS = "this organization can no longer run work";
-
 /** What the runs of one start call share: the credentials kind comes from `keys`. */
 type Starts = {
   runs: { id: string; inputId: string }[];
@@ -280,18 +277,18 @@ type Starts = {
   harness?: Harness;
 };
 
-/** A limit reached is 429, except the per-caller one: the web branches on its 409. */
+/** A limit reached is 429; an account without a key is 403. */
 const limitRefusal = (refused: Refusal) =>
-  new HTTPException(refused === "per-caller" ? 409 : 429, { message: refusalMessage[refused] });
+  new HTTPException(refused === "no-key" ? 403 : 429, { message: refusalMessage[refused] });
 
 /**
- * `limits` has every org the API serves (index.ts). An org missing from it is one no
- * longer configured: its queued runs fail and its running ones stop. `workflowOf` resolves a
+ * `limits.voluma` has every org that may run on Voluma's keys (index.ts). A `voluma` run of an org
+ * missing from it (no longer configured) fails if queued and stops if running. `workflowOf` resolves a
  * study's workflow id to the pins its runs record and the outputs a selection is checked against.
  */
 export function pgRunQueue(
   db: PostgresJsDatabase,
-  limits: ReadonlyMap<string, Limits>,
+  limits: Limits,
   vault: KeyVault,
   notifier: Notifier,
   workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputEntry[] } | undefined,
@@ -305,13 +302,6 @@ export function pgRunQueue(
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
       return work(tx);
     });
-
-  /** Browser calls only: a signed-in user's or guest's org is always configured (auth.ts). */
-  const limitsOf = (labId: string): Limits => {
-    const found = limits.get(labId);
-    if (!found) throw new Error(`organization ${labId} has no run limits`);
-    return found;
-  };
 
   type Hold = (runId: string, labId: string, keys: VisitorKeys) => void;
 
@@ -338,7 +328,7 @@ export function pgRunQueue(
   };
 
   const messageContext = (reader: Reader) => ({
-    limits: limitsOf(reader.labId),
+    limits,
     pinsOf: (workflowId: string) => workflowOf(workflowId)?.pins,
   });
 
@@ -395,9 +385,9 @@ export function pgRunQueue(
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
     const harness = starts.harness ?? defaultHarness;
-    const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
+    const used = await usage(tx, reader.labId);
     for (const { id, inputId } of starts.runs) {
-      const refused = admit("start", limitsOf(reader.labId), used, { credentials });
+      const refused = admit("start", limits, reader.labId, used, { credentials });
       if (refused) throw limitRefusal(refused);
       if (starts.keys) hold(id, reader.labId, starts.keys);
       await tx.insert(runs).values({
@@ -414,8 +404,7 @@ export function pgRunQueue(
         harness,
         state: "queued",
       });
-      used.callerUnfinished++;
-      if (credentials === "visitor") used.visitorActive++;
+      if (credentials === "visitor") used.ownKeyActive++;
     }
   };
 
@@ -591,7 +580,7 @@ export function pgRunQueue(
           throw new HTTPException(403, { message: "Only the run's starter can resend keys." });
         if (run.state.status !== "awaiting-keys")
           throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        const refused = admit("resume", limitsOf(reader.labId), await usage(tx, reader.labId), run);
+        const refused = admit("resume", limits, reader.labId, await usage(tx, reader.labId), run);
         if (refused) throw limitRefusal(refused);
         hold(runId, reader.labId, keys);
         await tx
@@ -642,16 +631,10 @@ export function pgRunQueue(
         // Failing or skipping a run changes none of these counts, so read each org's once.
         const usages = new Map<string, Usage>();
         for (const run of queued) {
-          const orgLimits = limits.get(run.labId);
-          if (!orgLimits) {
-            await fail(tx, run.id, NO_LIMITS);
-            vault.drop(run.id);
-            continue;
-          }
           if (run.credentials === "voluma") {
             const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
             usages.set(run.labId, used);
-            const refused = admit("claim", orgLimits, used, {
+            const refused = admit("claim", limits, run.labId, used, {
               credentials: "voluma",
               started: run.startedAt !== null,
             });
@@ -702,9 +685,9 @@ export function pgRunQueue(
         const run = await lockRun(tx, runId, eq(runs.leaseToken, leaseToken));
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
-        // An org dropped from config stops its running runs here (its queued ones fail at claim).
-        if (!limits.has(run.labId)) {
-          await fail(tx, runId, NO_LIMITS);
+        // An org dropped from config stops its running Voluma-key runs here (its queued ones fail at claim).
+        if (run.credentials === "voluma" && !limits.voluma.has(run.labId)) {
+          await fail(tx, runId, refusalError["no-key"]);
           return { stop: true };
         }
         await tx

@@ -269,7 +269,7 @@ export async function getRun(id: string): Promise<RunRead> {
   return read(runReadSchema, await request(`/run/runs/${encodeURIComponent(id)}`));
 }
 
-/** The caller's org's runs (only the caller's own under scope `self`), newest first. */
+/** The caller's org's runs (only the caller's own, plus the examples), newest first. */
 export async function listRuns(): Promise<Run[]> {
   return (await read(listRunsResponseSchema, await request("/run/runs"))).runs;
 }
