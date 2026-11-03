@@ -64,6 +64,7 @@ import {
   runSchema,
   runStateSchema,
   runTasksSchema,
+  runThinkingSchema,
   selectedOutputsSchema,
   visitorKeysSchema,
   workflowIdSchema,
@@ -264,6 +265,8 @@ export const createStudyRequestSchema = z.preprocess(
       keys: visitorKeysSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */
       model: modelRefSchema.optional(),
+      /** For every run started by this call, as in `startRunRequestSchema`. */
+      thinking: runThinkingSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */
       harness: harnessSchema.optional(),
     })

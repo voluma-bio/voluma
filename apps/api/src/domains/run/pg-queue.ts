@@ -12,7 +12,7 @@
 import { randomBytes } from "node:crypto";
 import type { Harness } from "@voluma/contracts/ids";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
-import type { Run, VisitorKeys } from "@voluma/contracts/run";
+import type { Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
   type ReleaseReason,
@@ -58,7 +58,7 @@ import {
   readableStudies,
   type Tx,
 } from "./pg-runs";
-import { modelChoices, pickModel } from "./run-models";
+import { DEFAULT_THINKING, modelChoices, pickModel } from "./run-models";
 import { events, inputs, runs, studies, studyMembers } from "./schema";
 
 /**
@@ -276,6 +276,8 @@ type Starts = {
   keys?: VisitorKeys;
   /** The model the caller asked for; `pickModel` decides the run's. */
   model?: string;
+  /** The thinking level the caller asked for; absent: `DEFAULT_THINKING`. */
+  thinking?: RunThinking;
   /** The loop the caller asked for; absent: `defaultHarness`. */
   harness?: Harness;
 };
@@ -411,6 +413,7 @@ export function pgRunQueue(
         inputId,
         credentials,
         model,
+        thinking: starts.thinking ?? DEFAULT_THINKING,
         harness,
         state: "queued",
       });

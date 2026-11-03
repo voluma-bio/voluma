@@ -119,20 +119,6 @@ function modelAliases(): Record<string, ModelRef> {
   return models;
 }
 
-/**
- * A visitor run sends the visitor's Meta key with this model, so it must be a Meta model; a
- * `-contributor` one would let Meta train on the visitor's scan.
- */
-function visitorModel(): ModelRef {
-  const ref = modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3");
-  if (!isVisitorSafe(ref)) {
-    throw new Error(
-      `RUNNER_VISITOR_MODEL must be a Standard-mode meta/ model, got "${ref.provider}/${ref.id}"`,
-    );
-  }
-  return ref;
-}
-
 /** `RUNNER_THINKING`, one of Pi's thinking levels; unset: Pi sends none. */
 function thinkingLevel(): ModelThinkingLevel | undefined {
   const raw = optional("RUNNER_THINKING");
@@ -143,7 +129,7 @@ function thinkingLevel(): ModelThinkingLevel | undefined {
   return level;
 }
 
-/** Whether a visitor's Meta key and scan may go to this model (see `visitorModel`). */
+/** Whether a run's own Meta key and scan may go to this model (a key choice: the run's own Meta key and scan go to Standard-mode Meta only). */
 export const isVisitorSafe = (ref: ModelRef) =>
   ref.provider === "meta" && !ref.id.endsWith("-contributor");
 
@@ -259,7 +245,6 @@ export function runnerConfig() {
      * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
      */
-    visitorModel: visitorModel(),
     modal,
     /**
      * The gateway sandboxes reach providers through, and the secrets their tokens are minted

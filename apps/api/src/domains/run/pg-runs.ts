@@ -166,6 +166,7 @@ function toRun({ run, input, position, calls }: Row, results: Results): Run {
     input: toInput(input),
     credentials: run.credentials,
     ...(run.model !== null && { model: run.model }),
+    ...(run.thinking !== null && { thinking: run.thinking }),
     ...(run.harness !== null && { harness: run.harness }),
     example: run.example,
     createdAt: run.createdAt.toISOString(),

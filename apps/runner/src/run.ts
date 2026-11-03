@@ -123,7 +123,6 @@ export interface RunnerContext {
   models: Models;
   /** The model behind each alias the config sets (`config.models`), resolved at startup. */
   aliases: Record<string, Model<Api>>;
-  visitorModel: Model<Api>;
   /** The run's bucket. */
   objects: ObjectStore;
   log(line: string): void;
@@ -381,13 +380,15 @@ async function claimBody(
       );
       // The model every role uses: `RUNNER_MODEL` (a plumbing check) over the run's own model
       // (`run.model`, chosen by the API) over the role file's alias. A run without one predates
-      // the choice. A visitor's key and scan go to Standard-mode Meta models only, whatever the
-      // API recorded, so a run that asks for another fails here and says which.
+      // the choice. A run on its own key sends that key and the scan to Standard-mode Meta models only,
+      // whatever the API recorded, so a run that asks for another fails here and says which.
       const runModel = (): Model<Api> | undefined => {
         if (!run.model || config.modelForced) return undefined;
         const [provider = "", ...id] = run.model.split("/");
         if (visitor && !isVisitorSafe({ provider, id: id.join("/") })) {
-          log(`the visitor run's model ${run.model} is not a Standard-mode Meta model`);
+          log(
+            `the run's model ${run.model} cannot take a run's own Meta key (not a Standard-mode Meta model)`,
+          );
           throw new Error(runModelNotForVisitors(run.model));
         }
         const model = models.getModel(provider, id.join("/"));
@@ -400,8 +401,7 @@ async function claimBody(
         return model;
       };
       const chosen = runModel();
-      // Without a run model, a role's model is its file's alias; a visitor's main thread keeps
-      // it when that is Standard-mode Meta, else the visitor model.
+      // Without a run model, a role's model is its file's alias.
       const roleModel = ({ name, model: alias }: AgentDefinition) => {
         if (chosen) return chosen;
         const model = ctx.aliases[alias];
@@ -411,17 +411,19 @@ async function claimBody(
           );
           throw new Error(roleModelUnset(alias));
         }
-        return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
+        return model;
       };
-      // A role's file may set its thinking level; else the runner's; else none is sent ("off").
-      // A forced model (`RUNNER_MODEL`) keeps the role's level unless `RUNNER_THINKING` sets one.
-      // A run's or forced model gets the nearest level it supports (DeepSeek Flash has no `medium`).
+      // The level every role uses: the run's own (`run.thinking`, picked at /new) unless the runner
+      // forces its model (`RUNNER_MODEL`), where `RUNNER_THINKING` wins when set; else the role
+      // file's, else the runner's, else none is sent ("off"). A run's or forced model gets the
+      // nearest level it supports (DeepSeek Flash has no `medium`).
       const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
         if (visitor) return "off";
         const wanted = config.modelForced
-          ? (config.thinking ?? thinking)
-          : (thinking ?? config.thinking);
-        const level = chosen || config.modelForced ? nearestThinking(wanted, model) : wanted;
+          ? (config.thinking ?? run.thinking ?? thinking)
+          : (run.thinking ?? thinking ?? config.thinking);
+        const level =
+          chosen || config.modelForced || run.thinking ? nearestThinking(wanted, model) : wanted;
         assertThinking(level, [model], `the ${name} role's`);
         return level ?? "off";
       };
