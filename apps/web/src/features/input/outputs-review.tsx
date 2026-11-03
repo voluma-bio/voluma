@@ -224,18 +224,24 @@ export function OutputsReview({
   const inViewId = inView?.id;
   const aimedFor = useRef<string | undefined>(undefined);
   const { jumpTo } = marking;
+  const inViewLoaded = !!inView?.state.latest;
   useEffect(() => {
-    if (!inViewId || item || aimedFor.current === inViewId) return;
+    if (!inViewId || item) return;
     const a = blocks.annotations.find((x) => x.id === inViewId);
+    // Another loaded output in view ends the aim, so coming back to the ruler aims again.
+    if (!a && inViewLoaded) aimedFor.current = undefined;
+    if (aimedFor.current === inViewId) return;
     const on = a && blocks.volumes.find((v) => v.id === a.volumeId);
     const image = on && blocks.volumes.find((v) => v.kind === "image" && v.gridId === on.gridId);
     const gridKey = image && gridKeyOf(image);
-    if (!a || !image || !gridKey) return;
+    // The jump needs the image's real shape, which arrives with its converted assets.
+    if (!a || image?.data?.format !== "npy" || !gridKey) return;
+    if (assets[image.data.sha256]?.state !== "ready") return;
     aimedFor.current = inViewId;
     const end = voxelOf(image, a.kind === "point" ? a.position : a.a);
     const at = end.map((n, i) => Math.max(0, Math.min(image.shapeZyx[i]! - 1, Math.round(n))));
     jumpTo({ at: at as unknown as Zyx, gridKey, taskId: inViewId });
-  }, [inViewId, item, blocks, jumpTo]);
+  }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
   const allViews = useMemo(() => savedViews(events), [events]);
   const views = useSavedViews(run, allViews, reopen);
   const scene = useRef<SceneHandle>(null);
