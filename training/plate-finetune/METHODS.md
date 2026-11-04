@@ -18,8 +18,12 @@ Best OA8-19L median/section per method. "Comparable" means the same metric and s
 | 2.5D context | L16 | 38.4 ± 3.7 | yes | no |
 | Cut-band loss weight | L18 | 33.6 ± 1.7 | yes | no |
 | Public knees added (PUB) | L32 | 64.6 ± 52.3 (vote 39.9) | yes, new label rules | no |
-| Band target, 3-seed vote, empty abstains | L32 | 16.7 | yes, new label rules; vote rule chosen after seeing the scores | yes |
-| Band target, 3-seed vote, plain majority | L32 | 92.3 | yes, new label rules | yes |
+| **Band target, threshold 0.3, 3-seed vote, cut on the faces' midline** | L33 | **16.4** | yes, new label rules; every rule fixed on validation first | yes (the release recipe) |
+| Band target, threshold 0.3, 3-seed vote, cut on the skeleton line | L33 | 17.6 | yes, new label rules; fixed on validation first | yes |
+| Band faces snapped on the band probability, midline cut | L33 | 15.9 | yes, new label rules; fixed on validation first | no |
+| Stray-piece rules on the band (12 rules) | L33 | none beat no rule on validation | validation only | no |
+| Band target, threshold 0.5, 3-seed vote, empty abstains | L32 | 16.7 | yes, new label rules; vote rule chosen after seeing the scores | yes (threshold 0.5) |
+| Band target, threshold 0.5, 3-seed vote, plain majority | L32 | 92.3 | yes, new label rules | yes (threshold 0.5) |
 | Band target + neighbour fill, 1000 steps | L21 | 34.9 ± 4.5 | yes, L15 labels | no (fill) |
 | Two-region target + fill | L21 | 31.5 ± 6.7 | yes, L15 labels | no |
 | Stock SAM 3.1 tracker between keyframes | L17 | 52 to 58 (agent keyframes) | yes, 11 to 12 sections | no |
@@ -31,14 +35,14 @@ Best OA8-19L median/section per method. "Comparable" means the same metric and s
 | Spark with text tools (3 arms) | L23 | 82 to 89 | yes | no |
 | MedSAM3, no training | MedSAM3 | 445 (text), 439 (box) | yes | no |
 
-Seed noise matters when reading the table. Recipe A on the same data and scan ranges from 27 to 39 µm across three seeds, and from 27 to 104 across seven. A gap under about 10 µm between two single-seed numbers is not a result. The label rules changed twice: L15 (pockets filled, loose bone ignored, connector stretches no longer scored) and L29 (fibula, loose bone and plateau pieces ignored). Numbers before and after those changes are not strictly comparable.
+Seed noise matters when reading the table. Recipe A on the same data and scan ranges from 27 to 39 µm across three seeds, and from 27 to 104 across seven. Two single-seed numbers say nothing about which method is better; L20 estimates that 4 to 5 seeds per variant resolve differences above about 10 µm at best. The label rules changed three times: L9 (open ends no longer leak, satellite bone pieces ignored), L15 (pockets filled, loose bone ignored, connector stretches no longer scored) and L29 (fibula, loose bone and plateau pieces ignored). Numbers before and after those changes are not strictly comparable.
 
 ## Fine-tune variants (region target)
 
 The image model is SAM 3.1, prompted with the text "epiphysis". The label is the region above the cut line, and the cut line is read off the predicted region's boundary.
 
 **Zero-shot SAM 3.1 (L9, L13)**
-Stock weights with the prompts "epiphysis", "bone" and "growth plate". Nothing is predicted at threshold 0.5, and nothing at 0.05 on four checked sections. Dice 0 on OA8-19L.
+Stock weights. Nothing is predicted at threshold 0.5 with the prompts "epiphysis" (L13) and "bone" (L9), and nothing at 0.05 with "epiphysis", "bone" or "growth plate" on four checked sections. Dice 0 on OA8-19L.
 Not carried: it is only the baseline.
 
 **Frozen-only training (L9, L13)**
@@ -102,12 +106,34 @@ The band runs from the proximal to the distal traced face, plus the cut line dil
 In the repo: the band target.
 
 **Votes with empty sections abstaining (L32)**
-Treating an empty mask as an abstention instead of a "no" vote, the 3-seed band vote is 16.7 µm on OA8-19L (A's vote 33.8, the 6-model A + ZH vote 28.7), p95 94, and 22.1 on OA6-9RK (A 33.1), p95 116. It is worse on validation scan OA8-21L (66.1 vs 38.3). The rule was chosen after seeing the empty sections, so it is a lead to confirm on a new scan, not a settled result. The plain majority vote gave 92.3 on OA8-19L.
+At threshold 0.5, treating an empty mask as an abstention instead of a "no" vote, the 3-seed band vote is 16.7 µm on OA8-19L (A's vote 33.8, the 6-model A + ZH vote 28.7), p95 94, and 22.1 on OA6-9RK (A 33.1), p95 116. It is worse on validation scan OA8-21L (66.1 vs 38.3). The rule was chosen after seeing the empty sections. L33 checked that validation alone would have chosen it too (pooled validation 39 µm against 99 for the plain vote). The plain majority vote gave 92.3 on OA8-19L. L33's lower threshold makes the two rules equal.
 In the repo: both vote rules.
 
 **Band face and thickness errors (L32)**
 Faces read from the band lie within 10 to 23 µm of the traced faces on the six scans, and the band comes out about one voxel thicker than traced where the plate is thin. Thickness is usable to about plus or minus 1 voxel.
 In the repo.
+
+**Lower threshold for empty sections (L33)**
+The L32 band checkpoints, unchanged, with the detector's instance-score threshold lowered. L33 fixed every rule on the four validation scans before scoring the test scans, and scored each test scan once per step. Pooled validation vote (mean of the 4 scans): 0.5 39.0, **0.3 37.8**, 0.2 47.3 (OA8-21L gets much worse at 0.2). Keeping 0.5 and falling back to 0.3 or 0.2 only on an empty section, or taking an empty section's best instance whatever its score, scored 38.0 to 52.6. At 0.3 no section is empty on any scan or seed (at 0.5: 14 of 261), and a single seed scores about as well as the vote: per-seed mean 17.5 µm on OA8-19L and 21.2 on OA6-9RK (at 0.5: 90.4 and 46.2). The 3-seed vote scores **17.6 on OA8-19L and 19.8 on OA6-9RK** (p95 107 and 113). L32's abstain vote, re-predicted on the same GPU, scored 17.0 and 21.5. Measured as the gain over the A vote, the threshold keeps all of L32's gain without a rule chosen on the test scans.
+In the repo: `predict.py --threshold 0.3`.
+
+**Cut line from the faces' midline (L33)**
+The faces are the band's run nearest the skeleton line in each column. Each point of the skeleton line moves to the faces' midpoint where that is within 4 voxels. Pooled validation vote 33.9 µm against 37.8 for the skeleton line. Test: 16.4 on OA8-19L, 18.7 on OA6-9RK (skeleton 17.6 and 19.8).
+In the repo: `band_to_region.py`, the default cut.
+
+**Faces snapped on the band probability (L33)**
+The faces were moved by snap_faces' two-face search with the cost taken from the band's soft probability, from the HU image, from both, or from the probability's half-maximum crossings. One variant added a pull toward the neighbouring sections' faces. Pooled validation mean face error: plain 38.0 µm, probability 38.0, probability + neighbours 37.1, HU 40.4, both 40.0, half-maximum 38.9. The probability + neighbours variant was chosen on validation. On the test scans its faces were no better than the plain ones (mean error 23.6 vs 20.7 µm on OA8-19L, 25.3 vs 25.6 on OA6-9RK). Its midline cut scored 15.9 and 19.7 against the plain faces' 16.4 and 18.7. The probability snap stays on the plain band edges because the probability already falls there; medians are 12 to 16 µm (just over a voxel) for every mode, and the error is in a few sections per scan more than 50 µm off.
+Not carried: no gain over the plain faces.
+
+**Stray-piece rules (L33)**
+Twelve rules that drop band pieces before the line is chained, at threshold 0.3, validation only:
+- keep the widest piece and anything within 5, 10 or 20 voxels of it;
+- keep pieces within 6, 10 or 15 voxels of the neighbour sections' line;
+- keep pieces supported by at least half of the neighbour sections (3D support);
+- cut the chain at bridges with a W jump over 10, 20 or 30 voxels (tried after the test scans were scored).
+
+None beat "no rule" (pooled validation 37.8 µm); all did worse (54 to 91): on end sections with a partial plate the widest piece is other bone, and dropping the rest drops the plate (OA8-21L V75: 15 to 1050 µm). 3D support keeps the strays, because they persist across neighbouring sections. The cut-line score barely sees strays, because it scores only the label's columns.
+Not carried: no gain.
 
 ## Tracker propagation
 
@@ -162,7 +188,7 @@ A SAM 3 base (not SAM 3.1) with a medical LoRA, run unmodified on the same 14 OA
 Not carried: it does not find the plate, and training on it is not defined on the current stack.
 
 **Box prompts (MedSAM3, L19)**
-An exemplar or expert box added to the text prompt. It was the best MedSAM3 setting, and in the L19 snap it helped the SAM mask; the trained models here use text only and no box training is wired.
+An expert box added to the text prompt. At threshold 0.5 it was the best MedSAM3 setting (439 µm against 445 for "epiphysis" alone); at 0.05 the "growth plate" text alone was best (92) and the box gave 109. In the L19 snap it helped the SAM mask. The models here train on text prompts only.
 Not carried.
 
 ## Label fixes and other pieces
@@ -172,7 +198,7 @@ L9 fixed open ends so the flood fill no longer leaked into the metaphysis and ig
 In the repo: through the L29 label rules in the export (next entry).
 
 **Plateau pieces, ossicles (L24)**
-Bone pieces on the plateau that touch the tibia, found by a thin dark seam and a blocky shape, then reviewed by eye: 14 pieces over 8 of 10 scans, 1 to 3% of the label region. With them set to ignore, the OA8-19L cut-line scores do not move (agent line 15.2, LoRA A seeds 26.9, 30.6, 39.3, identical to the digit) and Dice changes by 0.0005. They matter for volume measurements, which Dice and the cut line do not see.
+Bone pieces on the plateau that touch the tibia, found by a thin dark seam and a blocky shape, then reviewed by eye: 14 pieces over 8 of 10 scans by the write-up's summary (its table marks 13 kept over 7 scans, with OA6-9RK's piece unsure), 0 to 2.6% of the label region. With them set to ignore, the OA8-19L cut-line scores do not move (agent line 15.2, LoRA A seeds 26.9, 30.6, 39.3, identical to the digit) and Dice changes by 0.0005. They matter for volume measurements, which Dice and the cut line do not see.
 In the repo: as part of the L29 rules (fibula, loose bone and plateau pieces to ignore).
 
 **Stacked-cut smoothing as post-processing (L9, L13, L15)**

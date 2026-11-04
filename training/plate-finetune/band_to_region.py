@@ -5,8 +5,8 @@
 Per section: the band mask's connected pieces, each piece's skeleton reduced to its longest geodesic path, its ends continued
 along their last stretch to the cortex (at most EXT_MAX voxels); pieces that do not overlap in U, longest first, joined left to
 right into one polyline, the skeleton line. With --cut midline (the default, and the band recipe's) each point of that line then
-moves to the midpoint of the band's two faces in its column (faces.midline), which scored 1-6 µm better than the skeleton line
-on five of the six scored scans (L33). The region is labels.label_section on the line, the rule that built the region labels. A
+moves to the midpoint of the band's two faces in its column (faces.midline); in the 3-seed vote that scored 1-8 µm better than
+the skeleton line on each of the six scored scans (L33). The region is labels.label_section on the line, the rule that built the region labels. A
 perfect band (the traced one) scores the label floor, ~11 µm, through the skeleton line. Writes <out>/<scan>.npz (V, mask: the
 region) and <out>/<scan>-lines.json ({V: [[w, u], ...]}, the line the region was cut on); a section with no line has an empty
 region.

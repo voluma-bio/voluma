@@ -29,7 +29,10 @@ and the LoRA rank. Load it on top of the SAM 3.1 weights from [facebook/sam3.1](
 | `region-s0.pt`, `region-s1.pt`, `region-s2.pt` | `epiphysis` | the epiphysis (IIOC) above the cut line |
 
 Three seeds per target, each the checkpoint with the lowest validation loss of a 3000-step run. The recommended use is the
-three band seeds voted together, where a seed that returns nothing on a section abstains (`vote.py --abstain`).
+three band seeds:
+- predict each at detector threshold 0.3 (`predict.py --threshold 0.3`);
+- take each section's cut line from the midline between the band's two faces (`band_to_region.py`, the default);
+- vote the three regions (`vote.py --abstain`; at 0.3 it equals the plain vote).
 
 ## Training data
 
@@ -48,11 +51,12 @@ line the prediction implies, then the mean over sections. A section with no pred
 |---|---|---|---|
 | region, per seed | 33.4 ± 5.5 | 53.5 ± 38.0 | 55 / 54 / 32 |
 | region, 3-seed vote | 33.8 | 33.1 | 34 |
-| band, per seed | 90.2 ± 74.4 | 46.4 ± 36.0 | 83 / 152 / 39 |
-| **band, 3-seed vote, empty seeds abstain** | **16.7** | **22.1** | 39 |
+| band, per seed | 16.1 ± 2.1 | 20.0 ± 3.4 | 39 / 26 / 32 |
+| **band, 3-seed vote (recommended)** | **16.4** | **18.7** | 33 |
 
-A perfect band scores about 11 µm through the same line extraction (the label floor). The band's two faces land within 1–2
-voxels of the traced faces.
+The band rows use threshold 0.3 and the midline cut. Both, and the vote, were fixed on the validation scans before the test scans
+were scored. A perfect band scores about 11 µm through the same line extraction (the label floor). The band's two faces land
+within 1–2 voxels of the traced faces (median error 11–26 µm per scan and seed).
 
 ## Intended use
 
@@ -63,13 +67,14 @@ agent reviews, as in Voluma's mouse OA workflow. Not for clinical use, and not f
 ## Limits
 
 - Trained on one lab's scans and scanner. Untested on other protocols, ages or resolutions.
-- A band seed sometimes returns nothing on a section (14 of 261 section-predictions). A single band seed is worse than a
-  region seed for that reason; use the abstain vote.
-- The abstain vote rule was chosen after seeing those empty sections, so its test numbers are a lead to confirm on new
-  scans. On one validation scan (OA8-21L) the band vote is worse than the region vote (66 vs 38 µm).
+- At the detector's default threshold 0.5 a band seed returns nothing on about one section in twenty, and an empty section
+  has no cut line. At 0.3 none of the 261 section-predictions on the six scored scans was empty. A new scan may still have
+  some, and the abstain vote then skips that seed.
+- Two test scans and four validation scans are few. On one validation scan (OA8-21L) the band vote is worse than the region
+  vote (52.5 vs 38 µm).
 - On end sections where the plate covers only part of the section, the band model can draw a full-width line through other bone;
   it can also mark a separate round bone that the line extraction then joins to the plate.
-- Thickness from the band is good to about ±1 voxel and comes out about one voxel thick where the plate is thin.
+- Thickness from the band is good to about ±1 voxel and comes out about one voxel thicker than traced where the plate is thin.
 
 ## Licence
 
