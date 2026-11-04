@@ -19,7 +19,8 @@ import {
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Volume } from "@voluma/contracts/review";
 import { canon, changeOf, markStatesOf, marksOf, toldMarks } from "@voluma/contracts/review-state";
-import { markPoints, worldOf } from "@voluma/viewer/grid";
+import { toWorld } from "@voluma/contracts/ruler";
+import { markPoints } from "@voluma/viewer/grid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gridKeyOf, type MarkChange, type MarkStore, type YourMark } from "./marking";
 import { NotSent } from "./message-send";
@@ -180,7 +181,7 @@ export function useRunMarks({
         volume: m.volumeId,
         gridKey: m.gridKey,
         mark: m.mark,
-        world: markPoints(m.mark).map((p) => worldOf(p, volume.affine)),
+        world: markPoints(m.mark).map((p) => toWorld(volume.affine, p)),
         plane: m.plane && {
           view: m.plane.view,
           normal: m.plane.normal,
