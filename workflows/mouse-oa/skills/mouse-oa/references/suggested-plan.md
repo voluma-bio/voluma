@@ -19,6 +19,10 @@ A protocol script writes a cropped object for the viewer and, beside it, the ful
 open your folder, so report every file the script's result record names with the output it belongs to, the output's
 own file first. A later step takes the output's files from `/run/outputs.yaml`.
 
+Every step after intake also needs `scan-settings`, this scan's display window and segmentation threshold: name it
+with the other inputs in each brief, and the worker passes its file to the scripts. A new `scan-settings` puts out of
+date the masks and labels built at its threshold and everything measured on them.
+
 When a check-first fails, ask whether the fault could make any other output wrong. If it could, the worker tells
 main what it saw and where, and main decides whether the input gets a new version: patella voxels in the tibia label
 also make the patella volume wrong, even though the femur is fine. If the input is right and this step needs it finer

@@ -36,7 +36,7 @@ Writes: <out>/frame.json  the frame (`microct-core/resources/frame.py` has its s
         <out>/oriented.npy  float32 HU stack, axis 0 = slices, with its sidecar (its own grid)
         <out>/keyframe.jpg  the keyframe slice
 Prints: one JSON line {frame, oriented, keyframe_image, keyframe, slices, bend_deg, skew_vox, shafts_found, keyframe_bone_vox, threshold_hu, plane_rule, ref_object_frames, oriented_shape}
-Example: python orient_joint.py --in hu.npy --header hu.json --out orient --threshold-hu 2500 --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
+Example: python orient_joint.py --in hu.npy --header hu.json --out orient --threshold-hu scan-settings.json --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
 Exits 2 with one sentence on bad input, before writing anything.
 """
 from pathlib import Path
@@ -276,7 +276,7 @@ if __name__ == '__main__':
     ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='hu.npy of the scan')
     ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json from scan-intake')
     ap.add_argument('--out', required=True, help='output directory (created)')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in HU (the scan\'s, in scan-settings.json from intake)')
+    ap.add_argument('--threshold-hu', type=sidecar.threshold_arg, required=True, help='bone threshold: the scan\'s segmentation threshold: its scan-settings.json, or a number in HU')
     ap.add_argument('--shaft-radius-mm', type=float, required=True, help='mm: the widest a shaft gets')
     ap.add_argument('--ref-radius-mm', type=float, required=True, help='mm: how near the joint the reference object sits')
     ap.add_argument('--min-object-mm3', type=float, required=True, help='mm3: the smallest 3D piece worth considering')

@@ -43,8 +43,9 @@ description: >
   until its outline follows the cortex edge and keeps thin trabeculae without taking in soft tissue or cartilage,
   and the window until trabeculae and the growth plate show and the densest cortex is not clipped white. Write
   `scan-settings.json` (`{"window_hu": [lo, hi], "segmentation_threshold_hu": t, "peaks_hu": [soft, bone], "why":
-  "..."}`) and report it with the histogram and the views as evidence. Every later render takes
-  `--window scan-settings.json`, and every mask script its threshold as `--threshold-hu`. The measurement threshold
+  "..."}`) and report it with the histogram and the views as evidence. Every later script takes the file itself:
+  `--window scan-settings.json`, `--threshold-hu scan-settings.json`, `--bone-hu scan-settings.json`, and its `window_hu`
+  is the `window` of a `segment_sam` request. The measurement threshold
   (`microct-core`) is the lab's and stays fixed: say in your report where it falls against the chosen threshold,
   and raise a To check item when the two are more than 300 HU apart.
 - **Find out what each bone piece is.** `components.py` (`sam-segmentation`) lists the bone pieces of the cleaned

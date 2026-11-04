@@ -15,8 +15,8 @@ a seed outside the region around label L is refused.
 
 Writes: <out>  uint8 labels on the grid of --labels, with its sidecar
 Prints: one JSON line {labels, volume_mm3: {label id: volume}, core_fallback_labels (default mode only)}
-Example: python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu 2500
-         python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu 2500 --within 2 --seeds seeds.json
+Example: python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu scan-settings.json
+         python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu scan-settings.json --within 2 --seeds seeds.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
@@ -100,7 +100,7 @@ if __name__ == '__main__':
     ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
     ap.add_argument('--out', required=True, help='labels .npy to write')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels at or above this are bone (the segmentation threshold)')
+    ap.add_argument('--threshold-hu', type=sidecar.threshold_arg, required=True, help='voxels at or above it are bone: the scan\'s segmentation threshold: its scan-settings.json, or a number in HU')
     ap.add_argument('--core-mm', type=float, default=0.05, help='mm: how deep each label is eroded to make its seed, in the default segmentation mode')
     ap.add_argument('--within', type=int, help='label id to split between the parts in --seeds')
     ap.add_argument('--seeds', type=sidecar.existing, help='JSON {"<label>": [[z,y,x], ...]}: the parts of label --within')

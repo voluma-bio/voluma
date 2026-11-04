@@ -98,6 +98,19 @@ def existing(path):
     return path
 
 
+def threshold_arg(s):
+    """`type=` of a `--threshold-hu` or `--bone-hu` option: a number in HU, or the path of intake's scan-settings.json (its
+    `segmentation_threshold_hu`), so a script takes the scan's chosen threshold without retyping it. Returns a float."""
+    try:
+        if s.endswith('.json'):
+            return float(json.loads(Path(s).read_text())['segmentation_threshold_hu'])
+        return float(s)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise argparse.ArgumentTypeError(
+            f'{s!r} is not a number in HU or a json file with "segmentation_threshold_hu", such as intake\'s scan-settings.json '
+            f'({type(e).__name__})') from e
+
+
 def parser(doc, **kwargs):
     """The parser of a resource: `doc` is its module docstring, printed whole by `--help`. Options are never abbreviated,
     so a flag's missing value cannot swallow an abbreviated flag (`--out --h`) as that value."""

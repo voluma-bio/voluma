@@ -42,7 +42,8 @@ Open `keyframe.jpg` (`visual-check`). It must cut **both long bones through the 
 when there is one. Read the scan notes (intake's `scan-notes.md`) first: when it says the structure the reference object
 stands for is outside the field, the piece taken for it is something else, harmless to the cut but setting the side
 of the slice and which bone is A. If a bone is missing, cut off, or the joint space is not in the slice, do not run
-SAM: read `bend_deg` and `skew_vox` in the output, and try another `--threshold-hu`.
+SAM: read `bend_deg` and `skew_vox` in the output. When the threshold is the cause, choose it again as `scan-intake` says
+and write a new `scan-settings.json` before you rerun, so every mask uses the threshold you report.
 
 Labels and points made on a wrong frame are wrong on the scan grid too: a corrected frame reruns what was made on it.
 

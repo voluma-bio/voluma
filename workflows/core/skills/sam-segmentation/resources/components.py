@@ -11,8 +11,8 @@ Writes: nothing
 Prints: one JSON line {threshold_hu, index, count, top}; top is a list of {id, voxels, volume_mm3, centre_zyx, bbox_zyx,
   touches_border} (id 1 = largest). With `--index` the slice is 2D: each entry has area_mm2 in place of volume_mm3, and
   centre_yx and bbox_yx in place of the zyx fields, in that slice's rows and columns; `index` is the slice (axis 0).
-Example: python components.py --in hu.npy --threshold-hu 2500 --top 10
-         python components.py --in hu.npy --threshold-hu 2500 --index 159 --min-mm3 0.01
+Example: python components.py --in hu.npy --threshold-hu scan-settings.json --top 10
+         python components.py --in hu.npy --threshold-hu scan-settings.json --index 159 --min-mm3 0.01
 Exits 2 with one sentence on bad input, before reading the volume.
 """
 import numpy as np
@@ -22,7 +22,7 @@ from scipy import ndimage as ndi
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
     ap.add_argument('--in', dest='inp', type=sidecar.existing, required=True, help='the scan (hu.npy) or an oriented stack, with its sidecar beside it (for the voxel size)')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels at or above this are bone')
+    ap.add_argument('--threshold-hu', type=sidecar.threshold_arg, required=True, help='voxels at or above it are bone: the scan\'s segmentation threshold: its scan-settings.json, or a number in HU')
     ap.add_argument('--index', type=int, help='slice of the volume (axis 0): find 2D components on it instead of 3D components')
     ap.add_argument('--top', type=int, default=10, help='how many of the largest components to list')
     ap.add_argument('--min-mm3', type=float, default=0.0, help='mm3 (mm2 with --index): smallest component kept')
