@@ -80,9 +80,10 @@ band-to-region, scoring and `faces.py` (the tibia mask, the traced faces) and ex
   `manifest.json` (size and sha256 of every file, and the links). Fetch with R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
   `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`): `uv run --group release python dataset_r2.py pull --out data`, which checks every sha256.
   `region` is byte-identical to the L29 export and `band` to the L32 one.
-- **Checkpoints** (about 175 MB each: our trained tensors only, loaded on top of the SAM 3.1 weights): not published yet.
-  `upload_weights.py` pushes them with [MODEL_CARD.md](MODEL_CARD.md) to a Hugging Face model repo once the account is chosen.
-  Until then they are on Modal volume `plate-finetune` under `/runs/l29-a-s{0,1,2}` (region) and `/runs/l32-band-s{0,1,2}`
+- **Checkpoints** (about 175 MB each: our trained tensors only, loaded on top of the SAM 3.1 weights): the three band seeds
+  are public at [VolumaBio/mouse-knee-growth-plate](https://huggingface.co/VolumaBio/mouse-knee-growth-plate), with
+  [MODEL_CARD.md](MODEL_CARD.md) as its README (`upload_weights.py` pushed them, 4 Nov 2026). The region seeds are not
+  published; all six are on Modal volume `plate-finetune` under `/runs/l29-a-s{0,1,2}` (region) and `/runs/l32-band-s{0,1,2}`
   (band).
 
 ## Reproduce

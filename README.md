@@ -19,4 +19,8 @@ Specifications: [input review](apps/web/src/features/input/.context/CONTEXT.md),
 [run view](packages/run-view/.context/CONTEXT.md)
 and [grid viewer](packages/viewer/.context/CONTEXT.md).
 
+The growth-plate model the runs call is a SAM 3.1 fine-tune trained offline in
+[training/plate-finetune](training/plate-finetune/README.md) (scores, methods, Modal app); its weights are public at
+[VolumaBio/mouse-knee-growth-plate](https://huggingface.co/VolumaBio/mouse-knee-growth-plate).
+
 See [architecture](.context/CONTEXT.md) and [design rules](DESIGN.md).
