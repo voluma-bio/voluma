@@ -19,7 +19,7 @@ import {
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
-import { and, asc, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, ne, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
@@ -71,6 +71,8 @@ import { events, inputs, runs, studies, studyMembers } from "./schema";
 export const QUEUE_LOCK = 0x76_6f_6c_71;
 
 /** How long an own-key run whose keys are gone waits for them. */
+/** Runs on one starter's own key that may be unfinished at once; each holds a sealed key in its row. */
+const MAX_OWN_KEY_RUNS = 20;
 const KEYS_WAIT = sql`interval '24 hours'`;
 
 const leaseUntil = sql`now() + make_interval(secs => ${LEASE_SECONDS})`;
@@ -191,6 +193,11 @@ async function sweep(tx: Tx) {
     UPDATE runs SET state = 'ended', outcome = 'failed', ended_at = now(), sealed_keys = NULL,
       error = 'The keys were not resent within 24 hours.'
     WHERE state = 'awaiting-keys' AND awaiting_since <= now() - ${KEYS_WAIT}`);
+  // Self-healing: an end path that missed the column (an old API during a deploy overlap) still
+  // leaves no key behind.
+  await tx.execute(
+    sql`UPDATE runs SET sealed_keys = NULL WHERE sealed_keys IS NOT NULL AND state = 'ended'`,
+  );
 }
 
 const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, "failed", error);
@@ -365,6 +372,22 @@ export function pgRunQueue(
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
     const harness = starts.harness ?? defaultHarness;
+    if (credentials === "visitor") {
+      const [{ open } = { open: 0 }] = await tx
+        .select({ open: sql<number>`count(*)::int` })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.startedBy, caller.userId),
+            eq(runs.credentials, "visitor"),
+            ne(runs.state, "ended"),
+          ),
+        );
+      if (open + starts.runs.length > MAX_OWN_KEY_RUNS)
+        throw new HTTPException(429, {
+          message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
+        });
+    }
     const used = await usage(tx, reader.labId);
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limits, reader.labId, used, { credentials });

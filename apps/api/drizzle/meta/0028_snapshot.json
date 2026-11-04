@@ -1,5 +1,5 @@
 {
-  "id": "2e3c1170-7aac-4d66-b1bc-c0a3e88ee954",
+  "id": "17d78df3-e876-447c-b41c-702f00971ce9",
   "prevId": "e4e8aed6-09b7-401b-ba09-d58df1d7b88f",
   "version": "7",
   "dialect": "postgresql",
@@ -489,6 +489,22 @@
           ],
           "isUnique": false,
           "where": "\"runs\".\"state\" IN ('queued', 'running')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runs_sealed_keys": {
+          "name": "runs_sealed_keys",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"runs\".\"sealed_keys\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

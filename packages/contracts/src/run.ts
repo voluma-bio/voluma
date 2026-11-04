@@ -115,7 +115,7 @@
  * Visitor keys are the caller's own, kept in their browser. The server keeps them
  * for the run's life only, encrypted (AES-256-GCM under the API's `RUN_KEY_SECRET`) in
  * the run's row, and nulls them when the run ends or is cancelled; the runner holds them in
- * memory. Never on disk, in logs or in any response (log no request body on these routes).
+ * memory. Never in logs or in any response (log no request body on these routes).
  * The only channel that carries them past the server is the hand-off to the runner (the
  * runner contract). Text from a visitor's providers (errors, SDK messages) has the key values
  * redacted before it is stored or logged. A deploy or a runner restart does not lose them: the

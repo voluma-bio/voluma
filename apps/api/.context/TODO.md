@@ -1,5 +1,11 @@
 # TODO
 
+- **No total storage cap on guest uploads (for Jimmy to decide).** Guests may upload (#533); the only
+  limits are per scan (5,000 files, 20 GB) and 3 uploads in progress per user (`inputs.ts`).
+  Finished uploads are never capped and guests cost nothing to mint. Add a total-bytes cap per
+  user or organization, or rate-limit guest minting.
+- **Constrain sealed keys after #533 is live.** Add `CHECK (state <> 'ended' OR sealed_keys IS NULL)`
+  on `runs`; before that, the old code's end writes would fail during the deploy overlap.
 - **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
   (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event, because
   its R2 snapshot is the task loop's. Delete that lookup once the deletion PR's snapshot fallback

@@ -183,6 +183,7 @@ export const runs = pgTable(
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),
     index("runs_started_by").on(t.startedBy),
     index("runs_active_state").on(t.state).where(sql`${t.state} IN ('queued', 'running')`),
+    index("runs_sealed_keys").on(t.id).where(sql`${t.sealedKeys} IS NOT NULL`),
     index("runs_study").on(t.studyId),
   ],
 );

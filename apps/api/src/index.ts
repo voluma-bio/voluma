@@ -175,8 +175,8 @@ app.get("/health", (c) => c.text("ok"));
 // A storage directory's signed URLs carry their own authorization, and uploads pass the body limit.
 if (storageDirectory)
   app.all(`${DIRECTORY_STORE_MOUNT}/*`, (c) => storageDirectory.serve(c.req.raw));
-// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
-// vault and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
+// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the sealed
+// keys and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
 // 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
 // history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });

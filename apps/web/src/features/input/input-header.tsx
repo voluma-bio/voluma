@@ -322,10 +322,15 @@ function StopRun({ run }: { run: Run }) {
 const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
 
 /** The run's own problems, over the views: waiting for its starter's keys, failed, or out of touch. */
-export function RunAlert({ run, userId, stale }: { run: Run; userId: string; stale: boolean }) {
+export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string; stale: boolean }) {
   const { state } = run;
   if (state.status === "awaiting-keys") return <AwaitingKeys run={run} userId={userId} />;
-  if (state.status === "ended" && state.outcome === "completed" && run.credentials === "visitor")
+  if (
+    state.status === "ended" &&
+    state.outcome === "completed" &&
+    run.credentials === "visitor" &&
+    run.cannotMessage === null
+  )
     return <ReopenKeys userId={userId} />;
   if (state.status === "ended" && state.outcome === "failed")
     return (
@@ -343,12 +348,22 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
 }
 
 /**
- * A finished own-key run holds no key, so a message to it needs the user's. Shown until this browser
- * has one saved; the messages then carry it (`keysToReopen`).
+ * A finished own-key run holds no key, so a message to it needs the user's: the form shows until
+ * this browser has one saved (the messages then carry it, `keysToReopen`), and "Change key"
+ * brings it back to replace a wrong or revoked one.
  */
 function ReopenKeys({ userId }: { userId: string }) {
   const [saved, setSaved] = useState(() => !!loadKeys(userId));
-  if (saved) return null;
+  const [changing, setChanging] = useState(false);
+  if (saved && !changing)
+    return (
+      <p className={`${bar} flex items-center gap-2 bg-muted text-muted-foreground`}>
+        Corrections to this run use your saved Meta key.
+        <Button size="sm" variant="ghost" onClick={() => setChanging(true)}>
+          Change key
+        </Button>
+      </p>
+    );
   return (
     <section className={`${bar} grid gap-2 bg-muted text-muted-foreground`}>
       <p>
@@ -356,7 +371,14 @@ function ReopenKeys({ userId }: { userId: string }) {
         a correction.
       </p>
       <div className="max-w-sm">
-        <KeysForm userId={userId} submitLabel="Save key" onSubmit={() => setSaved(true)} />
+        <KeysForm
+          userId={userId}
+          submitLabel="Save key"
+          onSubmit={() => {
+            setSaved(true);
+            setChanging(false);
+          }}
+        />
       </div>
     </section>
   );

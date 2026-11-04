@@ -94,7 +94,7 @@
  * end wins: a report on a run that has ended, or that this lease no longer
  * holds, changes nothing and answers 409.
  *
- * Keys. They are never stored, logged or echoed. An error body from these
+ * Keys. They are never logged or echoed (the API keeps them sealed, only while the run lives). An error body from these
  * routes names no request or response field, and the runner redacts the key
  * values from every error it reports (`run.ts`).
  */

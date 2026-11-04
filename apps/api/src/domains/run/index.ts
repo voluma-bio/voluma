@@ -6,7 +6,7 @@
  *   inputs.ts  the browser's scans: list, and upload (members); `src/ops/upload-scan.ts` is the CLI for it
  *   stream.ts  the server-sent event stream of a run's stored events (users, debug token)
  *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
- * RunDeps lists what it needs; index.ts supplies the adapters (the queue is built with the limits and the key vault). The factory
+ * RunDeps lists what it needs; index.ts supplies the adapters (the queue is built with the limits and the key sealer). The factory
  * returns a Hono app and does not know its mount. The Postgres adapters and tables are in
  * this directory.
  */

@@ -4,7 +4,7 @@
  * reads, and maps the answer. Each route names its own guard: the reads (list, get) take
  * `requireReader`, so a user reads through `readerOf(user)` (another org's run is a 404)
  * and the debug token reads every lab; the writes take `requireUser`. Visitor keys go straight to the queue,
- * which holds them in memory; no handler logs a body.
+ * which seals them into the run's row; no handler logs a body.
  */
 import { randomUUID } from "node:crypto";
 import {
