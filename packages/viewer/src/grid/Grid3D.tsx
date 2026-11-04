@@ -3,8 +3,12 @@
  * scene has none (the scan before segmentation), in the grid's own mm (voxel × spacing; the grid's
  * rotation into the scan is not applied). Drag turns the scene like a ball in any direction, over
  * the top and around the view axis (a drag near the edge rolls); Shift, Ctrl/⌘ or right drag
- * pans; the wheel or middle drag zooms. The reset button puts the camera back where it opened. A
- * click on a mesh moves the crosshair there. Loading the volume or meshes never moves the camera.
+ * pans; the wheel or middle drag zooms. A click on a mesh moves the crosshair there.
+ *
+ * The camera opens on the grid's centre from the side of the output's own meshes (`GridMesh.own`),
+ * so they sit in front of the see-through context. It turns there once, when they have loaded,
+ * and only if no gesture or restored view has placed it first; after that, loading the volume or
+ * meshes never moves the camera. The reset button returns to that view for the meshes shown now.
  *
  * With Point, a click marks the visible surface under the pointer (the first shown mesh, or the
  * volume where it becomes half opaque, whichever is nearer) and a ring shows where it would land;
@@ -94,6 +98,7 @@ export function Grid3D({
     depth: DepthTexture;
     render(): void;
     reset(): void;
+    aim(): void;
   } | null>(null);
   const [meshLoad, setMeshLoad] = useState<{ left: number; error?: string }>({ left: 0 });
   // The raw image is drawn only under no meshes: with them its threshold surface hides them.
@@ -155,13 +160,25 @@ export function Grid3D({
       );
     }
     const clip = bounds.getBoundingSphere(new Sphere());
-    // Array z runs down the screen, as in the slice panes.
-    const opening = {
-      position: center
-        .clone()
-        .add(new Vector3(1.2, 2.2, -0.8).normalize().multiplyScalar(radius * 3.6)),
-      target: center,
-      up: new Vector3(0, 0, -1),
+    // The opening view looks at the grid's centre from the side of the output's own meshes, so
+    // they sit in front of the see-through context; from a default side when they are near the
+    // centre or there are none. Array z runs down the screen, as in the slice panes, unless the
+    // view is nearly along z.
+    const opening = () => {
+      const own = new Box3();
+      for (const child of meshes.children) if (child.userData.own) own.expandByObject(child);
+      const offset = own.isEmpty() ? new Vector3() : own.getCenter(new Vector3()).sub(center);
+      const direction = (
+        offset.length() > radius * 0.05 ? offset : new Vector3(1.2, 2.2, -0.8)
+      ).normalize();
+      return {
+        position: center.clone().add(direction.clone().multiplyScalar(radius * 3.6)),
+        target: center,
+        up:
+          Math.abs(direction.z) > Math.cos((10 * Math.PI) / 180)
+            ? new Vector3(0, -1, 0)
+            : new Vector3(0, 0, -1),
+      };
     };
     const light = new DirectionalLight(0xffffff, 2.2);
     camera.add(light);
@@ -245,9 +262,23 @@ export function Grid3D({
       arcball._gizmos.updateMatrix();
       render();
     };
-    const reset = () => place(opening.position, opening.target, opening.up);
+    const reset = () => {
+      const { position, target, up } = opening();
+      place(position, target, up);
+    };
     reset();
-    three.current = { meshes, annotations, volumes, depth, render, reset };
+    // The camera turns to face the output once, when its own meshes have loaded, unless a gesture
+    // or a restored view has placed it first.
+    let placed = false;
+    controls.addEventListener("start", () => {
+      placed = true;
+    });
+    const aim = () => {
+      if (placed) return;
+      placed = true;
+      reset();
+    };
+    three.current = { meshes, annotations, volumes, depth, render, reset, aim };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
     // Up from the camera's own turn: the controls leave `camera.up` meaningless after a rotate.
     const now = () => ({
@@ -263,6 +294,7 @@ export function Grid3D({
       show(saved) {
         if (!("camera" in saved)) return;
         const { position, target, up } = saved.camera;
+        placed = true;
         place(new Vector3(...position), new Vector3(...target), new Vector3(...up));
       },
     };
@@ -524,10 +556,16 @@ export function Grid3D({
   useEffect(() => {
     const t = three.current;
     if (!t) return;
+    let ownLoaded = false;
+    let ownLeft = false;
     for (const m of scene.meshes) {
       const mesh = t.meshes.getObjectByName(m.id);
       if (mesh instanceof Mesh) paint(mesh, m);
+      if (m.own && mesh) ownLoaded = true;
+      else if (m.own) ownLeft = true;
     }
+    // Another output on this grid can name meshes already loaded as its own.
+    if (ownLoaded && !ownLeft) t.aim();
     t.render();
   }, [scene.meshes]);
   useEffect(() => {
@@ -545,9 +583,12 @@ export function Grid3D({
     }
     const missing = latestMeshes.current.filter((m) => !t.meshes.getObjectByName(m.id));
     setMeshLoad({ left: missing.length });
-    const settle = (error?: string) => {
-      if (!abort.signal.aborted)
-        setMeshLoad((had) => ({ left: had.left - 1, error: had.error ?? error }));
+    // Aim once every own mesh has loaded or failed.
+    let ownLeft = missing.filter((m) => m.own).length;
+    const settle = (m: GridMesh, error?: string) => {
+      if (abort.signal.aborted) return;
+      setMeshLoad((had) => ({ left: had.left - 1, error: had.error ?? error }));
+      if (m.own && !--ownLeft) t.aim();
     };
     for (const m of missing)
       loadMesh(m, abort.signal)
@@ -567,12 +608,16 @@ export function Grid3D({
           if (m.placement) matrix.multiply(new Matrix4().fromArray(m.placement.flat()).transpose());
           mesh.matrix.copy(matrix.multiply(new Matrix4().makeTranslation(ox, oy, oz)));
           mesh.matrixAutoUpdate = false;
+          // So its world matrix is current before the first render, for the opening view's box.
+          mesh.matrixWorldNeedsUpdate = true;
           paint(mesh, latestMeshes.current.find((l) => l.id === m.id) ?? m);
           t.meshes.add(mesh);
           t.render();
-          settle();
+          settle(m);
         })
-        .catch((cause) => settle(`Couldn't load the ${m.name} mesh: ${(cause as Error).message}`));
+        .catch((cause) =>
+          settle(m, `Couldn't load the ${m.name} mesh: ${(cause as Error).message}`),
+        );
     return () => abort.abort();
   }, [meshIds]);
 
@@ -695,6 +740,8 @@ function paint(mesh: Mesh, m: GridMesh) {
   mesh.visible = m.opacity > 0;
   // Draw see-through shells after what they contain.
   mesh.renderOrder = m.opacity < 1 ? 1 : 0;
+  // Which meshes the opening view faces (`opening` in the pane).
+  mesh.userData.own = m.own;
 }
 
 /**

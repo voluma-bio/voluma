@@ -84,6 +84,8 @@ export type GridMesh = {
   opacity: number;
   /** A surface sheet also intersects each slice as a trace. */
   trace?: boolean;
+  /** The output's own object (not context, not a focused check): the 3D pane opens facing it. */
+  own?: true;
 };
 
 /** Published annotations, mapped from world mm into this grid's source voxels. */

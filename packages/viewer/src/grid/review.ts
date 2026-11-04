@@ -119,7 +119,8 @@ export function reviewGrid({
     volume === focusVolume && (focus?.label === undefined || focus.label === label);
   const check = { color: token("--check-outline"), opacity: 1, outline: true };
   // What the subject itself shows, over the context: in `--output`, outlined in slices.
-  const own = (id: string) => (focused.has(id) ? check : { ...check, color: token("--output") });
+  const own = (id: string) =>
+    focused.has(id) ? check : { ...check, color: token("--output"), own: true as const };
   const contextLook = (label: number) => ({
     color: token(showLabels ? `--label-${((label - 1) % 12) + 1}` : "--bone"),
     opacity: 1,
@@ -134,7 +135,7 @@ export function reviewGrid({
     m: { path: string; vertices: number; indices: number },
     name: string,
     offsetZyx: Zyx,
-    look: { color: string; opacity: number },
+    look: { color: string; opacity: number; own?: true },
     placement?: GridMesh["placement"],
   ): GridMesh => ({
     id: `${sha256}/${m.path}`,
@@ -146,6 +147,7 @@ export function reviewGrid({
     placement,
     color: look.color,
     opacity: look.opacity,
+    ...(look.own && { own: true }),
   });
 
   // The run's segmentation is context on every output: the labels volume on this grid that the
@@ -270,7 +272,9 @@ export function reviewGrid({
       base: assetBase(mask.sha256),
       levels: a.levels,
       offsetZyx,
-      ...look,
+      color: look.color,
+      opacity: look.opacity,
+      outline: look.outline,
     });
     meshes.push(...a.meshes.map((m) => mesh(mask.sha256, m, s.name, offsetZyx, look)));
   }
