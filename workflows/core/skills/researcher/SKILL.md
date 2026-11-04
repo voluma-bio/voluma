@@ -1,6 +1,5 @@
 ---
 name: researcher
-harness: agents
 description: >
   Load when the researcher writes to you: what to look at before you answer, how to answer, and what a yes
   or a mark from them means.

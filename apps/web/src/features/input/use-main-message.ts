@@ -16,13 +16,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, answerApproval } from "@voluma/api-client";
 import { invalidateRun, runQuery } from "@voluma/api-client/query";
 import { MAX_VIEW_BYTES } from "@voluma/contracts/agent-events";
+import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { RunRead } from "@voluma/contracts/run";
-import { type OutputItem, type OutputRow, shownOf } from "@voluma/run-view";
+import { keysToReopen, type OutputItem, type OutputRow, shownOf } from "@voluma/run-view";
 import { storeView } from "@voluma/viewer/grid";
 import { type RefObject, useState } from "react";
-import type { MarkChange } from "./marks-panel";
+import { useOutletContext } from "react-router";
+import type { MarkChange } from "./marking";
 import { refusalOf, useDraft, useIdempotentSend } from "./message-send";
 import type { SceneHandle } from "./viewer";
 
@@ -100,7 +102,7 @@ export function useMainMessage({
   const [unseen, setUnseen] = useState(false);
   const setState = useRunState(run.id);
   const { send, submit: post } = useIdempotentSend<{ marks: string[] }>({
-    runId: run.id,
+    run,
     before: ({ marks }) => settled(marks),
     onSuccess: ({ response, unseen, meta }) => {
       setText("");
@@ -174,12 +176,16 @@ export function useMainMessage({
 export function useAnswers(run: RunRead, onSent: () => void) {
   const [error, setError] = useState<{ requestId: string; text: string }>();
   const client = useQueryClient();
+  const { userId } = useOutletContext<Me>();
   const answer = useMutation({
-    mutationFn: (a: { requestId: string; answer: "yes" | "no"; text: string }) =>
-      answerApproval(run.id, a.requestId, {
+    mutationFn: (a: { requestId: string; answer: "yes" | "no"; text: string }) => {
+      const keys = keysToReopen(userId, run);
+      return answerApproval(run.id, a.requestId, {
         answer: a.answer,
         ...(a.text && { text: a.text }),
-      }),
+        ...(keys && { keys }),
+      });
+    },
     onMutate: (a) => setError((e) => (e?.requestId === a.requestId ? undefined : e)),
     // The studies' reads carry the run's open calls (`waiting`): they clear with the answer.
     onSuccess: () => {

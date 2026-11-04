@@ -1,9 +1,9 @@
 /**
- * Final outputs, the input page's right side: a run of the agent loop's final values in main's
+ * Final outputs, the input page's right side: a run's final values in main's
  * sections, then the outputs a worker reported that the workflow does not declare. The value
  * picked opens in place under its row: what it is, who made it, its report, its To check items
- * (with those of what it rests on), and "Rests on": the outputs its latest version was measured on,
- * drawn beside, made from or drawn on, with "Further back" opening the rest of its history in the
+ * (with those of what it rests on), and "Based on": the outputs its latest version was measured on,
+ * drawn beside, made from or drawn on, with "Earlier steps" opening the rest of its history in the
  * same list. A row there frames the panes on that output and opens its report under it. The
  * whole run's graph (W) is the place for what rests on an output. Lists separate by spacing.
  *
@@ -241,7 +241,9 @@ function ValueRow({
         {row.name}
       </span>
       {restsOnOpen(row) && (
-        <span className="shrink-0 truncate text-muted-foreground text-xs">rests on a To check</span>
+        <span className="shrink-0 truncate text-muted-foreground text-xs">
+          An input needs checking
+        </span>
       )}
       {row.provisional && (
         <span className="shrink-0 rounded-sm px-1 font-mono text-[11px] text-muted-foreground inset-ring inset-ring-border">
@@ -358,7 +360,7 @@ function RestsOn({
   ...props
 }: FinalOutputsProps & { rows: TrailRow[]; restsOn: TrailRow[]; further: TrailRow[] }) {
   const { open, nameOf } = props;
-  // Further back opens by itself when the output open is one of its rows; a click overrides.
+  // Earlier steps opens by itself when the output open is one of its rows; a click overrides.
   const holds = further.some((r) => r.id === open);
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const showFurther = toggled && toggled.when === holds ? toggled.open : holds;
@@ -371,7 +373,7 @@ function RestsOn({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-1 pt-1">
       <h4 className="m-0 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-        Rests on
+        Based on
       </h4>
       <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] gap-0.5 rounded-md bg-card p-1 inset-ring inset-ring-border">
         {restsOn.map((r) => (
@@ -392,7 +394,7 @@ function RestsOn({
                   showFurther && "rotate-90",
                 )}
               />
-              <span className="shrink-0">Further back · {further.length}</span>
+              <span className="shrink-0">Earlier steps · {further.length}</span>
               {!showFurther && (
                 <span className="min-w-0 truncate text-muted-foreground text-xs">
                   {further.map((r) => nameOf(r.id)).join(", ")}
@@ -443,7 +445,7 @@ function TrailItem({
         </span>
         <span className="text-muted-foreground text-xs">
           {row.role && ROLE_WORD[row.role]}
-          {feeds && `, for ${feeds}`}
+          {feeds && ` for ${feeds}`}
         </span>
         <span className="col-start-2 col-end-4 flex flex-wrap items-baseline gap-x-2 text-muted-foreground text-xs">
           {row.used !== undefined && (
@@ -476,14 +478,14 @@ function TrailItem({
 }
 
 /**
- * "rests on ○ Patella ‹ ○ Bone labels ‹ ✓ Scan": the chain a value is computed on, nearest first,
+ * "Based on ○ Patella ‹ ○ Bone labels ‹ ✓ Scan": the chain a value is computed on, nearest first,
  * each link hollow until a version of it is published. Several at one step read "A, B".
  */
 function ChainLine({ chain, nameOf }: { chain: ChainLink[][]; nameOf: (id: string) => string }) {
   if (chain.length === 0) return null;
   return (
     <p className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pr-3 pb-1 pl-10 text-muted-foreground text-xs">
-      <span className="mr-0.5">rests on</span>
+      <span className="mr-0.5">Based on</span>
       {chain.map((step, i) => (
         <Fragment key={step.map((l) => l.id).join()}>
           {i > 0 && (

@@ -16,6 +16,7 @@
  */
 
 import { referenceInputId } from "@voluma/contracts/r2";
+import { sql } from "drizzle-orm";
 import {
   boolean,
   doublePrecision,
@@ -140,18 +141,20 @@ export const runs = pgTable(
     notes: text(),
     inputId: text().notNull(),
     credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
+    /** An own-key run's keys, sealed (run-keys.ts) while the run lives; null for a Voluma-key run and once the run ends. */
+    sealedKeys: text(),
     /** The model every role of the run uses (`runSchema.model`); null for runs made before the choice existed. */
     model: text(),
     /** How hard every role reasons (`runSchema.thinking`); null for runs made before the choice. */
     thinking: text({ enum: ["low", "medium", "high"] }),
-    /** The loop that drives the run (`runSchema.harness`); null for runs made before the choice: the task loop. */
+    /** Read nowhere. New runs write `agents` so a build that still claims by it hands them out (TODO: drop the column). */
     harness: text({ enum: ["tasks", "agents"] }),
     example: boolean().notNull().default(false),
     createdAt: timestamptz().notNull().defaultNow(),
     state: text({ enum: ["queued", "running", "awaiting-keys", "ended"] }).notNull(),
     startedAt: timestamptz(),
     awaitingSince: timestamptz(),
-    /** The last claim, for the claim's round-robin across orgs. */
+    /** The last claim, for the claim's rotation between own-key starters (`queueOrder`). */
     claimedAt: timestamptz(),
     endedAt: timestamptz(),
     outcome: text({ enum: ["completed", "failed", "cancelled"] }),
@@ -179,6 +182,8 @@ export const runs = pgTable(
   (t) => [
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),
     index("runs_started_by").on(t.startedBy),
+    index("runs_active_state").on(t.state).where(sql`${t.state} IN ('queued', 'running')`),
+    index("runs_sealed_keys").on(t.id).where(sql`${t.sealedKeys} IS NOT NULL`),
     index("runs_study").on(t.studyId),
   ],
 );

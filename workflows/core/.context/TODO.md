@@ -42,17 +42,9 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 
 ## Which way up a render shows
 - `quad_view.py` fixes its 3D camera's view-up to scan +z (`'view_up': [0.0, 0.0, 1.0]`); `--rotate` changes azimuth and
-  elevation only. A task that wants its 3D views a particular way up (the femur with its shaft up, as in the mouse-OA
+  elevation only. A step that wants its 3D views a particular way up (the femur with its shaft up, as in the mouse-OA
   deck) cannot ask for it. Direction: a view-up argument, kept in `.view.json` so `pick.py` still maps picks. Likewise
   `orient_joint.py` puts bone A above bone B with no override (#429 review).
-
-## When the task loop is deleted (after Nov 4)
-
-The skills stay readable by both loops until then, so a few lines still speak the task loop: `checkpoint` with
-`toCheck` (segmentation-check, microct-core, scan-intake), the researcher's words list in `microct-core` (moves to
-`agents/words.md`), and "a second AI check". Rewrite them for `report_output`'s `toCheck` and `message` when
-`tasks.json` goes, and add `scan-notes`, `bone-pieces` and `small-structures` as the ids scan-intake and
-microct-core report those files under.
 
 ## A researcher's path drawn on a scan plane
 

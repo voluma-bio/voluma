@@ -79,12 +79,12 @@ where it is used.
 
 ## Copy
 
-- Plain labels: "Runs", "To check", "Rerun for this sample".
+- Plain labels: "To check", "Samples".
 - One scanned knee is a **Sample** on screen, written only through `INPUT_WORD` (`@voluma/ui`), the
   mouse-OA workflow's noun; a **run** is one go of the AI over it. Code, routes and the API call it
   an `input`.
 - Choices are worded as the user's decisions ("Accept", "Move endpoints",
-  "Rerun and save to task list"), not as system states.
+  "Save a view"), not as system states.
 - Screens show state. Teach a concept once, where it first appears, then
   trust the user to know it.
 

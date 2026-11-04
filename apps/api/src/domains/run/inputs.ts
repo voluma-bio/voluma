@@ -3,8 +3,7 @@
  * on, and upload one: create (an `uploading` input and a presigned PUT URL per
  * file), then complete once storage holds every declared file at its declared size, or
  * cancel.
- * Uploading is for members only: a guest can list and start on inputs but not store
- * files. No file passes through here.
+ * Every account uploads, a guest included (an upload costs storage, not model spend). No file passes through here.
  */
 import { randomUUID } from "node:crypto";
 import { inputKey, inputPrefix, uploadKey, uploadPrefix } from "@voluma/contracts/r2";
@@ -23,7 +22,12 @@ export interface UploadLimits {
   maxBytes: number;
   /** Uncompleted, unexpired uploads per member, so abandoned ones can't pile up URLs. */
   maxOpen: number;
+  /** Total declared bytes a person may keep stored, the same for every account. */
+  maxStoredBytes: number;
 }
+
+const size = (bytes: number) =>
+  bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${(bytes / 1e6).toFixed(1)} MB`;
 
 /** Every object under `prefix`: key relative to the prefix → bytes. */
 async function sizesUnder(store: ObjectStore, prefix: string): Promise<Map<string, number>> {
@@ -50,29 +54,42 @@ export function inputsRoutes({ reads, uploadStore, store, uploadLimits }: RunDep
 
   app.post("/inputs", async (c) => {
     const user = c.var.user;
-    if (user.account !== "member") {
-      return c.json({ error: "Sign in with a lab account to upload a scan." }, 403);
-    }
     if (!store) return c.json({ error: "Scan upload is not set up on this server." }, 503);
     const { name, files } = await parseJson(c, createUploadRequestSchema);
     const bytes = files.reduce((sum, f) => sum + f.size, 0);
     if (files.length > uploadLimits.maxFiles || bytes > uploadLimits.maxBytes) {
       return c.json(
         {
-          error: `A scan may have at most ${uploadLimits.maxFiles} files and ${uploadLimits.maxBytes} bytes.`,
+          error: `A scan may have at most ${uploadLimits.maxFiles} files and ${size(uploadLimits.maxBytes)}. This one has ${files.length} files and ${size(bytes)}.`,
         },
         413,
       );
     }
     const since = new Date(Date.now() - URL_TTL_SECONDS * 1000);
-    if ((await uploadStore.openCount(user.userId, since)) >= uploadLimits.maxOpen) {
+    const id = randomUUID();
+    const created = await uploadStore.create(
+      { id, labId: user.labId, uploadedBy: user.userId, name, files },
+      { capBytes: uploadLimits.maxStoredBytes, maxOpen: uploadLimits.maxOpen },
+      since,
+    );
+    if (!created.ok && created.reason === "open") {
       return c.json(
         { error: `You have ${uploadLimits.maxOpen} uploads in progress; finish one first.` },
         429,
       );
     }
-    const id = randomUUID();
-    await uploadStore.create({ id, labId: user.labId, uploadedBy: user.userId, name, files });
+    if (!created.ok) {
+      const pending =
+        created.openBytes > 0
+          ? `, and ${size(created.openBytes)} more is still uploading (an upload that never finishes stops counting after ${URL_TTL_SECONDS / 3600} hours)`
+          : "";
+      return c.json(
+        {
+          error: `You've stored ${size(created.storedBytes)} of your ${size(uploadLimits.maxStoredBytes)}${pending}. This scan is ${size(bytes)}.`,
+        },
+        413,
+      );
+    }
     const expiresAt = new Date(Date.now() + URL_TTL_SECONDS * 1000).toISOString();
     const uploads = await Promise.all(
       files.map(async (f) => ({
@@ -95,6 +112,10 @@ export function inputsRoutes({ reads, uploadStore, store, uploadLimits }: RunDep
     if (!upload) return c.json({ error: "not found" }, 404);
     if (upload.status === "ready") return c.json(upload.input);
     if (!store) return c.json({ error: "Scan upload is not set up on this server." }, 503);
+    // Past the URL lifetime the row has stopped counting toward the cap, so it can't finish.
+    if (upload.createdAt.getTime() < Date.now() - URL_TTL_SECONDS * 1000) {
+      return c.json({ error: "This upload expired; start it again." }, 410);
+    }
     const [staged, moved] = await Promise.all([
       sizesUnder(store, uploadPrefix(id)),
       sizesUnder(store, inputPrefix(id)),

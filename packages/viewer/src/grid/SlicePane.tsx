@@ -63,7 +63,7 @@ import { volumeLevel } from "./volume";
 
 /**
  * The colour token of the plane holding array axis `axis` constant, when the caller gives none:
- * the task review's fixed reading, z axial, y sagittal, x coronal.
+ * z axial, y sagittal, x coronal.
  */
 export const axisToken = (axis: Axis) =>
   axis === 0 ? "--plane-axial" : axis === 1 ? "--plane-sagittal" : "--plane-coronal";
@@ -92,7 +92,6 @@ export function SlicePane({
   onPick,
   note,
   planeToken = axisToken,
-  clickLines = false,
 }: {
   /** The grid axis the pane holds when untilted; a tilted pane names the axis it started on. */
   axis: Axis;
@@ -122,8 +121,6 @@ export function SlicePane({
   onStatus(status: PaneStatus): void;
   /** Each plane's colour token, for the crosshair lines; stable, or the lines redraw each render. */
   planeToken?: (axis: Axis) => string | undefined;
-  /** Line also takes two clicks, not only a drag (the outputs review's). */
-  clickLines?: boolean;
 }) {
   const [ra, ca] = planeAxes(axis);
   const basis = useStable(given ?? gridBasis(axis));
@@ -770,7 +767,6 @@ export function SlicePane({
     probe,
     scene,
     axis,
-    clickLines,
     handlesNow,
     pickLevel,
   });

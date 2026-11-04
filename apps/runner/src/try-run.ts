@@ -2,20 +2,19 @@
  * The agent test loop's last step: start a run on the local API (`pnpm dev`), wait for it to
  * end, and print what it produced.
  *   pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>]
- *       [--outputs <id,id>] [--notes <text>] [--harness tasks|agents]
+ *       [--outputs <id,id>] [--notes <text>]
  * A runner must be running (`pnpm --filter @voluma/runner start`) to claim the run. It signs in
  * with the WORKOS_TEST_EMAIL and WORKOS_TEST_PASSWORD of the repo .env, as `upload:scan` does,
  * on the API and origin `.dev/env.json` names; the scan defaults to the lab's reference scan.
- * It waits on the run's event stream, not a timer, and prints a line per task change, tool
- * call and thread. Exit 0 when the run completed, 1 when it failed or was cancelled, 2 when the
+ * It waits on the run's event stream, not a timer, and prints a line per tool
+ * call, thread, message and published output. Exit 0 when the run completed, 1 when it failed or was cancelled, 2 when the
  * script itself broke (no `pnpm dev`, sign-in or API errors, the stream lost for good), 3 when no
  * runner claimed the run within CLAIM_WAIT_MS.
  */
 import { parseArgs } from "node:util";
 import { meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
-import { fold } from "@voluma/contracts/fold";
-import { harnessSchema } from "@voluma/contracts/ids";
+import { outputsFold } from "@voluma/contracts/output-fold";
 import { listInputsResponseSchema, runSchema } from "@voluma/contracts/run";
 import { spend } from "@voluma/contracts/spend";
 import { END_EVENT } from "@voluma/contracts/stream";
@@ -44,7 +43,6 @@ const { values } = parseArgs({
     workflow: { type: "string", default: "mouse-oa" },
     outputs: { type: "string" },
     notes: { type: "string" },
-    harness: { type: "string" },
   },
 });
 const workflow = workflowById(values.workflow);
@@ -105,7 +103,6 @@ const study = studyDetailSchema.parse(
         start: [input.id],
         ...(outputs && { selectedOutputs: outputs }),
         ...(values.notes && { notes: values.notes }),
-        ...(values.harness && { harness: harnessSchema.parse(values.harness) }),
       },
     })
   ).json(),
@@ -123,10 +120,8 @@ const unclaimed = setTimeout(() => {
 
 const events: RunEvent[] = [];
 const progress = (e: RunEvent) => {
-  if (e.type === "task") say(`task ${e.payload.taskId}: ${e.payload.status} - ${e.payload.reason}`);
-  else if (e.type === "tool.call") say(`  tool ${e.payload.name}`);
-  else if (e.type === "thread.started")
-    say(`thread started: ${e.payload.kind} ${e.payload.task ?? e.payload.name}`);
+  if (e.type === "tool.call") say(`  tool ${e.payload.name}`);
+  else if (e.type === "thread.started") say(`thread started: ${e.payload.kind} ${e.payload.name}`);
   else if (e.type === "thread.ended") say(`thread ended: ${e.payload.status}`);
   else if (e.type === "agent.message")
     say(`  ${e.payload.from} -> ${e.payload.to}: ${e.payload.text.slice(0, 100)}`);
@@ -181,23 +176,14 @@ for (let ended = false, failures = 0; !ended; ) {
 }
 
 const run = runSchema.parse(await (await api(`/run/runs/${runId}`)).json());
-const folded = fold(events);
 console.log(
   `\nrun ${runId}: ${run.state.status === "ended" ? run.state.outcome : run.state.status}`,
 );
 if (run.state.status === "ended" && run.state.error) console.log(`error: ${run.state.error}`);
-for (const t of folded.tasks) {
-  if (t.status === "pending") {
-    console.log(`\n${t.id}: not started`);
-    continue;
-  }
-  const reported = [...t.measurements, ...t.scores].map((o) => o.id);
-  if (t.files.length) reported.push(`${t.files.length} file(s)`);
-  console.log(`\n${t.id}: ${t.status}${t.reason ? ` - ${t.reason}` : ""}`);
-  console.log(`  reported: ${reported.join(", ") || "none"}`);
-  console.log(
-    `  missing: ${t.missing.map((m) => `${m.outputId}${m.required ? " (required)" : ""}`).join(", ") || "none"}`,
-  );
+for (const o of outputsFold(events).outputs) {
+  const version = o.latest ? ` v${o.latest.version}` : "";
+  const why = o.missingReason ? ` - ${o.missingReason}` : "";
+  console.log(`${o.id}${o.final ? "" : " (not final)"}: ${o.status}${version}${why}`);
 }
 const total = spend(events, run.providerCalls).total;
 console.log(

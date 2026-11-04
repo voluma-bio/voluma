@@ -13,7 +13,7 @@
  * logged through it.
  *
  * Beside the supervisor runs the harness's conversion worker (`review-assets.ts`): it turns
- * the files tasks report into review assets in a `convert` sandbox as they appear.
+ * the files agents publish into review assets in a `convert` sandbox as they appear.
  *
  * The host gives `superviseRun` one signal, the cut-off: a stop that will not end the run
  * (shutdown, self-stop, refused, loop-stalled, lease lost, the server's stop). The supervisor
@@ -28,7 +28,7 @@
  * period, then closes the sandboxes; the next claim resumes the queue. A stop by the server
  * or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
- * (which learns why from `claim.previousClaim`) resumes them (`run-loop.ts`). The exception
+ * (which learns why from `claim.previousClaim`) resumes them (`agents/loop.ts`). The exception
  * is a user's cancel, which the runner learns as `stop`: the API has already ended every
  * thread `cancelled` with the run, and an ended run is never claimed again.
  */
@@ -41,13 +41,6 @@ import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { AGENT_TOOL_NAMES } from "@voluma/harness/agents/tools/registry";
 import { errorText } from "@voluma/harness/error-text";
-import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
-import {
-  NO_WORKFLOW_DIR,
-  roleModelUnset,
-  runModelNotForVisitors,
-  runModelUnavailable,
-} from "@voluma/harness/messages";
 import { usageOf } from "@voluma/harness/model-usage";
 import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
@@ -59,28 +52,35 @@ import {
   type Supervised,
   superviseRun,
 } from "@voluma/harness/supervise-run";
-import { TOOL_NAMES } from "@voluma/harness/tools";
 import type { ObjectStore } from "@voluma/object-store";
 import type { AgentDefinition } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
-import { computePlan } from "@voluma/workflow/plan";
-import { type Config, isVisitorSafe, providerKey, sandboxIdleSeconds } from "./config.ts";
+import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaImages } from "./meta-images.ts";
 import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
 import { loggedFetch } from "./model-fetch.ts";
 import { providerFailure } from "./provider-error.ts";
-import { r2Outputs } from "./r2-outputs.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
-import { storeEvidence } from "./store-evidence.ts";
 import { storeFiles } from "./store-files.ts";
 import { storePublish } from "./store-publish.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
 import { RunStopped, usageMeter } from "./usage.ts";
+
+/** Setup failures that end a run before it starts; the researcher reads them as the run's error. */
+const NO_WORKFLOW_DIR = "no workflow was named to start";
+/** What the researcher reads; the runner logs which variable is unset. */
+const roleModelUnset = (alias: string) =>
+  `the "${alias}" AI this workflow needs is not set up; whoever runs Voluma sets it up`;
+/** What the researcher reads when a run's chosen model cannot be used by this runner. */
+const runModelUnavailable = (model: string) =>
+  `this run's AI (${model}) is not set up on this server; whoever runs Voluma sets it up`;
+const runModelNotForVisitors = (model: string) =>
+  `${model} cannot run on your own key; start the run again with a model that can, or with Voluma's key`;
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -216,7 +216,6 @@ async function claimBody(
   );
   let lease: ReturnType<typeof holdLease> | undefined;
   let events: Recorder | undefined;
-  let live: LiveBatcher | undefined;
   let supervised: Supervised | undefined;
   let images: ReturnType<typeof metaImages> | undefined;
   let outcome: Outcome | undefined;
@@ -271,11 +270,7 @@ async function claimBody(
     // run to different dependencies. A run made before this was recorded is refused here.
     const pin = pinOf(runId, stored);
     const sandboxImage = pin?.image ?? config.sandbox.image;
-    const harness = pin?.harness ?? run.harness ?? "tasks";
-    log(
-      `sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"}); loop: ${harness}`,
-    );
-    live = liveBatcher((frames) => client.live(frames));
+    log(`sandbox image: ${sandboxImage} (${pin ? "the run's own" : "this runner's"})`);
     const recorded = recorder(
       {
         async append(event) {
@@ -288,7 +283,6 @@ async function claimBody(
       runId,
       () => stop("lease-lost"),
       stored,
-      live,
     );
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.
@@ -374,8 +368,7 @@ async function claimBody(
           prefix: workflowSnapshotPrefix(runId),
           root: REPO_ROOT,
           commit: config.commit,
-          knownTools: harness === "agents" ? AGENT_TOOL_NAMES : TOOL_NAMES,
-          harness,
+          knownTools: AGENT_TOOL_NAMES,
         }),
       );
       // The model every role uses: `RUNNER_MODEL` (a plumbing check) over the run's own model
@@ -446,7 +439,7 @@ async function claimBody(
           // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only. Any other
           // thread (a run made on another model, reopened for a correction) gets the role's model:
           // its stored history was written by another, so it is refused as unresumable and the run
-          // loop starts the work again (`run-loop.ts`), instead of the run failing.
+          // loop starts the work again (`agents/loop.ts`), instead of the run failing.
           const [provider = "", ...id] = recorded.split("/");
           const allowed = visitor
             ? isVisitorSafe({ provider, id: id.join("/") })
@@ -457,7 +450,6 @@ async function claimBody(
       };
       return {
         definition,
-        plan: "files" in definition ? computePlan(definition.files, run.selectedOutputs).tasks : [],
         model: (role, recorded) => ({
           model: threadModel(setupOf(role).model, recorded),
           thinkingLevel: setupOf(role).thinkingLevel,
@@ -467,7 +459,6 @@ async function claimBody(
     };
     supervised = superviseRun({
       runId,
-      harness,
       prepare: (signal) =>
         prepare(signal).catch((e) => {
           logStack(e);
@@ -482,16 +473,14 @@ async function claimBody(
       workflows: run.workflows,
       recorder: events,
       history: client,
-      evidence: storeEvidence(objects),
       files: storeFiles(objects),
       publish: storePublish(objects),
-      outputs: r2Outputs(config.r2),
       createSandbox,
       // The image is recorded on the root's first event, so `sandboxImage` is the run's own.
       sandbox: {
         image: sandboxImage,
         lifetimeSeconds: config.sandbox.lifetimeSeconds,
-        idleSeconds: sandboxIdleSeconds(config, harness),
+        idleSeconds: config.sandbox.idleSeconds,
       },
       // The token follows the tool grant: `superviseRun` asks for it only for a sandbox whose role holds `segment_sam`.
       gateway: config.gateway
@@ -532,7 +521,6 @@ async function claimBody(
     shutdown.removeEventListener("abort", onShutdown);
     lease?.halt();
     const wrapUp = (async () => {
-      await live?.flush();
       await events?.flush();
       if (report) await lease?.sendFinalUsage();
     })();
@@ -550,10 +538,6 @@ async function claimBody(
         );
       else if (stored)
         log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
-      if (live) {
-        const { frames, requests, dropped } = live.stats();
-        log(`live frames this claim: ${frames} in ${requests} requests, ${dropped} dropped`);
-      }
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
       if (images) log(`model requests this claim: ${images.summary()}`);

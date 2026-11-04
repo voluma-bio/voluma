@@ -19,13 +19,11 @@ import {
   KeysForm,
   loadKeys,
   runCost,
-  runModels,
   runStatus,
   runWork,
   stoppedText,
   useEvents,
   useNow,
-  useThreads,
 } from "@voluma/run-view";
 import {
   Button,
@@ -37,7 +35,7 @@ import {
   type Status,
   StatusMark,
 } from "@voluma/ui";
-import { catalog, workflowName } from "@voluma/workflow/bundled";
+import { workflowById, workflowName } from "@voluma/workflow/bundled";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
@@ -50,26 +48,15 @@ export function inputTitle(run: Run, study: StudyDetail | undefined) {
 }
 
 /** The study's workflow by its name; a run pinned to an older path still names it. */
-const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
-  const id = study?.study.workflowId;
-  return id && id in catalog
-    ? catalog[id as keyof typeof catalog].name
-    : workflowName(run.workflows[0]?.path);
-};
-
-/** How far a running task-loop run got: `done` of `total` tasks. */
-type Progress = { done: number; total: number };
+const workflowLabel = (run: Run, study: StudyDetail | undefined) =>
+  workflowById(study?.study.workflowId ?? "")?.name ?? workflowName(run.workflows[0]?.path);
 
 /**
- * Where the run stands in a few words: "Finished", "Running, 4 of 9 tasks done", "Waiting, place
+ * Where the run stands in a few words: "Finished", "Running", "In queue: the system is busy, place
  * 2 in line" (also a run that lost its runner and waits for another); otherwise the word every
- * list uses (`runStatus`). How long it took is in Run details.
+ * list uses (`runStatus`). How far it got is in Final outputs; how long it took is in Run details.
  */
-function where(
-  run: Run,
-  progress: Progress | undefined,
-  waitingOnYou: boolean,
-): { status?: Status; text: string } {
+function where(run: Run, waitingOnYou: boolean): { status?: Status; text: string } {
   const { state } = run;
   // Main holds a call for your yes: until you answer, the run waits on you, going or ended.
   if (
@@ -78,35 +65,28 @@ function where(
   )
     return { status: "check", text: "Waiting on you" };
   if (state.status === "queued")
-    return { status: "waiting", text: `Waiting, place ${state.position} in line` };
-  if (state.status === "running")
     return {
-      status: "running",
-      text:
-        progress && progress.total > 0
-          ? `Running, ${progress.done} of ${progress.total} tasks done`
-          : "Running",
+      status: "waiting",
+      text: `In queue: the system is busy, place ${state.position} in line`,
     };
+  if (state.status === "running") return { status: "running", text: "Running" };
   if (state.status === "ended" && state.outcome === "completed") return { text: "Finished" };
-  const { label, status } = runStatus(run);
+  const { label, status } = runStatus({ state, review: null });
   return { status, text: label };
 }
 
 export function InputHeading({
   run,
   study,
-  progress,
-  waitingOnYou = false,
+  waitingOnYou,
 }: {
   run: Run;
   study: StudyDetail | undefined;
-  /** A task-loop run's; an agent-loop run's count is in Final outputs. */
-  progress?: Progress;
-  /** An agent-loop run's main holds a call for your yes: the run waits on you. */
-  waitingOnYou?: boolean;
+  /** The run's main holds a call for your yes: the run waits on you. */
+  waitingOnYou: boolean;
 }) {
   const { title, group } = inputTitle(run, study);
-  const now = where(run, progress, waitingOnYou);
+  const now = where(run, waitingOnYou);
   return (
     <ShellHeading>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-2 text-sm">
@@ -174,14 +154,6 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
   const events = useEvents();
   const work = runWork(events, state, useNow(live));
   const failed = useMemo(() => failedThreads(events).size, [events]);
-  const threads = useThreads();
-  // Before any thread has started, the model the API recorded; after, what the threads used.
-  const threadModels = useMemo(() => runModels(threads), [threads]);
-  const models = threadModels.length
-    ? threadModels
-    : run.model
-      ? [{ label: "Model", models: [run.model] }]
-      : [];
   // Each claim records the commit its runner's checkout was at; a resume after a deploy adds one.
   const commits = useMemo(() => {
     const seen = new Set<string>();
@@ -190,21 +162,31 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
         for (const pin of e.payload.workflows ?? []) seen.add(pin.commit);
     return [...seen];
   }, [events]);
+  // What the agents called; before any has started, the model the API picked (none on older runs).
+  const models = useMemo(() => {
+    const seen = new Set<string>();
+    for (const e of events)
+      if (e.type === "thread.started" && e.payload.model) seen.add(e.payload.model);
+    return seen.size ? [...seen] : run.model ? [run.model] : [];
+  }, [events, run.model]);
   const cost = formatUsd(runCost(run));
   const unknown = providerCalls.unknownCostCalls;
   const researcher: FactSection["items"] = [
     // Live, the sum includes earlier work: a correction adds to the run's total.
     [live ? "Worked so far" : "Took", work ? formatDuration(work.seconds) : "Not started"],
-    ...(work?.redos ? [["Redos", String(work.redos)] as [string, string]] : []),
     ["Workflow", workflow],
-    ...models.map(({ label, models }): [string, ReactNode] => [
-      label,
-      <span key={label} className="flex flex-col font-mono text-xs">
-        {models.map((m) => (
-          <ModelId key={m} id={m} />
-        ))}
-      </span>,
-    ]),
+    ...(models.length
+      ? [
+          [
+            models.length > 1 ? "Models" : "Model",
+            <span key="model" className="flex flex-col font-mono text-xs">
+              {models.map((m) => (
+                <ModelId key={m} id={m} />
+              ))}
+            </span>,
+          ] as [string, ReactNode],
+        ]
+      : []),
     // A request of unknown cost adds nothing to the sum, so the sum is a floor.
     [live ? "Spent so far" : "Cost", unknown > 0 ? `At least ${cost}` : cost],
   ];
@@ -319,9 +301,16 @@ function StopRun({ run }: { run: Run }) {
 const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
 
 /** The run's own problems, over the views: waiting for its starter's keys, failed, or out of touch. */
-export function RunAlert({ run, userId, stale }: { run: Run; userId: string; stale: boolean }) {
+export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string; stale: boolean }) {
   const { state } = run;
   if (state.status === "awaiting-keys") return <AwaitingKeys run={run} userId={userId} />;
+  if (
+    state.status === "ended" &&
+    state.outcome === "completed" &&
+    run.credentials === "visitor" &&
+    run.cannotMessage === null
+  )
+    return <ReopenKeys userId={userId} />;
   if (state.status === "ended" && state.outcome === "failed")
     return (
       <p role="alert" className={`${bar} bg-destructive-tint text-destructive`}>
@@ -335,6 +324,43 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
       </p>
     );
   return null;
+}
+
+/**
+ * A finished own-key run holds no key, so a message to it needs the user's: the form shows until
+ * this browser has one saved (the messages then carry it, `keysToReopen`), and "Change key"
+ * brings it back to replace a wrong or revoked one.
+ */
+function ReopenKeys({ userId }: { userId: string }) {
+  const [saved, setSaved] = useState(() => !!loadKeys(userId));
+  const [changing, setChanging] = useState(false);
+  if (saved && !changing)
+    return (
+      <p className={`${bar} flex items-center gap-2 bg-muted text-muted-foreground`}>
+        Corrections to this run use your saved Meta key.
+        <Button size="sm" variant="ghost" onClick={() => setChanging(true)}>
+          Change key
+        </Button>
+      </p>
+    );
+  return (
+    <section className={`${bar} grid gap-2 bg-muted text-muted-foreground`}>
+      <p>
+        This run used your own Meta key, which Voluma does not keep once a run ends. Add it to send
+        a correction.
+      </p>
+      <div className="max-w-sm">
+        <KeysForm
+          userId={userId}
+          submitLabel="Save key"
+          onSubmit={() => {
+            setSaved(true);
+            setChanging(false);
+          }}
+        />
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -407,7 +433,7 @@ function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
   const busy = manual && resend.isPending;
   return (
     <section className={`${bar} grid gap-2 bg-check-tint text-check-strong`}>
-      <p>The run is waiting for your keys: the server restarted and no longer has them.</p>
+      <p>The run is waiting for your keys: the server no longer has a usable copy.</p>
       <div className="max-w-sm">
         <KeysForm
           userId={userId}

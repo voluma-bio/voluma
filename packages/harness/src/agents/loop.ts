@@ -26,12 +26,8 @@ import {
   silentMinutes,
   stalledMinutes,
 } from "@voluma/contracts/agents";
-import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
-import {
-  labelMapsOf,
-  type OutputCatalog,
-  type OutputEntry,
-} from "@voluma/contracts/output-catalog";
+import { openingChange, refuseOutputsChange } from "@voluma/contracts/final-outputs";
+import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "@voluma/contracts/thread-records";
@@ -40,7 +36,6 @@ import type { BashRuntime } from "../bash-runtime";
 import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
 import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "../loop-config";
 import { loopShell, RUNTIME, type Section, type Step } from "../loop-shell";
-import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "../messages";
 import type { Recorder } from "../recorder";
 import { threadIdOf } from "../thread-id";
 import type { ThreadSpec, Threads } from "../threads";
@@ -73,6 +68,7 @@ import {
   returnedId,
   startedId,
 } from "./effects";
+import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "./messages";
 import { type Handover, NO_SUMMARY, skillMarker } from "./prompts";
 import type { RunFiles } from "./run-files";
 import type { AgentsApi } from "./tools/coordination";
@@ -166,16 +162,6 @@ interface AgentLoopOptions {
 }
 
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
-
-/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
-export function openingOutputs(
-  catalog: readonly OutputEntry[],
-  selected: readonly string[] | undefined,
-) {
-  return selected
-    ? catalog.filter((e) => selected.includes(e.id))
-    : catalog.filter((e) => e.selectable);
-}
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, threads } = o;
@@ -300,7 +286,6 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const spec = {
       ...model,
       threadId: agent.id,
-      kind: "agent" as const,
       agent: { name: agent.name, role: agent.role },
       systemPrompt,
       prompt,
@@ -347,15 +332,9 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   }
 
   async function startup() {
-    const entries = openingOutputs(o.catalog, o.selectedOutputs);
+    const change = openingChange(o.catalog, o.selectedOutputs);
     const id = `${root}:outputs`;
-    if (entries.length > 0 && !derive().written.has(id)) {
-      const change = {
-        by: "runner" as const,
-        reason: "The outputs the researcher chose for this run.",
-        add: entries,
-        labels: labelMapsOf(o.catalog),
-      };
+    if (change && !derive().written.has(id)) {
       const why = refuseOutputsChange(undefined, change, o.catalog);
       if (why) throw new Error(`the run's opening outputs were refused: ${why}`);
       await recorder.append(root, "outputs.changed", change, id);

@@ -1,5 +1,15 @@
 # TODO
 
+- **A new guest cookie is a fresh upload cap (for Jimmy to decide).** The per-person cap
+  (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and guests cost
+  nothing to mint, so clearing cookies gives 50 GB more. Cap per organization or rate-limit guest
+  minting if storage cost matters.
+- **Constrain sealed keys after #533 is live.** Add `CHECK (state <> 'ended' OR sealed_keys IS NULL)`
+  on `runs`; before that, the old code's end writes would fail during the deploy overlap.
+- **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
+  (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event, because
+  its R2 snapshot is the task loop's. Delete that lookup once the deletion PR's snapshot fallback
+  is live and the 7 old `.snapshot-done` markers are deleted ([convert-task-runs.md](convert-task-runs.md)).
 - **Reconcile abandoned provider calls before archiving their runs.** Archive now refuses
   calls without a completed settlement (`duration_ms IS NULL`), including swept `cut` rows.
   Late settlement is preserved; genuinely settled unknown-cost calls remain archivable.
@@ -32,19 +42,12 @@
   delete `inputs/<id>/` for any id with no `ready` row: a complete cancelled or abandoned
   part way through its copy leaves files there.
 
-- **`seed:example --backfill` checks focus ids after its R2 writes.** `copyEvidence` and
-  `uploadBackfill` run before `backfillRows`'s focus check, so a bad id uploads ~2 GB under an unused
-  example id before refusing. Move the check into `readBackfill` and run it first; also check each
-  id's kind as the fold does (`volumeId` must be a labels volume). (review p563 of #178)
 - **`devWritePrefix` is a plain prefix match:** `r2:dev` writes at the root of `dev/`, and
   `r2:dev//x` and `r2:dev/../runs/x` pass (R2's own 403 stopped the last). Require a segment after
   `dev/` and reject empty, `.` and `..` segments. (p563)
-- `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
-  against the `points` `export.py`'s `ruler()` writes. (p563)
 - **Copied runs read the source's scratch images.** `seed:example` copies `pi_messages` verbatim, and
   history rows hold R2 image keys under the source run's `runs/<runId>/scratch/…`. Fine for a read-only
   example; give a copy its own keys (or resolve them per run) before an example can be rerun or reopened.
-- **View snapshots on an example run.** Since #435 every org reads example runs, and `POST /review/runs/:id/snapshots` checks only readability. So any reader can save a snapshot on the example, and every reader lists them, `by` included, guests too. Refuse saves on `run.example`, or list only the caller's own on an example. No UI calls these endpoints yet.
 - **The example on Studies.** Its sample counts as Done (#454), but its progress mark and the Samples tree's glyph are still amber To check, which nobody can act on. A neutral "Example" mark would read better.
 - **Example studies hold only reference inputs.** Reading a study reads every input in it. `seed:example` and `import:run` should assert that an example study has only the reference input.
 - **Mark and view caps count characters.** `MAX_MARK_BYTES` and `MAX_VIEW_BYTES` (`runs.ts`) measure `JSON.stringify(...).length`, so a note of multi-byte characters can be up to 3× the cap; `browserLimit` (256 KB) still bounds the request. Measure UTF-8 bytes.
@@ -54,4 +57,5 @@
 - **Delete the `scans` alias** in `createStudyRequestSchema` (`packages/contracts/src/study.ts`)
   once the deploy that renamed it to `inputs` is live and old `/new` tabs are gone.
 - **Heartbeat after cancel drops usage.** A heartbeat that arrives after the run is cancelled does not add its cost to `runs.model_cost_usd`, so the org spend limit undercounts that tail. Decide whether the cancel path should accept a final usage report.
-- **One "may use Voluma's key" rule.** `caller.guest` (`GUEST_KEYS_MESSAGE` in `pg-queue.ts` and `corrections.ts`, `runs.ts`) and the `limits.voluma` map (`no-key` in `admission.ts`) both decide whether a caller has Voluma's key. Replace `caller.guest` with one flag and fold it into `no-key`.
+- **Delete `POST /ingest/runs/:id/live`** (`domains/run/ingest.ts`), accepted and dropped for runners built before live frames were deleted; once none is live.
+- **Drop the task loop's deploy-overlap leftovers** once no runner or API built before "Delete the task loop" is live: the claim's `harnesses` field (`packages/contracts/src/runner.ts`, `adapters/http/hand-off.ts` in the runner, `ingest.ts`), the `runs.harness` column (`domains/run/schema.ts`, written `agents` by `startRuns` in `pg-queue.ts`) and its migration. `thread.started.harness` in stored events is stripped by the parser; no migration is needed.

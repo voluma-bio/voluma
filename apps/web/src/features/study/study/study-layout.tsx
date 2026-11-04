@@ -27,7 +27,7 @@ import { ChevronRight, ListTree } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router";
 import { linkTo } from "../link";
-import { actHref, nextToAct, openHref, placeOf } from "./study-model";
+import { nextToAct, openHref } from "./study-model";
 
 export type StudyContext = { detail: StudyDetail; workflow: BundledWorkflow; me: Me };
 
@@ -93,7 +93,7 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
   const base = `/studies/${detail.study.id}`;
   const compare = pathname.startsWith(`${base}/compare`);
   const next = nextToAct(detail.inputs, detail.study.example);
-  const nextHref = next && actHref(detail.study.id, next, placeOf(next, detail.study.example));
+  const nextHref = next && openHref(detail.study.id, next);
   return (
     <ShellHeading>
       <Breadcrumb

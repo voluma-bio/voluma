@@ -32,10 +32,10 @@ Result record: every script that reports numbers writes `{"values": {id: {value,
 to its JSON file and prints `{"out": path, "values": {id: {value, unit, definition, kind}}, ...}` (values rounded to 6 decimals).
 A script that places something (`objects.py`) adds `"objects": {id: entry}` to the record and to what it prints; `quad_view.py
 --objects` takes the record.
-`id` is the output id the caller asks for (a flag or a spec key; the workflow's `outputs.json` binds to it), `kind` is
+`id` is the output id the caller asks for (a flag or a spec key; the workflow's `outputs.yaml` binds to it), `kind` is
 `measurement` or `diagnostic` (a number that helps judge a measurement but is not one), and `value` may be null.
 
-Protocol spec: a workflow's `protocol.json` is `{output id: {parameter: value, ...}}`, keyed by the ids of its `outputs.json`.
+Protocol spec: a workflow's `protocol.json` is `{output id: {parameter: value, ...}}`, keyed by the ids of its `outputs.yaml`.
 A script that measures or cuts a region for an output takes `--spec protocol.json` and reads that output's parameters and the ids
 its values are written under from the entry, so no protocol number or output id is a flag the caller retypes. A script lists the
 keys it needs; `protocol` refuses an entry that lacks one. A core script has no default for a protocol number.

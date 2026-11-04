@@ -25,9 +25,7 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
   const canAnswerAs =
     (principal: Principal): CanAnswer =>
     async (tx, run, workflowId) =>
-      principal.kind === "user" &&
-      (await queue.cannotMessage(readerOf(principal), callerOf(principal), run, tx, workflowId)) ===
-        null;
+      principal.kind === "user" && (await queue.cannotMessage(run, tx, workflowId)) === null;
 
   app.post("/studies", requireUser, async (c) => {
     const body = await parseJson(c, createStudyRequestSchema);
@@ -53,7 +51,6 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
         keys: body.keys,
         model: body.model,
         thinking: body.thinking,
-        harness: body.harness,
       },
     });
     const detail = await studies.get(reader, result.studyId, canAnswerAs(user));

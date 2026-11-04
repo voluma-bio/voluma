@@ -10,9 +10,6 @@ const HEAD_CHARS = 4_000;
 const TAIL_CHARS = 8_000;
 // The stored copy holds at most this much (memory is the limit); the tail is always kept apart.
 const STORE_CHARS = 4_000_000;
-// One live `tool.output` frame per window, or sooner when the buffer fills.
-const FLUSH_MS = 300;
-const FLUSH_CHARS = 8_000;
 
 /** Everything a command printed, up to STORE_CHARS, plus its first and last characters. */
 export class OutputBuffer {
@@ -53,20 +50,16 @@ export interface ModelView {
   truncated: boolean;
 }
 
-/** `canRead`: the thread holds `read`, so a cut output's note points at it (a role file from before `read` does not). */
 export async function modelView(
   output: OutputBuffer,
   sandbox: Sandbox,
   path: string,
-  canRead: boolean,
   signal?: AbortSignal,
 ): Promise<ModelView> {
   if (!output.cut) return { output: output.head + output.tail, truncated: false };
   const text = output.stored();
   const omitted = output.total - HEAD_CHARS - TAIL_CHARS;
-  let note = canRead
-    ? `${omitted} of ${output.total} characters omitted. read ${path} for the rest of the output`
-    : `${omitted} of ${output.total} characters omitted; full output at ${path}`;
+  let note = `${omitted} of ${output.total} characters omitted. read ${path} for the rest of the output`;
   let stored = true;
   try {
     await sandbox.writeFile(path, new TextEncoder().encode(text), signal);
@@ -78,25 +71,4 @@ export async function modelView(
     note = `${omitted} of ${output.total} characters omitted; full output not saved (${String(error)})`;
   }
   return { output: `${output.head}\n[${note}]\n${output.tail}`, truncated: stored };
-}
-
-/** Batches live chunks per stream into `tool.output` frames. */
-export function coalescer(emit: (stream: "stdout" | "stderr", text: string) => void) {
-  const buffers = { stdout: "", stderr: "" };
-  let lastFlush = Date.now();
-  const flush = () => {
-    lastFlush = Date.now();
-    for (const stream of ["stdout", "stderr"] as const) {
-      const text = buffers[stream];
-      buffers[stream] = "";
-      if (text) emit(stream, text);
-    }
-  };
-  return {
-    add(stream: "stdout" | "stderr", text: string) {
-      buffers[stream] += text;
-      if (Date.now() - lastFlush >= FLUSH_MS || buffers[stream].length >= FLUSH_CHARS) flush();
-    },
-    flush,
-  };
 }

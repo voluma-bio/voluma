@@ -72,7 +72,7 @@ const FALLBACK_IMAGES_PER_REQUEST = 100;
 const PROVIDER_IMAGES_PER_REQUEST: Readonly<Record<string, number>> = { meta: 50 };
 /**
  * Shares of the request-size and image-count limits. Past WARN the thread gets the context notice (a
- * `view_image` call adds up to 4 MiB); past DUE it compacts at once; past COLD even the warm
+ * `read` call adds up to 4 MiB); past DUE it compacts at once; past COLD even the warm
  * summary request might not fit, so it summarizes without the tail.
  */
 const IMAGE_WARN = 0.4;

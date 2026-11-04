@@ -30,6 +30,7 @@
 import { madeFromSchema, toCheckItemSchema } from "@voluma/contracts/agent-events";
 import { agentLog } from "@voluma/contracts/agents";
 import {
+  convertedAs,
   type OutputEntry,
   type OutputKind,
   outputKindSchema,
@@ -46,7 +47,7 @@ import {
 import type { Volume } from "@voluma/contracts/review";
 import { toWorld } from "@voluma/contracts/ruler";
 import { z } from "zod";
-import { EvidenceNotFound, EvidenceRefused } from "../../ports/evidence";
+import { FileNotFound, FileRefused } from "../../ports/publish";
 import type { Tool, ToolContext } from "../../tools/tool";
 import { briefOf } from "../deliveries";
 import { reportOutputId } from "../effects";
@@ -117,16 +118,13 @@ interface Plan {
   shape?: string;
 }
 
-/** The shapes the review converter reads from a `.npy` (`detail.as`); a point or line has no array. */
-const CONVERTED_SHAPES = new Set<string>(["labels", "mask", "surface"]);
-
 /** The converter's representation of a listed output, where the catalog fixes it. */
 function detailOf(entry: OutputEntry): Pick<Plan, "detail" | "shape"> {
-  if (entry.kind === "base") return { detail: { as: "image" } };
-  if (entry.kind !== "overlay" || !entry.shape) return {};
-  return CONVERTED_SHAPES.has(entry.shape)
-    ? { detail: { as: entry.shape }, shape: entry.shape }
-    : { shape: entry.shape };
+  const as = convertedAs(entry);
+  return {
+    ...(as && { detail: { as } }),
+    ...(entry.kind === "overlay" && entry.shape && { shape: entry.shape }),
+  };
 }
 
 const zyxSchema = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
@@ -144,7 +142,7 @@ const annotationFileSchema = z.object({
  * `detail.points` of a point or line overlay: its ends in world mm, which is what the review draws.
  * The file (`objects.py`'s entry for the output, bare or as `objects[<id>]` of a result record)
  * holds voxels `[z, y, x]` on its grid; the affine is the base version's the call names in
- * `madeFrom`, the one `toWorld` uses for the task loop's annotations. A file on another grid than
+ * `madeFrom`. A file on another grid than
  * the base, or a base with no affine, is refused: an unconverted point would be drawn in the wrong place.
  */
 async function pointsOf(
@@ -155,7 +153,7 @@ async function pointsOf(
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const text = await deps.publish.read(fileKey, { signal }).catch((error: unknown) => {
-    if (error instanceof EvidenceRefused) throw new Refusal(error.message);
+    if (error instanceof FileRefused) throw new Refusal(error.message);
     throw error;
   });
   let json: unknown;
@@ -206,7 +204,7 @@ async function detailFromSidecar(
   // A sidecar over the read limit is as good as missing.
   const readOrMissing = (k: string) =>
     deps.publish.read(k, { signal }).catch((error: unknown) => {
-      if (error instanceof EvidenceRefused) return undefined;
+      if (error instanceof FileRefused) return undefined;
       throw error;
     });
   const text =
@@ -484,9 +482,9 @@ export function reportOutput(
               },
             )
             .catch((error) => {
-              if (error instanceof EvidenceNotFound)
+              if (error instanceof FileNotFound)
                 throw new Refusal(`No file at ${path}. Name files in your folder, not folders.`);
-              if (error instanceof EvidenceRefused) throw new Refusal(error.message);
+              if (error instanceof FileRefused) throw new Refusal(error.message);
               throw error;
             });
           const approved = expected?.[keyOf(ctx, path)];

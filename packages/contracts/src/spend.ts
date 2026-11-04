@@ -1,10 +1,10 @@
 /**
- * What a run spent, per thread, per task and in total, derived from its events: the run
+ * What a run spent, per thread and in total, derived from its events: the run
  * screen's agent cards and header call it. Pure: events in `seq` order in, plain data out; a
  * prefix of the log gives the spend so far.
  *
- * - Everything is counted per thread first (`threads`); a task's spend, `main` and `total` are
- *   sums over threads.
+ * - Everything is counted per thread first (`threads`); `total` is a
+ *   sum over threads.
  * - Cost and tokens: the `usage` on each assistant `message`, for the thread that wrote the
  *   event; an event from a thread with no `thread.started` before it counts only in `total`.
  * - Gateway requests (`Run.providerCalls`) are passed in separately and added
@@ -16,15 +16,12 @@
  * - Cache misses (`cacheMisses`) are judged per thread by `cacheStep`. A compaction summary is a
  *   call but is not judged, and the thread's next call starts a new baseline: it re-reads only the
  *   system prompt of a far shorter history, which is not a lost cache.
- * - A worker or check thread belongs to the task its `thread.started` names, so a task's
- *   spend covers all its attempts: worker, check and any redo. A thread with no task (the root, the main
- *   agent) belongs to `main`.
  * - Wall time is per thread, the sum of its spans, each from a `thread.started` to the
  *   thread's first `thread.ended` after it (a later end, such as a cancel of finished work,
  *   adds nothing), or to the thread's latest event while it has none (running, or cut off
  *   by a crash). A resume opens a new span, so a thread's time is its whole working time, not
- *   its last stretch. A task's wall time is the sum over its threads. `main`'s and `total`'s
- *   are the root thread's, whose open span ends at the log's latest event: the run's own
+ *   its last stretch. `total`'s
+ *   is the root thread's, whose open span ends at the log's latest event: the run's own
  *   working time, across resumes. The root starting again means the runner restarted, so every
  *   open span ends there, each at its own latest event.
  * - Sandbox time is the time from a `bash` call to its result, `bash` being the one tool
@@ -71,9 +68,6 @@ export type ThreadSpend = {
 export type RunSpend = {
   /** In the order the threads first started. */
   threads: ThreadSpend[];
-  /** In the order the tasks' first threads started. */
-  tasks: { taskId: string; spend: Spend }[];
-  main: Spend;
   total: Spend;
 };
 
@@ -152,18 +146,10 @@ export function missKind(
   return toolsChanged || idleMs >= CACHE_IDLE_MS ? "expected" : "unexpected";
 }
 
-const sum = (spends: Iterable<Spend>): Spend => {
-  const out = empty();
-  for (const s of spends) for (const k of Object.keys(out) as (keyof Spend)[]) out[k] += s[k];
-  return out;
-};
-
 export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls): RunSpend {
   const total = empty();
-  // threadId → its own spend and where it counts besides `total` (a task, `main`, or neither).
   const threads = new Map<string, Spend>();
   const cache = new Map<string, CacheState>();
-  const owner = new Map<string, { task: string } | "main">();
   const ended = new Map<string, number>();
   const open = new Map<string, { since: number; last: number }>();
   // toolCallId → the `bash` call's thread and start.
@@ -202,17 +188,12 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
     const at = Date.parse(e.createdAt);
     switch (e.type) {
       case "thread.started": {
-        const { task } = e.payload;
         if (threadPlace(e.payload) === "root") {
           // The root starts again only after the runner restarted, which cut off every thread.
           root = e.threadId;
           for (const threadId of [...open.keys()]) close(threadId);
         } else close(e.threadId);
-        if (!owner.has(e.threadId)) {
-          threads.set(e.threadId, empty());
-          // A thread with a task is that task's; any other (the root, the main agent) is `main`'s.
-          owner.set(e.threadId, task !== undefined ? { task } : "main");
-        }
+        if (!threads.has(e.threadId)) threads.set(e.threadId, empty());
         open.set(e.threadId, { since: at, last: at });
         break;
       }
@@ -259,7 +240,7 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
     latest = Math.max(latest, at);
   }
   for (const threadId of [...open.keys()]) close(threadId, undefined, true);
-  // The run's own working time is the root's; other threads of `main` add their calls, not time.
+  // The run's own working time is the root's; other threads add their calls, not time.
   if (root !== undefined) total.wallSeconds = threads.get(root)?.wallSeconds ?? 0;
   if (providerCalls) {
     total.costUsd += providerCalls.costUsd;
@@ -274,15 +255,6 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       }
     }
   }
-  const tasks = new Map<string, Spend[]>();
-  const mainThreads: Spend[] = [];
-  for (const [threadId, s] of threads) {
-    const o = owner.get(threadId);
-    if (o === "main") mainThreads.push(s);
-    else if (o) tasks.set(o.task, [...(tasks.get(o.task) ?? []), s]);
-  }
-  const main = sum(mainThreads);
-  main.wallSeconds = total.wallSeconds;
   return {
     threads: [...threads].map(([threadId, s]) => ({
       threadId,
@@ -290,8 +262,6 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       endedSeconds: ended.get(threadId) ?? 0,
       openSince: openAtEnd.get(threadId) ?? null,
     })),
-    tasks: [...tasks].map(([taskId, spends]) => ({ taskId, spend: sum(spends) })),
-    main,
     total,
   };
 }

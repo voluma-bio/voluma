@@ -248,7 +248,7 @@ class Meshes:
     """Display surfaces in mm (x, y, z), cut from an array downsampled by a step and cached as .vtp files in `cache_dir`.
 
     A cache file is named by a hash of the array's path and mtime, the step and what was cut. It is built under /tmp and
-    copied into `cache_dir` in one pass: `cache_dir` is usually under $SCRATCH, an R2 mount where VTK's writer crashes and
+    copied into `cache_dir` in one pass: `cache_dir` is usually under $WORK, an R2 mount where VTK's writer crashes and
     a rename fails. A mesh is read only when its `.done` marker holds the .vtp's byte count, so a copy cut off part way,
     one being overwritten, or a marker that arrived before its mesh is built again. The downsampled array is read once
     per Meshes, however many labels are cut from it."""

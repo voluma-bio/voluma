@@ -5,19 +5,9 @@
  * QueryClient. Call sites add their own options (`refetchInterval`, `enabled`) around these, except
  * where the rule is the key's own (the live refetch of `studiesQuery` and `studyQuery`).
  */
-import {
-  type QueryClient,
-  queryOptions,
-  type UseMutationOptions,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
-import type { AcceptCheckRequest, ReviewDecisionResponse } from "@voluma/contracts/review";
+import { type QueryClient, queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { UpdateUserSettingsRequest } from "@voluma/contracts/settings";
 import {
-  ApiError,
-  acceptCheck,
-  getReviewRun,
   getRun,
   getRunModels,
   getStudy,
@@ -30,8 +20,6 @@ import {
 
 export const runQuery = (id: string) =>
   queryOptions({ queryKey: ["run", id], queryFn: () => getRun(id) });
-export const reviewRunQuery = (id: string) =>
-  queryOptions({ queryKey: ["review-run", id], queryFn: () => getReviewRun(id) });
 /** The lab's studies, refetched every 5 s while any study's newest run is still going. */
 export const studiesQuery = () =>
   queryOptions({
@@ -81,61 +69,7 @@ export const allStudiesKey = ["study"] as const;
 export function invalidateRun(client: QueryClient, runId: string) {
   return Promise.all([
     client.invalidateQueries({ queryKey: runQuery(runId).queryKey }),
-    client.invalidateQueries({ queryKey: reviewRunQuery(runId).queryKey }),
     client.invalidateQueries({ queryKey: allStudiesKey }),
     client.invalidateQueries({ queryKey: studiesQuery().queryKey }),
   ]);
-}
-
-export type AcceptVars = Pick<AcceptCheckRequest, "taskId" | "resultRevisionId"> & {
-  checkId: string;
-};
-
-/**
- * "Looks right": accepting one open check on a run's current result. One mutation and one error
- * rule for every place that offers it (the run page, the study's To check list, the task report),
- * so a failure reads the same wherever it happens. Callers show `mutation.error.message`.
- *
- * `revisionId` is the displayed review's revision; each mutation also names the displayed task
- * result. Without a review revision the mutation can't run (callers disable their button).
- * A 409 means the result changed since the page loaded: the run,
- * review and study reads are refetched in the background to show the new one. After a success
- * the mutation stays pending until they land.
- */
-export function useAcceptCheck(
-  runId: string,
-  revisionId: string | undefined,
-  options: Pick<
-    UseMutationOptions<ReviewDecisionResponse, Error, AcceptVars>,
-    "onMutate" | "onSuccess" | "onSettled"
-  > = {},
-) {
-  const client = useQueryClient();
-  return useMutation<ReviewDecisionResponse, Error, AcceptVars>({
-    ...options,
-    mutationFn: async ({ checkId, taskId, resultRevisionId }) => {
-      if (!revisionId) throw new Error("no completed result");
-      try {
-        return await acceptCheck(runId, checkId, {
-          baseRevisionId: revisionId,
-          taskId,
-          resultRevisionId,
-        });
-      } catch (e) {
-        const status = e instanceof ApiError ? e.status : undefined;
-        if (status === 409) void invalidateRun(client, runId);
-        // 403 and 409 carry the server's own wording; anything else (network, 5xx) gets a generic line.
-        throw new Error(
-          (status === 403 || status === 409) && e instanceof ApiError && e.serverMessage
-            ? e.serverMessage
-            : "Couldn't save. Try again.",
-        );
-      }
-    },
-    onSuccess: async (...args) => {
-      await client.cancelQueries({ queryKey: reviewRunQuery(runId).queryKey });
-      client.setQueryData(reviewRunQuery(runId).queryKey, args[0]);
-      await Promise.all([options.onSuccess?.(...args), invalidateRun(client, runId)]);
-    },
-  });
 }

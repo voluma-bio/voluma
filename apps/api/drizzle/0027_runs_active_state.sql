@@ -1,0 +1,1 @@
+CREATE INDEX "runs_active_state" ON "runs" USING btree ("state") WHERE "runs"."state" IN ('queued', 'running');

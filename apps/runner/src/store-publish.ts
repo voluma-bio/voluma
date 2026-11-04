@@ -5,12 +5,8 @@
  * fails the copy instead of publishing other bytes under this hash.
  */
 import { createHash } from "node:crypto";
-import {
-  EvidenceNotFound,
-  EvidenceRefused,
-  MAX_UNMOUNTED_BYTES,
-} from "@voluma/harness/ports/evidence";
 import type { Publish } from "@voluma/harness/ports/publish";
+import { FileNotFound, FileRefused, MAX_UNMOUNTED_BYTES } from "@voluma/harness/ports/publish";
 import type { ObjectStore } from "@voluma/object-store";
 
 const MAX_SMALL_BYTES = 1024 * 1024;
@@ -19,9 +15,9 @@ export function storePublish(store: ObjectStore): Publish {
   return {
     async copy(from, to, { hash, signal } = {}) {
       const head = await store.head(from, { signal });
-      if (!head) throw new EvidenceNotFound(from);
+      if (!head) throw new FileNotFound(from);
       if (!hash && head.size > MAX_UNMOUNTED_BYTES)
-        throw new EvidenceRefused(
+        throw new FileRefused(
           `${from} is ${Math.round(head.size / 2 ** 20)} MiB, over the ${MAX_UNMOUNTED_BYTES / 2 ** 20} MiB the host reads.`,
         );
       let sha256: string;
@@ -38,7 +34,7 @@ export function storePublish(store: ObjectStore): Publish {
     async read(key, { signal } = {}) {
       const head = await store.head(key, { signal });
       if (!head) return undefined;
-      if (head.size > MAX_SMALL_BYTES) throw new EvidenceRefused(`${key} is not a small file.`);
+      if (head.size > MAX_SMALL_BYTES) throw new FileRefused(`${key} is not a small file.`);
       return new Response((await store.get(key, { ifMatch: head.etag, signal })).body).text();
     },
     async write(key, text, { signal } = {}) {

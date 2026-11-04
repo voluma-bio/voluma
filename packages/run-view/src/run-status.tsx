@@ -1,13 +1,12 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
  * Studies, the study page and the input review so they read the same: Running, N to check, Checked,
- * Failed, Stopped, Waiting (queued),
- * Needs your keys, Not started. A completed run with no open
- * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
- * reviewed, which is never inferred. Also where a run's row links (the input review), how an input
+ * Failed, Stopped, Waiting (queued), Needs your keys, Waiting on you, Not started. A completed run
+ * with no open item reads "Checked". Also where a run's row links (the input review), how an input
  * is named, and how its cost, time and age ("12 min ago") read.
  */
-import type { Run } from "@voluma/contracts/run";
+import type { RunEvent } from "@voluma/contracts/events";
+import type { Run, RunState } from "@voluma/contracts/run";
 import type { StudyMember, StudyRunSummary } from "@voluma/contracts/study";
 import type { Status } from "@voluma/ui";
 
@@ -31,6 +30,44 @@ export function formatUsd(usd: number): string {
 export const runCost = (run: Pick<Run, "usage" | "providerCalls">) =>
   run.usage.modelCostUsd + run.providerCalls.costUsd;
 
+/**
+ * The spans a run worked: its first claim to its end, then each correction from its
+ * `run.reopened` to the root thread's next end or its `correction.ended`. The time between an
+ * end and a researcher's reopen is not work. The last span runs to the run's end, or to `now`
+ * while the run goes. A run queued again after a reopen or a lost runner has no `startedAt` in its
+ * state, so the first claim comes from the log. `reopens` counts every message that reopened it.
+ */
+export function runWork(
+  events: readonly RunEvent[],
+  state: RunState,
+  now: number,
+): { startedAt: string; seconds: number; reopens: number } | undefined {
+  const startedAt =
+    (state.status === "queued" ? null : state.startedAt) ??
+    events.find((e) => e.type === "claim.started")?.createdAt;
+  if (!startedAt) return undefined;
+  const roots = new Set<string>();
+  const starts = [Date.parse(startedAt)];
+  const ends: (number | undefined)[] = [];
+  for (const e of events) {
+    if (e.type === "thread.started" && e.payload.parentThreadId === null) roots.add(e.threadId);
+    else if (e.type === "run.reopened") starts.push(Date.parse(e.createdAt));
+    else if ((e.type === "thread.ended" && roots.has(e.threadId)) || e.type === "correction.ended")
+      // The latest end inside a span closes it: a resumed root can end more than once.
+      ends[starts.length - 1] = Date.parse(e.createdAt);
+  }
+  const last = state.status === "ended" ? Date.parse(state.endedAt) : now;
+  let seconds = 0;
+  starts.forEach((start, i) => {
+    const end =
+      i === starts.length - 1 && state.status !== "ended"
+        ? last
+        : (ends[i] ?? starts[i + 1] ?? last);
+    seconds += Math.max(0, end - start) / 1000;
+  });
+  return { startedAt, seconds, reopens: starts.length - 1 };
+}
+
 /** Whole seconds as `45 s`, `12 min 5 s` or `2 h 3 min`. */
 export function formatDuration(seconds: number): string {
   const s = Math.round(seconds);
@@ -49,7 +86,7 @@ export function inputLabel(input: Pick<StudyMember, "subject" | "attributes">): 
 
 /**
  * Where an input opens: its page in a study, on the input's newest run (live while it goes, for
- * review once it ends). `query` carries the page's selection (`task`, `item`, `output`...); a link
+ * review once it ends). `query` carries the page's selection (`output`, `item`...); a link
  * that means an earlier run adds `run`.
  */
 export const inputHref = (studyId: string, inputId: string, query: Record<string, string> = {}) =>
@@ -57,46 +94,36 @@ export const inputHref = (studyId: string, inputId: string, query: Record<string
     Object.keys(query).length > 0 ? `?${new URLSearchParams(query)}` : ""
   }`;
 
-/** Where one To check item leads: its input page, opened on that task and item (`checkId`, as `acceptCheck` takes it). */
-export const itemHref = (
-  studyId: string,
-  inputId: string,
-  { taskId, checkId, run }: { taskId: string; checkId: string; run?: string },
-) => inputHref(studyId, inputId, { task: taskId, item: checkId, ...(run && { run }) });
-
 export type RunStatus = { label: string; status: Status };
 
+/** A run as a status reads it: a study's newest-run summary, or a run with its input's review. */
+type StatusFacts = Pick<StudyRunSummary, "state" | "outputs" | "waiting"> & {
+  /** The run's review in brief: its open To check items once it completed; null before. */
+  review: { needsYou: number } | null;
+};
+
 /**
- * A run's status, with "Task N of M" while a task-loop run runs and "Running · N of M in" (final
- * outputs) while an agent-loop run does: what a row says about a live run.
+ * A run's status, with "Running · N of M in" (its final outputs) while it runs: what a row says
+ * about a live run.
  */
-export function liveStatus(
-  run: Pick<StudyRunSummary, "state" | "review" | "tasks" | "outputs" | "harness" | "waiting">,
-): RunStatus {
+export function liveStatus(run: StatusFacts): RunStatus {
   if (run.waiting) return WAITING_ON_YOU;
-  const running = run.state.status === "running";
-  if (running && run.outputs)
+  if (run.state.status === "running" && run.outputs)
     return {
       label: `Running · ${run.outputs.done} of ${run.outputs.total} in`,
       status: "running",
     };
-  const tasks = running ? run.tasks : null;
-  return tasks
-    ? {
-        label: `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}`,
-        status: "running",
-      }
-    : runStatus(run);
+  return runStatus(run);
 }
 
-/** What needs a person on one run: open To check items on either loop, never samples ("3 to check"). */
+/** What needs a person on one run: its open To check items, never samples ("3 to check"). */
 export const toCheckText = (n: number) => `${n} to check`;
 
 /** A run with a held call the researcher can answer (`StudyRunSummary.waiting`): whatever its row says. */
 const WAITING_ON_YOU: RunStatus = { label: "Waiting on you", status: "check" };
 
-/** A run's status; a study's newest-run summary carries the same `state` and `review`. */
-export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
+/** A run's status from its state and its review in brief. */
+export function runStatus({ state, review }: Pick<StatusFacts, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Waiting", status: "waiting" };
@@ -105,13 +132,10 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
     case "awaiting-keys":
       return { label: "Needs your keys", status: "paused" };
     case "ended":
-      // To check means needs you: a card nobody can accept outranks Reviewed too.
       if (state.outcome === "completed")
         return review?.needsYou
           ? { label: toCheckText(review.needsYou), status: "check" }
-          : review?.reviewedAt
-            ? { label: "Reviewed", status: "done" }
-            : { label: "Checked", status: "done" };
+          : { label: "Checked", status: "done" };
       if (state.outcome === "failed") return { label: "Failed", status: "stopped" };
       return { label: "Stopped", status: "stopped" };
   }

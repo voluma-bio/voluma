@@ -1,5 +1,5 @@
 /**
- * The input review of a run of the agent loop (Q24, mockup C), in the shell's two side panels. The
+ * The input review of a run (Q24, mockup C), in the shell's two side panels. The
  * left side's tabs: the conversation with the run's main AI (the default, and the only place
  * anything on the run changes: `main-conversation.tsx`; badged while main waits on your yes) and
  * the inputs (the shared tree, named by `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with
@@ -72,7 +72,7 @@ import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
 import { MainConversation } from "./main-conversation";
-import { gridKeyOf, QUAD_TOOLS, useLocalMarks, useMarking } from "./marks-panel";
+import { gridKeyOf, useLocalMarks, useMarking } from "./marking";
 import { FinalOutputs, restsOnOpen, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
@@ -214,11 +214,11 @@ export function OutputsReview({
     volumes: blocks.volumes,
     reopen,
   });
-  // An example run keeps no marks (its writes are refused): they are the page's, uncapped.
+  // An example run keeps no marks (its writes are refused): they are the page's.
   const exampleMarks = useLocalMarks();
   const store = run.example ? exampleMarks : runMarks;
   const settled = runMarks.settled;
-  const marking = useMarking(QUAD_TOOLS, store);
+  const marking = useMarking(store);
   // Opening a published ruler or point puts the slices through its first end once, so a Navigate
   // drag can take it; a To check item's own focus wins, and later events leave the slices alone.
   const inViewId = inView?.id;
@@ -240,7 +240,7 @@ export function OutputsReview({
     aimedFor.current = inViewId;
     const end = voxelOf(image, a.kind === "point" ? a.position : a.a);
     const at = end.map((n, i) => Math.max(0, Math.min(image.shapeZyx[i]! - 1, Math.round(n))));
-    jumpTo({ at: at as unknown as Zyx, gridKey, taskId: inViewId });
+    jumpTo({ at: at as unknown as Zyx, gridKey, output: inViewId });
   }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
   const allViews = useMemo(() => savedViews(events), [events]);
   const views = useSavedViews(run, allViews, reopen);
@@ -628,7 +628,7 @@ function SceneBar({
           {root.name} ›
         </button>
       ) : standIn ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{root.name} rests on</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{root.name} is based on</span>
       ) : (
         inView.state.section && (
           <span className="shrink-0 text-xs text-muted-foreground">{inView.state.section}</span>
@@ -643,7 +643,7 @@ function SceneBar({
       )}
       <StatusMark status={status} label={word} className="shrink-0" />
       {inherited && (
-        <span className="shrink-0 text-muted-foreground text-xs">rests on a To check</span>
+        <span className="shrink-0 text-muted-foreground text-xs">An input needs checking</span>
       )}
       <span className="flex-1" />
       {viewError && (
@@ -725,11 +725,9 @@ function OutputScene({
             revision={blocks}
             subject={stable}
             assets={assets}
-            display={NO_DISPLAY}
             focus={focus}
             tool={marking.tool}
             onTool={marking.setTool}
-            tools={marking.tools}
             marks={marking.marks}
             selected={marking.selected}
             jump={marking.jump}
@@ -737,7 +735,6 @@ function OutputScene({
             onMark={(mark, volumeId, gridKey, plane) =>
               marking.add(mark, volumeId, gridKey, subject, plane)
             }
-            full={marking.full}
             onShown={marking.setShown}
             quad={quad}
           />
@@ -746,7 +743,6 @@ function OutputScene({
     </div>
   );
 }
-const NO_DISPLAY = {};
 
 /**
  * Looks right on a To check item. The decision is an event the stream brings: once saved, the

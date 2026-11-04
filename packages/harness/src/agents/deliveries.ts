@@ -1,7 +1,7 @@
 /**
  * Every string the agent loop tells an agent: main's delivery (notices, the agent list, what is
  * out of date or pending), a worker's wrap-up request, the cut-off and liveness lines, and the
- * refusals and results of the coordination tools. The task loop's are `messages.ts`.
+ * refusals and results of the coordination tools.
  */
 import {
   type AgentLog,
@@ -137,6 +137,7 @@ const SHAPES: Record<string, string> = {
   box: "a box",
   angle: "an angle",
   outline: "an outline",
+  path: "a path",
 };
 
 /** The message the researcher sent, with each mark they attached in the plain terms of the notice (`design-r3.md`). Positions are world mm, never voxels. */
@@ -147,9 +148,12 @@ function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?:
     const view = a.mark.plane ? `the ${a.mark.plane.view.toUpperCase()} plane` : "3D";
     const where = `${shape} in ${view}`;
     const head = `- ${a.change}: "${a.mark.tag}" on ${a.mark.output} v${a.version}, ${where}`;
-    const line = (a.mark.mark as { line?: { lengthMm?: number } }).line;
-    const length =
-      line?.lengthMm === undefined ? "" : `, length ${Number(line.lengthMm.toFixed(2))} mm`;
+    const { line, path } = a.mark.mark as {
+      line?: { lengthMm?: number };
+      path?: { lengthMm?: number };
+    };
+    const lengthMm = line?.lengthMm ?? path?.lengthMm;
+    const length = lengthMm === undefined ? "" : `, length ${Number(lengthMm.toFixed(2))} mm`;
     const ends = a.mark.world.map(mm).join("–");
     if (a.change === "move" && a.was)
       return `${head}, from ${a.was.world.map(mm).join("–")} to ${ends} mm${length}`;

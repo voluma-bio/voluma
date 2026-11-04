@@ -22,7 +22,7 @@ export interface SandboxSession {
    * replaced, its files outside the mounts are gone: the returned sandbox then puts the
    * restart note at the head of its next `exec` output, once, so the model reads it. A
    * thread's first call gets no note. `{ note: false }` is for a command the host runs on its
-   * own account (hashing evidence): it never consumes the note, which stays owed to the
+   * own account (hashing a file): it never consumes the note, which stays owed to the
    * model's next call.
    */
   get(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;

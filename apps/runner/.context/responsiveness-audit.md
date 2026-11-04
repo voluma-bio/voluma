@@ -147,8 +147,8 @@ treat the current four-image write or its request token trigger as a bound
 on all hydrated bytes. This audit does not implement a competing compactor
 or a pagination/storage migration.
 
-Current tool bounds also matter: `read` accepts 8 MiB; `view_image` reads
-at most 64 MiB per input and returns at most four 1 MiB images. Sharp's resize
+Current tool bounds also matter: `read` accepts 8 MiB (this audit
+measured the deleted `view_image`, which read at most 64 MiB per input) and returns at most four 1 MiB images. Sharp's resize
 runs asynchronously, but decode cost was not benchmarked here. The measured
 history write is the returned-image path, not an image-decoding benchmark.
 API/database stalls, Render CPU contention and network outages are outside
@@ -181,8 +181,6 @@ The probe is no longer in the tree: check out commit `3e63664f`, then run from t
 pnpm --filter @voluma/runner exec tsx src/responsiveness-probe.ts
 pnpm --filter @voluma/runner exec tsx src/responsiveness-probe.ts --provider-only --compare
 pnpm --filter @voluma/runner exec tsx src/responsiveness-probe.ts --provider-only --baseline
-pnpm --filter @voluma/runner exec vitest run src/store-evidence.test.ts
-pnpm --filter @voluma/harness exec vitest run src/live.test.ts
 pnpm check
 ```
 

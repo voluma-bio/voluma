@@ -1,19 +1,22 @@
 /**
- * Sending a message to a run's AI, for both composers: the task loop's (`ai-panel.tsx`) and main's
- * on the agent loop (`use-main-message.ts`). Each supplies its fields and its refusal words; this
- * owns the draft kept across reloads, the picture fitted into the room the body leaves, and a send
+ * Sending a message to a run's main AI (`use-main-message.ts` supplies its fields and its refusal
+ * words): this owns the draft kept across reloads, the picture fitted into the room the body leaves, and a send
  * that keeps the message id across retries. The API deduplicates by id alone, so a retry resends
  * the exact request, picture included, and the message is stored once.
  */
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
+import type { Me } from "@voluma/contracts/auth";
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
   MESSAGE_BODY_BYTES,
   type SendRunMessageRequest,
   type SendRunMessageResponse,
 } from "@voluma/contracts/messages";
+import type { Run } from "@voluma/contracts/run";
+import { keysToReopen } from "@voluma/run-view";
 import { useEffect, useRef, useState } from "react";
+import { useOutletContext } from "react-router";
 
 /**
  * The box's text, kept in this tab's sessionStorage so a reload (by hand, or onto a new deploy)
@@ -80,23 +83,31 @@ type Attempt<M> = {
 };
 
 export function useIdempotentSend<M>({
-  runId,
+  run,
   before,
   onSuccess,
 }: {
-  runId: string;
+  /** Sending to an ended own-key run reopens it, so the message then carries the user's saved keys. */
+  run: Pick<Run, "id" | "credentials" | "state">;
   /** Awaited on every try, before the post; a `NotSent` keeps the message unsent. */
   before?: (meta: M) => Promise<void>;
   /** `unseen`: the picture the message meant to carry couldn't be made, or was too large. */
   onSuccess: (sent: { response: SendRunMessageResponse; unseen: boolean; meta: M }) => void;
 }) {
+  const { userId } = useOutletContext<Me>();
   const tried = useRef<Attempt<M>>(undefined);
   const inFlight = useRef(false);
   const send = useMutation({
     mutationFn: async (attempt: Attempt<M>) => {
       const { body, unseen } = await attempt.prepared;
       await before?.(attempt.meta);
-      return { response: await sendRunMessage(runId, body), unseen, meta: attempt.meta };
+      // Read now, not when the message was made: a retry after the user saved their keys carries them.
+      const keys = keysToReopen(userId, run);
+      return {
+        response: await sendRunMessage(run.id, { ...body, ...(keys && { keys }) }),
+        unseen,
+        meta: attempt.meta,
+      };
     },
     onSuccess: (sent) => {
       tried.current = undefined;

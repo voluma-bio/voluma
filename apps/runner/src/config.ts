@@ -166,10 +166,6 @@ function checkoutCommit(): string {
 
 export type Config = ReturnType<typeof runnerConfig>;
 
-/** How long a sandbox idles before it stops: the agent loop's runs get the shorter wait. */
-export const sandboxIdleSeconds = (config: Config, harness: string | undefined) =>
-  harness === "agents" ? config.sandbox.agentIdleSeconds : config.sandbox.idleSeconds;
-
 export function runnerConfig() {
   const modal = modalToken();
   const models = modelAliases();
@@ -217,15 +213,14 @@ export function runnerConfig() {
       maxRunCostUsd: positiveInt("RUNNER_MAX_RUN_COST_USD", 50),
       cacheMissLimit: positiveInt("RUNNER_CACHE_MISS_LIMIT", 3),
     },
-    /** The run loop's limits (`LoopConfig`); the harness default is 2 fix rounds. */
+    /** The agent loop's limits (`LoopConfig`). */
     loop: {
-      maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),
       activityMinutes: positiveInt("RUNNER_ACTIVITY_MINUTES", 10),
       pingMinutes: positiveInt("RUNNER_PING_MINUTES", 25),
       pingCloseMinutes: positiveInt("RUNNER_PING_CLOSE_MINUTES", 50),
     },
     /**
-     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/` or `workflows/core/roles/`),
+     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),
      * for a `voluma` run. Our key for each provider is `VOLUMA_<PROVIDER>_API_KEY`.
      */
     models,
@@ -265,10 +260,8 @@ export function runnerConfig() {
     sandbox: {
       image: SANDBOX_IMAGE,
       lifetimeSeconds: positiveInt("VOLUMA_SANDBOX_LIFETIME_SECONDS", 14400),
-      // The floor keeps a sandbox from idling out before its inputs finish staging.
-      idleSeconds: positiveInt("VOLUMA_SANDBOX_IDLE_SECONDS", 300, 30),
-      /** A run on the agent loop: its agents mostly wait, and each next call gets a fresh machine. */
-      agentIdleSeconds: positiveInt("VOLUMA_AGENT_SANDBOX_IDLE_SECONDS", 120, 30),
+      /** Agents mostly wait, and each next call gets a fresh machine. */
+      idleSeconds: positiveInt("VOLUMA_SANDBOX_IDLE_SECONDS", 120, 30),
     },
   };
 }

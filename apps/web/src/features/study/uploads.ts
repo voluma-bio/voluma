@@ -71,7 +71,8 @@ export function formatBytes(bytes: number): string {
 function createError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 403) return "Uploading scans needs a lab account.";
-    if (error.status === 413) return "This scan is over the upload size limit.";
+    if (error.status === 413)
+      return error.serverMessage ?? "This scan is over the upload size limit.";
     if (error.status === 429)
       return "You have other uploads in progress. Finish or remove them, then retry.";
     if (error.status === 503) return "Scan upload isn't available on this server.";
@@ -164,8 +165,8 @@ export function useUploads() {
           }
         }
         const created = job.created;
-        // Only new PUTs need a live URL; a complete-only retry works after expiry.
-        if (job.paths.length > 0 && Date.parse(created.expiresAt) <= Date.now()) {
+        // The server refuses to complete an upload past its URLs' lifetime too.
+        if (Date.parse(created.expiresAt) <= Date.now()) {
           return settle({
             kind: "error",
             message: "This upload expired. Remove the scan and drop it again.",

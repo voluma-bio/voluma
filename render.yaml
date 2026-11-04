@@ -50,11 +50,8 @@ services:
         - .tool-versions
         - tsconfig.base.json
         - pnpm-workspace.yaml
-        # @voluma/workflow/bundled imports these (the API's workflow catalog, the web build's
-        # outputs and task titles); @voluma/workflow/output-catalogs imports outputs.yaml (the
-        # agent loop's catalog, in the web build). No other workflows/**: the build reads no other.
-        - workflows/*/outputs.json
-        - workflows/*/tasks.json
+        # The API reads each workflow's outputs.yaml at start (@voluma/workflow/catalog-file) and the
+        # web build bundles it (@voluma/workflow/output-catalogs). No other workflows/**: the build reads no other.
         - workflows/*/outputs.yaml
     envVars:
       - fromGroup: voluma-shared
@@ -78,6 +75,9 @@ services:
         sync: false
       - key: WORKOS_COOKIE_PASSWORD
         sync: false
+      # Seals an own-key run's keys in the database while the run lives (apps/api/.context/deploy.md).
+      - key: RUN_KEY_SECRET
+        generateValue: true
       - key: WORKOS_LAB_ORGANIZATION_ID
         sync: false
       - key: WORKOS_JUDGES_ORGANIZATION_ID
@@ -90,17 +90,21 @@ services:
       - key: R2_SECRET_ACCESS_KEY
         sync: false
       # What guards Voluma's key (deploy.md); read at start; unset is no limit. CONCURRENT and
-      # SPEND_USD (dollars of model spend) are per organization that has the key; OWN_KEY_ACTIVE is
-      # the runs on callers' own keys over every account. No daily limits: the runner's two slots
-      # and Modal's spend limit bound sandbox spend. Guest sign-in: GUEST_ORGANIZATION_ID in the dashboard (deploy.md).
+      # SPEND_USD (dollars of model spend) are per organization that has the key; APP_RUNNING is
+      # the runs running at once over every account (the claim enforces it; one slot at most goes
+      # to runs on callers' own keys). No daily limits: those slots and Modal's spend limit bound
+      # sandbox spend. Guest sign-in: GUEST_ORGANIZATION_ID in the dashboard (deploy.md).
+      # Total scan storage per person, GB, the same for every account (apps/api/.context/deploy.md).
+      - key: UPLOAD_LIMIT_PER_USER_GB
+        value: "50"
       - key: RUN_LIMITS_LAB_CONCURRENT
         value: "4"
       - key: RUN_LIMITS_JUDGES_CONCURRENT
         value: "2"
       - key: RUN_LIMITS_JUDGES_SPEND_USD
         value: "300"
-      - key: RUN_LIMITS_OWN_KEY_ACTIVE
-        value: "4"
+      - key: RUN_LIMITS_APP_RUNNING
+        value: "2"
 
   - type: web
     name: voluma-gateway

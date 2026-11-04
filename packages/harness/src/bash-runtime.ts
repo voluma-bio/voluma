@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { coalescer, type ModelView, modelView, OutputBuffer } from "./tools/bash-output";
+import { type ModelView, modelView, OutputBuffer } from "./tools/bash-output";
 
 /** A command's exec has no timeout of its own; the sandbox's lifetime ends it (adapters clamp). */
 const EXEC_SECONDS = 4 * 3600;
@@ -40,13 +40,10 @@ export interface BashStart {
   timeoutMin: number;
   background: boolean;
   sandbox: Sandbox;
-  /** Where the full output goes when it is cut, and whether the thread can `read` it. */
+  /** Where the full output goes when it is cut. */
   spillPath: string;
-  canRead: boolean;
   /** Aborts the command while the call waits for it; once it is backgrounded, only `kill` does. */
   signal: AbortSignal;
-  /** Live chunks for people watching, while the call waits. */
-  output(stream: "stdout" | "stderr", text: string): void;
 }
 
 export type BashStarted =
@@ -80,7 +77,6 @@ class Command {
   waiters = 0;
   /** The `bash.backgrounded` write. */
   recorded: Promise<boolean> | undefined;
-  live: ReturnType<typeof coalescer> | undefined;
   failure: unknown;
   result: { exit: number; view: ModelView } | undefined;
   pingTimer: NodeJS.Timeout | undefined;
@@ -115,7 +111,6 @@ export class BashRuntime {
   /** Runs the command; returns its result, or that it moved to the background. */
   async start(o: BashStart): Promise<BashStarted> {
     const cmd = new Command(bashIdOf(o.threadId, o.toolCallId), o);
-    cmd.live = coalescer(o.output);
     const stop = () => cmd.abort.abort();
     if (o.signal.aborted) stop();
     o.signal.addEventListener("abort", stop);
@@ -138,7 +133,7 @@ export class BashRuntime {
       o.signal.removeEventListener("abort", stop);
     }
     if (cmd.failure !== undefined) throw cmd.failure;
-    const view = await modelView(cmd.output, o.sandbox, o.spillPath, o.canRead, o.signal);
+    const view = await modelView(cmd.output, o.sandbox, o.spillPath, o.signal);
     return { kind: "ended", exit: cmd.exit, view };
   }
 
@@ -255,12 +250,10 @@ export class BashRuntime {
           continue;
         }
         cmd.output.add(chunk.data);
-        cmd.live?.add(chunk.type, chunk.data);
       }
     } catch (error) {
       cmd.failure = error;
     }
-    cmd.live?.flush();
   }
 
   /** The stream is over: a foreground call takes the result itself; a background command is recorded. */
@@ -271,14 +264,14 @@ export class BashRuntime {
       cmd.end();
       return;
     }
-    const { threadId, sandbox, spillPath, canRead } = cmd.start;
+    const { threadId, sandbox, spillPath } = cmd.start;
     clearTimeout(cmd.pingTimer);
     try {
       await cmd.recorded;
       if (this.#deps.cutOff.aborted) return;
       if (cmd.failure !== undefined)
         cmd.output.add(`\n[command stream failed: ${String(cmd.failure)}]\n`);
-      const view = await modelView(cmd.output, sandbox, spillPath, canRead);
+      const view = await modelView(cmd.output, sandbox, spillPath);
       await this.#deps.recorder.append(
         threadId,
         "bash.ended",
@@ -304,8 +297,6 @@ export class BashRuntime {
   /** Stores `bash.backgrounded`, and only then lets the caller tell the agent. */
   async #background(cmd: Command, reason: "asked" | "timeout"): Promise<BashStarted> {
     cmd.phase = "background";
-    cmd.live?.flush();
-    cmd.live = undefined;
     this.#commands.set(cmd.id, cmd);
     const { threadId, command, timeoutMin } = cmd.start;
     cmd.recorded = this.#deps.recorder.append(

@@ -220,6 +220,11 @@ export function lengthMm(a: Zyx, b: Zyx, spacingZyx: Zyx): number {
   return Math.hypot(...a.map((v, k) => (b[k]! - v) * spacingZyx[k]!));
 }
 
+/** An open path's length in mm: the sum of its segments, on a grid with this spacing. */
+export function pathLengthMm(points: readonly Zyx[], spacingZyx: Zyx): number {
+  return points.reduce((sum, p, i) => (i ? sum + lengthMm(points[i - 1]!, p, spacingZyx) : 0), 0);
+}
+
 /** A closed outline's area in mm², its points all on one plane (Newell's method, in mm). */
 export function areaMm2(points: readonly Zyx[], spacingZyx: Zyx): number {
   const mm = points.map((p) => p.map((v, k) => v * spacingZyx[k]!));
@@ -274,8 +279,7 @@ const mid = (points: readonly Zyx[]): Zyx =>
 
 /**
  * The part of a mark on a slice pane's slice (`slab`; `whole` when the pane is untilted: the
- * axis it holds at a source voxel), or null. A box shows only on untilted panes: the task
- * review's, which never tilt.
+ * axis it holds at a source voxel), or null. A box shows only on untilted panes.
  */
 export function sliceShape(
   mark: GridMark,
@@ -336,6 +340,15 @@ export function sliceShape(
       ...(ends.length === 3 && { measure: { at: vertexZyx, text: `${measure(degrees)}°` } }),
     };
   }
+  if ("path" in mark) {
+    const { zyx, lengthMm } = mark.path;
+    if (!zyx.every(onSlice)) return null;
+    return {
+      lines: [{ points: zyx, closed: false }],
+      dots: [],
+      measure: { at: zyx[zyx.length - 1]!, text: `${measure(lengthMm)} mm` },
+    };
+  }
   const { outline } = mark;
   if (!outline.zyx.every(onSlice)) return null;
   return {
@@ -378,6 +391,14 @@ export function wholeShape(mark: GridMark): Shape {
       lines: [{ points: [aZyx, bZyx], closed: false }],
       dots: [aZyx, bZyx],
       measure: { at: mid([aZyx, bZyx]), text: `${measure(lengthMm)} mm` },
+    };
+  }
+  if ("path" in mark) {
+    const { zyx, lengthMm } = mark.path;
+    return {
+      lines: [{ points: zyx, closed: false }],
+      dots: [],
+      measure: { at: zyx[zyx.length - 1]!, text: `${measure(lengthMm)} mm` },
     };
   }
   const { outline } = mark;
@@ -503,13 +524,14 @@ function drawMarks(
 
 /**
  * A mark's vertices in a fixed order: a point's one; a box's min, max; a line's a, b; an angle's
- * a, vertex, b; an outline's own.
+ * a, vertex, b; an outline's or a path's own.
  */
 export function markPoints(mark: GridMark): readonly Zyx[] {
   if ("point" in mark) return [mark.point];
   if ("box" in mark) return [mark.box.min, mark.box.max];
   if ("line" in mark) return [mark.line.aZyx, mark.line.bZyx];
   if ("angle" in mark) return [mark.angle.aZyx, mark.angle.vertexZyx, mark.angle.bZyx];
+  if ("path" in mark) return mark.path.zyx;
   return mark.outline.zyx;
 }
 

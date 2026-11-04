@@ -6,8 +6,8 @@
   "exports": {
     "./load": "./src/load.ts",
     "./definition": "./src/definition.ts",
-    "./plan": "./src/plan.ts",
     "./bundled": "./src/bundled.ts",
+    "./catalog-file": "./src/catalog-file.ts",
     "./output-catalogs": "./src/output-catalogs.ts"
   },
   "scripts": {

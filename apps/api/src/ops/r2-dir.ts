@@ -1,6 +1,6 @@
 /**
  * Operator scripts move a folder of files between disk and R2: `export:run`, `import:run`,
- * `seed:example --backfill` and `r2:put` all take either a local folder or `r2:<prefix>`
+ * `r2:put` all take either a local folder or `r2:<prefix>`
  * (`r2:dev/runs/<id>/`). An `r2:` folder is downloaded to a temp folder first, so the code after
  * it reads a plain folder. Reads the R2 settings from the environment (the repo .env).
  */
@@ -46,23 +46,14 @@ export function r2Prefix(spec: string): string | null {
 }
 
 /**
- * Stores the file at `key`. Content-addressed keys (`immutable`: evidence by sha256) are skipped
- * when present. Every other key is overwritten unless the stored ETag equals the file's MD5 (what
+ * Stores the file at `key`, overwriting unless the stored ETag equals the file's MD5 (what
  * R2 reports for a single-part upload), so a changed file never leaves stale bytes.
  */
-export async function put(
-  store: ObjectStore,
-  key: string,
-  path: string,
-  { immutable = false } = {},
-): Promise<void> {
+export async function put(store: ObjectStore, key: string, path: string): Promise<void> {
   // A buffer, not a stream: the SDK can retry it when the connection drops.
   const body = await readFile(path);
   const head = await store.head(key);
-  if (
-    head &&
-    (immutable || head.etag?.replaceAll('"', "") === createHash("md5").update(body).digest("hex"))
-  )
+  if (head && head.etag?.replaceAll('"', "") === createHash("md5").update(body).digest("hex"))
     return;
   await store.put(key, body);
 }

@@ -4,11 +4,10 @@
  * reads, and maps the answer. Each route names its own guard: the reads (list, get) take
  * `requireReader`, so a user reads through `readerOf(user)` (another org's run is a 404)
  * and the debug token reads every lab; the writes take `requireUser`. Visitor keys go straight to the queue,
- * which holds them in memory; no handler logs a body.
+ * which seals them into the run's row; no handler logs a body.
  */
 import { randomUUID } from "node:crypto";
 import {
-  acceptRefusal,
   type Run,
   type RunRead,
   resendKeysRequestSchema,
@@ -36,16 +35,15 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   /** The run with what `user` may do on it now (`runReadSchema`); no user: the debug token. */
   const readOf = async (user: UserPrincipal | undefined, run: Run): Promise<RunRead> => ({
     ...run,
-    cannotMessage: user
-      ? await queue.cannotMessage(readerOf(user), callerOf(user), run)
-      : READ_ONLY_TOKEN,
-    cannotAccept: user ? (acceptRefusal(run)?.message ?? null) : READ_ONLY_TOKEN,
+    cannotMessage: user ? await queue.cannotMessage(run) : READ_ONLY_TOKEN,
   });
   const userOf = (principal: Principal) => (principal.kind === "user" ? principal : undefined);
 
   app.post("/runs", requireUser, async (c) => {
-    const { studyId, inputId, selectedOutputs, notes, keys, model, thinking, harness } =
-      await parseJson(c, startRunRequestSchema);
+    const { studyId, inputId, selectedOutputs, notes, keys, model, thinking } = await parseJson(
+      c,
+      startRunRequestSchema,
+    );
     const user = c.var.user;
     const result = await queue.start(readerOf(user), callerOf(user), {
       id: randomUUID(),
@@ -56,7 +54,6 @@ export function runsRoutes({ reads, queue }: RunDeps) {
       keys,
       model,
       thinking,
-      harness,
     });
     return c.json(result.run satisfies Run);
   });

@@ -1,5 +1,5 @@
 /**
- * The skeleton every run loop shares: the wake-up counter, starting a thread (its
+ * The skeleton of the run loop: the wake-up counter, starting a thread (its
  * `thread.started` is stored before it runs), the failure policy (a step error, a thread
  * refused or thrown, or a store that gave up fails the run on purpose), the drive loop, the
  * stop of every thread when the run ends, and the root's closing `thread.ended`. A loop supplies
@@ -11,10 +11,8 @@ import type { BashRuntime } from "./bash-runtime";
 import type { ProviderError } from "./failure-policy";
 import type { ThreadLayout } from "./layout";
 import type { LoopConfig, ModelSetup } from "./loop-config";
-import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
-import type { Outputs } from "./ports/outputs";
 import type { Publish } from "./ports/publish";
 import type { PayloadOf, Recorder } from "./recorder";
 import type { SandboxSession } from "./sandbox-session";
@@ -52,8 +50,6 @@ export interface Shared {
   files: Files;
   /** The agents' stored conversations (`agents/transcript.ts` renders one). */
   history: History;
-  evidence: Evidence;
-  outputs: Outputs;
   /** Moves a file an agent named into a published output version (the agent loop's). */
   publish: Publish;
   session: SandboxSession;
@@ -68,7 +64,7 @@ export interface Shared {
 }
 
 /**
- * One loop's side of a run (`tasks-wire.ts`): which sandbox and display name each thread has,
+ * The agent loop's side of a run (`agents/wire.ts`): which sandbox and display name each thread has,
  * read from the log, and the loop itself, run on the shell's parts.
  */
 export interface Wire {

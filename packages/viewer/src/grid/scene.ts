@@ -11,9 +11,7 @@ export type Zyx = readonly [number, number, number];
 /**
  * A mark on the grid in source voxels (z, y, x): a voxel (with a note, or the value a probe read
  * there), an inclusive box, a line, an angle (its vertex between two ends), or a closed outline on
- * one plane, which may be tilted: the contract's `MarkShape`, which the outputs review stores. The
- * task review sends these as the message's `Mark` (`@voluma/contracts/messages`), which has no
- * notes, values or angles and whose outlines lie on a grid axis.
+ * one plane, which may be tilted: the contract's `MarkShape`, which the review stores.
  */
 export type GridMark = MarkShape;
 
@@ -21,7 +19,7 @@ export type GridMark = MarkShape;
 export type ProbeValue = NonNullable<Extract<GridMark, { point: unknown }>["probe"]>;
 
 /** What a marking gesture makes; none is the viewer's own navigation. Probe reads values and keeps a point on click. */
-export type MarkTool = "point" | "box" | "line" | "angle" | "outline" | "probe";
+export type MarkTool = "point" | "box" | "line" | "angle" | "outline" | "path" | "probe";
 
 /** A mark as drawn: the person's own in `--mark-mine`, the AI's dashed in `--mark-ai`. */
 export type ShownMark = {

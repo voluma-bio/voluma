@@ -1,23 +1,19 @@
 /**
- * The input review's main area: the subject in view (a task, or an output of the agent loop) on
- * its own analysis grid in Andrew's grid viewer (3D and three slices through one crosshair), with
- * the blocks the subject names drawn on it, from the run's converted assets. Loaded lazily, with
- * three.js. Each grid gets its own viewer, kept mounted and hidden while another grid is shown;
- * structure display changes redraw in place. The marking tools sit on the viewer's bar when the
- * page takes marks (`onTool`); your marks on this grid's image are drawn, and a new one is named
- * by that image's id. The page learns which grid is shown (`onShown`), since marks and the picture
- * belong to it.
+ * The input review's main area: the output in view on its own analysis grid in the four-pane
+ * viewer (`QuadViewer`), with the blocks it names drawn on it, from the run's converted assets.
+ * Loaded lazily, with three.js. Each grid gets its own viewer, kept mounted and hidden while
+ * another grid is shown. The marking tools sit on the viewer's bar when the page takes marks
+ * (`onTool`); your marks on this grid's image are drawn, and a new one is named by that image's
+ * id. The page learns which grid is shown (`onShown`), since marks and the picture belong to it.
  */
 import { reviewAssetUrl } from "@voluma/api-client";
-import type { Focus, ReviewAssets, ReviewTask } from "@voluma/contracts/review";
+import type { Focus, ReviewAssets } from "@voluma/contracts/review";
 import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
   type GridPlanes,
   type GridScene,
-  GridViewer,
-  type GridViewerHandle,
   labelsMiddle,
   type MarkEdit,
   type MarkPlane,
@@ -30,34 +26,17 @@ import {
   type QuadViewerHandle,
   reviewGrid,
   type ShownMark,
-  type StructureDisplay,
-  taskBlocks,
   tokenColor,
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { FULL, gridKeyOf, type ShownGrid, TOOLS, type Tool, type YourMark } from "./marks-panel";
-
-/** A task in view: what its numbers are measured on and drawn with, and what it reported. */
-export function TaskViewer({
-  task,
-  ...props
-}: Omit<Parameters<typeof SceneViewer>[0], "subject" | "title"> & { task: ReviewTask }) {
-  const { revision } = props;
-  const subject = useMemo(
-    () => ({ id: task.id, shown: taskBlocks(revision, task) }),
-    [revision, task],
-  );
-  return <SceneViewer subject={subject} {...props} />;
-}
+import { gridKeyOf, type ShownGrid, TOOLS, type YourMark } from "./marking";
 
 export function SceneViewer({
   runId,
   revision,
   subject,
-  title,
   assets,
-  display,
   focus,
   tool,
   onTool,
@@ -66,31 +45,23 @@ export function SceneViewer({
   jump,
   onJumped,
   onMark,
-  full,
   onShown,
-  viewer,
   quad,
-  tools = TOOLS,
 }: {
   runId: string;
   revision: Blocks;
-  /** What is in view: its id (a task's, an output's) and the block ids it shows. */
+  /** The output in view: its id and the block ids it shows. */
   subject: { id: string; shown: readonly string[] };
-  /** Replaces the grid's name above the views: the output and its value. */
-  title?: string;
   assets: Record<string, ReviewAssets>;
-  display: StructureDisplay;
   /** The selected item's place: each new object moves the crosshair there once. */
   focus?: Focus;
   tool: MarkTool | null;
   /** Absent: the page takes no marks, and the marking tools are not shown. */
   onTool?: (tool: MarkTool | null) => void;
-  /** The marking tools on the bar; the task review's when absent. */
-  tools?: readonly Tool[];
   marks: readonly YourMark[];
   selected: string | undefined;
-  /** A mark picked in Marks: it moves the crosshair once its grid is shown, then `onJumped`. */
-  jump?: { at: Zyx; gridKey: string; taskId: string };
+  /** A mark picked: it moves the crosshair once its grid is shown, then `onJumped`. */
+  jump?: { at: Zyx; gridKey: string; output: string };
   onJumped: () => void;
   /** A new mark, on the image volume `volumeId`; returns its id. */
   onMark: (
@@ -99,16 +70,10 @@ export function SceneViewer({
     gridKey: string,
     plane?: MarkPlane | null,
   ) => string | undefined;
-  /** At the cap of marks a message carries, the tools are held off. */
-  full: boolean;
-  /** The mounted subject and grid; undefined while no viewer is shown. */
+  /** The mounted output and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
-  viewer?: Ref<GridViewerHandle>;
-  /**
-   * The outputs review's four panes instead of the task review's grid viewer: the layout, which
-   * holds across grids, and each grid's planes by the image's id.
-   */
-  quad?: {
+  /** The four panes' layout, which holds across grids, and each grid's planes by the image's id. */
+  quad: {
     layout: QuadLayout;
     onLayout(layout: QuadLayout): void;
     planesOf(imageId: string): GridPlanes | undefined;
@@ -138,7 +103,6 @@ export function SceneViewer({
         revision,
         shown: subject.shown,
         assets,
-        display,
         labels,
         focus,
         // The zarr reader resolves level paths against this, so it is absolute.
@@ -146,10 +110,10 @@ export function SceneViewer({
           new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href,
         token: tokenColor,
       }),
-    [runId, revision, subject.shown, assets, display, labels, focus],
+    [runId, revision, subject.shown, assets, labels, focus],
   );
   // A focused label has no extent in the run's data: find its middle on the grid. Keyed by
-  // what it reads, since `grid` is rebuilt on every display change.
+  // what it reads, since `grid` is rebuilt whenever Labels is toggled.
   const focusLabels = grid.state === "ready" ? grid.focusLabels : undefined;
   const labelsKey = focusLabels && `${focusLabels.source.base}|${focusLabels.labels.join()}`;
   const latestLabels = useRef(focusLabels);
@@ -165,7 +129,7 @@ export function SceneViewer({
     return () => abort.abort();
   }, [labelsKey]);
   // A new object per item selection or found voxel, so the crosshair moves then and not when
-  // display settings change.
+  // Labels is toggled.
   const at =
     grid.state === "ready"
       ? (grid.focus ?? (labelsFocus?.for === labelsKey ? labelsFocus?.at : undefined))
@@ -183,7 +147,7 @@ export function SceneViewer({
     if (jump.gridKey === gridKey) {
       setAim({ gridKey, target: { at: jump.at } });
       onJumped();
-    } else if (jump.taskId === subject.id) onJumped();
+    } else if (jump.output === subject.id) onJumped();
   }, [jump, gridKey, subject.id, onJumped]);
   // A new grid mounts before effects run; never initialize it with the previous grid's voxel.
   const shownFocus = aim.gridKey === gridKey ? aim.target : target;
@@ -204,10 +168,10 @@ export function SceneViewer({
     return byGrid;
   }, [marks, selected]);
   // What the shown grid's planes can be aligned to: the catalog's fitted planes, the other grids.
-  const fits = quad?.fits;
+  const { fits } = quad;
   const targets = useMemo(
     () =>
-      imageId && fits
+      imageId
         ? planeTargets({
             revision,
             imageId,
@@ -228,7 +192,6 @@ export function SceneViewer({
           key: gridKey,
           imageId: grid.imageId,
           scene: grid.scene,
-          title: title ?? grid.name,
           notes: grid.notes,
           focus: shownFocus,
         }
@@ -252,7 +215,7 @@ export function SceneViewer({
   const shownReady = !!live && !!slots.find((k) => k.key === live.key)?.ready;
   const shownQuad = useRef<QuadViewerHandle>(null);
   useImperativeHandle(
-    quad?.ref,
+    quad.ref,
     () => ({
       view: () => {
         const state = shownQuad.current?.state();
@@ -263,7 +226,7 @@ export function SceneViewer({
     [live?.imageId],
   );
   useEffect(
-    () => onShown(gridKey ? { key: gridKey, taskId: subject.id, ready: shownReady } : undefined),
+    () => onShown(gridKey ? { key: gridKey, output: subject.id, ready: shownReady } : undefined),
     [gridKey, subject.id, shownReady, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
@@ -274,12 +237,11 @@ export function SceneViewer({
         {onTool && (
           <SegmentedControl
             label="Marking tool"
-            options={tools.map((t) => ({
+            options={TOOLS.map((t) => ({
               value: t.value,
               label: t.label,
               shortcut: t.keys[0],
               icon: t.icon,
-              reason: full && t.value !== "navigate" ? FULL : undefined,
             }))}
             value={tool ?? "navigate"}
             onValueChange={(v) => onTool(v === "navigate" ? null : v)}
@@ -311,47 +273,31 @@ export function SceneViewer({
         const on = k.key === live?.key;
         return (
           <div key={k.key} className="h-full" hidden={!on}>
-            {quad ? (
-              <QuadViewer
-                scene={k.scene}
-                planes={quad.planesOf(k.imageId)}
-                layout={quad.layout}
-                onLayout={quad.onLayout}
-                focus={k.focus}
-                notes={k.notes}
-                tool={on ? tool : null}
-                marks={shown.get(k.key) ?? NO_MARKS}
-                onMark={on ? (mark, plane) => onMark(mark, k.imageId, k.key, plane) : undefined}
-                onNote={quad.onNote}
-                onReady={report(k.key)}
-                targets={k.imageId === live?.imageId ? targets : undefined}
-                onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
-                restore={quad.restore?.grid === k.imageId ? quad.restore.state : undefined}
-                onEdit={
-                  on && quad.onEdit
-                    ? (edit, plane) => quad.onEdit?.(edit, k.imageId, k.key, plane)
-                    : undefined
-                }
-                onPick={quad.onPick}
-                ref={on ? shownQuad : undefined}
-              >
-                {bar(on)}
-              </QuadViewer>
-            ) : (
-              <GridViewer
-                scene={k.scene}
-                title={k.title}
-                focus={k.focus}
-                notes={k.notes}
-                tool={on ? tool : null}
-                marks={shown.get(k.key) ?? NO_MARKS}
-                onMark={on ? (mark) => onMark(mark, k.imageId, k.key) : undefined}
-                onReady={report(k.key)}
-                ref={on ? viewer : undefined}
-              >
-                {bar(on)}
-              </GridViewer>
-            )}
+            <QuadViewer
+              scene={k.scene}
+              planes={quad.planesOf(k.imageId)}
+              layout={quad.layout}
+              onLayout={quad.onLayout}
+              focus={k.focus}
+              notes={k.notes}
+              tool={on ? tool : null}
+              marks={shown.get(k.key) ?? NO_MARKS}
+              onMark={on ? (mark, plane) => onMark(mark, k.imageId, k.key, plane) : undefined}
+              onNote={quad.onNote}
+              onReady={report(k.key)}
+              targets={k.imageId === live?.imageId ? targets : undefined}
+              onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
+              restore={quad.restore?.grid === k.imageId ? quad.restore.state : undefined}
+              onEdit={
+                on && quad.onEdit
+                  ? (edit, plane) => quad.onEdit?.(edit, k.imageId, k.key, plane)
+                  : undefined
+              }
+              onPick={quad.onPick}
+              ref={on ? shownQuad : undefined}
+            >
+              {bar(on)}
+            </QuadViewer>
           </div>
         );
       })}
@@ -359,7 +305,7 @@ export function SceneViewer({
   );
 }
 
-/** The outputs review's shown grid, as a message takes it: its view (`QuadState` on image `grid`) and a picture. */
+/** The shown grid, as a message takes it: its view (`QuadState` on image `grid`) and a picture. */
 export type SceneHandle = {
   view(): { state: QuadState; grid: string } | undefined;
   /** The shown panes as one PNG of at most `maxBytes`; null when they have no picture or none fits. */
@@ -371,7 +317,6 @@ type View = {
   key: string;
   imageId: string;
   scene: GridScene;
-  title: string;
   notes: string[];
   focus: { at: Zyx } | undefined;
 };

@@ -1,4 +1,4 @@
-/** A path as the link the shared parts take (rows' `LinkTo`, breadcrumbs' `CrumbTo`), through the app's router. */
+/** A path as the link a breadcrumb takes (`CrumbTo`), through the app's router. */
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 

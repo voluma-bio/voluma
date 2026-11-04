@@ -6,9 +6,8 @@
  * never stored its prompt rebuilds it identically. Everything here is generic: a workflow's
  * words come only from its skill, `outputs.yaml` and the notes it is handed.
  */
-import type { AgentsDefinition, Skill } from "@voluma/workflow/definition";
+import type { AgentDefinition, Skill, WorkflowDefinition } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
-import { skillList, toolIndex } from "../prompts";
 
 /** The paths every agent reads; the layout (`layout.ts`) and the run files writer make them true. */
 const FINAL_OUTPUTS = "/run/final-outputs.yaml";
@@ -21,14 +20,14 @@ export function systemPromptOf({
   layout,
   review,
 }: {
-  definition: AgentsDefinition;
+  definition: WorkflowDefinition;
   layout: ThreadLayout;
   /** The review main (`AgentRecord.review`): the run is finished and main continues it with the researcher. */
   review?: boolean;
 }): string {
   const role = definition.agents[layout.role];
   if (!role) throw new Error(`${layout.name} runs on ${layout.role}, which is not a role file`);
-  const skills = `${skillList(definition, role, " [in your first message]", review ? ["researcher"] : [])}\n\n${toolIndex(definition, role, role.tools.includes("bash"))}`;
+  const skills = `${skillList(definition, role, review ? ["researcher"] : [])}\n\n${toolIndex(definition, role)}`;
   const researcher = definition.skills.find((s) => s.name === "researcher");
   return [
     role.body,
@@ -40,12 +39,46 @@ export function systemPromptOf({
   ].join("\n\n");
 }
 
+/** The tool a role reads files with: `read`, else its shell. */
+const readerOf = (role: AgentDefinition) => (role.tools.includes("read") ? "`read`" : "bash");
+
+/**
+ * The role's skills, progressively disclosed: name, description and path here, the skill and its
+ * references and resources read with the role's reading tool (`readerOf`) when needed. The
+ * workflow's own skill comes first; its text is in the first message.
+ */
+function skillList(
+  def: Pick<WorkflowDefinition, "skills">,
+  role: AgentDefinition,
+  /** Skills whose text is already in the system prompt: marked so, not to be read again. */
+  inPrompt: readonly string[] = [],
+): string {
+  const lines = def.skills
+    .filter((s) => role.skills.includes(s.name))
+    .map(
+      (s) =>
+        `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? " [in your first message]" : ""}${inPrompt.includes(s.name) ? " [below, in this prompt]" : ""}`,
+    );
+  return `Skills: read a skill's SKILL.md with ${readerOf(role)} before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
+}
+
+/** One line per script of the role's skills, from its docstring. */
+function toolIndex(def: Pick<WorkflowDefinition, "toolIndex">, role: AgentDefinition): string {
+  const lines = def.toolIndex
+    .filter((t) => role.skills.includes(t.skill))
+    .map((t) => `- ${t.skill}/${t.script}: ${t.summary}`);
+  const use = role.tools.includes("bash")
+    ? "Run `python <skill dir>/resources/<script> --help` before you use one."
+    : `Workers run them; read one with ${readerOf(role)} to know what a worker's result rests on.`;
+  return `Scripts of those skills, at <skill dir>/resources/<script> (skill dirs are listed above). ${use}\n${lines.join("\n")}`;
+}
+
 /**
  * `review.md`, or in a snapshot cut before it existed the `corrections` skill's text, which it moved
  * (a snapshot before that has neither: a short opening). Delete the fallback once no run predates
  * `review.md` (`packages/harness/.context/TODO.md`).
  */
-function reviewText(definition: AgentsDefinition): string {
+function reviewText(definition: WorkflowDefinition): string {
   return (
     definition.review ??
     definition.skills.find((s) => s.name === "corrections")?.text ??
@@ -121,7 +154,7 @@ export const skillMarker = (name: string) => `### Skill ${name} (`;
 export const skillBlock = (s: Skill) => `${skillMarker(s.name)}${s.path})\n\n${s.text}`;
 
 /** The skill, then its companions, once each, in that order; then `extra`. */
-function skillsOf(definition: AgentsDefinition, extra: readonly string[] = []): Skill[] {
+function skillsOf(definition: WorkflowDefinition, extra: readonly string[] = []): Skill[] {
   const own = definition.skills[0] as Skill;
   const byName = (name: string) => {
     const skill = definition.skills.find((s) => s.name === name);
@@ -135,7 +168,7 @@ export function firstMessageOf({
   definition,
   start,
 }: {
-  definition: AgentsDefinition;
+  definition: WorkflowDefinition;
   start: AgentStart;
 }): string {
   const own = definition.skills[0] as Skill;

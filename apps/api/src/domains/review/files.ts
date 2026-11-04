@@ -1,5 +1,5 @@
-/** Review's keys in the object store: a run's files, message snapshots and converted assets. */
-import { evidenceKey, reviewAssetKey } from "@voluma/contracts/r2";
+/** Review's keys in the object store: a run's files and converted assets. */
+import { reviewAssetKey } from "@voluma/contracts/r2";
 import { ObjectNotFound, type ObjectStore } from "@voluma/object-store";
 import { HTTPException } from "hono/http-exception";
 
@@ -31,26 +31,6 @@ export const openFile = (store: ObjectStore, key: string, signal: AbortSignal) =
     missing: "File not found.",
     failed: "Could not read the file.",
   });
-
-/** Publishes complete content-addressed bytes of a screenshot; rejects with 502 when storage fails. */
-export async function saveEvidence(
-  store: ObjectStore,
-  runId: string,
-  sha256: string,
-  bytes: Uint8Array,
-  signal: AbortSignal,
-): Promise<void> {
-  try {
-    // An existing key is kept: the same content may already be evidence, or another save may have just written it.
-    await store.put(evidenceKey(runId, sha256), bytes, {
-      contentType: "image/png",
-      ifNoneMatch: true,
-      signal,
-    });
-  } catch {
-    throw new HTTPException(502, { message: "Could not save the screenshot." });
-  }
-}
 
 /**
  * A short-lived URL for one converted asset of the run, with the seconds it stays valid for.

@@ -38,7 +38,6 @@ import {
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
 import { isContextOverflowError } from "../../context-overflow";
-import { replyFrames } from "../../live";
 import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
@@ -55,20 +54,12 @@ import { type Interrupted, interruptedResult } from "./history-repair";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
-/**
- * The `thread.started` rule on `task`, in types: a worker or check thread has a task, the main
- * agent none. The supervisor is the root and runs no agent loop, so it is not started here.
- */
-type ThreadIdentity =
-  | { kind: "worker" | "check"; taskId: string; agent?: undefined }
-  | { kind: "main"; taskId?: undefined; agent?: undefined }
-  /** A thread of the agent model: no task, a name and a role (`harness/agents`). */
-  | { kind: "agent"; taskId?: undefined; agent: { name: string; role: "main" | "worker" } };
-
-export type StartThreadOptions = ThreadIdentity & {
+export interface StartThreadOptions {
   threadId: string;
-  /** How a message's sender reads in the thread's inbox ("From corin:"); default: the task loop's labels. */
-  labelOf?: (sender: UserSender) => string;
+  /** The thread's name and role (`agents/`). */
+  agent: { name: string; role: "main" | "worker" };
+  /** How a message's sender reads in the thread's inbox ("From corin:"). */
+  labelOf: (sender: UserSender) => string;
   /**
    * Builds the result of a tool call that a crash cut off, from the log (the caller knows what
    * the call did). `undefined` keeps the cautious default text.
@@ -107,7 +98,7 @@ export type StartThreadOptions = ThreadIdentity & {
    * exactly as after a crash. The next claim resumes it from what was stored.
    */
   runSignal?: AbortSignal;
-};
+}
 
 export interface ThreadHandle {
   /** Puts a message in the running thread's inbox. False once the thread has ended. */
@@ -251,7 +242,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   // The notices of each user message we prompt with (a brief has one), kept with the message
   // itself so each is recorded under its own sender.
   const noticesOf = new WeakMap<AgentMessage, Notice[]>();
-  const label = options.labelOf ?? senderLabel;
+  const label = options.labelOf;
   const userMessage = (notices: Notice[], text = blockOf(notices, label)): AgentMessage => {
     const message: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
     noticesOf.set(message, notices);
@@ -347,9 +338,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       }
       if (stored.length > 0) agent.state.messages = stored;
 
-      // The id the reply's live frames carry, picked when it starts and used by its `message`.
-      let replyId: string | undefined;
-      let frames: ReturnType<typeof replyFrames> | undefined;
       // Pi emits a reply's `message_start` as a live partial only once the provider's response
       // headers are in and its own retries are over; a call that failed before them gets
       // `message_start` with the final error message. `lastInterrupted`: the latest reply failed
@@ -359,13 +347,8 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         switch (event.type) {
           case "message_start":
             if (event.message.role === "assistant") {
-              replyId = crypto.randomUUID();
-              frames = replyFrames(threadId, replyId, recorder.live);
               replyStarted = event.message.stopReason !== "error";
             }
-            break;
-          case "message_update":
-            frames?.(event.assistantMessageEvent);
             break;
           case "message_end": {
             const { message } = event;
@@ -393,22 +376,15 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
                 emit("message", { role: "user", text, sender });
               }
             } else if (message.role === "assistant") {
-              // Every reply gets a `message`, even an empty or failed one: it ends the
-              // reply's live partial (`stream.ts`).
+              // Every reply gets a `message`, even an empty or failed one.
               const used = usageOf(message);
               const reasoning = reasoningOf(message);
-              recorder.emit(
-                threadId,
-                "message",
-                {
-                  role: "assistant",
-                  text: textOf(message),
-                  ...(reasoning && { reasoning }),
-                  ...(used && { usage: used }),
-                },
-                replyId,
-              );
-              replyId = frames = undefined;
+              recorder.emit(threadId, "message", {
+                role: "assistant",
+                text: textOf(message),
+                ...(reasoning && { reasoning }),
+                ...(used && { usage: used }),
+              });
             } else if (message.role === "system") {
               // Pi's declaration of a resumed thread's changed tools (the first system message is stored with `persist(system)`).
               // A tool redefined in place comes as a removal and an addition of the same name.
@@ -457,7 +433,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         while (!historyError && !signal?.aborted) {
           if (overflowRetryable(agent.state.messages)) {
             const recovered = await compacting.recover(agent.state.messages, signal).catch((e) => {
-              // The summary's own provider failure ends the thread as that failure; the run loop treats it by the thread's place (`run-loop.ts`).
+              // The summary's own provider failure ends the thread as that failure; the supervisor treats it by the thread's place (`supervise-run.ts`).
               const text = e instanceof Error ? e.message : String(e);
               throw new ThreadFailure(text, compacting.interrupted(text));
             });
@@ -513,9 +489,6 @@ interface Notice {
   sender: UserSender;
 }
 
-const senderLabel = (s: UserSender) =>
-  s.kind === "thread" ? "the main agent" : s.kind === "person" ? "the researcher" : "Voluma";
-
 /** The text the model reads for a set of notices, in arrival order. */
 const blockOf = (notices: Notice[], label: (s: UserSender) => string) =>
   `New messages for you:\n\n${notices.map((n) => `From ${label(n.sender)}:\n${n.text}`).join("\n\n")}`;
@@ -559,7 +532,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { threadId, kind, taskId, agent, sandbox, recorder }: StartThreadOptions,
+  { threadId, agent, sandbox }: StartThreadOptions,
   batchOf: (toolCallId: string) => string[],
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
@@ -569,21 +542,16 @@ function toAgentTool(
     description: tool.description,
     parameters: Type.Unsafe(strictObjects(jsonSchema)),
     ...(tool.prepare && { prepareArguments: tool.prepare }),
-    ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
       let result: ToolResult;
       try {
         result = await tool.execute(tool.input.parse(params), {
           threadId,
-          kind: agent ? agent.role : kind,
-          ...(taskId && { taskId }),
-          ...(agent && { agent }),
+          agent,
           toolCallId,
           batch: batchOf(toolCallId),
           signal: signal ?? new AbortController().signal,
           sandbox: () => sandbox(threadId),
-          output: (stream, text) =>
-            recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
         });
       } catch (error) {
         // Voluma's failure, not the call's: recorded as `infrastructure`, and the run page

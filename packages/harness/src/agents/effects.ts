@@ -1,8 +1,7 @@
 /**
  * The event id each side-effecting call of the agent loop writes, derived from the call
  * (`<thread>:<toolCallId>` plus a suffix), so a repeated call finds its event and a call a crash
- * cut off is answered from the log. The task loop's table is `tools/effects.ts`; its keys are
- * tool names and some mean something else there.
+ * cut off is answered from the log.
  */
 export const reportOutputId = (threadId: string, toolCallId: string) =>
   `${threadId}:${toolCallId}:report_output`;

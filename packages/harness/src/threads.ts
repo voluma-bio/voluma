@@ -1,11 +1,11 @@
 /**
  * The run's threads in one process: which are running and how to stop or steer them. It
  * keeps no run state beyond that. `start` launches a thread, or resumes one of the same id
- * from its History when given an `input`; the run loop decides what to start and when,
- * from the stored log plus `running` (`run-loop.ts`). A thread that throws, or is refused
+ * from its History when given an `input`; the agent loop decides what to start and when,
+ * from the stored log plus `running` (`agents/loop.ts`). A thread that throws, or is refused
  * before it starts (`ran` false), is a failure of the run: `failure()` holds the first. One
  * refused because its stored History cannot be resumed (`stale`: a deploy changed the input of one of its
- * tools, or its model) is not: `stale(threadId)` says why, and the run loop restarts the work.
+ * tools, or its model) is not: `stale(threadId)` says why, and the agent loop restarts the work.
  */
 import {
   type StartThreadOptions,
@@ -16,12 +16,7 @@ import {
 
 /** What differs per thread; the run-wide dependencies come from `Threads`' `shared`. */
 type PerRun = "recorder" | "history" | "sandbox" | "signal" | "runSignal";
-// Distributes over the kind union; a plain `Omit` would collapse it.
-export type ThreadSpec = StartThreadOptions extends infer O
-  ? O extends unknown
-    ? Omit<O, PerRun>
-    : never
-  : never;
+export type ThreadSpec = Omit<StartThreadOptions, PerRun>;
 type Shared = Pick<StartThreadOptions, "recorder" | "history" | "sandbox"> & {
   /** Called when a thread ends, whatever the outcome; its sandbox is no longer needed. */
   release(threadId: string): void;

@@ -12,22 +12,6 @@ is a structure (a mask), not an annotation.
   boundaries (OA's `upper_inner_boundary_curves`). As thousands of two-point
   `line`s it would bloat every revision.
 
-## `checkThreadId` → `threadId` on the `answer` event (PR #384)
-
-A worker's `ask` is answered through the same `answer` event, so `checkThreadId` now holds a worker's id too. Rename it to `threadId` by expand/contract (see the stored-event rule in the root `AGENTS.md`), and fix the doc comments in `events.ts` that still say "a check thread asked" / "answered a check thread's `ask`".
-
-## Contract step after the agent model's expand step (not before Nov 4, and not while a stored run uses them)
-
-The agent model's events (`agent-events.ts`, and the widened `thread.started`, `thread.ended` and
-user sender in `events.ts`) are new types and optional fields only; today's `output` event is
-untouched. Each narrowing below is a step-2 PR (root `AGENTS.md`, "Contract changes"): re-run the
-conversion, parse every staging run and every `run.json`, then narrow.
-
-- Remove the task-loop events (`output`, `revision.started`, `attempt.opened`, `task`, `checkpoint`,
-  `plan.changed`, `ask`, `answer`, `reply`, `outputs.*`, and the human `check.accepted`,
-  `review.completed`, `correction.ended`) with the fold's task rows.
-- `thread.started`: `harness` required on the root thread; `role` required on agent-model threads.
-
 ## Final outputs file
 
 `final-outputs.ts` holds `finalOutputsSchema` (the rendered `/run/final-outputs.yaml`), the total
@@ -51,8 +35,17 @@ Readers that take an output's status from `fold.byId` by its own id (`hasVersion
 One fold helper, `stateOf(fold, id)`, that resolves the label to its map first and is the only way
 readers get a state, would end that class (`chainOf` needed the same step, #489).
 
-`readStoredTitle` in `fold.ts` repairs to-check titles stored as a whole malformed array
-(`[{"focus":…, "title": "…"}]`). The task-loop harness guard (`packages/harness/src/task-runtime.ts`)
-refuses a title only when it parses as JSON, so malformed arrays can still be written. Make it refuse
-any title that starts with `[{` or `{"`, parsable or not; once that is live and the last run recorded
-before it is gone, delete `readStoredTitle`.
+## Drop the deploy-overlap leftovers of the task loop (2026-11-03)
+
+Once no runner or API built before "Delete the task loop" is live, and no run started by such a runner
+can be resumed: delete from `claimSchema.run` (`src/runner.ts`, filled by `ingest.ts`) `harness`, `tasks`
+and `review` (an older runner requires all three), the claim's `harnesses`, and `harness` on the root
+`thread.started` (`src/events.ts`, written by `supervise-run.ts`; an older runner pins
+`first.payload.harness ?? "tasks"`), together with the `runs.harness` column. The API's TODO
+(`apps/api/.context/TODO.md`) lists the rest.
+
+## Drop `thread.started.kind` (later step)
+
+`kind` repeats `role` now that only `main` and `worker` exist (the root writes `supervisor`). A stored
+event field, so two steps: make it optional and stop writing it, then, once no stored event or live
+runner needs it, delete it. Along with it, `ThreadBase.role` and `ThreadLayout.role` duplicate `place`.

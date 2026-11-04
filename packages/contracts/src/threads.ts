@@ -30,7 +30,7 @@ export function failedThreads(events: readonly RunEvent[]): Set<string> {
 }
 
 /**
- * What `cancelEnds` reads of an event: columns, plus the two payload fields it needs. The server
+ * What `cancelEnds` reads of an event: columns, plus the one payload field it needs. The server
  * reads exactly these from the stored rows, so a payload that no longer parses cannot change
  * which threads a cancel ends.
  */
@@ -41,18 +41,7 @@ export type CancelRow = {
   seq: number;
   /** `thread.started` only: it has no parent. */
   root?: boolean;
-  /** `thread.ended` only. */
-  status?: string;
 };
-
-export const cancelRow = (e: RunEvent): CancelRow => ({
-  id: e.id,
-  type: e.type,
-  threadId: e.threadId,
-  seq: e.seq,
-  ...(e.type === "thread.started" && { root: e.payload.parentThreadId === null }),
-  ...(e.type === "thread.ended" && { status: e.payload.status }),
-});
 
 /**
  * The server's cancel of a run that did not finish (a user's cancel, or a failure it records as
@@ -61,38 +50,13 @@ export const cancelRow = (e: RunEvent): CancelRow => ({
  * writes none. Ids are `<the thread's latest thread.started id>:cancel:end`: a thread, the root
  * above all, has one id for every claim, so an id keyed to the thread would collide with the
  * end of an earlier correction.
- *
- * In a correction (`openSince`) the ends also cover the threads that already finished inside
- * it, root excepted: the correction is discarded, and an agent that resumed would believe its
- * reverted work stands. The next correction starts them fresh (`messages.ts`).
  */
-export function cancelEnds(
-  runId: string,
-  events: readonly CancelRow[],
-  at: Date,
-  /** The `seq` of the open correction's `run.reopened` (`corrections`), if one is open. */
-  openSince: number | undefined,
-): EventInput[] {
+export function cancelEnds(runId: string, events: readonly CancelRow[], at: Date): EventInput[] {
   const root = events.find((e) => e.type === "thread.started" && e.root);
   const isRoot = (id: string) => id === root?.threadId;
   const start = new Map<string, string>(); // thread -> its latest thread.started id
-  const stopped = new Set<string>(); // threads whose latest end is `cancelled`
-  for (const e of events) {
-    if (e.type === "thread.started") {
-      start.set(e.threadId, e.id);
-      stopped.delete(e.threadId);
-    } else if (e.type === "thread.ended" && e.status === "cancelled") {
-      stopped.add(e.threadId);
-    }
-  }
-  const ending = new Set(openThreads(events));
-  if (openSince !== undefined) {
-    for (const e of events.filter((e) => e.seq >= openSince)) {
-      if (start.has(e.threadId) && !isRoot(e.threadId) && !stopped.has(e.threadId))
-        ending.add(e.threadId);
-    }
-  }
-  return [...ending]
+  for (const e of events) if (e.type === "thread.started") start.set(e.threadId, e.id);
+  return openThreads(events)
     .sort((a, b) => Number(isRoot(a)) - Number(isRoot(b)))
     .map((threadId) => ({
       id: `${start.get(threadId)}:cancel:end`,

@@ -1,6 +1,5 @@
 # Every output a run of the mouse OA workflow can produce, in the agent model's format
-# (packages/contracts/src/output-catalog.ts). Today's task loop still reads outputs.json and
-# tasks.json beside this file.
+# (packages/contracts/src/output-catalog.ts).
 #
 # Bones are overlays on `scan`: each is one label of the `bone-labels` map, which is reported once.
 # Values are the outputs a researcher can select; their `on` and `context` overlays are shown
@@ -217,7 +216,7 @@
 - id: cortex
   kind: overlay
   name: Cortex
-  description: the cortical shell mask the cortical task reads
+  description: the cortical shell mask the cortical thickness step reads
   base: tibia-grid
   shape: mask
   expect:
@@ -233,7 +232,7 @@
 - id: growth-plate-proximal-face
   kind: overlay
   name: Growth plate, proximal face
-  description: traced once; the later tasks read it
+  description: traced once; the later steps read it
   base: tibia-grid
   shape: surface
   fitsPlane: { code: GP, name: the growth plate }
@@ -241,7 +240,7 @@
 - id: growth-plate-distal-face
   kind: overlay
   name: Growth plate, distal face
-  description: traced once; the later tasks read it
+  description: traced once; the later steps read it
   base: tibia-grid
   shape: surface
   fitsPlane: { code: GP, name: the growth plate }

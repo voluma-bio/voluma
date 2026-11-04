@@ -1,15 +1,12 @@
 /**
- * Facts about a thing, one click away (Run details, an input's facts, an agent's or a task's info).
+ * Facts about a thing, one click away (Run details, an input's facts, Study details).
  * Radix underneath: the trigger toggles it, Escape and a click outside close it, and focus moves
  * in and back. `Facts` is the label and value list most popovers hold, `FactSections` several of
- * them under titles, and `InfoButton` the quiet (i) that opens them beside what they describe.
- * Wrap a link in `PopoverClose` to close the popover as it navigates. The content mounts only
+ * them under titles. Wrap a link in `PopoverClose` to close the popover as it navigates. The content mounts only
  * while open, so a clock inside it ticks only while someone reads it.
  */
-import { Info } from "lucide-react";
 import { Popover as P } from "radix-ui";
 import { type ReactElement, type ReactNode, useRef } from "react";
-import { IconButton } from "./button";
 import { cx } from "./cx";
 import { floatingClass, useTheme } from "./portal";
 
@@ -114,36 +111,5 @@ export function FactSections({ sections }: { sections: FactSection[] }) {
           </section>
         ))}
     </div>
-  );
-}
-
-export type InfoButtonProps = {
-  /** What it tells, as its accessible name and tooltip: "Agent details". */
-  label: string;
-  children: ReactNode;
-  align?: PopoverProps["align"];
-  /** Held open, as in a story; left out, the button opens and closes it. */
-  open?: boolean;
-};
-
-/**
- * The quiet (i) beside a thing: what it took, cost and counted, which the reader asks for
- * rather than scans for. Holds `FactSections` or `Facts`.
- */
-export function InfoButton({ label, children, align = "start", open }: InfoButtonProps) {
-  return (
-    <Popover
-      label={label}
-      align={align}
-      open={open}
-      className="w-80 p-3"
-      trigger={
-        <IconButton size="sm" label={label} className="text-fg-subtle hover:text-foreground">
-          <Info />
-        </IconButton>
-      }
-    >
-      {children}
-    </Popover>
   );
 }

@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame with its rail (one `QueryClient` in `SignedIn`); features/study (Home, studies, Workflows) and features/input (the input review) own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame with its rail (one `QueryClient` in `SignedIn`); features/study (studies, Workflows) and features/input (the input review) own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
@@ -15,17 +15,17 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
-apps/runner     The runner service: claims runs from the API and runs each on the loop it is pinned to (Run lane)
+apps/runner     The runner service: claims runs from the API and runs each on the agent loop (Run lane)
 packages/
-  contracts     zod schemas for the four contracts and the shared formats; the fold (a row per plan task, stale-task graph)
+  contracts     zod schemas for the four contracts and the shared formats; the folds of the event log (`AgentLog`, `outputsFold`, `reviewState`)
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
                 adapter; runtime-neutral (no Node types)
-  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`)
+  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`)
   api-client    typed commands and event stream; the only way web features reach the API
-  viewer        the grid viewer (three.js, zarr in a worker) and the grid a review task is shown on
+  viewer        the grid viewer (three.js, zarr in a worker) and the grid an output is shown on
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
-workflows/      `core/` (role files, generic micro-CT skills, Python requirements) and one directory per workflow (`outputs.json`, `tasks.json`, `outputs.yaml`, `skills/`), with their Python skill resources
+workflows/      `core/` (role files, generic micro-CT skills, Python requirements) and one directory per workflow (`outputs.yaml`, `skills/`), with their Python skill resources
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```
@@ -35,22 +35,18 @@ Dependencies point down: apps → feature code → packages. `contracts` and
 
 ## The agent runtime
 
-The harness has two run loops over one shell (`loop-shell.ts`: waking the loop, starting
-threads, stopping them, the root's end): the **task loop** (`run-loop.ts`: a task graph,
-a worker per task, a check on every submit, fix rounds) and the **agent loop** (`agents/loop.ts`:
-main and up to 4 named workers, messages, published output versions). A run's loop is chosen when
-it is created (`runs.harness`, null = tasks; the start's `harness`, else `DEFAULT_RUN_HARNESS`, `agents`
-unless set, the same for every organization); at its first claim the runner copies it onto the root
-`thread.started` (`harness`), and a resumed run keeps that pinned loop. The task loop runs only when a
-start asks for it, and old runs keep theirs. This section
-describes the task loop unless a bullet says otherwise; the agent loop is in
-`packages/harness/.context/CONTEXT.md`, its roles in `workflows/core/roles/`.
+The harness has one run loop over one shell (`loop-shell.ts`: waking the loop, starting
+threads, stopping them, the root's end): the **agent loop** (`agents/loop.ts`: main and up to 4
+named workers, messages, published output versions). It is described in
+`packages/harness/.context/CONTEXT.md`; its roles are in `workflows/core/agents/`.
+`runs.harness` and the claim's `harnesses` field remain only for the deploy overlap
+(`apps/api/.context/TODO.md`).
 
 Each model thread runs on Pi (`@earendil-works/pi-agent-core`), used as it comes;
 we add our own pieces only when a real run needs them. The agent runs
 outside the sandbox, so credentials never enter it. A run is a tree of
 threads: a supervisor (the root, code), the main agent, and below it workers
-(task loop: one per task, plus check threads; agent loop: named workers).
+(named workers).
 - **Event log.** Ours, kept separately from Pi's history: the `events`
   table in Postgres, behind the run domain's API, keyed `(run_id, id)`. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the
@@ -63,9 +59,7 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   workflow and the inputs read-only, the run's scratch and outputs read-write. Each
   mount gets its own temporary R2 credential, limited to its prefix and the sandbox's
   lifetime, minted from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_BUCKET` and `CLOUDFLARE_API_TOKEN`; the credentials never enter
-  the sandbox. Inputs are copied to local disk at their mount path at create for the threads of a task whose `tasks.json` entry sets `copyInputs` (decisions 2026-10-30) (a cold
-  mounted read of the scan is slow; see the POC in the docs repo, `research/modal-poc.md`);
-  the bucket is mounted privately for the copy. Each sandbox gets a fresh name (Modal
+  the sandbox. Inputs are mounted read-only from the bucket, not copied (a cold read of the scan is slow; see the POC in the docs repo, `research/modal-poc.md`). Each sandbox gets a fresh name (Modal
   names are unique among running sandboxes, so a sandbox a dead runner left behind
   would block a resume). `packages/harness/src/layout.ts` owns which prefix is mounted
   where; prompts and tools take paths from it.
@@ -81,8 +75,8 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   to `History` at `message_end`, synchronously: if a write fails the agent stops and
   nothing more is stored, so the history is always an exact prefix. Tool calls and results
   go through the run's `recorder` (`src/recorder.ts`): a background queue in emission
-  order whose failures never end a thread (events are retried). Live tool output
-  (`ToolContext.output`) streams as live frames (`bash.ts`). `startThread({prompt, input?})`: a new thread sends
+  order whose failures never end a thread (events are retried).
+  `startThread({prompt, input?})`: a new thread sends
   the prompt; a thread with history sends `input`, or continues if there is none. On
   resume it answers a crash's tool calls without a result (appended, never editing history)
   and fails if the stored system message differs from the current prompt and tools. One bad history row
@@ -115,17 +109,16 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   thread, `send`, `abort`, wait for one to go idle) and holds no run state. A thread's id is opaque, unique within its run
   only (every row and query is keyed by run): a new thread gets `uuid5(runId, name)`
   (`packages/harness/src/thread-id.ts`), minted once when it first starts. Its `name` (`supervisor`,
-  `main`, `<taskId>.<role>`, plus `.<n>` for the n-th) is on `thread.started`, where n is how many the
+  `main`, a worker's name, plus `.<n>` for the n-th main) is on `thread.started`, where n is how many the
   log has started for that role, so a restart never reuses a thread. Everything after the mint reads
   the id from the record. A run whose root is not `uuid5(runId, "supervisor")`, or records no
   `sandboxImage`, was made by an older Voluma: its claim fails with "can't be resumed" (`pinnedImageOf`)
-  rather than mint a second root. `thread.started` carries the task id
-  for a worker or check thread.
+  rather than mint a second root.
 - **Pi's batch rules shape the tools.** Pi runs the tool calls of one reply as a batch: in
   parallel, unless any tool in it is `sequential`, which makes the whole batch sequential. A
   batch ends the turn only when every result in it sets `terminate`; one call that doesn't and
   the agent carries on. An inbox delivery lands with the last result of a batch, never
-  between its calls. So a tool that must end the turn (`submit_task`, `ask`) refuses to share a
+  between its calls. So a tool that must end the turn refuses to share a
   reply (`ToolContext.batchSize`): it answers with an error result and no effect, the other calls
   run as usual, and the model calls it again alone; `wait` ends the main agent's turn instead of blocking until
   something happens, because a blocking `wait` would hold every sequential call batched behind it
@@ -138,61 +131,18 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   delivery order. The view is always a prefix of the store, so `recorder(..., stored)` on a
   resume holds exactly the view the run had. A retrying `emit` holds back every later event,
   because nothing should be decided past a gap in the record. The API also writes into a running
-  claim (marks, saved views, `tocheck.resolved`): `POST /events` answers the stored `seq`, the
+  claim (marks, saved views): `POST /events` answers the stored `seq`, the
   recorder reads any events below it into the view before its own event, and the heartbeat's
   `lastSeq` makes it pull the tail, so the view stays a gapless prefix and a delivery cursor
   (a position in the list) never passes an unseen event; a read that runs out of retries stops the
   claim like a failed write, and the next claim resumes. An API from before this answers 204 and
   no `lastSeq`; the runner then numbers events as it did.
-- **The checklist is a fold.** `task-runtime.ts` writes the `task`, `checkpoint`, `output`,
-  `attempt.opened` and `revision.started` events a thread's tool call causes, under
-  `@voluma/contracts/task-tools`. Its only view of the run is `fold(recorder.events())` (folded
-  once per change of the log), inside one per-run critical section (`section`). A thread's
-  kind and task come from its tool context, not the log. It writes through `recorder.append`,
-  which waits for the store's acknowledgement (retried like `emit`, safe because the store ignores an
-  event id it holds), so the runtime never decides from an event the store lacks; a store
-  that refuses the event fails the tool call, and the run loop fails the run. A store still
-  unavailable after the retries releases the run instead (the runner's "self-stop"). Hashing and copying
-  evidence happen outside the section. A worker writes only to its own task, and an attempt
-  opens only when every task it builds on is satisfied (`openAttempt` is the one way).
-  `tools/task-tools.ts` wraps it as `checkpoint`, `report_output`, `submit_task` and `ask`. `output-checks.ts` holds the
-  declared-output, reference, grid-placement and ruler-length checks. Files named as evidence go through the `Evidence` port.
-- **The run loop** (`run-loop.ts`) is code, not a model thread, and keeps no state of its own. Each
-  step, inside the runtime's `section`, is a function of `fold` of the log, `thread-log.ts` (every
-  thread's state: running, idle, stopped, cut off; asks and answers; fix rounds; the delivery
-  cursor and notices) and which threads run in this process. It does the first applicable of:
-  resume a cut-off thread, start the check of an `under-review` task, write a finished check's
-  result (`check-result`, or `fix-limit`), deliver to the main agent, and the liveness end. Resume is the same code as a first run. The run ends when
-  the root has a completed `thread.ended` (`finish_run`, or liveness); then every thread without
-  an end is stopped. Stops are appended first (`thread.ended {cancelled}` inside the section,
-  then abort without waiting), so the holder check refuses the stopped thread's next write at once.
-  A stale mark stops every worker and check of the dependent the same way, whatever its status.
-  A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
-  cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
-- **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates.
-  In the task loop it starts workers (`start_agent`), steers them or sends feedback on a rejected task
-  (`message`), answers a checker's or worker's question (`answer`; a worker's `ask` does not end its turn, and the answer joins its inbox), accepts a rejected task, changes the plan
-  (`change_plan`, recorded as `plan.changed` before it applies; each running worker gets a one-line inbox message of what changed) and ends the run
-  (`finish_run`). Its tools are `tools/main-tools.ts`; each writes under an id derived from the
-  call (`tools/effects.ts`), so a call a crash cut off is answered from the log. It hears about
-  the run only through **delivery messages** that resume it: the notices (a submit, a worker that
-  stopped, a check result, an `ask`, a stale task), the live agents and the tasks whose row
-  changed (`messages.ts`, which holds every string an agent is told). A delivery's `covers` is the last event it accounted for; what lies
-  after the latest `covers` is undelivered, so a crash can deliver twice, never lose one. If the
-  main agent ends its turn with nothing running and nothing to deliver, it is nudged with the full
-  agents list and task table; after `stuckLimit` such nudges in a row code skips the unfinished
-  tasks (a root-written `plan.changed`) and ends the run. A main thread that cannot resume, or
-  failed on a provider error, is replaced by `main.<n+1>` whose first message is built from the log.
-  A thread that throws or is refused before it starts (`ran` false), a fatal provider error (a retryable one resumes its thread once first), or an
-  error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports
-  Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only
-  what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness writes each role's tools, system prompt and first message from the workflow definition (`prompts.ts`) and each sandbox's spec from its layout.
-  The harness builds exactly the tools a role's file names (`tools/registry.ts`).
+- **The run loop** (`agents/loop.ts`) is code around the main thread, with no state of its own: each step is a function of `agentLog(events)` and which threads run in this process. A run ends when the root has a completed `thread.ended`; then every thread without an end is stopped (stops are appended first, so the holder check refuses a stopped thread's next write at once). A thread that throws or is refused before it starts, a fatal provider error (a retryable one resumes its thread once first), or an error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness builds exactly the tools a role's file names (`agents/tools/registry.ts`); prompts are `agents/prompts.ts`.
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
   `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
   way whether the run is fresh or recovered: read the run's stored events (paged) and every
   thread's history over HTTP, build the recorder from them, and call the harness's `superviseRun` with the sandbox,
-  evidence and model adapters. All run-scoped HTTP (events, history, heartbeat, report) is one
+  and model adapters. All run-scoped HTTP (events, history, heartbeat, report) is one
   `runClient`, which also stops the run on a lost lease and redacts what it sends. `lease.ts` heartbeats every 15 s with the
   usage since the last acknowledged one (model dollars from Pi's per-reply cost, sandbox
   seconds from the session's ready/stopped states) and stops the run on `stop`, on a
@@ -201,7 +151,7 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   5 s), so the lease is renewed soon after the API answers again. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our model key; a `visitor` run uses the claim's Meta key, in that run's scope
   only. Every sandbox runs on our Modal token. A guest may start only `visitor` runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). In the task loop the plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. In the agent loop the event log holds no plan: the final outputs are the selected catalog entries of `outputs.yaml` (the catalog's `selectable` ones if none were sent), written as the run's opening `outputs.changed` (`openingOutputs`, `agents/wire.ts`) and changed by main with `change_outputs`; main's plan is a note it writes (`/work/main/plan.md`). The task loop's prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`); the agent loop's are `agents/prompts.ts`. Every role's tools are what its role file lists: `workflows/core/agents/` through `packages/harness/src/tools/registry.ts` for the task loop, `workflows/core/roles/` through `packages/harness/src/agents/tools/registry.ts` for the agent loop; `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The event log holds no plan: the final outputs are the selected catalog entries of `outputs.yaml` (the catalog's `selectable` ones if none were sent), written as the run's opening `outputs.changed` (`openingOutputs`, `agents/wire.ts`) and changed by main with `change_outputs`; main's plan is a note it writes (`/work/main/plan.md`). Prompts are the role file plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash). Every role's tools are what its role file lists (`workflows/core/agents/`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL`. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can
@@ -374,16 +324,15 @@ the CSS stays the one source.
 ## Input review
 
 One input's run, live and for review, is `apps/web/src/features/input` at `/studies/:studyId/inputs/:inputId` (the user's theme, dark image wells; the input's newest run in that study, `?run=` an earlier one),
-with the selection in the URL (`task`, `item`, `agent`); the old `/scans/:runId`, `/runs/:id/live` and
-`/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
-conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and
-files. What any screen needs to show a run is `packages/run-view`; the grid viewer is
+with the selection in the URL (`output`, `item`, `agent`); the old `/scans/:runId`, `/runs/:id/live` and
+`/runs/:runId` redirect there. It reads the run's stream and folds it for the agents, outputs, items and the
+conversation (`outputsFold`, `reviewState`); the assets route serves what the viewer draws. What any screen needs to show a run is `packages/run-view`; the grid viewer is
 `packages/viewer`. No synthetic measurements or simulated services are mounted.
 
-Images come only from the run: each task's grid and what is drawn on it are the run's published
+Images come only from the run: the grid of an output and what is drawn on it are the run's published
 blocks and converted assets. The [input review specification][input-spec] covers the URL, the two
 sources and reconnecting; the [run view specification][run-view-spec] the run model and
-transcripts; the [viewer specification][viewer-spec] how a task's grid is chosen, the viewer's
+transcripts; the [viewer specification][viewer-spec] how a grid is chosen, the viewer's
 geometry, loading and verification coverage.
 
 [input-spec]: ../apps/web/src/features/input/.context/CONTEXT.md

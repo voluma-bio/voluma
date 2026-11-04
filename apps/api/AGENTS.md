@@ -59,10 +59,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `studies.ts` (create, list, get), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
-  recovery) and the key vault. A run carries its loop (`runs.harness`, null = tasks), set at start
-  from the request's `harness` or `DEFAULT_RUN_HARNESS` (`agents` unless set), the same for every organization. A claim hands out only runs whose loop the
-  runner lists (`harnesses`, absent = tasks, so an older runner never gets an agent-loop run). Keep
-  the claim filter when you touch start or claim; `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
+  recovery) and an own-key run's sealed keys. Every run is an agent-loop run: `runs.harness` is still written (`agents`) and the claim's `harnesses` still accepted, both ignored, until no old runner or API is live ([.context/TODO.md](.context/TODO.md)). `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per limit.
 - **Every run belongs to a study** (`studies`, `study_members`; `runs.study_id` is not null), and
@@ -95,35 +92,31 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   There is no other restart counter.
 - **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
-  rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
-  checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
+  rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port). `decideMessage` judges in the contract's order, under the
   queue lock for `sendMessage`. **Lock order: the queue lock (where taken), then `lockRun`
-  (`pg-event-log.ts`: event lock, then the run row; the only way the API takes a run row `FOR UPDATE`).** Exceptions: the gateway's `admitCall` (`packages/provider-calls/src/calls.ts`) locks the row alone and never takes the event lock after it; `FOR SHARE` reads (`assertLease`, `pg-snapshots.ts`) are separate. `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
+  (`pg-event-log.ts`: event lock, then the run row; the only way the API takes a run row `FOR UPDATE`).** Exceptions: the gateway's `admitCall` (`packages/provider-calls/src/calls.ts`) locks the row alone and never takes the event lock after it; `FOR SHARE` reads (`assertLease`) are separate. `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
   each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` locks
   the run before judging its state. `decide` (review decisions) checks the run has ended before
-  taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
-  to a queued or running task-loop run (409: one message, one claim) and reopens an ended `completed` one: it
-  writes `run.reopened`, clears `lastClaimEnd`, `stalledClaims` and the lease. An agent-loop run
-  takes a message while queued or running with no reopen: the message is an event in the log, a
+  taking it, so an accept on a running run never holds it while loading the log). `decideMessage` takes a message while the run is queued or running with no reopen, and reopens an ended `completed` one (`run.reopened`; clears `lastClaimEnd`, `stalledClaims` and the lease): the message is an event in the log, a
   running claim pulls it in (the heartbeat's `lastSeq`) and a queued run's first claim reads it, and
   `report()` reopens the run when its claim ended before reading it (`readSeq`: the last event the
   claim read). A run is in a
-  correction while `corrections(events).open` (`@voluma/contracts/fold`; `openCorrection`: no
+  correction while `corrections(events).open` (`@voluma/contracts/corrections`: no
   `correction.ended` since the latest `run.reopened`), so its claims are corrections. A correction never ends a run worse than `completed`: every way the queue would
   fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
   claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its threads
   cancelled, the open ones and those that finished inside the correction (`cancelEnds`, fed row columns and the raw payload of thread rows read in JS: it runs inside the claim, so it never refuses).
-- **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
-  under the lock. Never store, log or return them, and log no body on a route that takes
-  them. A transition holds the keys before the write that makes the run claimable commits;
-  cancel, failure and the claim drop or hand them out; the claim moves any queued visitor
-  run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
-  runs per org (429), and `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
+- **An own-key run's keys live sealed in `runs.sealed_keys`** (`run-keys.ts`, AES-256-GCM under
+  `RUN_KEY_SECRET`) for the run's life. `pg-queue.ts` seals them at start and resume, `corrections.ts`
+  at a reopen (the request brings them: a finished run's were nulled), the claim opens them, and
+  every path that ends a run nulls them. Never log or return them (except in the claim), and log no
+  body on a route that takes them. A claim that cannot open them moves the run to `awaiting-keys`.
+  `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
   `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
 - Operator CLIs (seed, archive, export and import a run, `r2:put`, `upload:scan`) live in
   `src/ops/`, not in a domain.
 - **Limits come from env** (`RUN_LIMITS_*`, read in `index.ts`; they guard Voluma's key, `admission.ts`); the workflow catalog
-  (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/`, `review/`, `scratch/person/` and `outputs/` under the example's prefix)
+  (`@voluma/workflow/bundled`) is code, and each workflow's `outputs.yaml` is read from the checkout at start (`@voluma/workflow/catalog-file`). `seed:example --from <runId> [--remote]` makes an example run (it copies the source's `review/`, `scratch/person/` and `outputs/` under the example's prefix)
   (`src/ops/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
@@ -137,16 +130,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
   `--remote`. R2 is shared with staging, so a local seed names its example
   `example-local-<runId>` (it refuses `example-<runId>`, the id staging reads, without `--remote`).
-  Shared dev data: `dev/runs/<runId>/` (dump) and `dev/backfill/<runId>/` (backfill folder) for
+  Shared dev data: `dev/runs/<runId>/` (dump) for
   ce5a0f21-c948-4e20-a03f-04ff7f0e707b. Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
 
 ## Review domain (`src/domains/review`)
 
-- `index.ts` is a mount list, like the run domain's. `runs.ts` serves `GET /runs/:runId`: the
-  run's `ReviewRun` (`@voluma/contracts/review`), built on each read by `review-run.ts` from
-  `fold` over the run's whole event log, plus what `fold` leaves to the API. Nothing
-  re-validates it on the way out: the fold's resolvers guarantee no duplicate or dangling
-  id, and `reviewIntegrityIssues` (`fold-test-log.ts`) checks that in the fold tests.
+- `index.ts` is a mount list, like the run domain's. There is no run document: the web app reads the run's stream, and `reviewState` (`@voluma/contracts/review-state`) folds the log for the outputs, assets and marks.
 - It reads runs and writes human decisions through `RunRecords` (`src/ports`), wired
   to Run's `pg-run-records.ts`. A researcher's message and an answer to an approval
   (`POST /runs/:runId/approvals/:requestId`, agent-loop runs) go through `RunMessages` instead
@@ -155,48 +144,27 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   the event lock **before** the run-row lock (both through `lockRun`), then validate and append
   atomically; preserve that order to avoid deadlocking runner appends. Review owns policy;
   Run owns authorization filters, sequence allocation and persistence. No domain imports
-  the other. `review-state` overlays acceptance on `fold` without changing scientific state.
-- Accept check compares the request's displayed task `resultRevisionId` with the current task
-  before deduplicating or writing its decision; the completed base revision must also match.
-  Only explicit Mark reviewed
-  at zero remaining sets `reviewedAt`. Both are idempotent, shared across authorized
-  readers, and forbidden on examples. The same derived summary is `Run.review` and
-  `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
-  have null summaries. Review mutations return/refetch snapshots; execution SSE closes
-  at run end and does not continuously deliver human review changes.
+  the other. 
 - `POST /runs/:runId/tocheck/accept` (a run of the agent loop) writes `tocheck.resolved` through the
   same `decide`, validated against `results.outputs` (`outputsFold`, part of `reviewState`): the
   output, version and item must exist; an item already resolved writes nothing; examples are 403.
   It is allowed while the run goes: the version it judges never changes.
 - One loader, `resultsLoader()` (`pg-runs.ts`), serves the run and study reads and Review's `RunRecords.load`
-  and `decide`. It memoizes the run's fold (`{results, correcting, open, failed}`), including
+  and `decide`. It memoizes the run's fold (`{results, waiting, skipped}`), including
   `reviewState(log)`, up to 250,000 folded events in total (about 20 MB; least recently read out
   first). An event that fails `runEventSchema` is skipped and logged (id, type) when the run is loaded, so the cache holds the fold of the rest, with the count in `skipped` (Review's `decide` refuses a write while it is non-zero). Keyed by the run's `generation` and latest event ID
-  (ordered by sequence) among `FOLD_EVENT_TYPES` (`packages/contracts/src/fold.ts`, next to the
-  switch it describes; add a type there when the fold starts to read it) in the same repeatable-read
+  (ordered by sequence) among `RESULT_EVENT_TYPES` (`packages/contracts/src/review-state.ts`, next to the
+  fold it describes; add a type there when the fold starts to read it) in the same repeatable-read
   snapshot. Seed and import replacements start a new generation, invalidating cached results even
   when event IDs repeat or there are no fold events. Cache misses load only those
   events; hits load no event payloads. A single-run read of a run of any state throws on events that don't parse; lists
   leave out a completed run that doesn't and keep another with empty results. The event log remains the only durable human-decision state.
-- `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
-  files (`evidenceKey`) from the store (`files.ts` maps a missing object to 404 and a failed read to 502), after `RunRecords.readable`.
-  No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`,
-  a day). The leading bytes pick the type: JPEG, PNG, GIF and WebP inline, anything else an attachment,
+- `runs.ts` also serves `GET /runs/:runId/outputs/*`: a file under the run's `outputs/` prefix from the store
+  (`files.ts` maps a missing object to 404 and a failed read to 502), after `RunRecords.readable`.
+  The leading bytes pick the type: JPEG, PNG, GIF and WebP inline, anything else an attachment,
   always `nosniff`, since the stored content type is whatever the sandbox mount wrote. HEAD is
   a 405 before storage is opened.
-- `snapshots.ts` owns immutable screenshots, separate from scientific results and human
-  decision events. Authorized readers may save them, including on examples and historical
-  revisions. Review owns metadata; `saveEvidence` (`files.ts`) publishes validated static PNGs before
-  metadata is inserted. Retries keep the same UUID/pixels and return the original actor/time;
-  conflicting captures return 409. Run's internal `generation` changes on example replacement:
-  every snapshot query and insert uses it, so late saves cannot attach to the replacement.
-  `adapters/pg-snapshots.ts` implements the shared `ReviewSnapshots` port: insertion holds a
-  share lock on the matching run generation until commit. Archive/replacement holds the run's
-  update lock, so a save either commits before the archive checks it or is refused afterwards.
-- A screenshot is one grid-viewer pane (`slice` or `3d`) on a `gridId`. The API checks the
-  grid has an image volume in the pinned revision, the crosshair lies on it, and every
-  structure and focus reference belongs to the revision; it refuses new `acquired` (DICOM
-  viewer) saves, which stay listed. The domains get one `ObjectStore` (`@voluma/object-store`; the R2
+- The domains get one `ObjectStore` (`@voluma/object-store`; the R2
   adapter, or with `OBJECT_STORE_DIRECTORY` a local folder with the same keys) and build their keys with
   `@voluma/contracts/r2`. The folder's signed URLs (asset GETs, scan upload PUTs) point at
   `/api/storage/*`, which `index.ts` mounts ahead of the auth guards; they carry their own HMAC and

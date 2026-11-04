@@ -12,8 +12,8 @@
  * `input` for what a step read (reported with a version, in `madeFrom`; not declared here).
  *
  * The file is strict and cross-checked: a dangling id, a link to the wrong kind or a cycle fails
- * with the path to it. `loadWorkflow` (`packages/workflow`) parses it for runs of the agent loop;
- * `outputs.json`, which today's task loop reads, is `workflow-files.ts`. Write `"on":` quoted:
+ * with the path to it. `loadWorkflow` (`packages/workflow`) parses it for every run, and
+ * `@voluma/workflow/bundled` parses it at build time for the web app. Write `"on":` quoted:
  * PyYAML reads a bare `on` key as `True`, and the loader refuses it.
  */
 import { z } from "zod";
@@ -52,8 +52,7 @@ export type View = z.infer<typeof viewSchema>;
 /**
  * What an overlay is stored as: `labels` (an integer map, one value per structure), `mask`
  * (binary voxels), `surface` (a height map over an axis), `point` and `line` (annotations a
- * ruler or a landmark draws). These are today's `outputs.json` kinds `volume` of `labels`,
- * `structure`, `surface` and `annotation`.
+ * ruler or a landmark draws).
  */
 export const overlayShapeSchema = z.enum(["labels", "mask", "surface", "point", "line"]);
 
@@ -157,6 +156,12 @@ export const outputEntrySchema = z.discriminatedUnion("kind", [
 ]);
 export type OutputEntry = z.infer<typeof outputEntrySchema>;
 
+/** The ids in `selected` that are not a `selectable` output of `catalog` (a run can't select them). */
+export const unselectable = (catalog: readonly OutputEntry[], selected: readonly string[]) => {
+  const byId = new Map(catalog.map((e) => [e.id, e]));
+  return selected.filter((id) => !byId.get(id)?.selectable);
+};
+
 /** The map whose version holds `id`'s voxels when the catalog lists `id` as a label overlay, else `id`. */
 export const labelMapOf = (catalog: readonly OutputEntry[], id: string): string => {
   const e = catalog.find((x) => x.id === id);
@@ -168,6 +173,17 @@ export const labelMapsOf = (catalog: readonly OutputEntry[]): Record<string, str
   Object.fromEntries(
     catalog.flatMap((e) => (e.kind === "overlay" && e.label ? [[e.id, e.label.of]] : [])),
   );
+
+/** The shapes the review converter reads from a `.npy` (`detail.as`); a point or line has no array. */
+const CONVERTED_SHAPES = new Set<string>(["labels", "mask", "surface"]);
+
+/** How the review converter reads a listed output's file (`detail.as`), where the catalog fixes it. */
+export const convertedAs = (entry: OutputEntry): string | undefined =>
+  entry.kind === "base"
+    ? "image"
+    : entry.kind === "overlay" && entry.shape && CONVERTED_SHAPES.has(entry.shape)
+      ? entry.shape
+      : undefined;
 
 /** The ids `entry` links to, for the cycle check. */
 function linksOf(entry: OutputEntry): string[] {
@@ -292,11 +308,12 @@ export type OutputCatalog = z.infer<typeof outputCatalogSchema>;
 const SUPERSCRIPT: Record<string, string> = { "2": "²", "3": "³", "-1": "⁻¹", "-2": "⁻²" };
 
 /**
- * A value's UCUM unit as people and `outputs.json` write it: `mm3` → `mm³`, `[hnsf'U]` → `HU`,
- * `um` → `µm`, `1/mm3` → `1/mm³`; annotations in braces drop out.
+ * A value's UCUM unit as people write it: `mm3` → `mm³`, `[hnsf'U]` → `HU`,
+ * `um` → `µm`, `1/mm3` → `1/mm³`; annotations in braces drop out. A plain number (UCUM `1`)
+ * has no unit: `""`.
  */
 export const unitAsWritten = (ucum: string): string =>
-  ucum
+  (ucum === "1" ? "" : ucum)
     .replaceAll("[hnsf'U]", "HU")
     .replace(/\{[^}]*\}/g, "")
     .replace(/\bu(?=[mgLl])/g, "µ")

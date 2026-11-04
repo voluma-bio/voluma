@@ -1,17 +1,16 @@
 /**
- * Postgres adapter for the run queue: every state change of a run, and the key vault
- * (key-vault.ts) that goes with it. Each transition (start, resume, cancel, claim,
+ * Postgres adapter for the run queue: every state change of a run, and the sealed keys
+ * (run-keys.ts) of an own-key run that go with it. Each transition (start, resume, cancel, claim,
  * heartbeat, report) runs in one transaction, judged by the database's `now()`; no API
  * process's clock or memory decides a lease. Which transitions take the queue lock, and why
- * heartbeat and report don't: `apps/api/AGENTS.md`. The vault is only touched under that lock, so holding or dropping a run's keys can't interleave with
- * the claim that hands them out: keys are held before the transaction that makes a run
- * queued commits, and dropped by whatever ends or moves it. The lease token stays on an
+ * heartbeat and report don't: `apps/api/AGENTS.md`. Keys are sealed in the same transaction that makes a run
+ * queued, and nulled by whatever ends it. The lease token stays on an
  * ended run so the old holder's next heartbeat is told to `stop`; a recovery clears it,
  * so that holder is `lease-lost` (lease.ts).
  */
 import { randomBytes } from "node:crypto";
-import type { Harness } from "@voluma/contracts/ids";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
+import { type OutputCatalog, unselectable } from "@voluma/contracts/output-catalog";
 import type { Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
@@ -19,8 +18,7 @@ import {
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
-import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, ne, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
@@ -38,26 +36,26 @@ import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progre
 import {
   answerApproval,
   decideMessage,
-  endCorrection,
-  GUEST_KEYS_MESSAGE,
   messageRefusal,
   messageTargetOf,
   openCorrection,
   reopen,
 } from "./corrections";
-import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
 import { cancelOpenThreads, cancelReviewWorkers, lockRun } from "./pg-event-log";
 import {
   loadRun,
   loadRuns,
+  ownKeyBusy,
   type Queryable,
+  queueOrder,
   readableInputs,
   readableRuns,
   readableStudies,
   type Tx,
 } from "./pg-runs";
+import type { KeySealer } from "./run-keys";
 import { DEFAULT_THINKING, modelChoices, pickModel } from "./run-models";
 import { events, inputs, runs, studies, studyMembers } from "./schema";
 
@@ -70,7 +68,9 @@ import { events, inputs, runs, studies, studyMembers } from "./schema";
  */
 export const QUEUE_LOCK = 0x76_6f_6c_71;
 
-/** How long a visitor run waits for its keys. */
+/** How long an own-key run whose keys are gone waits for them. */
+/** Runs on one starter's own key that may be unfinished at once; each holds a sealed key in its row. */
+const MAX_OWN_KEY_RUNS = 20;
 const KEYS_WAIT = sql`interval '24 hours'`;
 
 const leaseUntil = sql`now() + make_interval(secs => ${LEASE_SECONDS})`;
@@ -89,7 +89,7 @@ export type RunnerReport =
 export type Claimed = {
   run: Run;
   leaseToken: string;
-  /** The visitor run's keys, handed out once. */
+  /** The own-key run's keys, opened from the run's sealed column for this claim. */
   keys?: VisitorKeys;
   /** The study's budget (`claimSchema.budgetUsd`); null: none. */
   budgetUsd: number | null;
@@ -99,7 +99,7 @@ export type Claimed = {
 
 /**
  * Ends the matching running claims for `reason` and takes their runs back: a `voluma` run to
- * `queued`, a `visitor` run to `awaiting-keys` (its keys are gone). A claim that ended
+ * `queued` (an own-key run keeps its sealed keys). A claim that ended
  * without progress counts toward the no-progress limit (`claim-progress.ts`); at the limit
  * the run ends `failed`, naming the call that was in flight.
  */
@@ -133,8 +133,7 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
         .update(runs)
         .set({
           ...base,
-          state: run.credentials === "visitor" ? "awaiting-keys" : "queued",
-          awaitingSince: run.credentials === "visitor" ? sql`now()` : null,
+          state: "queued",
         })
         .where(eq(runs.id, run.id));
     }
@@ -189,19 +188,23 @@ async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason:
 async function sweep(tx: Tx) {
   await recover(tx, sql`lease_expires_at <= now()`, "lease-expired");
   await tx.execute(sql`
-    UPDATE runs SET state = 'ended', outcome = 'failed', ended_at = now(),
+    UPDATE runs SET state = 'ended', outcome = 'failed', ended_at = now(), sealed_keys = NULL,
       error = 'The keys were not resent within 24 hours.'
     WHERE state = 'awaiting-keys' AND awaiting_since <= now() - ${KEYS_WAIT}`);
+  // Self-healing: an end path that missed the column (an old API during a deploy overlap) still
+  // leaves no key behind.
+  await tx.execute(
+    sql`UPDATE runs SET sealed_keys = NULL WHERE sealed_keys IS NOT NULL AND state = 'ended'`,
+  );
 }
 
 const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, "failed", error);
 
 /**
  * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
- * person's message, `messages.ts`) is never left worse than `completed`: its open threads end
- * `cancelled`, `correction.ended` records what happened, and the run ends `completed` with its
- * earlier results. On the agent loop only the workers and the root end, and main stays cut off
- * (`cancelReviewWorkers`). `set` adds columns to the update (a recovery's lease reset).
+ * person's message, `messages.ts`) is never left worse than `completed`: only its workers and the
+ * root end, and main stays cut off (`cancelReviewWorkers`); the run ends `completed` with its
+ * earlier results. `set` adds columns to the update (a recovery's lease reset).
  */
 async function endUnfinished(
   tx: Tx,
@@ -212,21 +215,14 @@ async function endUnfinished(
 ) {
   const reopenId = await openCorrection(tx, runId);
   const correcting = reopenId !== null;
-  const [{ harness } = { harness: null }] = correcting
-    ? await tx.select({ harness: runs.harness }).from(runs).where(eq(runs.id, runId))
-    : [];
-  if (correcting && harness === "agents") {
-    // Review on the agent loop (`cancelReviewWorkers`): main is cut off, not ended, and no correction span exists.
-    await cancelReviewWorkers(tx, runId, status === "cancelled");
-  } else {
-    if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
-    if (correcting) await endCorrection(tx, runId, reopenId, status, error);
-  }
+  if (correcting) await cancelReviewWorkers(tx, runId, status === "cancelled");
+  else if (status === "cancelled") await cancelOpenThreads(tx, runId);
   await tx
     .update(runs)
     .set({
       ...set,
       state: "ended",
+      sealedKeys: null,
       outcome: correcting ? "completed" : status,
       endedAt: sql`now()`,
       error: correcting ? null : (error ?? null),
@@ -275,8 +271,6 @@ type Starts = {
   model?: string;
   /** The thinking level the caller asked for; absent: `DEFAULT_THINKING`. */
   thinking?: RunThinking;
-  /** The loop the caller asked for; absent: `defaultHarness`. */
-  harness?: Harness;
 };
 
 /** A limit reached is 429; an account without a key is 403. */
@@ -291,46 +285,24 @@ const limitRefusal = (refused: Refusal) =>
 export function pgRunQueue(
   db: PostgresJsDatabase,
   limits: Limits,
-  vault: KeyVault,
+  sealer: KeySealer,
   notifier: Notifier,
-  workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputEntry[] } | undefined,
+  workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputCatalog } | undefined,
   /** `RUN_MODEL_OVERRIDE`, validated by `modelOverride`. */
   modelOverride: string | null,
-  /** `DEFAULT_RUN_HARNESS`: the loop of a run whose start names none. */
-  defaultHarness: Harness,
 ) {
+  /** The organizations in queue priority order (`Limits`). */
+  const orgs = [...limits.voluma.keys()];
+
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
       return work(tx);
     });
 
-  type Hold = (runId: string, labId: string, keys: VisitorKeys) => void;
-
-  /**
-   * Runs a write of the browser under the lock. A refusal is an `HTTPException` thrown where it
-   * is decided: it rolls the write back and reaches the client. Any failure forgets the keys the
-   * work held through `hold`.
-   */
-  const attempt = async <T>(work: (tx: Tx, hold: Hold) => Promise<T>): Promise<T> => {
-    const held: string[] = [];
-    const hold: Hold = (runId, labId, keys) => {
-      if (!vault.hold(runId, labId, keys))
-        throw new HTTPException(429, {
-          message: "Too many runs are waiting with keys; try again shortly.",
-        });
-      held.push(runId);
-    };
-    try {
-      return await locked((tx) => work(tx, hold));
-    } catch (error) {
-      for (const id of held) vault.drop(id);
-      throw error;
-    }
-  };
-
   const messageContext = {
     limits,
+    sealer,
     pinsOf: (workflowId: string) => workflowOf(workflowId)?.pins,
   };
 
@@ -366,29 +338,40 @@ export function pgRunQueue(
    */
   const startRuns = async (
     tx: Tx,
-    hold: Hold,
     reader: Reader,
     caller: Caller,
     study: { id: string },
-    workflow: { pins: WorkflowPin[]; outputs: OutputEntry[] },
+    workflow: { pins: WorkflowPin[]; outputs: OutputCatalog },
     starts: Starts,
   ) => {
     const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
     if (bad.length)
       throw new HTTPException(400, {
-        message: `Not a measurement or score of this workflow: ${bad.join(", ")}.`,
+        message: `Not a selectable output of this workflow: ${bad.join(", ")}.`,
       });
     if (starts.runs.length === 0) return;
-    // A guest runs only on their own keys: Voluma's are for signed-in accounts.
-    if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
-    const harness = starts.harness ?? defaultHarness;
-    const used = await usage(tx, reader.labId, credentials);
+    if (credentials === "visitor") {
+      const [{ open } = { open: 0 }] = await tx
+        .select({ open: sql<number>`count(*)::int` })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.startedBy, caller.userId),
+            eq(runs.credentials, "visitor"),
+            ne(runs.state, "ended"),
+          ),
+        );
+      if (open + starts.runs.length > MAX_OWN_KEY_RUNS)
+        throw new HTTPException(429, {
+          message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
+        });
+    }
+    const used = await usage(tx, reader.labId);
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limits, reader.labId, used, { credentials });
       if (refused) throw limitRefusal(refused);
-      if (starts.keys) hold(id, reader.labId, starts.keys);
       await tx.insert(runs).values({
         id,
         labId: reader.labId,
@@ -399,12 +382,13 @@ export function pgRunQueue(
         notes: starts.notes ?? null,
         inputId,
         credentials,
+        sealedKeys: starts.keys ? sealer.seal(id, starts.keys) : null,
         model,
+        // Read nowhere; an API built before the task loop was deleted claims by it (TODO: drop the column).
+        harness: "agents",
         thinking: starts.thinking ?? DEFAULT_THINKING,
-        harness,
         state: "queued",
       });
-      if (credentials === "visitor") used.ownKeyActive++;
     }
   };
 
@@ -415,14 +399,14 @@ export function pgRunQueue(
     /**
      * Creates one run `queued` on an input of an existing study. Refuses a study the reader
      * can't read (or the example's), an input the study lacks, an input still uploading, a
-     * limit already reached, and a visitor run when the vault is full.
+     * limit already reached.
      */
     start: (
       reader: Reader,
       caller: Caller,
       request: Omit<Starts, "runs"> & { id: string; studyId: string; inputId: string },
     ) =>
-      attempt(async (tx, hold) => {
+      locked(async (tx) => {
         const [study] = await tx
           .select({ id: studies.id, workflowId: studies.workflowId, example: studies.example })
           .from(studies)
@@ -440,16 +424,16 @@ export function pgRunQueue(
           );
         if (!member) throw new HTTPException(404, { message: "unknown input" });
         await checkInputs(tx, reader, [request.inputId]);
-        await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
+        await startRuns(tx, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
           runs: [{ id: request.id, inputId: request.inputId }],
         });
-        return { run: await loadRun(tx, request.id) };
+        return { run: await loadRun(tx, request.id, orgs) };
       }),
 
     /**
      * Creates a study, its inputs and a `queued` run for each of `starts.runs`, in one
-     * transaction: any refusal (an input, a limit, the vault) refuses the whole call and
+     * transaction: any refusal (an input, a limit) refuses the whole call and
      * leaves nothing. Returns the study's id.
      */
     createStudy: (
@@ -465,7 +449,7 @@ export function pgRunQueue(
         starts: Starts;
       },
     ) =>
-      attempt(async (tx, hold) => {
+      locked(async (tx) => {
         const workflow = workflowFor(request.study.workflowId);
         const found = await checkInputs(
           tx,
@@ -485,7 +469,7 @@ export function pgRunQueue(
             position,
           })),
         );
-        await startRuns(tx, hold, reader, caller, request.study, workflow, request.starts);
+        await startRuns(tx, reader, caller, request.study, workflow, request.starts);
         return { studyId: request.study.id };
       }),
 
@@ -494,11 +478,10 @@ export function pgRunQueue(
      * `completed` with the cancel recorded (`endUnfinished`). Example runs are read-only.
      */
     async cancel(reader: Reader, runId: string) {
-      await attempt(async (tx) => {
-        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
+      await locked(async (tx) => {
+        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), orgs);
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
-        vault.drop(runId);
         // A report may end the run under its own locks: take them and judge the state they leave.
         const locked = await lockRun(tx, runId);
         if (locked?.state !== "ended") await endUnfinished(tx, runId, "cancelled");
@@ -506,22 +489,20 @@ export function pgRunQueue(
       notifier.notify(runId);
       // After the commit, so a reply that cannot be read cannot roll the cancel back.
       return {
-        run: await db.transaction((tx) => loadRun(tx, runId), {
+        run: await db.transaction((tx) => loadRun(tx, runId, orgs), {
           isolationLevel: "repeatable read",
         }),
       };
     },
 
-    /** Why `caller` can't message `run` now, or null (`messageRefusal`); the run read reports it. */
+    /** Why `run` can't be messaged now, or null (`messageRefusal`); the run read reports it. */
     async cannotMessage(
-      reader: Reader,
-      caller: { userId: string; guest: boolean },
       run: Run,
       /** A caller inside a transaction passes it: a second pool connection there can exhaust the pool. */
       tx: Queryable = db,
       studyWorkflowId?: string,
     ): Promise<string | null> {
-      const refusal = await messageRefusal(tx, messageContext.pinsOf, caller, {
+      const refusal = await messageRefusal(tx, messageContext.pinsOf, {
         ...messageTargetOf(run),
         studyWorkflowId,
       });
@@ -531,7 +512,7 @@ export function pgRunQueue(
     /** Whether `reader` may send this message now, without storing anything (`decideMessage`). */
     checkMessage: (
       reader: Reader,
-      caller: { userId: string; guest: boolean },
+      caller: Caller,
       runId: string,
       msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) =>
@@ -540,7 +521,7 @@ export function pgRunQueue(
     /** Stores the message, reopening the run if it had ended; one transaction under the queue lock. */
     async sendMessage(
       reader: Reader,
-      caller: { userId: string; guest: boolean },
+      caller: Caller,
       runId: string,
       msg: { id: string; payload: PersonMessage; markIds?: string[] },
     ) {
@@ -554,7 +535,7 @@ export function pgRunQueue(
     /** Stores a yes or no to a held call, reopening the run if it had ended; never through admission. */
     async answerApproval(
       reader: Reader,
-      caller: { userId: string; guest: boolean },
+      caller: Caller,
       runId: string,
       requestId: string,
       body: AnswerApprovalRequest,
@@ -566,74 +547,49 @@ export function pgRunQueue(
     },
 
     /**
-     * `awaiting-keys` → `queued`, for the run's own starter, holding the new keys. The run
-     * stays as it was when the own-key cap is reached or the vault is full.
+     * `awaiting-keys` → `queued`, for the run's own starter, sealing the new keys.
      */
     resume: (reader: Reader, runId: string, keys: VisitorKeys) =>
-      attempt(async (tx, hold) => {
-        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
+      locked(async (tx) => {
+        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), orgs);
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.state.status !== "awaiting-keys")
           throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        const refused = admit(
-          "resume",
-          limits,
-          reader.labId,
-          await usage(tx, reader.labId, run.credentials),
-          run,
-        );
+        const refused = admit("resume", limits, reader.labId, await usage(tx, reader.labId), run);
         if (refused) throw limitRefusal(refused);
-        hold(runId, reader.labId, keys);
         await tx
           .update(runs)
-          .set({ state: "queued", awaitingSince: null })
+          .set({ state: "queued", awaitingSince: null, sealedKeys: sealer.seal(runId, keys) })
           .where(eq(runs.id, runId));
-        return { run: await loadRun(tx, runId) };
+        return { run: await loadRun(tx, runId, orgs) };
       }),
 
     /**
-     * One transaction: sweep expired leases, send the queued visitor runs whose keys this
-     * process doesn't hold (another process took the start, or it restarted) to
-     * `awaiting-keys`, then take the oldest queued run of the org served longest ago
-     * that the limits allow and whose loop the runner lists (a run's `harness`, null: `tasks`),
-     * with its keys if it is a visitor run. The held ids are read
-     * under the lock: a start that holds its keys before it commits is either in them or
-     * not yet queued.
+     * One transaction: sweep expired leases, then take the first queued run in `queueOrder` that
+     * the slot caps and the org's limits allow, with its keys if it is an own-key run. An own-key run whose sealed keys
+     * cannot be opened goes to `awaiting-keys` instead.
      */
-    claim: (runnerId: string, harnesses: readonly Harness[]) =>
+    claim: (runnerId: string) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
-        await tx
-          .update(runs)
-          .set({ state: "awaiting-keys", awaitingSince: sql`now()` })
-          .where(
-            and(
-              eq(runs.state, "queued"),
-              eq(runs.credentials, "visitor"),
-              notInArray(runs.id, vault.ids()),
-            ),
-          );
-        // Round-robin by org: the org claimed longest ago goes first (never claimed: first),
-        // and within an org the oldest run, so one org's backlog can't starve another.
+        // The slot caps (`Limits`): counted under the lock, from every runner process, so a
+        // deploy overlap of two runners can't take more than the app's total.
+        const [counts] = await tx.execute<{ running: number; ownKeyBusy: boolean }>(sql`
+          SELECT count(*)::int AS running, ${ownKeyBusy} AS "ownKeyBusy"
+          FROM runs WHERE state = 'running' AND NOT example`);
+        if (!counts || counts.running >= limits.appRunning) return null;
         const queued = await tx
           .select()
           .from(runs)
-          .where(
-            and(
-              eq(runs.state, "queued"),
-              inArray(sql`coalesce(${runs.harness}, 'tasks')`, [...harnesses]),
-            ),
-          )
-          .orderBy(
-            sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
-            asc(runs.createdAt),
-            asc(runs.id),
-          );
+          .where(eq(runs.state, "queued"))
+          .orderBy(...queueOrder(orgs));
         // Failing or skipping a run changes none of these counts, so read each org's once.
         const usages = new Map<string, Usage>();
         for (const run of queued) {
-          if (run.credentials === "voluma") {
-            const used = usages.get(run.labId) ?? (await usage(tx, run.labId, "voluma"));
+          if (run.credentials === "visitor") {
+            if (counts.ownKeyBusy) continue;
+          } else {
+            const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
             usages.set(run.labId, used);
             const refused = admit("claim", limits, run.labId, used, {
               credentials: "voluma",
@@ -644,6 +600,16 @@ export function pgRunQueue(
               await fail(tx, run.id, refusalError[refused]);
               continue;
             }
+          }
+          // An own-key run whose sealed keys are gone or unreadable (a rotated secret) waits for the user to resend them.
+          const keys =
+            run.credentials === "visitor" ? sealer.open(run.id, run.sealedKeys) : undefined;
+          if (run.credentials === "visitor" && !keys) {
+            await tx
+              .update(runs)
+              .set({ state: "awaiting-keys", awaitingSince: sql`now()` })
+              .where(eq(runs.id, run.id));
+            continue;
           }
           const leaseToken = randomBytes(24).toString("hex");
           await tx
@@ -658,13 +624,12 @@ export function pgRunQueue(
               leaseExpiresAt: leaseUntil,
             })
             .where(eq(runs.id, run.id));
-          const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
           const [study] = await tx
             .select({ budgetUsd: studies.budgetUsd })
             .from(studies)
             .where(eq(studies.id, run.studyId));
           return {
-            run: await loadRun(tx, run.id),
+            run: await loadRun(tx, run.id, orgs),
             leaseToken,
             budgetUsd: study?.budgetUsd ?? null,
             ...(keys && { keys }),
@@ -730,12 +695,18 @@ export function pgRunQueue(
           await endUnfinished(tx, runId, "failed", report.error);
         } else {
           // The researcher wrote while the claim was ending: the run goes back to the queue.
-          const late = run.harness === "agents" ? await lateWrite(tx, runId, report.readSeq) : null;
+          const late = await lateWrite(tx, runId, report.readSeq);
           // A reopen already stored for that write cannot queue the run again: it would loop.
           if (!late || !(await reopen(tx, runId, late, run.startedBy)))
             await tx
               .update(runs)
-              .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
+              .set({
+                state: "ended",
+                sealedKeys: null,
+                outcome: "completed",
+                endedAt: sql`now()`,
+                error: null,
+              })
               .where(eq(runs.id, runId));
         }
       });

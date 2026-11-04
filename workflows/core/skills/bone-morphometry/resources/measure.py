@@ -6,25 +6,25 @@ spec entry, which holds (and may add "kind": "diagnostic" for a number that is n
                                                                         output id of the line drawn between them (an object)
   {"num": "<output id>", "den": "<output id>", "definition": "..."}    a ratio of two outputs listed before it in --output
   {"definition": "..."}                                                 a label volume: the voxels of the labels of the structures the
-                                                                        output is `on` in --outputs (outputs.json), counted in --labels
-                                                                        (that structures' `grid`, the labels volume, is the object)
+                                                                        output is `on` in --outputs (outputs.yaml), counted in --labels
+                                                                        (the overlays' `label.of`, the labels volume, is the object)
 Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a unit, else
 "<num unit>/<den unit>". Refused: an output the spec lacks, a point or labels file not given, a point missing from
-the files, a label volume whose output is not `on` structures with a label, a ratio naming an output not computed before it, a zero denominator.
+the files, a label volume whose output is not `on` overlays with a label, a ratio naming an output not computed before it, a zero denominator.
 The record format is in `microct-core/resources/sidecar.py`.
 
 Writes: <out>  the result record {values: {id: {value, unit, definition, kind, ...}}, objects, grid_id, spacing_zyx_mm, inputs}
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}, objects}
-Example: python measure.py --spec protocol.json --outputs outputs.json --output patella-volume --labels labels.npy --grid hu.json --out measurements.json
+Example: python measure.py --spec protocol.json --outputs outputs.yaml --output patella-volume --labels labels.npy --grid hu.json --out measurements.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import json
 from pathlib import Path
 
 import numpy as np
 import objects
 import sidecar
+import yaml
 
 
 def distance_mm(points_zyx, spacing_zyx_mm):
@@ -46,16 +46,16 @@ def ratio(num, den):
 
 
 def structure_labels(oid, declared):
-    """(label ids, labels-volume id) of the structures the output `oid` is `on`, from outputs.json's list `declared`."""
+    """(label ids, labels-volume id) of the overlays the output `oid` is `on`, from outputs.yaml's list `declared`."""
     by_id = {o["id"]: o for o in declared}
     structs = [by_id.get(s, {}) for s in by_id.get(oid, {}).get("on", [])]
-    if not structs or any("label" not in s for s in structs) or len({s["grid"] for s in structs}) != 1:
-        sidecar.fail(f"{oid}: it is neither a distance nor a ratio, and in --outputs it is not `on` structures with a label on one labels volume")
-    return [s["label"] for s in structs], structs[0]["grid"]
+    if not structs or any("label" not in s for s in structs) or len({s["label"]["of"] for s in structs}) != 1:
+        sidecar.fail(f"{oid}: it is neither a distance nor a ratio, and in --outputs it is not `on` overlays with a label on one labels volume")
+    return [s["label"]["value"] for s in structs], structs[0]["label"]["of"]
 
 
 def measure(spec_path, outputs, grid_path, labels=None, points=None, declared=None):
-    """Values, input hashes and objects of `outputs` (ids of the spec at `spec_path`), on the grid of `grid_path`; `labels` is a .npy path, `points` {name: zyx}, `declared` outputs.json's list."""
+    """Values, input hashes and objects of `outputs` (ids of the spec at `spec_path`), on the grid of `grid_path`; `labels` is a .npy path, `points` {name: zyx}, `declared` outputs.yaml's list."""
     grid = sidecar.grid(grid_path)
     sp = grid['spacing_zyx_mm']
     out, inputs, placed = {}, {}, {}
@@ -97,13 +97,13 @@ def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json")
     ap.add_argument('--output', nargs='+', required=True, metavar='ID', help='output ids to compute, in this order (a ratio after the values it divides)')
-    ap.add_argument('--outputs', type=sidecar.existing, help="the workflow's outputs.json: says which structures (and so which label ids) a label volume is on")
+    ap.add_argument('--outputs', type=sidecar.existing, help="the workflow's outputs.yaml: says which structures (and so which label ids) a label volume is on")
     ap.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json (or any sidecar): the grid the points and labels are on')
     ap.add_argument('--labels', type=sidecar.existing, help='labels.npy on --grid, for the label volumes (its sidecar beside it)')
     ap.add_argument('--points', type=sidecar.existing, nargs='+', help='points files on --grid that hold the named points (the points.json files pick.py writes)')
     ap.add_argument('--out', required=True, help='JSON file to write')
     a = ap.parse_args()
-    declared = json.loads(Path(a.outputs).read_text()) if a.outputs else None
+    declared = yaml.safe_load(Path(a.outputs).read_text()) if a.outputs else None
     grid = sidecar.grid(a.grid)
     points = sidecar.load_points(a.points, grid['grid_id']) if a.points else None
     values, inputs, placed = measure(a.spec, a.output, a.grid, a.labels, points, declared)

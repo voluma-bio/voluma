@@ -11,35 +11,32 @@
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID to let anyone in as a guest (the repo .env).
+ * RUN_KEY_SECRET (at least 32 characters): seals an own-key run's keys in the database while the run lives (domains/run/run-keys.ts).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
- * DEFAULT_RUN_HARNESS (tasks|agents, default agents): the loop of a run whose start names none.
  * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
  * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
- * and RUN_LIMITS_OWN_KEY_ACTIVE (runs on callers' own keys, queued or running, over every account); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
- * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
+ * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member, UPLOAD_LIMIT_PER_USER_GB (50) total stored per person (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { harnessSchema } from "@voluma/contracts/ids";
 import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
-import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
 import { directoryStore } from "@voluma/object-store/directory";
 import { r2Store } from "@voluma/object-store/r2";
-import { workflowById } from "@voluma/workflow/bundled";
+import { catalog, workflowById } from "@voluma/workflow/bundled";
+import { readOutputCatalog } from "@voluma/workflow/catalog-file";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
-import { pgSnapshots } from "./adapters/pg-snapshots";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
 import type { KeyLimits, Limits } from "./domains/run/admission";
-import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
@@ -48,6 +45,7 @@ import { pgRunRecords } from "./domains/run/pg-run-records";
 import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
 import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
+import { keySealer } from "./domains/run/run-keys";
 import { modelOverride } from "./domains/run/run-models";
 import { createUser } from "./domains/user";
 import { pgUserSettings } from "./domains/user/pg-settings";
@@ -82,23 +80,34 @@ function countFromEnv(name: string, fallback: number): number {
   return value;
 }
 
+/** A positive number of gigabytes from env (fractions allowed), or `fallback` when unset. */
+function gbFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
+  return value;
+}
+
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
 
 // The organizations that get Voluma's key, and what each may run on it: only these, never an
 // organization that merely exists. Members sign in to them; the guest organization (auth.ts) is
 // separate and has no key, and unset means the sign-in wall.
+// The order is the queue priority: judges are claimed before the lab (`Limits`).
 const keyOrganizations = [
-  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
     ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, limits: keyLimitsFromEnv("JUDGES") }]
     : []),
+  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
 ];
 const guestOrganizationId = process.env.GUEST_ORGANIZATION_ID || null;
 // An org missing from `voluma` is no longer configured: its queued Voluma-key runs fail and its running ones stop.
+const appRunning = countFromEnv("RUN_LIMITS_APP_RUNNING", 2);
 const limits: Limits = {
   voluma: new Map(keyOrganizations.map((org) => [org.id, org.limits])),
-  ownKeyActive: limitNumber("RUN_LIMITS_OWN_KEY_ACTIVE"),
+  appRunning,
 };
 
 const auth = createAuth({
@@ -116,14 +125,21 @@ const auth = createAuth({
 
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
 const draining = new AbortController();
-const results = resultsLoader();
+const results = resultsLoader([...limits.voluma.keys()]);
 const reads = pgRunReads(db, results);
 const studies = pgStudyReads(db, results);
 const notifier = createNotifier();
+// Each bundled workflow's catalog, from this checkout: the outputs a start may select.
+const REPO_ROOT = resolve(import.meta.dirname, "../../..");
+const outputs = Object.fromEntries(
+  Object.values(catalog).map((w) => [w.id, readOutputCatalog(REPO_ROOT, w.path)]),
+);
+const runKeySecret = required("RUN_KEY_SECRET");
+if (runKeySecret.length < 32) throw new Error("RUN_KEY_SECRET must be at least 32 characters");
 const queue = pgRunQueue(
   db,
   limits,
-  new KeyVault(),
+  keySealer(runKeySecret),
   notifier,
   // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
   (id) => {
@@ -131,12 +147,11 @@ const queue = pgRunQueue(
     return (
       workflow && {
         pins: [{ repo: "voluma-bio/voluma", path: workflow.path }],
-        outputs: workflow.outputs,
+        outputs: outputs[id] ?? [],
       }
     );
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
-  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "agents"),
 );
 const eventLog = pgEventLog(db, notifier);
 
@@ -170,20 +185,17 @@ app.get("/health", (c) => c.text("ok"));
 // A storage directory's signed URLs carry their own authorization, and uploads pass the body limit.
 if (storageDirectory)
   app.all(`${DIRECTORY_STORE_MOUNT}/*`, (c) => storageDirectory.serve(c.req.raw));
-// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
-// vault and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
+// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the sealed
+// keys and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
 // 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
 // history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
 const messageLimit = bodyLimit({ maxSize: MESSAGE_BODY_BYTES });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
-const snapshotLimit = bodyLimit({ maxSize: REVIEW_SNAPSHOT_BODY_BYTES });
 app.use("/api/*", (c, next) => {
   if (c.req.path.startsWith("/api/run/ingest/")) return runnerLimit(c, next);
   if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
-  if (c.req.method === "POST" && /^\/api\/review\/runs\/[^/]+\/snapshots$/.test(c.req.path))
-    return snapshotLimit(c, next);
   if (/^\/api\/review\/runs\/[^/]+\/messages$/.test(c.req.path)) return messageLimit(c, next);
   return browserLimit(c, next);
 });
@@ -211,6 +223,7 @@ app.route(
       maxFiles: countFromEnv("UPLOAD_MAX_FILES", 5000),
       maxBytes: countFromEnv("UPLOAD_MAX_BYTES", 20_000_000_000),
       maxOpen: countFromEnv("UPLOAD_MAX_OPEN", 3),
+      maxStoredBytes: Math.round(gbFromEnv("UPLOAD_LIMIT_PER_USER_GB", 50) * 1e9),
     },
     shutdown: draining.signal,
   }),
@@ -219,7 +232,6 @@ app.route(
   "/api/review",
   createReview({
     runs: runRecords,
-    snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage, answer: queue.answerApproval },
     store,
   }),

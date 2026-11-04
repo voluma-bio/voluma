@@ -1,32 +1,13 @@
 /**
- * The workflow catalog: every workflow a run can start from, with its `tasks.json` and
- * `outputs.json` bundled as JSON imports and parsed with the runner's cross-file check
- * (`workflowFilesSchema`): a bad file throws at import, which stops the API from starting
- * (`bundled.test.ts` makes CI parse it first). The API takes a `workflowId` from here, never a
- * path, so a caller can't point the runner at another directory; a run pins the deployed commit and the entry's `path`, and the runner snapshots that directory
- * (and `workflows/core`) when it starts. A workflow's text reaches a prompt only through a commit
- * of this repo, which is the trust boundary.
+ * The workflow catalog: every workflow a run can start from. The API takes a `workflowId` from
+ * here, never a path, so a caller can't point the runner at another directory; a run pins the
+ * deployed commit and the entry's `path`, and the runner snapshots that directory (and
+ * `workflows/core`) when it starts. A workflow's text reaches a prompt only through a commit of
+ * this repo, which is the trust boundary.
  *
- * The web app reads names, task titles and outputs from here at build time: the API serves no
- * workflow files. The runner checks a run's selected outputs against its own checkout, which may
- * be a later commit than this bundle.
- *
- * JSON imports (`with { type: "json" }`) work in Vite, Node (tsx) and `tsc` alike.
+ * Names, units and sections of a workflow's outputs are its `outputs.yaml`: the web app reads it
+ * with `outputCatalogOf` (`output-catalogs.ts`, Vite only), the API from disk (`apps/api`).
  */
-import {
-  type OutputEntry,
-  type TaskEntry,
-  workflowFilesSchema,
-} from "@voluma/contracts/workflow-files";
-import mouseOaOutputs from "../../../workflows/mouse-oa/outputs.json" with { type: "json" };
-import mouseOaTasks from "../../../workflows/mouse-oa/tasks.json" with { type: "json" };
-import smokeOutputs from "../../../workflows/smoke/outputs.json" with { type: "json" };
-import smokeTasks from "../../../workflows/smoke/tasks.json" with { type: "json" };
-
-const idAsTitle = (id: string) => {
-  const words = id.replaceAll("-", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-};
 
 export interface BundledWorkflow {
   /** The catalog id `createStudy` takes. */
@@ -35,62 +16,16 @@ export interface BundledWorkflow {
   path: string;
   name: string;
   description: string;
-  /** The tasks in file order. */
-  tasks: TaskEntry[];
-  /** Every output a run can produce, in file order. */
-  outputs: OutputEntry[];
-  /** The outputs a summary leads with (`headline` in `outputs.json`), in file order. */
-  headline: OutputEntry[];
-  /** A task's title; a task without one shows its id. */
-  taskTitle: (id: string) => string;
-  /** An output's name; one the workflow doesn't list shows its id. */
-  outputName: (id: string) => string;
-}
-
-function bundle(
-  meta: Pick<BundledWorkflow, "id" | "path" | "name" | "description">,
-  tasksJson: unknown,
-  outputsJson: unknown,
-): BundledWorkflow {
-  const { tasks, outputs } = workflowFilesSchema.parse({ tasks: tasksJson, outputs: outputsJson });
-  const titles = new Map(tasks.flatMap((t) => (t.title ? [[t.id, t.title]] : [])));
-  const names = new Map(outputs.map((o) => [o.id, o.name]));
-  return {
-    ...meta,
-    tasks,
-    outputs,
-    // `headline` is optional in the schema; an output without it is not a headline.
-    headline: outputs.filter((o) => "headline" in o && o.headline === true),
-    // A task a recorded plan names but today's workflow retired (and a plan recorded before titles
-    // has no title for): its id as words, "femoral-geometry" -> "Femoral geometry".
-    taskTitle: (id) => titles.get(id) ?? idAsTitle(id),
-    outputName: (id) => names.get(id) ?? id,
-  };
 }
 
 export const catalog = {
-  /** A two-task workflow that checks the runner end to end. */
-  smoke: bundle(
-    {
-      id: "smoke",
-      path: "workflows/smoke",
-      name: "Smoke test",
-      description: "Counts the scan's files and lists their extensions.",
-    },
-    smokeTasks,
-    smokeOutputs,
-  ),
   // A starter for the lab to edit (`workflows/mouse-oa/skills/mouse-oa/SKILL.md`).
-  "mouse-oa": bundle(
-    {
-      id: "mouse-oa",
-      path: "workflows/mouse-oa",
-      name: "Mouse OA knee",
-      description: "Measures the proximal tibia, the distal femur and the knee's bone structures.",
-    },
-    mouseOaTasks,
-    mouseOaOutputs,
-  ),
+  "mouse-oa": {
+    id: "mouse-oa",
+    path: "workflows/mouse-oa",
+    name: "Mouse OA knee",
+    description: "Measures the proximal tibia, the distal femur and the knee's bone structures.",
+  },
 } satisfies Record<string, BundledWorkflow>;
 
 type WorkflowId = keyof typeof catalog;

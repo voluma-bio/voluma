@@ -6,10 +6,9 @@
  *
  * Uploads run while the researcher fills the rest. Start can be pressed before they finish: it
  * waits for them, says so, and starts when the last one completes (the page has to stay open).
- * A guest can't upload (the API refuses), so a guest picks an earlier scan and gives keys.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, createStudy, signIn } from "@voluma/api-client";
+import { ApiError, createStudy } from "@voluma/api-client";
 import { inputsQuery, runModelsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
@@ -34,7 +33,7 @@ import {
   ShellHeading,
   TextField,
 } from "@voluma/ui";
-import { catalog } from "@voluma/workflow/bundled";
+import { workflowById } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
@@ -43,10 +42,10 @@ import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./in
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
 import { linkTo } from "./link";
 import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
-import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
+import { measurementsOf, WorkflowPanel } from "./workflow-measurements";
 
 /** The one workflow a study can use today, listed as a list of one. */
-const WORKFLOWS = [catalog["mouse-oa"]];
+const WORKFLOWS = [workflowById("mouse-oa")].filter((w) => w !== undefined);
 
 /** A scan on the page: dropped here (uploading under `id`) or uploaded before. */
 interface Row {
@@ -110,8 +109,6 @@ export function NewPage() {
   const me = useOutletContext<Me>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const canUpload = me.kind === "member";
-  const guest = me.kind === "visitor";
 
   const inputs = useQuery(inputsQuery());
   const runs = useQuery(runsQuery());
@@ -218,14 +215,14 @@ export function NewPage() {
             ? "Name the study first."
             : !workflow
               ? "Choose a workflow first."
-              : guest && !keys
+              : !me.volumaKey && !keys
                 ? "Add your Meta key first."
                 : undefined;
 
-  // One list for everyone. On a run that uses the user's own key (they saved one, or a guest must),
+  // One list for everyone. On a run that uses the user's own key (they saved one, or the account has no Voluma key),
   // a model that needs Voluma's key shows disabled, and a pick of it falls back to the default.
   const list = runModels.data;
-  const ownKey = keys || guest;
+  const ownKey = keys || !me.volumaKey;
   const forced = ownKey ? undefined : list?.forced;
   const usable = (c: { needsVolumaKey: boolean }) => !(ownKey && c.needsVolumaKey);
   const model = list?.choices.some((c) => c.model === pickedModel && usable(c))
@@ -253,10 +250,6 @@ export function NewPage() {
         keys,
         model,
         thinking,
-        // Hidden switch for the agent loop (no UI): /new?harness=agents.
-        ...(new URLSearchParams(location.search).get("harness") === "agents" && {
-          harness: "agents" as const,
-        }),
       };
       // A deploy's reload waits for the answer: leaving mid-request would hide whether it started.
       const release = holdLeave();
@@ -305,17 +298,7 @@ export function NewPage() {
       <PageHead title={`Run on new ${INPUT_WORD.many}`} />
       <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-6 pb-16 max-[760px]:px-4">
         <Step n={1} title={INPUT_WORD.Many}>
-          {canUpload ? (
-            <DropZone compact={table.length > 0} onFiles={(d) => void addDropped(d)} />
-          ) : (
-            <p className="rounded-lg bg-muted px-4 py-3 text-sm">
-              Uploading scans needs a lab account.{" "}
-              <Button variant="link" onClick={() => signIn()}>
-                Sign in
-              </Button>{" "}
-              or use a {INPUT_WORD.one} already here.
-            </p>
-          )}
+          <DropZone compact={table.length > 0} onFiles={(d) => void addDropped(d)} />
           {skipped.length > 0 && (
             <p className="text-sm text-muted-foreground">
               Not used: {skipped.slice(0, 5).join(", ")}
@@ -344,7 +327,6 @@ export function NewPage() {
           )}
           <Earlier
             inputs={inputs}
-            open={!canUpload}
             chosen={new Set(rows.flatMap((r) => (r.input ? [r.input.id] : [])))}
             hidden={
               new Set(
@@ -370,13 +352,12 @@ export function NewPage() {
                   <span className="min-w-0">
                     <span className="block font-medium">{w.name}</span>
                     <span className="block text-sm text-muted-foreground">
-                      {w.tasks.length} tasks, {measurementsOf(w).length} measurements
+                      {measurementsOf(w).length} measurements
                     </span>
-                    <span className="block text-sm text-muted-foreground">{measuredBy(w)}</span>
                   </span>
                 </label>
                 <Button variant="link" className="text-sm" onClick={() => setPanel(w.id)}>
-                  See tasks
+                  See measurements
                 </Button>
               </div>
             ))}
@@ -506,7 +487,7 @@ export function NewPage() {
         </div>
 
         <div className="px-1">
-          <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
+          <RunKeyLine userId={me.userId} volumaKey={me.volumaKey} keys={keys} onChange={setKeys} />
         </div>
 
         {WORKFLOWS.map((w) => (
@@ -901,13 +882,11 @@ function UploadBar({ progress, id, total }: { progress: Progress; id: string; to
 
 function Earlier({
   inputs,
-  open,
   chosen,
   hidden,
   onToggle,
 }: {
   inputs: ReturnType<typeof useQuery<Input[]>>;
-  open: boolean;
   chosen: Set<string>;
   /** Scans uploaded on this page, already in the table. */
   hidden: Set<string>;
@@ -915,10 +894,7 @@ function Earlier({
 }) {
   const list = inputs.data?.filter((i) => !hidden.has(i.id));
   return (
-    // Opens again whenever uploading becomes impossible (`open`), as the page's way in.
     <Disclosure
-      key={String(open)}
-      defaultOpen={open}
       label={`Or use a ${INPUT_WORD.one} you uploaded before${list ? ` (${list.length})` : ""}`}
     >
       <div>

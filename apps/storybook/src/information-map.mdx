@@ -10,22 +10,19 @@ library with a story, never drawn once in a screen.
 
 | Information | Component | Where it appears |
 |---|---|---|
-| State of a task, input, item or agent | StatusMark | study panel, input-by-task grid, TaskGraph boxes, Scans, To check, Agents, header line |
-| A row's state with its number ("5 to check") | StatusMark, status check | study panel rows, input rows, Needs you rows, the grid's Status column |
-| How many, beside a heading | Count | strip icons, panel heads, page heads, Box heads |
-| How far along, one cell per task or input | Progress | study panel, Home's studies, input rows |
-| One measured value with its unit | Readout | ItemToCheck, the Report's values, Results |
+| State of a sample, an output or a run | StatusMark | study rows, the Samples list, Final outputs, header line |
+| A row's state with its number ("5 to check") | StatusMark, status check | study rows, the Samples list |
+| How many, beside a heading | Count | panel heads, page heads, Box heads |
+| Where each sample's outputs stand | the sample bar | study rows |
 | A short tag, or what the AI sees | Chip | attachments, short tags |
-| The workflow and where each task stands | TaskGraph (study, summary, report sizes) | dashboard, Report panel, input summaries, Workflow page |
-| A list of things you can open | Row, or RowLink when it goes somewhere | every list: inputs, items, tasks, values, files, agents |
-| A table of things with columns | Table | Home's studies, Scans, Results |
-| Something waiting for your decision | ItemToCheck | To check (study and input) |
-| An agent's conversation | AgentThread | Agents panel, The AI |
+| Samples by study and group | SampleTree | the Samples tab |
+| One measurement across samples | StripPlot | the study's side, Compare |
+| Something waiting for your decision | ItemToCheck | Final outputs |
 | Where you are | Breadcrumb in the header line | every screen |
 | Details about a thing, on demand | Popover | Run details, Study details |
-| A choice between a few views | SegmentedControl | By input / By issue, Status / Values, row density |
+| A choice between a few options | SegmentedControl | the marking tools, the theme |
 | Nothing here yet, loading, or failed | EmptyState, LoadingState, ErrorState | every list and panel |
-| A titled block on a page | Box | Home, dashboard |
+| A titled block on a page | Box | Workflows |
 
 Text styles follow the same rule: measured values and slice numbers use the mono face; names,
 counts and sentences use the text face with tabular figures for numbers.

@@ -9,7 +9,7 @@
  * pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
- * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
+ * `operator.ts`). Files are not copied: they stay in R2 under the run's prefixes, shared by every database.
  */
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -21,7 +21,6 @@ import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { reviewSnapshots } from "../domains/review/schema";
 import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
 import { events, inputs, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
@@ -68,8 +67,7 @@ const dump = await withLocalDir(
       events: { id: string; seq: number; runId: string }[];
       // Dumps made before run-keyed rows also hold `threads` (ignored) and `pi_messages` without `runId`.
       piMessages: { runId?: string }[];
-      // Dumps from before these were exported have neither.
-      reviewSnapshots?: { runId: string; generation: string }[];
+      // Dumps from before these were exported have none.
       providerCalls?: { runId: string }[];
     },
 );
@@ -127,7 +125,6 @@ await db.transaction(async (tx) => {
   const existing = await lockRun(tx, runId);
   if (existing && !values.replace) throw new Error(`run ${runId} exists; pass --replace`);
   await tx.delete(providerCalls).where(eq(providerCalls.runId, runId));
-  await tx.delete(reviewSnapshots).where(eq(reviewSnapshots.runId, runId));
   await tx.delete(piMessages).where(eq(piMessages.runId, runId));
   await tx.delete(events).where(eq(events.runId, runId));
   await tx.delete(runs).where(eq(runs.id, runId));
@@ -212,14 +209,6 @@ await db.transaction(async (tx) => {
   await insertAll(
     piMessages,
     dump.piMessages.map((m) => ({ ...m, runId })),
-  );
-  await insertAll(
-    reviewSnapshots,
-    (dump.reviewSnapshots ?? []).map((snapshot) => ({
-      ...snapshot,
-      generation:
-        snapshot.generation === dump.run.generation ? run.generation : snapshot.generation,
-    })),
   );
   await insertAll(providerCalls, dump.providerCalls ?? []);
 });

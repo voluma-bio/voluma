@@ -10,9 +10,9 @@ Run `pnpm install`, then `pnpm dev`. In an Amp orb, run
 `pnpm check` runs lint, typechecks and package tests.
 `pnpm --filter @voluma/web build` verifies the production frontend bundle.
 
-In the input review, each task opens on its own analysis grid (the scan, or an aligned grid
+In the input review, each output opens on its own analysis grid (the scan, or an aligned grid
 the run made) in the grid viewer: 3D plus axial, coronal and sagittal slices
-through one crosshair, with the task's structures and surfaces from the run's
+through one crosshair, with its structures and surfaces from the run's
 converted assets.
 
 Specifications: [input review](apps/web/src/features/input/.context/CONTEXT.md),
