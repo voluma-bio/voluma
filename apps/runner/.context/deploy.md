@@ -45,7 +45,7 @@ yaml has them):
 | Setting | Value |
 |---|---|
 | Source | GitHub repo `voluma-bio/voluma`, branch `main`, root `/` |
-| Deploy trigger | `autoDeployTrigger: checksPass`: Render waits for the GitHub check suites before deploying |
+| Deploy trigger | `autoDeployTrigger: checksPass`: Render waits for the GitHub check suites before deploying. CI skips a push that changes only Markdown (`paths-ignore: "**/*.md"` in `.github/workflows/ci.yml`), so a merge that changes only `workflows/**/*.md` (role files, skills) starts no check and is never auto-deployed: the runner keeps the old workflow until a manual deploy (#574 and #587 on 2026-11-04). Deploy it by hand after such a merge ([TODO.md](TODO.md)) |
 | Build | `pnpm install --frozen-lockfile`. No build step; `tsx` is a runtime dependency |
 | Start | `cd apps/runner && exec node --import tsx src/main.ts`. `exec` makes node the process, so it gets SIGTERM |
 | Shutdown delay | 60 s: above the runner's `SHUTDOWN_BUDGET_MS` (30 s), which is how long it waits for runs to report `released` |

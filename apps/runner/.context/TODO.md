@@ -19,3 +19,5 @@ From the skillset move (`workflows/` in this repo):
 - **Every Meta request hashes every inline image** (`meta-images.ts`, `fileIdFor`): about 54 ms of event-loop time per 40 images of 1 MiB, plus short-lived copies. Cache the hash per image if it ever competes with the lease timers.
 
 - **Delete the `RUNNER_MODEL` / `RUNNER_THINKING` boot refusal in `config.ts`** about a week after #540 merges, once every host has dropped both variables.
+
+- A merge that changes only `workflows/**/*.md` never auto-deploys the runner: its trigger is `checksPass` and CI's `paths-ignore: "**/*.md"` starts no check (deploy.md, Deploy trigger). Have CI run on `workflows/**` Markdown (a `paths` exception, or a cheap job that always runs), or move the runner to `autoDeployTrigger: commit`. Until then, deploy the runner by hand after such a merge.
