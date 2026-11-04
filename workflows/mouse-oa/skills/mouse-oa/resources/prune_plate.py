@@ -1,4 +1,4 @@
-"""Prune the plate model's proposal: drop the faces on stray band pieces and cut U ranges, leaving those columns for you to trace.
+"""Prune the plate model's proposal: drop faces on stray band pieces and cut U ranges, for you to trace.
 
 `segment_plate` (plate_model.py) writes the checkpoints' voted band as pieces (`plate-band.npz`) and lists them in `plate-faces.json`
 (`pieces`; `suspect` marks a piece with faces on it that lies on a small separate part of the tibia mask, such as the fibula). Two
