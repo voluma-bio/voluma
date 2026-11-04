@@ -1,9 +1,10 @@
 /**
  * Where the outputs review's slice panes lie. Each pane has a basis in the grid's mm, (z, y, x)
  * order: `right` and `down` on screen, `normal` out of the plane. Untilted, the three panes hold
- * the grid's axes (`GRID`); tilting by hand turns two of them about the third's normal, and
- * aligning turns all three onto a target (a fitted plane, or another grid's axes). Their normals
- * stay perpendicular to each other throughout.
+ * the grid's axes (`GRID`); tilting by hand turns two of them about the third's normal, spinning
+ * turns all three about one pane's normal (that pane's image turns in place), and aligning turns
+ * all three onto a target (a fitted plane, or another grid's axes). Their normals stay
+ * perpendicular to each other throughout, and each pane stays a rotation of its grid pane.
  */
 import { type Axis, planeAxes, type Zyx } from "./scene";
 
@@ -68,24 +69,44 @@ export function tilt(o: Orientation, about: Axis, angle: number): Orientation {
   return o.map((b, a) => (a === about ? b : turnBasis(b, k, angle))) as unknown as Orientation;
 }
 
-/** How far the panes are from the grid's axes, in degrees: the largest angle between a pane and its grid plane. */
-export function offGrid(o: Orientation): number {
-  const worst = Math.min(...o.map((b, a) => Math.abs(dot(b.normal, E[a]!))));
-  return (Math.acos(Math.min(1, worst)) * 180) / Math.PI;
+/**
+ * All three panes turned about pane `about`'s normal so that its image turns `angle` radians
+ * clockwise on screen, in place; the other two planes turn with it.
+ */
+export function spin(o: Orientation, about: Axis, angle: number): Orientation {
+  const b = o[about];
+  // right × down is +normal in some panes and −normal in others (XY's is −z), so the same turn
+  // about the normal reads clockwise in one pane and anticlockwise in another.
+  const facing = Math.sign(dot(cross(b.right, b.down), b.normal));
+  return o.map((p) => turnBasis(p, b.normal, -facing * angle)) as unknown as Orientation;
 }
 
-/** Below this the panes count as on the grid's axes. */
-const UNTILTED_DEGREES = 0.05;
+/**
+ * How far the panes are turned from the grid's axes, in degrees: the largest angle of the turn
+ * taking a grid pane onto its pane, so a pane spun in its own plane counts.
+ */
+export function offGrid(o: Orientation): number {
+  const worst = Math.max(
+    ...o.map((b, a) => {
+      const g = GRID[a]!;
+      const trace = dot(b.right, g.right) + dot(b.down, g.down) + dot(b.normal, g.normal);
+      return Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2)));
+    }),
+  );
+  return (worst * 180) / Math.PI;
+}
+
 const degrees = (d: number) => `${d < 10 ? d.toFixed(1) : Math.round(d)}°`;
 
 /**
- * How the panes lie, in words ("Tilted 18°", "Along the growth plate, 12° off the grid"), aligned
+ * How the panes lie, in words ("Turned 18°", "Along the growth plate, 12° off the grid"), aligned
  * to the target named `aligned`; undefined on the grid's axes.
  */
 export function orientationWords(o: Orientation, aligned: string | undefined): string | undefined {
+  // The panes' own test, so the words never say "on the grid" while a pane is resliced a hair off it.
+  if (o.every((b, a) => onGrid(b, a as Axis))) return undefined;
   const off = offGrid(o);
-  if (off < UNTILTED_DEGREES) return undefined;
-  return aligned ? `Along ${aligned}, ${degrees(off)} off the grid` : `Tilted ${degrees(off)}`;
+  return aligned ? `Along ${aligned}, ${degrees(off)} off the grid` : `Turned ${degrees(off)}`;
 }
 
 /**

@@ -1,8 +1,10 @@
 /**
  * The grid viewer's 3D pane: the scene's meshes, or the image as a volume rendering when the
- * scene has none (the scan before segmentation), in the grid's own mm (voxel × spacing; the grid's rotation into the scan is not applied). Drag
- * rotates, right drag pans, the wheel zooms; a click on a mesh moves the crosshair there. Loading
- * the volume or meshes never moves the camera.
+ * scene has none (the scan before segmentation), in the grid's own mm (voxel × spacing; the grid's
+ * rotation into the scan is not applied). Drag turns the scene like a ball in any direction, over
+ * the top and around the view axis (a drag near the edge rolls); Shift, Ctrl/⌘ or right drag
+ * pans; the wheel or middle drag zooms. The reset button puts the camera back where it opened. A
+ * click on a mesh moves the crosshair there. Loading the volume or meshes never moves the camera.
  *
  * With Point, a click marks the visible surface under the pointer (the first shown mesh, or the
  * volume where it becomes half opaque, whichever is nearer) and a ring shows where it would land;
@@ -13,7 +15,8 @@
  * Each frame renders the meshes into a target with depth, copies it to the canvas, then
  * ray-marches the volume, if any, over it (`volume.ts`).
  */
-import { cx } from "@voluma/ui";
+import { cx, IconButton } from "@voluma/ui";
+import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
@@ -28,6 +31,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  type Object3D,
   OrthographicCamera,
   PerspectiveCamera,
   PlaneGeometry,
@@ -41,23 +45,22 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { ArcballControls } from "three/addons/controls/ArcballControls.js";
 import type { Contrast } from "./compose";
 import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { holdLevel } from "./planes";
-import {
-  type AssetLevel,
-  capturePane,
-  type GridMark,
-  type GridMesh,
-  type GridScene,
-  type MarkTool,
-  type PaneHandle,
-  type PaneStatus,
-  type ShownMark,
-  type Zyx,
+import type {
+  AssetLevel,
+  GridMark,
+  GridMesh,
+  GridScene,
+  MarkTool,
+  PaneHandle,
+  PaneStatus,
+  ShownMark,
+  Zyx,
 } from "./scene";
 import { tokenColor } from "./token-color";
 import { volumeBytes, volumeLevel, volumeMesh, volumeSteps } from "./volume";
@@ -90,6 +93,7 @@ export function Grid3D({
     volumes: Scene;
     depth: DepthTexture;
     render(): void;
+    reset(): void;
   } | null>(null);
   const [meshLoad, setMeshLoad] = useState<{ left: number; error?: string }>({ left: 0 });
   // The raw image is drawn only under no meshes: with them its threshold surface hides them.
@@ -139,8 +143,6 @@ export function Grid3D({
     const s = new Scene();
     const camera = new PerspectiveCamera(30, 1, 0.01, 1000);
     eye.current = camera;
-    // Array z runs down the screen, as in the slice panes.
-    camera.up.set(0, 0, -1);
     const size = toWorld(scene.shapeZyx);
     const center = size.clone().multiplyScalar(0.5);
     const radius = size.length() / 2;
@@ -153,9 +155,14 @@ export function Grid3D({
       );
     }
     const clip = bounds.getBoundingSphere(new Sphere());
-    camera.position
-      .copy(center)
-      .add(new Vector3(1.2, 2.2, -0.8).normalize().multiplyScalar(radius * 3.6));
+    // Array z runs down the screen, as in the slice panes.
+    const opening = {
+      position: center
+        .clone()
+        .add(new Vector3(1.2, 2.2, -0.8).normalize().multiplyScalar(radius * 3.6)),
+      target: center,
+      up: new Vector3(0, 0, -1),
+    };
     const light = new DirectionalLight(0xffffff, 2.2);
     camera.add(light);
     light.position.set(0.3, 0.6, 1);
@@ -176,9 +183,18 @@ export function Grid3D({
     const volumes = new Scene();
     const annotations = new Scene();
     const size2 = new Vector2();
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.copy(center);
-    controls.enableDamping = false;
+    // No scene, so no gizmos; no fling after a drag, no double-click focus.
+    const controls = new ArcballControls(camera, renderer.domElement);
+    controls.enableAnimations = false;
+    controls.enableFocus = false;
+    // Its defaults, less FOV on Shift (Shift + wheel or middle drag zooms), plus Shift drag pans.
+    controls.unsetMouseAction("WHEEL", "SHIFT");
+    controls.unsetMouseAction(1, "SHIFT");
+    controls.setMouseAction("PAN", 0, "SHIFT");
+    // `target` (untyped in @types/three) is where `setCamera` looks and pivots. The pivot after
+    // that is the private gizmo group's position: a pan moves it and leaves `target` behind.
+    const arcball = controls as unknown as { target: Vector3; _gizmos: Object3D };
+    const pivot = arcball._gizmos.position;
     // One frame per animation frame, however many changes asked for it.
     let frame = 0;
     const draw = () => {
@@ -218,23 +234,36 @@ export function Grid3D({
       frame ||= requestAnimationFrame(draw);
     };
     controls.addEventListener("change", render);
-    controls.update();
-    three.current = { meshes, annotations, volumes, depth, render };
+    // Sets the camera from outside; `setCamera` makes the controls continue from it.
+    const place = (position: Vector3, target: Vector3, up: Vector3) => {
+      camera.position.copy(position);
+      camera.up.copy(up);
+      arcball.target.copy(target);
+      controls.setCamera(camera);
+      // Gestures read the pivot from the group's matrix, which nothing renders to refresh, and
+      // `setCamera` moves only its position: unrefreshed, a pan or zoom jumps to the origin.
+      arcball._gizmos.updateMatrix();
+      render();
+    };
+    const reset = () => place(opening.position, opening.target, opening.up);
+    reset();
+    three.current = { meshes, annotations, volumes, depth, render, reset };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
+    // Up from the camera's own turn: the controls leave `camera.up` meaningless after a rotate.
     const now = () => ({
-      camera: { position: xyz(camera.position), target: xyz(controls.target), up: xyz(camera.up) },
+      camera: {
+        position: xyz(camera.position),
+        target: xyz(pivot),
+        up: xyz(new Vector3(0, 1, 0).applyQuaternion(camera.quaternion)),
+      },
     });
     handle.current = {
-      capture: () => ({ ...capturePane(renderer.domElement, draw), view: now() }),
       view: now,
       layers: () => layer.layers(renderer.domElement, draw),
       show(saved) {
         if (!("camera" in saved)) return;
-        camera.position.set(...saved.camera.position);
-        camera.up.set(...saved.camera.up);
-        controls.target.set(...saved.camera.target);
-        controls.update();
-        render();
+        const { position, target, up } = saved.camera;
+        place(new Vector3(...position), new Vector3(...target), new Vector3(...up));
       },
     };
     const observer = new ResizeObserver(() => {
@@ -245,7 +274,8 @@ export function Grid3D({
       target.setSize(size2.x, size2.y);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      render();
+      // The ball's size follows the pane's aspect; this also draws.
+      controls.setTbRadius(controls.radiusFactor);
     });
     observer.observe(element);
 
@@ -288,6 +318,8 @@ export function Grid3D({
       ];
     };
     const down = (event: PointerEvent) => {
+      // The controls follow the pointer on the window; the release comes back here.
+      renderer.domElement.setPointerCapture(event.pointerId);
       downAt =
         event.button === 0 && !event.shiftKey && !event.ctrlKey && !event.metaKey
           ? { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
@@ -333,11 +365,12 @@ export function Grid3D({
     renderer.domElement.addEventListener("pointerup", up);
 
     // Line: a drag that starts on the surface draws instead of rotating. Captured on the pane,
-    // so the orbit controls on the canvas below never see the press.
+    // so the controls on the canvas below never see the press.
     let line: { from: Zyx } | null = null;
     const lineDown = (event: PointerEvent) => {
       if (
         line ||
+        event.target !== renderer.domElement ||
         marking.current.tool !== "line" ||
         event.button !== 0 ||
         event.shiftKey ||
@@ -630,11 +663,21 @@ export function Grid3D({
   useEffect(() => latestStatus.current(status), [status]);
   return (
     <div ref={host} className={PANE}>
-      {chip && (
-        <span className={cx(CHIP, "top-2 right-2")} role="status">
-          {chip}
-        </span>
-      )}
+      <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
+        {chip && (
+          <span className={cx(CHIP, "static")} role="status">
+            {chip}
+          </span>
+        )}
+        <IconButton
+          size="sm"
+          label="Reset the 3D view"
+          className="bg-viewer-chip text-viewer-chip-fg hover:bg-viewer-well hover:text-viewer-chip-fg"
+          onClick={() => three.current?.reset()}
+        >
+          <RotateCcw />
+        </IconButton>
+      </div>
     </div>
   );
 }

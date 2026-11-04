@@ -33,3 +33,10 @@
 - Borrowed context meshes (`GridMesh.placement`) can reach past the grid's box, while the 3D pane's
   far plane comes from the grid's bounding sphere (`Grid3D.tsx`, `clip`): the knee's far side may be
   cut off when the camera pulls back. Grow `clip` with the loaded meshes' bounds.
+- Turning the planes (#567): one window key listener in `QuadViewer` that knows the hovered or focused pane,
+  instead of one per `SlicePane` choosing by `[data-slice-pane]:hover`; share the "typing or overlay target"
+  check with `apps/web/src/features/input/marking.tsx` and the shell; fold `tilts`/`spins` in `QuadViewer`
+  into one helper; `finish()` in `slice-gestures.ts` asks "is this a marking tool" instead of listing modes.
+- 3D pane (#567): the overlay row around the status chip and reset button catches drags that start over it;
+  dispose the Arcball gizmo geometry `setTbRadius` replaces on each resize. Ask the expert whether a dial
+  turned back to 0° should count as on the grid (today the bar says "Turned 0.0°" until Reset).

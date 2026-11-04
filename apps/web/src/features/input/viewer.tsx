@@ -191,6 +191,7 @@ export function SceneViewer({
       ? {
           key: gridKey,
           imageId: grid.imageId,
+          name: grid.name,
           scene: grid.scene,
           notes: grid.notes,
           focus: shownFocus,
@@ -275,6 +276,7 @@ export function SceneViewer({
           <div key={k.key} className="h-full" hidden={!on}>
             <QuadViewer
               scene={k.scene}
+              gridName={k.name}
               planes={quad.planesOf(k.imageId)}
               layout={quad.layout}
               onLayout={quad.onLayout}
@@ -316,6 +318,7 @@ export type SceneHandle = {
 type View = {
   key: string;
   imageId: string;
+  name: string;
   scene: GridScene;
   notes: string[];
   focus: { at: Zyx } | undefined;
