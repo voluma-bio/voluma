@@ -71,7 +71,7 @@ export async function usage(tx: Tx, labId: string): Promise<Usage> {
  * live run is never refused.
  */
 export function admit(
-  stage: "start" | "resume" | "reopen" | "claim",
+  stage: "start" | "reopen" | "claim",
   limits: Limits,
   labId: string,
   u: Usage,

@@ -68,9 +68,9 @@ import { events, inputs, runs, studies, studyMembers } from "./schema";
  */
 export const QUEUE_LOCK = 0x76_6f_6c_71;
 
-/** How long an own-key run whose keys are gone waits for them. */
 /** Runs on one starter's own key that may be unfinished at once; each holds a sealed key in its row. */
 const MAX_OWN_KEY_RUNS = 20;
+/** How long an own-key run whose keys are gone waits for them. */
 const KEYS_WAIT = sql`interval '24 hours'`;
 
 const leaseUntil = sql`now() + make_interval(secs => ${LEASE_SECONDS})`;
@@ -217,18 +217,34 @@ async function endUnfinished(
   const correcting = reopenId !== null;
   if (correcting) await cancelReviewWorkers(tx, runId, status === "cancelled");
   else if (status === "cancelled") await cancelOpenThreads(tx, runId);
-  await tx
+  await markEnded(
+    tx,
+    runId,
+    correcting ? "completed" : status,
+    correcting ? undefined : error,
+    set,
+  );
+}
+
+/** The one write that ends a run: its outcome, and its sealed keys forgotten. */
+const markEnded = (
+  tx: Tx,
+  runId: string,
+  outcome: "completed" | "failed" | "cancelled",
+  error?: string,
+  set: Partial<typeof runs.$inferInsert> = {},
+) =>
+  tx
     .update(runs)
     .set({
       ...set,
       state: "ended",
       sealedKeys: null,
-      outcome: correcting ? "completed" : status,
+      outcome,
       endedAt: sql`now()`,
-      error: correcting ? null : (error ?? null),
+      error: error ?? null,
     })
     .where(eq(runs.id, runId));
-}
 
 /**
  * The first researcher write the ending claim never saw (`lateResearcherWrite`), from raw columns:
@@ -333,8 +349,8 @@ export function pgRunQueue(
   };
 
   /**
-   * Admits each of `starts.runs` against the limits and inserts it `queued`. The counts are
-   * read once, then raised by each run inserted, so the last run is judged with the others.
+   * Admits `starts.runs` against the limits once (they share one org and one kind of key) and
+   * inserts each `queued`.
    */
   const startRuns = async (
     tx: Tx,
@@ -368,10 +384,11 @@ export function pgRunQueue(
           message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
         });
     }
-    const used = await usage(tx, reader.labId);
+    const refused = admit("start", limits, reader.labId, await usage(tx, reader.labId), {
+      credentials,
+    });
+    if (refused) throw limitRefusal(refused);
     for (const { id, inputId } of starts.runs) {
-      const refused = admit("start", limits, reader.labId, used, { credentials });
-      if (refused) throw limitRefusal(refused);
       await tx.insert(runs).values({
         id,
         labId: reader.labId,
@@ -555,8 +572,6 @@ export function pgRunQueue(
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.state.status !== "awaiting-keys")
           throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        const refused = admit("resume", limits, reader.labId, await usage(tx, reader.labId), run);
-        if (refused) throw limitRefusal(refused);
         await tx
           .update(runs)
           .set({ state: "queued", awaitingSince: null, sealedKeys: sealer.seal(runId, keys) })
@@ -698,16 +713,7 @@ export function pgRunQueue(
           const late = await lateWrite(tx, runId, report.readSeq);
           // A reopen already stored for that write cannot queue the run again: it would loop.
           if (!late || !(await reopen(tx, runId, late, run.startedBy)))
-            await tx
-              .update(runs)
-              .set({
-                state: "ended",
-                sealedKeys: null,
-                outcome: "completed",
-                endedAt: sql`now()`,
-                error: null,
-              })
-              .where(eq(runs.id, runId));
+            await markEnded(tx, runId, "completed");
         }
       });
       notifier.notify(runId);
