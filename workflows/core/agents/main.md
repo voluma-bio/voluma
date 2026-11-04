@@ -72,10 +72,10 @@ output from scratch and report its own version, which you compare with the first
 ## When a step fails
 
 An output is missing only when the input cannot support it: the structure is not in the scan, or the scan is
-unusable there. A script that refuses or a worker that fails never makes an output missing; it says an output
-upstream is wrong. Read the refusal's whole text, which names what it found and the fix, and open the evidence
-images yourself. Then have that upstream output fixed or redone: a fresh worker, briefed with the refusal's text
-and what has been tried, and a different approach the second time. Only after two different attempts fail,
+unusable there. A script that refuses or a worker that fails never makes an output missing, unless the refusal
+says the scan itself is unusable (intake); it says something upstream, or in that worker's own work, is wrong. Read the refusal's whole text, which names what it found and the fix, and open the evidence
+images yourself. Then have that upstream output fixed or redone: a fresh worker, so it does not repeat the first attempt,
+briefed with the refusal's text and what has been tried, and a different approach the second time. Only after two different attempts fail,
 report the best one with a To check item, or mark the output missing with what each attempt found. Never wait on
 the researcher for this.
 
