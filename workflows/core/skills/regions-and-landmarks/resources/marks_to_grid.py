@@ -1,10 +1,16 @@
 """A researcher's mark in world mm onto a grid: a section's curve in annotations, or a seed in an outline.
 
-A mark arrives in world mm, (x, y, z), as your delivery prints it: "at (8.12, 5.03, 129.4)–(8.20, 5.10, 129.4)– ... mm".
+A mark arrives in mm, (x, y, z), as your delivery prints it: "drawn on tibia-grid v1 ... at (2.11, 1.81, 2.13)–(2.38, 1.81, 2.11)– ... mm".
 `--world` takes that line as it is: it reads the bracketed triples after whichever of " at " and " to " comes last (a moved
-mark, "from (...) to (...) mm", gives its new place), so numbers in the tag, the version or the length are not read as points. `--grid` is the header of the grid you work on: the scan's `hu.json`,
-or a frame's `frame.json` (an aligned stack such as the tibia's `tibia-frame.json`). Its `affine_xyz_to_world_mm` maps indices
-to the same world mm as the review, so the mark lands on that grid without other maths.
+mark, "from (...) to (...) mm", gives its new place), so numbers in the tag, the version or the length are not read as points.
+The review's mm are not the scan's world mm: they are voxel index (x, y, z) times spacing on the image the mark was drawn on, from
+that image's voxel 0, unrotated (the review places every image so; `packages/harness/src/agents/tools/report-output.ts`
+`detailFromSidecar`). So `--drawn-on` is the header of that image, the output the delivery names after "drawn on" (its sidecar,
+the `.json` beside its `.npy`, from `/run/outputs.yaml`): its spacing turns the mm into that image's voxels. `--grid` is the
+header of the grid you work on: the scan's `hu.json`, or a frame's `frame.json` (an aligned stack such as the tibia's
+`tibia-frame.json`). When both are the same grid (same `grid_id`), that is all; when not (drawn on the scan, worked on the tibia
+grid), both headers need `affine_xyz_to_world_mm`, which carries the voxels from one grid to the other through the scan's world
+mm: then pass the drawn-on grid's `hu.json` or `frame.json` rather than an array sidecar.
 
 Two modes, give exactly one:
 
@@ -34,8 +40,8 @@ for the bone and this one for the piece (`segmentation-check`).
 Writes: <out>  --curve only: the annotations copy, or the curve alone
 Prints: one JSON line: --curve {grid_id, axis, section, points, cols_replaced, kept_points, moved_vox, vox_from_key, off_section_vox, out};
         --seed {grid_id, seed_zyx, label, apart, piece_voxels, pieces: [{label, apart, piece_voxels, inside_voxels}], off_plane_vox}
-Example: python marks_to_grid.py --curve --world "at (8.1, 5.0, 129.4)–(8.3, 5.1, 129.4)–(8.5, 5.1, 129.5) mm" --grid tibia-frame.json --into annotations.json --key growth_plate_curves --out annotations-marked.json
-         python marks_to_grid.py --seed --world "(...)–(...)–(...)" --grid hu.json --labels labels.npy
+Example: python marks_to_grid.py --curve --world "at (2.11, 1.81, 2.13)–(2.38, 1.81, 2.11)–(2.64, 1.81, 2.10) mm" --drawn-on tibia-frame.json --grid tibia-frame.json --into annotations.json --key growth_plate_curves --out annotations-marked.json
+         python marks_to_grid.py --seed --world "(...)–(...)–(...)" --drawn-on hu.json --grid hu.json --labels labels.npy
 Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
@@ -65,13 +71,19 @@ def world_points(text):
     return np.array(found, float)
 
 
-def to_grid(xyz, header):
-    """World mm (x, y, z) -> fractional voxel indices (z, y, x) of the grid `header` describes."""
+def to_grid(xyz, drawn_on, header):
+    """The review's mm (x, y, z) on the image `drawn_on` describes -> fractional voxel indices (z, y, x) of the grid `header` describes."""
+    d = sidecar.grid(drawn_on)
     g = sidecar.grid(header)
-    if 'affine_xyz_to_world_mm' not in g:
-        sidecar.fail(f'{header} has no affine_xyz_to_world_mm: pass the hu.json that scan-intake wrote, or the frame.json of the stack')
-    inv = np.linalg.inv(np.asarray(g['affine_xyz_to_world_mm'], float))
-    idx = (inv @ np.c_[xyz, np.ones(len(xyz))].T).T[:, :3]
+    zyx = xyz[:, ::-1] / np.asarray(d['spacing_zyx_mm'], float)
+    if d['grid_id'] == g['grid_id']:
+        return g, zyx
+    for path, h in ((drawn_on, d), (header, g)):
+        if 'affine_xyz_to_world_mm' not in h:
+            sidecar.fail(f'{path} has no affine_xyz_to_world_mm, and the mark was drawn on grid {d["grid_id"]}, not {g["grid_id"]}: pass '
+                         'the hu.json that scan-intake wrote, or the frame.json of the stack, for both --drawn-on and --grid')
+    world = np.asarray(d['affine_xyz_to_world_mm'], float) @ np.c_[zyx[:, ::-1], np.ones(len(zyx))].T
+    idx = (np.linalg.inv(np.asarray(g['affine_xyz_to_world_mm'], float)) @ world).T[:, :3]
     return g, idx[:, ::-1]
 
 
@@ -218,7 +230,9 @@ def main():
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument('--curve', action='store_true', help='the mark is a line or path along a face on one section: write it as that section\'s curve')
     mode.add_argument('--seed', action='store_true', help='the mark is an outline around a piece: print a labelled voxel inside it')
-    ap.add_argument('--world', required=True, help='the mark\'s points in world mm, as your delivery prints them')
+    ap.add_argument('--world', required=True, help='the mark\'s points in mm, as your delivery prints them')
+    ap.add_argument('--drawn-on', type=sidecar.existing, required=True,
+                    help='header of the image the mark was drawn on (the output after "drawn on" in the delivery): its sidecar, hu.json or frame.json')
     ap.add_argument('--grid', type=sidecar.existing, required=True, help='header of the grid to map onto: hu.json or a frame.json')
     ap.add_argument('--axis', type=int, choices=(0, 1, 2), default=1, help='--curve: the array axis the sections are cut across (default 1)')
     ap.add_argument('--max-off-section', type=float, default=2.0, help='--curve: how far apart along --axis the mark\'s points may lie, voxels')
@@ -233,7 +247,7 @@ def main():
         sidecar.fail('--into and --key go together: the annotations file and the curve key of the face the mark lies on')
     if a.seed and not a.labels:
         sidecar.fail('--seed needs --labels, the labels the piece is in')
-    g, zyx = to_grid(world_points(a.world), a.grid)
+    g, zyx = to_grid(world_points(a.world), a.drawn_on, a.grid)
     (curve if a.curve else seed)(a, g, zyx)
 
 
