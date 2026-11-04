@@ -96,7 +96,7 @@ const inputSchema = z.object({
     .array(toCheckItemSchema)
     .optional()
     .describe(
-      "What a person must judge, in plain words about the scan: {title, focus?}. A choice the method and the data do not settle, and that changes a result, goes here with the choice you made meanwhile. focus is where the review takes them: focus.on lists the outputs the item is about, each label by a label's own id, not its label map; a point or box in scan voxels [z, y, x] marks a place no output covers.",
+      "What a person must judge, in plain words about the scan: {title, focus?}. A choice the method and the data do not settle, and that changes a result, goes here with the choice you made meanwhile.",
     ),
   provisional: z.boolean().optional().describe("No reference comparison yet."),
   kind: outputKindSchema.optional().describe("Only for an output the workflow does not list."),
