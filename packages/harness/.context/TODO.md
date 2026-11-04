@@ -22,3 +22,5 @@
 - A mark's "drawn on <image> vN" names that image's latest version when main is told, not the one it was drawn on: they
   differ only if a new version of the base is published between send and delivery. Freeze the version in the attached
   mark at send (`freezeAttached`) to close it.
+
+- **`segment_plate` is a mouse-oa tool in the shared worker role.** `workflows/core/agents/worker.md` lists it, so every workflow's workers are offered it, and outside mouse-oa `python3 -m plate_model` fails with `ModuleNotFoundError` and the fallback hint. Let a workflow declare the tools it adds to a role, the way it lists skills, and move `segment_plate` to mouse-oa's declaration (#550 review).

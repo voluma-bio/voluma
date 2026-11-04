@@ -31,6 +31,8 @@ const INPUTS = "/inputs";
 export const OUTPUTS = "/outputs";
 export const WORKFLOW = "/workflow";
 export const REVIEW = "/review";
+/** The tools that work through the gateway: a role holding one gets a sandbox that reaches it, and none is offered without a gateway. */
+export const GATEWAY_TOOLS: readonly string[] = ["segment_sam", "segment_plate"];
 const INPUT_REVIEW = "/input-review";
 const RUN = "/run";
 const WORK = "/work";
@@ -50,7 +52,7 @@ export interface ThreadLayout {
   env: Record<string, string>;
   /** The tools its role holds (the role file's, less what the run cannot grant). */
   tools: readonly string[];
-  /** The sandbox may reach the gateway (and gets its URL and token): the role holds `segment_sam`. */
+  /** The sandbox may reach the gateway (and gets its URL and token): the role holds a gateway tool (`GATEWAY_TOOLS`). */
   gateway: boolean;
   /** The mounts, as bullet lines for the tool description. */
   description: string;
@@ -211,7 +213,7 @@ export function runLayout({ runId, inputPrefix, skills }: RunLayoutOptions): Run
         dir,
         env: { PYTHONPATH: pythonPath, WORK: dir },
         tools,
-        gateway: tools.includes("segment_sam"),
+        gateway: tools.some((t) => GATEWAY_TOOLS.includes(t)),
         description:
           `${common}- ${OUTPUTS} holds every published output version, one folder per version: read it, do not modify it. ${RUN}/outputs.yaml lists the versions and ${RUN}/final-outputs.yaml the outputs the researcher asked for; both are rewritten as the run goes.\n` +
           `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, ` +
