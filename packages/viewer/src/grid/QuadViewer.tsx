@@ -6,7 +6,7 @@
  * between grid cells, so a swap, a layout change or full screen keeps its camera, zoom and loaded
  * data. The tool bar is docked under the panes: the caller's tools on the left; how far the
  * planes are turned (or, on the grid's axes, the grid's name), Align, Turn, Reset, the window,
- * the 1/2/4 layout and Save view on the right.
+ * the 1/2/4 layout and Save view on the right; tools, Planes and Contrast are icons named by their tooltips.
  *
  * The three planes turn together (`frame.ts`): tilted by hand from the dots at their crosshair
  * lines' ends, spun by turning one pane's image in place (Alt-drag or `,` `.` in it, or Turn's
@@ -201,6 +201,17 @@ const lower = (name: string) => name.charAt(0).toLowerCase() + name.slice(1);
 /** The gap between panes, in px: the seams. */
 const GAP = 4;
 const clampSplit = (f: number) => Math.min(0.8, Math.max(0.2, f));
+
+let webgl: boolean | undefined;
+/** Whether panes can draw: three.js needs WebGL 2, and without it every pane throws. */
+function hasWebGL() {
+  if (webgl === undefined) {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    webgl = !!gl;
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+  return webgl;
+}
 
 export function QuadViewer({
   scene,
@@ -603,6 +614,23 @@ export function QuadViewer({
   // The pane in the top-left corner: the one filling the views, else slot 0.
   const corner = layout.full ?? layout.views[0];
 
+  if (!hasWebGL())
+    return (
+      <section
+        className="grid h-full place-items-center bg-background p-6 text-sm"
+        aria-label="Views"
+      >
+        <div className="grid max-w-md gap-2">
+          <h2 className="font-medium text-foreground">The scan can't be drawn in this browser</h2>
+          <p className="text-muted-foreground">
+            The slices and 3D view need graphics acceleration (WebGL), which is turned off here. In
+            Chrome, turn on Settings › System › "Use graphics acceleration when available", then
+            relaunch Chrome.
+          </p>
+        </div>
+      </section>
+    );
+
   return (
     <section className="flex h-full min-h-0 flex-col bg-background" aria-label="Views">
       {(notes.length > 0 || contrastError || alignError || plateError) && (
@@ -737,7 +765,16 @@ export function QuadViewer({
             >
               {pane}
               {heading && view === corner && (
-                <div className="absolute top-2 left-2 z-30 flex max-w-[calc(100%-3rem)]">
+                // A slice pane's number and slider own its top-left corner; the 3D pane's
+                // buttons its top-right.
+                <div
+                  className={cx(
+                    "absolute top-2 z-30 flex",
+                    view === "3d"
+                      ? "left-2 max-w-[calc(100%-3rem)]"
+                      : "right-2 max-w-[calc(100%-8rem)] justify-end",
+                  )}
+                >
                   {heading}
                 </div>
               )}
@@ -789,10 +826,9 @@ export function QuadViewer({
           side="top"
           className="w-80"
           trigger={
-            <Button size="sm" variant="ghost">
+            <IconButton size="sm" label="Planes">
               <Rotate3d aria-hidden />
-              Planes
-            </Button>
+            </IconButton>
           }
         >
           <div className="grid gap-3 text-xs">
@@ -870,10 +906,9 @@ export function QuadViewer({
             side="top"
             className="w-auto"
             trigger={
-              <Button size="sm" variant="ghost">
+              <IconButton size="sm" label="Contrast">
                 <SunMedium aria-hidden />
-                Contrast
-              </Button>
+              </IconButton>
             }
           >
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

@@ -583,8 +583,10 @@ export function SlicePane({
 
   // Load the plane through the crosshair at the level the zoom needs: untilted, a whole slice of
   // the level; tilted, the plane resliced from the level's chunks it crosses, over the coarsest
-  // level's picture of the whole outline. Untilted, the coarsest level shows meanwhile, unless the
-  // finer one arrives almost as soon (it does from the worker's cache).
+  // level's picture of the whole outline. Untilted, a pane's first picture is two levels coarser,
+  // drawn before the fine chunks are asked for; a new slice shows the coarsest level meanwhile
+  // unless the finer one arrives almost as soon (it does from the worker's cache); a new zoom keeps
+  // the picture it has.
   useEffect(() => {
     if (!contrast) return;
     const abort = new AbortController();
@@ -710,8 +712,16 @@ export function SlicePane({
         probe.current = made.read;
         shown(k);
       };
+      if (level !== coarsest && drawnKey.current.image === null) {
+        // A pane's first picture: a level two coarser (4×, a few chunks) drawn before the fine
+        // chunks are asked for, since the worker serves its queue newest first and three panes'
+        // full-resolution slices (hundreds of chunks) would bury it for seconds.
+        const k = Math.min(coarsest, level + 2);
+        show(await slice(k).catch(() => null), k);
+        if (abort.signal.aborted) return;
+      }
       const fine = slice(level);
-      if (level !== coarsest) {
+      if (level !== coarsest && drawnKey.current.image !== planeKey) {
         // Only a fine picture that arrives skips the coarse one; a failed fine load doesn't.
         const arrived = fine.then(
           () => true,
@@ -882,6 +892,16 @@ export function SlicePane({
   // A tilted pane counts along the grid axis nearest its normal, primed.
   const counted = whole ? axis : nearestAxis(basis.normal);
   const at = Math.round(point[counted]);
+  const count = scene.shapeZyx[counted]!;
+  /** Go to slice `to` (from 0) of the counted axis. */
+  const goTo = (to: number) => {
+    const by = to - point[counted];
+    if (whole) return step(Math.round(by));
+    // A turned pane steps along its normal: convert the counted axis's change into that
+    // (the normal's component can be small; `step` takes care of its sign).
+    const s = scene.spacingZyx;
+    step((by * s[counted]!) / (Math.min(...s) * Math.abs(basis.normal[counted]!)));
+  };
   const sliceHelp = useId();
   return (
     // biome-ignore lint/a11y/useSemanticElements: an interactive image surface, not a form fieldset.
@@ -895,32 +915,31 @@ export function SlicePane({
       aria-label={whole ? `Slice ${index + 1} of ${total}` : "Turned slice"}
       aria-describedby={sliceHelp}
     >
-      {/* The slice as a slider down the pane's left edge, its number above (as in Amira). */}
+      {/* The slice as a slider down the pane's left edge, the last slice at the top and its number
+          above (as in Amira); the arrows and the wheel move the same way. */}
       <span
-        className={cx(CHIP, "top-2 left-2 tabular-nums")}
+        className={cx(CHIP, "pointer-events-auto top-2 left-2 flex items-baseline tabular-nums")}
         title={whole ? undefined : "Counted along the scan's nearest axis"}
       >
-        {at + 1}
-        {!whole && "′"} / {scene.shapeZyx[counted]}
+        <SliceNumber
+          at={at}
+          count={count}
+          onGo={goTo}
+          onDone={() => host.current?.focus({ preventScroll: true })}
+        />
+        {!whole && "′"}&nbsp;/ {count}
       </span>
       <input
         type="range"
         aria-label="Slice"
-        aria-valuetext={`Slice ${at + 1} of ${scene.shapeZyx[counted]}`}
-        title="Drag, or Shift + scroll"
+        aria-valuetext={`Slice ${at + 1} of ${count}`}
+        title="Drag or scroll"
         min={0}
-        max={scene.shapeZyx[counted]! - 1}
+        max={count - 1}
         value={at}
-        onChange={(event) => {
-          const by = Number(event.target.value) - point[counted];
-          if (whole) return step(Math.round(by));
-          // A turned pane steps along its normal: convert the counted axis's change into that
-          // (the normal's component can be small or negative).
-          const s = scene.spacingZyx;
-          step((by * s[counted]!) / (Math.min(...s) * basis.normal[counted]!));
-        }}
+        onChange={(event) => goTo(Number(event.target.value))}
         onPointerDown={(event) => event.stopPropagation()}
-        className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [writing-mode:vertical-lr]"
+        className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [direction:rtl] [writing-mode:vertical-lr]"
       />
       <span id={sliceHelp} className="sr-only">
         Focus slice: ↑/↓ 1 · Page Up/Down 10
@@ -935,7 +954,10 @@ export function SlicePane({
         <span />
       </div>
       {(!shown || refining) && !error && (
-        <span className={cx(CHIP, "top-2 right-2 left-24")} role="status">
+        <span
+          className={cx(CHIP, "bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap")}
+          role="status"
+        >
           {shown ? "Loading full resolution…" : "Loading…"}
         </span>
       )}
@@ -977,4 +999,50 @@ function useStable<T>(value: T): T {
   const ref = useRef(value);
   if (JSON.stringify(ref.current) !== JSON.stringify(value)) ref.current = value;
   return ref.current;
+}
+
+/**
+ * The slice number as a field: typed and copied like text. Enter (or leaving it) goes to the slice
+ * and Escape drops the draft; either way it then shows the slice the pane is on, so a jump the pane
+ * can't make (past an end, or out of the volume on a turned pane) never stays on screen.
+ */
+function SliceNumber({
+  at,
+  count,
+  onGo,
+  onDone,
+}: {
+  at: number;
+  count: number;
+  onGo: (slice: number) => void;
+  /** After Enter or Escape: focus goes back to the pane, so the arrows step again. */
+  onDone: () => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  // Leaving the field commits, so Escape drops the draft before handing focus back.
+  const dropped = useRef(false);
+  const commit = () => {
+    const n = Number.parseInt(draft ?? "", 10);
+    setDraft(null);
+    if (dropped.current) dropped.current = false;
+    else if (!Number.isNaN(n) && n - 1 !== at) onGo(Math.min(Math.max(n, 1), count) - 1);
+  };
+  return (
+    <input
+      aria-label="Go to slice"
+      inputMode="numeric"
+      value={draft ?? String(at + 1)}
+      size={String(count).length}
+      onChange={(event) => setDraft(event.target.value)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onFocus={(event) => event.target.select()}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") dropped.current = true;
+        else if (event.key !== "Enter") return;
+        onDone();
+      }}
+      onBlur={commit}
+      className="w-auto rounded-sm bg-transparent text-right outline-none hover:bg-viewer-well focus:bg-viewer-well"
+    />
+  );
 }

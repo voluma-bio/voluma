@@ -8,16 +8,7 @@
  */
 import { reviewAssetUrl } from "@voluma/api-client";
 import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  Menu,
-  MenuRadioGroup,
-  MenuRadioItem,
-  SegmentedControl,
-  Tooltip,
-} from "@voluma/ui";
+import { Button, EmptyState, ErrorState, SegmentedControl, Tooltip } from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
@@ -42,7 +33,7 @@ import {
   type VoxelBox,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { ChevronDown, EyeOff } from "lucide-react";
+import { EyeOff } from "lucide-react";
 import {
   type ReactNode,
   type Ref,
@@ -266,8 +257,6 @@ export function SceneViewer({
     [gridKey, subject.id, shownReady, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
-  // The marking tools, on the shown viewer's bar: the ones a reviewer points with named, the
-  // measuring ones under More tools.
   // Labels hidden on this grid are said on the bar, so a hidden structure is never a surprise.
   const hiddenHere =
     grid.state === "ready"
@@ -381,9 +370,6 @@ const keep = (had: Kept[], live: View | undefined, revision: Blocks): Kept[] => 
   return [...others, { ...live, ready }].slice(-MAX_KEPT);
 };
 
-/** Tools named on the bar; the rest are under More tools. */
-const NAMED = new Set<MarkTool | "navigate">(["navigate", "point", "line"]);
-
 function ToolBar({
   tool,
   onTool,
@@ -391,50 +377,12 @@ function ToolBar({
   tool: MarkTool | null;
   onTool: (tool: MarkTool | null) => void;
 }) {
-  const value = tool ?? "navigate";
-  const more = TOOLS.filter(
-    (t): t is (typeof TOOLS)[number] & { value: MarkTool } => !NAMED.has(t.value),
-  );
-  const picked = more.find((t) => t.value === value);
   return (
-    <>
-      <SegmentedControl
-        label="Marking tool"
-        options={TOOLS.filter((t) => NAMED.has(t.value)).map((t) => ({
-          value: t.value,
-          label: t.short,
-        }))}
-        value={value}
-        onValueChange={(v) => onTool(v === "navigate" ? null : v)}
-      />
-      <Menu
-        align="start"
-        trigger={
-          <Button size="sm" variant={picked ? "secondary" : "ghost"}>
-            {picked ? (
-              <>
-                {picked.icon}
-                {picked.short}
-              </>
-            ) : (
-              "More tools"
-            )}
-            <ChevronDown aria-hidden />
-          </Button>
-        }
-      >
-        <MenuRadioGroup
-          label="More tools"
-          value={picked?.value ?? ""}
-          onValueChange={(v) => onTool(v as MarkTool)}
-        >
-          {more.map((t) => (
-            <MenuRadioItem key={t.value} value={t.value}>
-              {t.label}
-            </MenuRadioItem>
-          ))}
-        </MenuRadioGroup>
-      </Menu>
-    </>
+    <SegmentedControl
+      label="Marking tool"
+      options={TOOLS}
+      value={tool ?? "navigate"}
+      onValueChange={(v) => onTool(v === "navigate" ? null : v)}
+    />
   );
 }
