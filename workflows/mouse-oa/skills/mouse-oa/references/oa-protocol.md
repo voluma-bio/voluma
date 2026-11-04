@@ -60,10 +60,10 @@ flare on the lab scans; sampled from the scan, so the range may reach past the c
 follows the centroids, so when the dots are pulled off the shaft (by the flare, the fibula, or a label piece), move
 `--axis-mm` first; use `--tilt-deg CORONAL SAGITTAL` only for a lean the line misses: positive CORONAL when the shaft's
 lower end sits at larger U than its top on the coronal sheet (V on the sagittal one), the degrees you read off; the script
-turns W to cancel it, and `axis_residual_deg` then reads about minus the tilt. +V anterior comes from a sign rule on scan y and
-the joint end; the grid is right-handed, so which way along U is medial depends on the knee. The record's `medial_side`
-(`+U` or `-U`) says it, from the fibula's side (lateral): **confirm it on the QC montage** before you name a side, and find
-the fibula yourself when it says `unknown`. Every annotation is an index on that grid and carries its `grid_id`;
+turns W to cancel it, and `axis_residual_deg` then reads about minus the tilt. The script turns the grid so the fibula (lateral) lies at
+-U: +U medial and, on a right knee, +V anterior. The record's `medial_side` and `anterior_side` (from the patella) say
+what it found: **confirm both on the QC montage** before you name a side, and find the fibula or patella yourself where
+one says `unknown` (no label to go by) or `anterior_side` says `-V` (a left knee). Every annotation is an index on that grid and carries its `grid_id`;
 the scripts refuse a file without one or from another grid, because indices mean nothing on another frame. They
 also refuse, before writing anything, a key they don't know, a value of the wrong form, and an index outside the grid. The
 femoral landmarks are the exception: `[z, y, x]` on the scan grid.
@@ -256,6 +256,6 @@ the measurements they check.
 - ROI-3 (#16–23) depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported
   as `cortex_estimate_mm`, the wall's thickness just below the plate): a wrong depth moves ROI-3. The edge is that
   one depth all round, so where the wall is locally thicker ROI-3 reaches into it (at the tibial tuberosity, for example).
-- A medial or lateral value (#8, #9, #11, #12) follows `tibia_frame.py`'s `medial_side`, confirmed on the render.
+- A medial or lateral value (#8, #9, #11, #12) follows `tibia_frame.py`'s `medial_side` (+U medial), confirmed on the render.
 - Tb.Nd and Tb.Tm (#22, #23) are exploratory; Tb.Th, Tb.Sp, Tb.N and Ct.Th (#19–21, #24, #25) carry the
   sphere-method bias with the voxel size.

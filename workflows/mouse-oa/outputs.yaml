@@ -48,8 +48,8 @@
   from: scan
   planes: { XY: axial, XZ: coronal, YZ: sagittal }
   expect:
-    - Which way along U is medial (tibia_frame.py's medial_side, from the fibula, which is lateral), confirmed
-      on the frame's QC montage.
+    - +U medial and +V anterior (tibia_frame.py's medial_side and anterior_side, from the fibula and the
+      patella), confirmed on the frame's QC montage.
 
 - id: scan-notes
   kind: file
