@@ -78,7 +78,7 @@ def grow(shape, build, fill_elevation):
     """Seeded watershed, 6-connected: the basins of the seeds flood the mask over the elevation. `build(seeds, mask)` fills an
     int32 seed view and an int8 mask view, `fill_elevation(view)` a float64 view.
     skimage's `watershed` casts every input to float64/int32 and pads again: about 26 bytes per voxel, 7 GB on a whole scan
-    against a 4 GiB sandbox. This builds the padded arrays once (13 bytes per voxel), builders' temporaries freed before the
+    against an 8 GiB sandbox. This builds the padded arrays once (13 bytes per voxel), builders' temporaries freed before the
     float64 image exists, and calls skimage's raveled core, which is private: re-check it when skimage is bumped in requirements.txt."""
     padded = tuple(n + 2 for n in shape)
     inner = (slice(1, -1),) * 3
