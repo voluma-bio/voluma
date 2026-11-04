@@ -26,7 +26,7 @@ Writes: in <out>, on the aligned grid (array axes W, V, U):
   qc-plate-<n>.jpg        coronal sections framed on each section's span, every proposed section unless --sections names others:
                           orange proximal face, cyan distal face; a red tick under each flagged column
 Prints: the result record {out, values, annotations, model, stretches, covered, qc}
-Example: python plate_model.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --out plate/
+Example: python plate_model.py --window <window> --hu-aligned tibia-hu.npy --mask tibia-mask.npy --out plate/
 Exits 2 with one sentence, before writing anything, on bad input, when the model cannot be reached or refuses, and when it finds
 the plate on fewer than two sections. Then run plate_faces.py instead.
 Needs VOLUMA_GATEWAY_URL and VOLUMA_GATEWAY_TOKEN, which a sandbox that holds `segment_plate` has.
@@ -169,8 +169,9 @@ def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, default=str(HERE / 'protocol.json'),
                     help=f"the workflow's protocol.json: entries {SPEC_ID} and {SHARED_ID} (default: the one beside this script)")
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', default=str(HERE.parent / 'references' / 'anatomy.json'),
-                    help="QC display window in HU, or the workflow's anatomy.json (default: the skill's)")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True,
+                    help='QC display window, as the other QC scripts take it: lo,hi in HU or the file that holds it. Only the QC sheets '
+                         'use it; the model gets raw HU and applies its own training window')
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--out', required=True, help='output directory (created)')
@@ -201,7 +202,8 @@ def main():
     spans, flagged = spans_flags(kept, vs, round(sp['min_run_um'] / 1000 / vox), max(1, round(sp['flag_min_um'] / 1000 / vox)))
     sections = [v for v in vs if v in spans]
     if len(sections) < 2:
-        sidecar.fail('the plate model found the plate on fewer than two sections: run plate_faces.py instead')
+        sidecar.fail('the plate model found the plate on fewer than two sections: that is its verdict on this scan, not a fault. Run '
+                     'plate_faces.py instead, and check its proposal hardest: the plate may be hard to see here')
     qc_v = sections
     if a.sections:
         qc_v = [int(x) for x in a.sections.split(',')]

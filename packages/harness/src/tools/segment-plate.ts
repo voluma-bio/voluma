@@ -21,6 +21,11 @@ const input = z
       ),
     mask: z.string().describe("tibia-mask.npy, written with it."),
     out: z.string().describe("Folder for the proposal, created; in your own folder."),
+    window: z
+      .string()
+      .describe(
+        "The QC sheets' display window, as the other mouse-oa QC scripts take `--window`: `lo,hi` in HU or the file that holds it. The model gets raw HU either way.",
+      ),
     sections: z
       .array(z.number().int().min(0))
       .optional()
@@ -51,11 +56,13 @@ export function segmentPlateTool(layout: ThreadLayout): Tool<typeof input> {
       layout.keyOf(args.hu, "read");
       layout.keyOf(args.mask, "read");
       layout.keyOf(args.out, "write");
+      if (args.window.endsWith(".json")) layout.keyOf(args.window, "read");
       const sandbox = await ctx.sandbox();
       const flags = [
         `--hu-aligned ${quote(args.hu)}`,
         `--mask ${quote(args.mask)}`,
         `--out ${quote(args.out)}`,
+        `--window ${quote(args.window)}`,
         ...(args.sections ? [`--sections ${args.sections.join(",")}`] : []),
       ];
       let stdout = "";
