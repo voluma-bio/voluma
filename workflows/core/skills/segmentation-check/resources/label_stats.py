@@ -33,6 +33,7 @@ Exits 2 with one sentence on bad input, before writing anything.
 import json
 from pathlib import Path
 
+import joint_cap as jc
 import numpy as np
 import sidecar
 from scipy import ndimage as ndi
@@ -92,36 +93,6 @@ def load_ranges(path):
     return {e['id']: e for e in json.loads(Path(path).read_text())['labels']} if path else {}
 
 
-# A copy of the joint-end cap check of mouse-oa's tibia_frame.py (CAP_MM, CAP_GAP, largest_piece, cap_solidity, check_bone):
-# it must match check_bone there until both import one module in workflows/core (.context/TODO.md). Run at intake so swapped labels
-# are caught before the tibial step: a label anatomy.json marks `joint_cap: notched` (a femur: the intercondylar notch makes
-# its cap's footprint U-shaped) must have the less solid cap of the pair facing it across the joint (`joint_cap: solid`).
-CAP_MM = 0.63
-CAP_GAP = 0.05
-
-
-def largest_piece(m):
-    """The largest 6-connected piece of mask `m`, labelled inside its bounding box."""
-    zs, ys, xs = (np.flatnonzero(m.any(axis=ax)) for ax in ((1, 2), (0, 2), (0, 1)))
-    box = np.s_[zs[0] : zs[-1] + 1, ys[0] : ys[-1] + 1, xs[0] : xs[-1] + 1]
-    pieces, n = ndi.label(m[box])
-    out = np.zeros_like(m)
-    if n:
-        out[box] = pieces == 1 + int(np.argmax(np.bincount(pieces.ravel())[1:]))
-    return out
-
-
-def cap_solidity(m, low_end, cap_vox):
-    """Area over convex-hull area of the cap of mask `m` within `cap_vox` slices of its low or high end, projected along z."""
-    from skimage.morphology import convex_hull_image
-
-    zs = np.flatnonzero(m.any(axis=(1, 2)))
-    z0, z1 = zs[0], zs[-1]
-    lo, hi = (z0, z0 + cap_vox) if low_end else (max(z1 - cap_vox + 1, z0), z1 + 1)
-    foot = m[lo:hi].any(axis=0)
-    return float(foot.sum() / max(convex_hull_image(foot).sum(), 1))
-
-
 def swap_check(labels, sp, expected):
     """{key: sentence} for a notched/solid pair whose caps read the other way round; the solidities go in `caps`."""
     notched = [lv for lv, e in expected.items() if e.get('joint_cap') == 'notched']
@@ -132,13 +103,10 @@ def swap_check(labels, sp, expected):
             mn, ms = labels == n, labels == s
             if not mn.any() or not ms.any():
                 continue
-            mn, ms = largest_piece(mn), largest_piece(ms)
-            zn, zs = (float(np.flatnonzero(m.any(axis=(1, 2))).mean()) for m in (mn, ms))
-            cap = round(CAP_MM / sp[0])
-            cn, cs = cap_solidity(mn, zs < zn, cap), cap_solidity(ms, zn < zs, cap)
+            cn, cs, _ = jc.caps(jc.largest_piece(mn), jc.largest_piece(ms), sp[0])
             caps[f'{n}-{s}'] = {str(n): round(cn, 3), str(s): round(cs, 3),
-                                'reads': 'as labelled' if cs > cn + CAP_GAP else 'swapped' if cn > cs + CAP_GAP else 'unclear'}
-            if cn > cs + CAP_GAP:
+                                'reads': 'as labelled' if cs > cn + jc.CAP_GAP else 'swapped' if cn > cs + jc.CAP_GAP else 'unclear'}
+            if cn > cs + jc.CAP_GAP:
                 nn, ns = expected[n]['name'], expected[s]['name']
                 flags[f'swapped:{n}-{s}'] = (
                     f'{n} {nn} has the solid joint end of a {ns} and {s} {ns} the notched one of a {nn} (cap solidity {cn:.3f} '
