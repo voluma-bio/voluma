@@ -185,7 +185,7 @@ export function MainConversation({
                   </div>
                 </li>
               ) : m.from === "outcome" ? (
-                <li key={m.id} className="text-xs text-muted-foreground">
+                <li key={m.id} className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
                   {m.status === "cancelled"
                     ? "You stopped this request. Results are unchanged."
                     : `Your request didn't finish${m.text ? `: ${m.text.replace(/\.$/, "")}` : ""}. Results are unchanged.`}
