@@ -1,23 +1,32 @@
 """Make a shaft-aligned frame and a cropped HU stack and mask for one long bone (the tibia for IIOC).
 
-Fits the bone's shaft axis (centroid regression over the shaft part), takes the epiphyseal long cross-axis as U
-(+U medial and +V anterior come from a sign rule on scan y and `--joint-end` that assumes one knee and one scan orientation:
-confirm it on the QC montage before naming a side), and resamples the HU volume and the bone mask onto that
-frame, cropped around the joint end. Everything the protocol annotates (growth-plate curves, heights, plate
-patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
+Puts the shaft's long axis on W, 0 degrees off in both the coronal (W-U) and the sagittal (W-V) plane, takes the epiphyseal
+long cross-axis as U (+U medial and +V anterior come from a sign rule on scan y and `--joint-end` that assumes one knee and one
+scan orientation: confirm it on the QC montage before naming a side), and resamples the HU volume and the bone mask onto that
+frame, cropped around the joint end. The growth plate is not levelled: its roll stays as the anatomy has it. The axis is fitted
+on the bone the crop shows: a first guess from scan-z slices (`--shaft-frac`), then, up to five times, the mask is resampled
+onto the provisional grid, each W section in `--axis-mm` is filled and its largest piece kept (so the fibula and specks do not
+pull it), lines u(w), v(w) are fitted through the centroids, and W is turned onto them until both are under 0.1 degrees.
+`--tilt-deg` then turns it further, to cancel a lean seen on the QC. Everything the protocol annotates (growth-plate curves,
+heights, plate patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
 The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
 because its sign rule (+U medial, +V anterior) and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
-voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, a `--joint-end` on the side
-away from the femur, and a `--label` whose joint end has the femur's notch where `--femur-label`'s is solid (the two
-labels swapped): the joint-end caps' solidities, in the result record, tell the two bones apart.
+voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, fewer than ten sections with bone
+in the `--axis-mm` range, a `--joint-end` on the side away from the femur, and a `--label` whose joint end has the femur's
+notch where `--femur-label`'s is solid (the two labels swapped): the joint-end caps' solidities, in the result record, tell the two bones apart.
 
 Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolation, -1000 outside the scan), with its sidecar
         <out>/<name>-mask.npy  bool bone mask on the aligned grid (nearest), with its sidecar
         <out>/<name>-frame.json  the frame, mapping aligned indices back to the scan grid
-        <out>/<name>-frame-qc.jpg  six coronal sections of the aligned stack with the mask outlined: check the axes here
+        <out>/<name>-frame-qc.jpg  six coronal (W-U) sections with the mask outlined, the fitted axis (yellow, over the
+            `--axis-mm` range, through the section centroids) and W (magenta, vertical): check the axes here
+        <out>/<name>-frame-qc-sagittal.jpg  the same for six sagittal (W-V) sections
         <out>/<name>.json  the result record: `objects` holds the aligned grid as `tibia-grid` (a volume on the frame's affine)
-Prints: one JSON line {out, values, objects, hu, mask, frame, qc, grid_id, shape_wvu, mask_volume_mm3, shaft_z, epiphysis_z}
+Prints: one JSON line {out, values, objects, hu, mask, frame, qc, qc_sagittal, grid_id, shape_wvu, mask_volume_mm3,
+        axis_residual_deg {coronal, sagittal}, axis_mm, axis_w, tilt_deg, iterations, shaft_z, epiphysis_z, tibia_check, ...}
+        axis_residual_deg: the axis's angle to W on the final full-resolution mask; positive coronal = the shaft's lower end
+        (toward +W) at larger U than its top, positive sagittal the same with V. axis_w: the --axis-mm range as W indices.
 Example: python tibia_frame.py --window scan-settings.json --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -35,6 +44,10 @@ from scipy import ndimage as ndi
 SUBSAMPLE = 2  # epiphysis points for the PCA are taken every 2nd voxel
 CAP_MM = 0.63  # how far from its joint end a bone's cap reaches, for the femur/tibia check
 CAP_GAP = 0.05  # cap solidities closer than this cannot tell the two bones apart
+FIT_STEP = 2  # the axis refit samples the aligned mask every 2nd voxel; the reported residual is on the full-resolution mask
+MAX_ITER = 5
+CONVERGED_DEG = 0.1
+MIN_SECTIONS = 10
 
 
 def largest_piece(m):
@@ -122,15 +135,71 @@ def fit_frame(mask, shaft_z, epi_z, joint_end, vox):
     return np.column_stack([u, v, w]), p.mean(axis=0)
 
 
-def crop_for(mask, basis, origin, joint_end, depth_vox, pad):
-    """Lower corner and shape (xyz order, in aligned voxels) covering the bone from the joint end to depth_vox."""
+def joint_part(mask, joint_end, depth_vox):
+    """Scan xyz of the bone voxels within depth_vox slices of the joint end: what the crop must cover."""
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
     lo, hi = (zs[-depth_vox:][0], zs[-1]) if joint_end == 'high' else (zs[0], zs[0] + depth_vox)
     z, y, x = np.nonzero(mask[lo : hi + 1])
-    local = (np.column_stack([x, y, z + lo]) - origin) @ basis
+    return np.column_stack([x, y, z + lo])
+
+
+def crop_for(points, basis, origin, pad):
+    """Lower corner and shape (xyz order, in aligned voxels) covering `points` (`joint_part`), and the joint end's W in the
+    same unframed coordinates (the corner's W is it minus `pad`)."""
+    local = (points - origin) @ basis
     low = np.floor(local.min(axis=0)).astype(int) - pad
     high = np.ceil(local.max(axis=0)).astype(int) + pad + 1
-    return low, high - low
+    return low, high - low, float(local[:, 2].min())
+
+
+def tilted(basis, su, sv):
+    """`basis` (columns U, V, W in scan xyz) with W turned onto W + su U + sv V; U keeps its side, re-orthogonalised."""
+    u, v, w = basis.T
+    w = w + su * u + sv * v
+    w /= np.linalg.norm(w)
+    u = u - (u @ w) * w
+    u /= np.linalg.norm(u)
+    return np.column_stack([u, np.cross(w, u), w])
+
+
+def sections(slices, ws, vox, step=1):
+    """Centroids (w, u, v) of the filled largest piece of each (V, U) section in `slices` (W indices `ws`), in aligned
+    voxels of a grid sampled every `step`; slices with no bone are skipped. The largest piece, so the fibula and specks
+    do not pull the axis. Also the (u0, u1, v0, v1) box the pieces span."""
+    rows, box = [], [np.inf, -np.inf, np.inf, -np.inf]
+    for w, sec in zip(ws, slices, strict=True):
+        pieces, n = ndi.label(close_and_fill(sec, vox * step))
+        if not n:
+            continue
+        vv, uu = np.nonzero(pieces == 1 + int(np.argmax(np.bincount(pieces.ravel())[1:])))
+        rows.append((w, uu.mean() * step, vv.mean() * step))
+        box = [min(box[0], uu.min() * step), max(box[1], uu.max() * step), min(box[2], vv.min() * step), max(box[3], vv.max() * step)]
+    return np.array(rows).reshape(-1, 3), box
+
+
+def axis_fit(cen):
+    """Lines u(w), v(w) through the section centroids: (slope_u, slope_v) and the two polyfit coefficient pairs."""
+    if len(cen) < MIN_SECTIONS:
+        sidecar.fail(f'only {len(cen)} sections in the --axis-mm range hold bone (need {MIN_SECTIONS}): the range runs off the '
+                     'bone or the crop; give an --axis-mm range inside the shaft part of the crop')
+    pu, pv = np.polyfit(cen[:, 0], cen[:, 1], 1), np.polyfit(cen[:, 0], cen[:, 2], 1)
+    return pu[0], pv[0], pu, pv
+
+
+def coarse_sections(mask, basis, origin, low, shape, w_range, vox):
+    """`sections` on the mask resampled every FIT_STEP voxels onto the aligned grid at corner `low`, W indices in `w_range`."""
+    corner = origin + basis @ low
+    uu, vv = np.meshgrid(np.arange(0, shape[0], FIT_STEP), np.arange(0, shape[1], FIT_STEP))
+    ws = list(range(w_range[0], w_range[1], FIT_STEP))
+    slices = []
+    for w in ws:
+        xyz = corner + np.stack([uu, vv, np.full_like(uu, w)], -1) @ basis.T
+        slices.append(ndi.map_coordinates(mask.view(np.uint8), np.moveaxis(xyz[..., ::-1], -1, 0), order=0, mode='constant', cval=0).astype(bool))
+    return sections(slices, ws, vox, FIT_STEP)[0] if ws else np.empty((0, 3))
+
+
+def degrees(slope):
+    return round(float(np.degrees(np.arctan(slope))), 3)
 
 
 def main():
@@ -155,16 +224,28 @@ def main():
         nargs=2,
         metavar=('FROM', 'TO'),
         default=[0.5, 0.95],
-        help='shaft part of the bone, as fractions of its z extent from the joint end',
+        help='shaft part of the bone, as fractions of its z extent from the joint end: only the first guess at the axis, which '
+        'the fit on --axis-mm then turns',
     )
     ap.add_argument('--epiphysis-frac', type=float, nargs=2, metavar=('FROM', 'TO'), default=[0.0, 0.2], help='epiphysis part, same fractions')
-    ap.add_argument('--shaft-z', type=int, nargs=2, metavar=('FIRST', 'LAST'), help='explicit shaft slice range in scan z (overrides --shaft-frac)')
+    ap.add_argument('--shaft-z', type=int, nargs=2, metavar=('FIRST', 'LAST'), help='explicit shaft slice range in scan z for the first guess (overrides --shaft-frac)')
     ap.add_argument('--epiphysis-z', type=int, nargs=2, metavar=('FIRST', 'LAST'), help='explicit epiphysis slice range in scan z (overrides --epiphysis-frac)')
     ap.add_argument('--crop-lower-uvw', type=int, nargs=3, metavar=('U', 'V', 'W'), help='explicit crop corner in aligned voxels (needs --crop-shape-uvw)')
     ap.add_argument('--crop-shape-uvw', type=int, nargs=3, metavar=('U', 'V', 'W'), help='explicit crop size in aligned voxels (needs --crop-lower-uvw)')
     ap.add_argument('--depth-mm', type=float, default=3.15, help='mm: how far from the joint end the crop reaches')
     ap.add_argument('--pad-mm', type=float, default=0.105, help='mm: margin around the bone in the crop')
+    ap.add_argument('--axis-mm', type=float, nargs=2, metavar=('FROM', 'TO'), default=[2.5, 3.9],
+                    help='mm along W from the joint end: the shaft sections whose centroids define the axis (below the metaphyseal flare, '
+                    'inside the crop)')
+    ap.add_argument('--tilt-deg', type=float, nargs=2, metavar=('CORONAL', 'SAGITTAL'), default=[0.0, 0.0],
+                    help='degrees, turned after the fit to cancel a lean you see on the QC: positive CORONAL when the shaft\'s lower end '
+                    'sits at larger U than its top on the coronal sheet, positive SAGITTAL the same with V on the sagittal sheet; the '
+                    'reported residual then reads about minus the tilt')
     a = ap.parse_args()
+    if bool(a.crop_lower_uvw) != bool(a.crop_shape_uvw):
+        sidecar.fail('--crop-lower-uvw and --crop-shape-uvw go together: give both or neither')
+    if not 0 <= a.axis_mm[0] < a.axis_mm[1]:
+        sidecar.fail(f'--axis-mm {a.axis_mm[0]} {a.axis_mm[1]} is not a range from the joint end: give FROM < TO, both >= 0')
     g = sidecar.grid(a.hu_json)
     sp = g['spacing_zyx_mm']
     if not np.allclose(sp, sp[0], rtol=1e-3):
@@ -184,11 +265,24 @@ def main():
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)
     basis, origin = fit_frame(mask, shaft_z, epi_z, a.joint_end, sp[0])
-    depth_vox = round(a.depth_mm / sp[0])
-    if a.crop_lower_uvw and a.crop_shape_uvw:
-        low, shape_xyz = np.array(a.crop_lower_uvw), np.array(a.crop_shape_uvw)
-    else:
-        low, shape_xyz = crop_for(mask, basis, origin, a.joint_end, depth_vox, round(a.pad_mm / sp[0]))
+    joint = joint_part(mask, a.joint_end, round(a.depth_mm / sp[0]))
+
+    def crop(basis):
+        low, shape_xyz, w_joint = crop_for(joint, basis, origin, round(a.pad_mm / sp[0]))
+        if a.crop_lower_uvw:
+            low, shape_xyz = np.array(a.crop_lower_uvw), np.array(a.crop_shape_uvw)
+        w0 = float(w_joint - low[2])  # the joint end's W index in the crop
+        return low, shape_xyz, (max(round(w0 + a.axis_mm[0] / sp[0]), 0), min(round(w0 + a.axis_mm[1] / sp[0]), int(shape_xyz[2])))
+
+    for iterations in range(1, MAX_ITER + 1):
+        low, shape_xyz, w_range = crop(basis)
+        su, sv, _, _ = axis_fit(coarse_sections(mask, basis, origin, low, shape_xyz, w_range, sp[0]))
+        if max(abs(degrees(su)), abs(degrees(sv))) < CONVERGED_DEG:
+            break
+        basis = tilted(basis, su, sv)
+    if any(a.tilt_deg):
+        basis = tilted(basis, *np.tan(np.radians(a.tilt_deg)))
+    low, shape_xyz, w_range = crop(basis)
     shape_zyx = tuple(int(i) for i in shape_xyz[::-1])
     frame = fr.make(
         g['grid_id'],
@@ -202,6 +296,9 @@ def main():
     )
     aligned = fr.resample(hu, frame, order=1, cval=-1000)
     amask = fr.resample(mask.astype(np.uint8), frame, order=0, cval=0, dtype=np.uint8).astype(bool)
+    cen, (u0, u1, v0, v1) = sections(amask[w_range[0] : w_range[1]], range(*w_range), sp[0])
+    su, sv, pu, pv = axis_fit(cen)
+    residual = {'coronal': degrees(su), 'sagittal': degrees(sv)}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     params = {
@@ -213,6 +310,8 @@ def main():
         'pad_mm': a.pad_mm,
         'crop_lower_uvw': low.tolist(),
         'crop_shape_uvw': shape_xyz.tolist(),
+        'axis_mm': a.axis_mm,
+        'tilt_deg': a.tilt_deg,
     }
     for name, arr in ((f'{a.name}-hu.npy', aligned), (f'{a.name}-mask.npy', amask)):
         np.save(out / name, arr)
@@ -225,9 +324,17 @@ def main():
             script='tibia_frame.py',
         )
     fr.save(frame, out / f'{a.name}-frame.json')
-    vs = [int(v) for v in np.linspace(shape_zyx[1] * 0.2, shape_zyx[1] * 0.8, 6)]
-    qc = vl.slice_sheet(out / f'{a.name}-frame-qc.jpg', aligned, [(amask, 'cyan')], 1, vs, a.window,
-                        axis_names=('W index (joint at top)', 'V index', 'U index'), titles=[f'coronal V={v}' for v in vs], voxel_mm=sp[0])
+    qcs = {}
+    for axis, plane, lo, hi, p, k, letter in ((1, 'coronal', v0, v1, pu, 1, 'V'), (2, 'sagittal', u0, u1, pv, 2, 'U')):
+        idx = [int(i) for i in np.linspace(lo + 0.1 * (hi - lo), hi - 0.1 * (hi - lo), 6)]  # across the shaft in the axis range
+        ws = np.array(w_range)
+        top = np.polyval(p, ws[0])
+        curves = [[(np.polyval(p, ws), ws, 'yellow'), ([top, top], [0, shape_zyx[0] - 1], 'magenta', '--'),
+                   (cen[:, k], cen[:, 0], 'yellow', ',')]] * len(idx)
+        qcs[plane] = vl.slice_sheet(
+            out / f'{a.name}-frame-qc{"" if plane == "coronal" else "-sagittal"}.jpg', aligned, [(amask, 'cyan')], axis, idx, a.window,
+            curves=curves, axis_names=('W index (joint at top)', 'V index', 'U index'), voxel_mm=sp[0],
+            titles=[f'{plane} {letter}={i}: axis {residual[plane]:+.2f} deg off W (yellow; magenta = W)' for i in idx])
     sidecar.emit_values(
         out / f'{a.name}.json',
         {},
@@ -235,10 +342,16 @@ def main():
         hu=str(out / f'{a.name}-hu.npy'),
         mask=str(out / f'{a.name}-mask.npy'),
         frame=str(out / f'{a.name}-frame.json'),
-        qc=qc,
+        qc=qcs['coronal'],
+        qc_sagittal=qcs['sagittal'],
         grid_id=frame['grid_id'],
         shape_wvu=list(shape_zyx),
         mask_volume_mm3=round(float(amask.sum()) * sp[0] ** 3, 4),
+        axis_residual_deg=residual,
+        axis_mm=a.axis_mm,
+        axis_w=list(w_range),
+        tilt_deg=a.tilt_deg,
+        iterations=iterations,
         shaft_z=list(shaft_z),
         epiphysis_z=list(epi_z),
         **check,
