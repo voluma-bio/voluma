@@ -52,7 +52,7 @@ def main():
     ap.add_argument('--proposal', type=sidecar.existing, required=True,
                     help="segment_plate's out folder: plate-annotations.json, plate-faces.json and plate-band.npz")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy the proposal was made on (for the QC)')
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help='QC display window: lo,hi in HU or the file that holds it')
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window: the scan's scan-settings.json (intake's), or lo,hi in HU")
     ap.add_argument('--drop-pieces', metavar='ID,ID,...', default='', help="ids from plate-faces.json's `pieces`")
     ap.add_argument('--cut', metavar='V:U0-U1,...', default='', help='U ranges to empty, on one section (V) or every proposed section in V0-V1')
     ap.add_argument('--out', required=True, help='output directory (created); not the proposal folder')
