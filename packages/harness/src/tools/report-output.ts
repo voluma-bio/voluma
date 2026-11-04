@@ -278,6 +278,14 @@ function gridAffine(deps: OutputToolDeps, gridId: string): Volume["affine"] | un
   return undefined;
 }
 
+/** Spacing only: no rotation and origin 0, what a sidecar without a pose (or an old run) gives. */
+const isDiagonal = (m: Volume["affine"]) =>
+  [0, 1, 2].every((r) => [0, 1, 2, 3].every((c) => c === r || m[r]![c] === 0));
+
+/** Equal to 1e-4 mm in every entry: one frame's affine, written twice, is the same float64s. */
+const sameAffine = (a: Volume["affine"], b: Volume["affine"]) =>
+  a.every((row, r) => row.every((v, c) => Math.abs(v - b[r]![c]!) <= 1e-4));
+
 /**
  * Where the caller's latest published copy of `rel` is, for a sidecar already moved out of the
  * folder: a file reported on its own (the scan's `hu.json`) is gone before the array it describes
@@ -569,6 +577,11 @@ export function reportOutput(
           const value = input.value;
           const gridId = typeof sidecar.gridId === "string" ? sidecar.gridId : undefined;
           const pinned = gridId && gridAffine(deps, gridId);
+          const own = sidecar.affine as Volume["affine"] | undefined;
+          if (pinned && own && !isDiagonal(pinned) && !isDiagonal(own) && !sameAffine(pinned, own))
+            console.warn(
+              `report_output: ${input.id} on grid ${gridId} has its own affine ${JSON.stringify(own)}, not the grid's ${JSON.stringify(pinned)}; publishing the grid's (two frames sharing one grid_id?)`,
+            );
           const detail = {
             ...sidecar,
             ...(pinned && { affine: pinned }),

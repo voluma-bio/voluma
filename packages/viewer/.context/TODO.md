@@ -34,3 +34,5 @@
 - 3D pane (#567): the overlay row around the status chip and reset button catches drags that start over it;
   dispose the Arcball gizmo geometry `setTbRadius` replaces on each resize. Ask the expert whether a dial
   turned back to 0° should count as on the grid (today the bar says "Turned 0.0°" until Reset).
+- `worldOf` (`src/grid/marks.ts`, used by `apps/web/.../run-marks.ts`) duplicates contracts' `toWorld`:
+  a mark's world position is computed by one and delivered back through `toVoxel`. Use `toWorld` and delete it.

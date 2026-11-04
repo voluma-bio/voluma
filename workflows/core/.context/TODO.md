@@ -68,7 +68,11 @@ A new run publishes each `.npy` with its grid's `affine_xyz_to_world_mm` (`sidec
 `report-output.ts` `gridAffine` keeps one affine per grid), and marks reach the agents as voxels of the image they were drawn
 on. Left: a base whose sidecar has neither the affine nor `spacing_zyx_mm` still reads as identity in the review
 (`packages/run-view/src/outputs-model.ts`, `affineOf`), so a mark or point on it is placed in raw voxels without an error;
-refuse those instead. Runs published before this change keep spacing-only affines on every grid, and the viewer reads both.
+refuse those instead. A grid published before this change keeps its spacing-only affine, and a run spanning the deploy (or an
+old run's grid first published after it) can mix them: the scan with `hu.json`'s real affine, the tibia grid diagonal at origin 0
+from an old `tibia_frame.py` sidecar. Nothing records which affines are real poses, so before the review shows one grid against
+another in world mm (today it uses only axis directions across grids, `targets.ts`), mark them (a flag in `detail`, or "the
+grid's first block came from a header").
 
 ## HU calibration for a scan without it
 
