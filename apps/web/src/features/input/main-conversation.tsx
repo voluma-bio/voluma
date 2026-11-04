@@ -8,7 +8,7 @@
  * The message itself is `useMainMessage`.
  */
 import type { ConversationItem } from "@voluma/contracts/conversation";
-import { ApprovalCard, approvalWords, Markdown } from "@voluma/run-view";
+import { type AgentLinks, ApprovalCard, approvalWords, Markdown } from "@voluma/run-view";
 import { Button, Chip, cx, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
 import { Bookmark, Send, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
@@ -65,6 +65,7 @@ export function MainConversation({
   views,
   live,
   nameOf,
+  agents,
   checkTitle,
   message,
   answers,
@@ -78,6 +79,8 @@ export function MainConversation({
   /** The run is queued or running: main is at work on what it was sent. */
   live: boolean;
   nameOf: (id: string) => string;
+  /** The agents main's replies can name in code to open their thread. */
+  agents: AgentLinks;
   /** A To check item's title, by its place. */
   checkTitle: (item: { output: string; version: number; item: number }) => string | undefined;
   message: ReturnType<typeof useMainMessage>;
@@ -190,7 +193,7 @@ export function MainConversation({
               ) : m.from === "agent" ? (
                 <li key={m.id} className="grid gap-1">
                   <Said who="main" at={m.at} />
-                  <Markdown text={m.text} className="text-sm" />
+                  <Markdown text={m.text} className="text-sm" agents={agents} />
                 </li>
               ) : (
                 <li key={m.id}>

@@ -7,7 +7,7 @@
 
 import { runEventSchema } from "@voluma/contracts/events";
 import { providerCalls } from "@voluma/provider-calls";
-import { catalog, workflowById } from "@voluma/workflow/bundled";
+import { workflowById, workflowByPath } from "@voluma/workflow/bundled";
 import { asc, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { events, inputs, piMessages, runs, studies, studyMembers } from "../domains/run/schema";
@@ -76,8 +76,7 @@ export function assertRestorable(dump: {
   const workflowId = dump.run.workflowId ?? dump.study?.workflowId;
   const workflowPath = (dump.run.workflows as { path: string }[])[0]?.path;
   const workflow =
-    (workflowId ? workflowById(workflowId) : undefined) ??
-    Object.values(catalog).find((w) => w.path === workflowPath);
+    (workflowId ? workflowById(workflowId) : undefined) ?? workflowByPath(workflowPath);
   if (!workflow) {
     throw new Error(
       `run ${runId} used ${workflowId ?? workflowPath}, which is not a bundled workflow`,

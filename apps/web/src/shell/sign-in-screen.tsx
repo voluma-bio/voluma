@@ -65,12 +65,12 @@ export function GateScreen({
         <div className="grid justify-items-center gap-3">
           {title ? (
             <>
-              <BrandLockup className="mb-3 gap-2.5 text-ui [&_svg]:size-5.5" />
+              <BrandLockup className="mb-3 gap-2.5 text-ui [&_img]:size-5.5" />
               <h1 className="text-2xl font-semibold tracking-tight text-balance">{title}</h1>
             </>
           ) : (
             <h1>
-              <BrandLockup className="gap-3 text-2xl tracking-tight [&_svg]:size-8" />
+              <BrandLockup className="gap-3 text-2xl tracking-tight [&_img]:size-8" />
             </h1>
           )}
           {detail ? <p className="text-muted-foreground">{detail}</p> : null}

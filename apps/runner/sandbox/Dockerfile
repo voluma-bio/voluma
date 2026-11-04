@@ -1,4 +1,4 @@
-# The sandbox image every run uses, ours and visitors': the analysis packages the
+# The sandbox image every run uses, ours and guests': the analysis packages the
 # prompts promise. CI builds it (.github/workflows/sandbox-image.yml) and pushes it to
 # ghcr.io/voluma-bio/voluma-sandbox; the runner pins the digest in src/config.ts.
 # The packages are workflows/core/requirements.txt, passed as the build context

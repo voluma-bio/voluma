@@ -32,10 +32,13 @@ export const ShellContext = createContext<ShellState | null>(null);
 const HeadingContext = createContext<HTMLElement | null>(null);
 
 export function AppShell({
+  brand,
   rail,
   theme,
   children,
 }: {
+  /** The non-interactive brand mark in the header, above the rail. */
+  brand: ReactNode;
   /** The app's rail (`Rail`), at the far left under the header line. */
   rail: ReactNode;
   /** The whole frame's theme, chosen by the app; image wells use their own viewer tokens. */
@@ -89,8 +92,9 @@ export function AppShell({
     <ShellContext.Provider value={state}>
       <HeadingContext.Provider value={heading}>
         <ThemeScope theme={theme} className="flex h-dvh flex-col bg-background text-foreground">
-          <header className="flex h-[var(--header-h)] shrink-0 items-center border-b border-border bg-card px-3.5">
-            <div ref={setHeading} className="flex min-w-0 flex-1 items-center gap-3" />
+          <header className="flex h-[var(--header-h)] shrink-0 items-center border-b border-border bg-card">
+            <div className="grid w-11 shrink-0 place-items-center">{brand}</div>
+            <div ref={setHeading} className="flex min-w-0 flex-1 items-center gap-3 px-3.5" />
           </header>
           <div className="flex min-h-0 flex-1">
             {rail}

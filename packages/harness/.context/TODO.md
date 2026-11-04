@@ -18,5 +18,9 @@
 - **Delete the pre-pull API fallback (R3p, two-step).** After the API that answers `POST /events` with `{seq}` and heartbeats with `lastSeq` is live on every environment: in `adapters/http/run-client.ts` `append`, drop the `204 → undefined` branch; make `EventLog.append` return a `number`; in `recorder.ts` drop the `seq !== undefined` guard and the `viewSeq() + 1` numbering.
 
 - **Keep `options.input` on a resume with no user message in History.** `start-thread.ts:311-322` drops `options.input` in that branch; add the input after the prompt there (#494 review, note 1).
-- **Delete the pre-`review.md` fallback.** `reviewText` in `agents/prompts.ts` uses the snapshot's `corrections` skill when the snapshot has no `agents/review.md` (runs started before the review-loop PR; their roles are in `core/roles/`). Delete it, and `WorkflowDefinition.review` becomes required, once no run that can still be reopened predates it.
+- **Delete the pre-`review.md` fallback.** `reviewText` in `prompts.ts` uses the snapshot's `corrections` skill when the snapshot has no `core/review.md` (runs started before the review-loop PR; their roles are in `core/roles/`). Delete it, and `WorkflowDefinition.review` becomes required, once no run that can still be reopened predates it.
 - **Write the handover right after the run main's close (Later, review-loop design).** The first reply after a run ends waits for the summary call. Make it while the main's cache is warm, store it under the kept notes (`notesKey`), and have `handoverOf` read it. Not done: it adds a stored file and a second call site.
+
+- A mark's "drawn on <image> vN" names that image's latest version when main is told, not the one it was drawn on: they
+  differ only if a new version of the base is published between send and delivery. Freeze the version in the attached
+  mark at send (`freezeAttached`) to close it.

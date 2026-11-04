@@ -202,10 +202,9 @@ An agent in its own worktree tries a workflow change on the real system like thi
    (this worktree's database, a per-launch secret) and a Cloudflare quick tunnel to it, and writes the
    tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
    `gateway https://…trycloudflare.com` line before starting the runner.
-2. `RUNNER_MODEL=deepseek/deepseek-flash RUNNER_THINKING=low pnpm --filter @voluma/runner start` (set in `.env`
-   or the shell: one model for every role). Agents run plumbing checks on `deepseek/deepseek-flash` with `RUNNER_THINKING=low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`, never wonder, and never a run on staging (Jimmy). Meta SAM is the only Meta call here, about $0.10 each.
-3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
-   (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
+2. `pnpm --filter @voluma/runner start`, with `RUN_MODEL_OVERRIDE=deepseek/deepseek-flash` in `.env` for the local API (it records that model on every Voluma-key run, so the runner just reads `run.model`; a guest's own-key run keeps its pick, since a Meta key can't call DeepSeek, so plumbing runs are a member's) and thinking picked at `/new`. The runner refuses to boot with `RUNNER_MODEL` or `RUNNER_THINKING` set. Agents run plumbing checks on `deepseek/deepseek-flash` with thinking `low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`, never wonder, and never a run on staging (Jimmy). Meta SAM is the only Meta call here, about $0.10 each.
+3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …] [--thinking low|medium|high] [--model <provider/id>]`
+   (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan (`--thinking` and `--model` go in the start body; plumbing checks pass `--thinking low`, since the default medium rounds up to high on deepseek-flash),
    follows the run's event stream until it ends and prints its outcome, the outputs reported (`outputsFold`), cost and the run page. Exit 1 when the run failed or was cancelled, 2 when the script itself broke
    (no `pnpm dev`, sign-in or API errors), 3 when no runner claimed the run in 3 minutes. Edits to `workflows/` are read from
    the checkout when a run starts, so edit, then try-run again.
@@ -281,7 +280,7 @@ thread takes its model from the log, so a base-URL override set for one model ca
 
 # Runner: `read` shows the model files the sandbox wrote
 
-`packages/harness/src/agents/tools/read.ts` reads up to 4 text or PNG/JPEG files from the run's mounts (a path
+`packages/harness/src/tools/read.ts` reads up to 4 text or PNG/JPEG files from the run's mounts (a path
 outside them, such as the sandbox's `/tmp`, through the thread's sandbox: `tools/read-whole.ts`) and returns the
 images as image content; a `ToolResult` may carry `images`, which the Pi adapter turns into image blocks. An image over
 1 MiB or 2000 px a side is cut at the panes its `.view.json` names or downscaled with sharp (`tools/image-fit.ts`: EXIF
@@ -369,7 +368,7 @@ the reply that ended the thread had started. A compaction summary call reports t
 interrupted, and neither is a failure before any call (stored history). The field is optional: an API from before it
 strips it, and that one end then reads as not interrupted (a fresh main, as before).
 
-What survives goes to the run loop (`packages/harness/src/agents/loop.ts`), which asks `provider-error.ts` for the
+What survives goes to the run loop (`packages/harness/src/loop.ts`), which asks `provider-error.ts` for the
 text's class (the unit test there pins the texts) and reads `interrupted` from the end:
 - *fatal* (any other 4xx: auth, `404 model_not_found`, an empty account): fails the run at once, on any thread
   (`failureKind`).
@@ -436,8 +435,8 @@ lifetime) and once more 23 min into the replacement, before the exit code was lo
 
 # Runner: role text, tool grants and models come from the run's role files
 
-Role files are `workflows/core/agents/`, built by `packages/harness/src/agents/prompts.ts` with tools from
-`packages/harness/src/agents/tools/registry.ts` (`workflows/core/agents/AGENTS.md`).
+Role files are `workflows/core/agents/`, built by `packages/harness/src/prompts.ts` with tools from
+`packages/harness/src/tools/registry.ts` (`workflows/core/agents/AGENTS.md`).
 
 An agent's system prompt is `workflows/core/agents/<role>.md`'s body, then the sandbox text (`layout.ts` `description`), then the role's skill list and the tool index (one line per skill
 script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
@@ -447,24 +446,18 @@ composes byte-identical text and an edited file reaches only new threads (a resu
 definitions it started with, run by the current tools; a tool whose input schema changed (a `.default`, a `.min`, a new field), or that is new to the role, is declared to it by a system message Pi appends to the transcript (`resumedTools`), stored with the history so a later resume does not append it again, and new calls use the current schema; it costs one uncached request per thread on Meta and DeepSeek and none on Anthropic's Opus 5, measured; a tool removed since is declared removed the same way; a description change (the tool's or a field's) changes nothing sent. It is `ThreadStale` only when a tool it has called no longer exists, or its model changed: switching the model under a live thread would replay another provider's reasoning blocks and ids, which nothing has measured). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
-A run's model is decided by the API when the run is created and arrives as `run.model` (optional: a run made before the choice has none; `run-models.ts` in the API's run domain holds the choices). Precedence: `RUNNER_MODEL` (the plumbing check), then `run.model` (every role uses it, and a visitor run too), then the role file's alias. A run whose model has no key here (`VOLUMA_<PROVIDER>_API_KEY`) or is unknown to Pi fails at claim with a message naming it, as does a visitor run whose model is not a Standard-mode Meta model (the API refuses that too; neither side trusts the other). The deploy overlap holds both ways: `runSchema` strips unknown keys, so a runner without this reads a claim that has `model`, and a claim without it is today's behaviour.
+A run's model is decided by the API when the run is created and arrives as `run.model` (optional: a run made before the choice has none; `run-models.ts` in the API's run domain holds the choices). Precedence: `run.model` (every role uses it, an own-key run too), then the role file's alias. A run whose model has no key here (`VOLUMA_<PROVIDER>_API_KEY`) or is unknown to Pi fails at claim with a message naming it, as does an own-key run whose model fails `ownKeyMayUse` (`packages/contracts`: the same rule the API's `needsVolumaKey` marks come from, and the API refuses it too; neither side trusts the other). The deploy overlap holds both ways: `runSchema` strips unknown keys, so a runner without this reads a claim that has `model`, and a claim without it is today's behaviour.
 
 Without `run.model`, a role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
 `RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
-(no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
-set, forces every alias to one model. Each configured alias's provider key is required at start.
+(no default; a run whose role file names an unset alias fails when it starts). Each configured alias's provider key is required at start.
 
-A run made at `/new` carries `run.thinking` (low, medium or high; the API records it, default medium), which every role uses at the nearest level its model supports (`nearestThinking`). Without it (an older run), a role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
-levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a test
-run), `RUNNER_THINKING` when set applies to every role, and otherwise each role keeps the run's level (else its file's) at the nearest the forced model supports, `off` for a model with no reasoning (`config.modelForced`; `main.ts` refuses at boot a `RUNNER_THINKING` the model lacks) (Jimmy, 2 Nov: forcing the model must not turn thinking off). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+A run made at `/new` carries `run.thinking` (low, medium or high; the API records it, default medium), which every role uses at the nearest level its model supports (`nearestThinking`). Without it (an older run), a role's thinking level is its role file's `thinking` key, else none (`"off"`). There is no runner-wide setting: `RUNNER_MODEL` and `RUNNER_THINKING` are gone and `config.ts` refuses to boot while either is set, so a plumbing run can't go to a paid model unnoticed (force the model with the API's `RUN_MODEL_OVERRIDE`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
-History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
-checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
-role's set level against its model (the role files load per run); both use `thinking.ts` and check
-only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
+History message. Pi clamps an unsupported level silently, so `run.ts` at run start checks each
+role's set level against its model (the role files load per run) with `thinking.ts`, non-off levels only. Unset and `"off"` both mean no requested effort through Pi Agent, not a
 guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
-DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
-without asking Muse for an unsupported effort. With `run.model`, the role file's level goes to the nearest level the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`), and `RUNNER_THINKING` is checked against the aliases only. Visitor runs get the same levels as anyone's (fitted with `nearestThinking` to the model they run on). The level is
+DeepSeek sends `thinking: disabled`. Any level goes to the nearest the model supports (above first, then below; DeepSeek Flash has no `medium`: `nearestThinking`). Own-key runs get the same levels as anyone's (fitted with `nearestThinking` to the model they run on). The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
@@ -483,8 +476,8 @@ The next claim learns why from `claim.previousClaim` (the API records `lease-exp
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
 run loop then resumes each agent still open (its latest `thread.started` has no
 `thread.ended`) that this process hasn't started. It resumes with the message of `cutOffText`
-(`agents/messages.ts`), naming the tool the log shows with no result, or the no-tool form, and a
-tool the cut-off interrupted is answered from the log (`agents/effects.ts`). A tool whose `tool.call` event was
+(`messages.ts`), naming the tool the log shows with no result, or the no-tool form, and a
+tool the cut-off interrupted is answered from the log (`effects.ts`). A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.
 

@@ -1,6 +1,6 @@
 /**
  * Postgres adapter for the run queue: every state change of a run, and the sealed keys
- * (run-keys.ts) of an own-key run that go with it. Each transition (start, resume, cancel, claim,
+ * (run-keys.ts) of an own-key run that go with it. Each transition (start, cancel, claim,
  * heartbeat, report) runs in one transaction, judged by the database's `now()`; no API
  * process's clock or memory decides a lease. Which transitions take the queue lock, and why
  * heartbeat and report don't: `apps/api/AGENTS.md`. Keys are sealed in the same transaction that makes a run
@@ -11,25 +11,25 @@
 import { randomBytes } from "node:crypto";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
 import { type OutputCatalog, unselectable } from "@voluma/contracts/output-catalog";
-import type { Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
+import type { OwnKeys, Run, RunThinking } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
   type ReleaseReason,
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { and, asc, desc, eq, gt, inArray, ne, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, ne, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import {
   admit,
   type Limits,
+  mayUseVolumaKey,
   type Refusal,
   refusalError,
   refusalMessage,
-  type Usage,
-  usage,
+  spentUsd,
 } from "./admission";
 import { lateResearcherWrite } from "./agent-review";
 import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
@@ -61,18 +61,19 @@ import { DEFAULT_THINKING, modelChoices, pickModel } from "./run-models";
 import { events, inputs, runs, studies, studyMembers } from "./schema";
 
 /**
- * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
+ * Serializes the transactions that admit or start work: claim, start, cancel, message,
  * import/archive. A heartbeat and a report take only the run's own locks (`lockRun`: event lock, then the
  * row), so a slow claim never delays an acknowledgement. They can skip this lock because they
- * only take a run off `running`, which lowers the counts a claim reads (`usage`); the one write
+ * only take a run off `running`, which lowers the counts a claim reads; the one write
  * that raises them, `queued` → `running`, is the claim's, under this lock.
  */
 export const QUEUE_LOCK = 0x76_6f_6c_71;
 
-/** How long an own-key run whose keys are gone waits for them. */
 /** Runs on one starter's own key that may be unfinished at once; each holds a sealed key in its row. */
 const MAX_OWN_KEY_RUNS = 20;
-const KEYS_WAIT = sql`interval '24 hours'`;
+
+/** The error of an own-key run whose sealed keys cannot be opened: only a changed `RUN_KEY_SECRET` does that. */
+const KEYS_LOST = "Voluma's key secret changed; start the run again.";
 
 const leaseUntil = sql`now() + make_interval(secs => ${LEASE_SECONDS})`;
 
@@ -91,7 +92,7 @@ export type Claimed = {
   run: Run;
   leaseToken: string;
   /** The own-key run's keys, opened from the run's sealed column for this claim. */
-  keys?: VisitorKeys;
+  keys?: OwnKeys;
   /** The study's budget (`claimSchema.budgetUsd`); null: none. */
   budgetUsd: number | null;
   /** Present on every claim after the run's first. */
@@ -188,15 +189,10 @@ async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason:
 
 async function sweep(tx: Tx) {
   await recover(tx, sql`lease_expires_at <= now()`, "lease-expired");
-  await tx.execute(sql`
-    UPDATE runs SET state = 'ended', outcome = 'failed', ended_at = now(), sealed_keys = NULL,
-      error = 'The keys were not resent within 24 hours.'
-    WHERE state = 'awaiting-keys' AND awaiting_since <= now() - ${KEYS_WAIT}`);
-  // Self-healing: an end path that missed the column (an old API during a deploy overlap) still
-  // leaves no key behind.
-  await tx.execute(
-    sql`UPDATE runs SET sealed_keys = NULL WHERE sealed_keys IS NOT NULL AND state = 'ended'`,
-  );
+  // Shim, delete with the `awaiting-keys` state (apps/api/.context/TODO.md): an API built before
+  // that state was deleted, still live in a deploy overlap, may leave a run there.
+  const stuck = await tx.select({ id: runs.id }).from(runs).where(eq(runs.state, "awaiting-keys"));
+  for (const { id } of stuck) await fail(tx, id, KEYS_LOST);
 }
 
 const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, "failed", error);
@@ -221,18 +217,28 @@ async function endUnfinished(
     // The span ends here, so the conversation says the request failed and a later reopen starts a new span.
     await endCorrection(tx, runId, reopenId, status, error);
   } else if (status === "cancelled") await cancelOpenThreads(tx, runId);
-  await tx
+  await markEnded(tx, runId, correcting ? "completed" : status, error, set);
+}
+
+/** The one write that ends a run: its outcome, and its sealed keys forgotten. */
+const markEnded = (
+  tx: Tx,
+  runId: string,
+  outcome: "completed" | "failed" | "cancelled",
+  error?: string,
+  set: Partial<typeof runs.$inferInsert> = {},
+) =>
+  tx
     .update(runs)
     .set({
       ...set,
       state: "ended",
       sealedKeys: null,
-      outcome: correcting ? "completed" : status,
+      outcome,
       endedAt: sql`now()`,
-      error: correcting ? null : (error ?? null),
+      error: error ?? null,
     })
     .where(eq(runs.id, runId));
-}
 
 /**
  * The first researcher write the ending claim never saw (`lateResearcherWrite`), from raw columns:
@@ -270,7 +276,7 @@ type Starts = {
   runs: { id: string; inputId: string }[];
   selectedOutputs?: string[];
   notes?: string;
-  keys?: VisitorKeys;
+  keys?: OwnKeys;
   /** The model the caller asked for; `pickModel` decides the run's. */
   model?: string;
   /** The thinking level the caller asked for; absent: `DEFAULT_THINKING`. */
@@ -337,8 +343,8 @@ export function pgRunQueue(
   };
 
   /**
-   * Admits each of `starts.runs` against the limits and inserts it `queued`. The counts are
-   * read once, then raised by each run inserted, so the last run is judged with the others.
+   * Admits `starts.runs` against the limits once (they share one org and one kind of key) and
+   * inserts each `queued`.
    */
   const startRuns = async (
     tx: Tx,
@@ -354,16 +360,16 @@ export function pgRunQueue(
         message: `Not a selectable output of this workflow: ${bad.join(", ")}.`,
       });
     if (starts.runs.length === 0) return;
-    const credentials = starts.keys ? "visitor" : "voluma";
+    const credentials = starts.keys ? "own" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
-    if (credentials === "visitor") {
+    if (credentials !== "voluma") {
       const [{ open } = { open: 0 }] = await tx
         .select({ open: sql<number>`count(*)::int` })
         .from(runs)
         .where(
           and(
             eq(runs.startedBy, caller.userId),
-            eq(runs.credentials, "visitor"),
+            ne(runs.credentials, "voluma"),
             ne(runs.state, "ended"),
           ),
         );
@@ -372,10 +378,11 @@ export function pgRunQueue(
           message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
         });
     }
-    const used = await usage(tx, reader.labId);
+    const refused = admit(limits, reader.labId, await spentUsd(tx, reader.labId), {
+      credentials,
+    });
+    if (refused) throw limitRefusal(refused);
     for (const { id, inputId } of starts.runs) {
-      const refused = admit("start", limits, reader.labId, used, { credentials });
-      if (refused) throw limitRefusal(refused);
       await tx.insert(runs).values({
         id,
         labId: reader.labId,
@@ -551,68 +558,48 @@ export function pgRunQueue(
     },
 
     /**
-     * `awaiting-keys` → `queued`, for the run's own starter, sealing the new keys.
-     */
-    resume: (reader: Reader, runId: string, keys: VisitorKeys) =>
-      locked(async (tx) => {
-        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), orgs);
-        if (!run) throw new HTTPException(404, { message: "not found" });
-        if (run.state.status !== "awaiting-keys")
-          throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        const refused = admit("resume", limits, reader.labId, await usage(tx, reader.labId), run);
-        if (refused) throw limitRefusal(refused);
-        await tx
-          .update(runs)
-          .set({ state: "queued", awaitingSince: null, sealedKeys: sealer.seal(runId, keys) })
-          .where(eq(runs.id, runId));
-        return { run: await loadRun(tx, runId, orgs) };
-      }),
-
-    /**
      * One transaction: sweep expired leases, then take the first queued run in `queueOrder` that
-     * the slot caps and the org's limits allow, with its keys if it is an own-key run. An own-key run whose sealed keys
-     * cannot be opened goes to `awaiting-keys` instead.
+     * the slot caps and the org's spend limit allow, with its keys if it is an own-key run. An own-key run whose sealed keys
+     * cannot be opened ends `failed` instead.
      */
     claim: (runnerId: string) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
-        // The slot caps (`Limits`): counted under the lock, from every runner process, so a
-        // deploy overlap of two runners can't take more than the app's total.
-        const [counts] = await tx.execute<{ running: number; ownKeyBusy: boolean }>(sql`
-          SELECT count(*)::int AS running, ${ownKeyBusy} AS "ownKeyBusy"
-          FROM runs WHERE state = 'running' AND NOT example`);
-        if (!counts || counts.running >= limits.appRunning) return null;
-        const queued = await tx
-          .select()
-          .from(runs)
-          .where(eq(runs.state, "queued"))
-          .orderBy(...queueOrder(orgs));
-        // Failing or skipping a run changes none of these counts, so read each org's once.
-        const usages = new Map<string, Usage>();
-        for (const run of queued) {
-          if (run.credentials === "visitor") {
-            if (counts.ownKeyBusy) continue;
-          } else {
-            const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
-            usages.set(run.labId, used);
-            const refused = admit("claim", limits, run.labId, used, {
+        // The first queued run the slots allow, in the order of its place in line (`queueOrder`).
+        // The slot caps (`Limits`) are counted under the lock, from every runner process, so a
+        // deploy overlap of two runners can't take more than the app's total; an own-key run is
+        // eligible only while the one own-key slot is free. A run failed below leaves the
+        // next one first, so ask again.
+        for (;;) {
+          const [run] = await tx
+            .select()
+            .from(runs)
+            .where(
+              and(
+                eq(runs.state, "queued"),
+                sql`(SELECT count(*) FROM runs r WHERE r.state = 'running' AND NOT r.example) < ${limits.appRunning}`,
+                or(eq(runs.credentials, "voluma"), sql`NOT ${ownKeyBusy}`),
+              ),
+            )
+            .orderBy(...queueOrder(orgs))
+            .limit(1);
+          if (!run) return null;
+          if (run.credentials === "voluma") {
+            // A run that started is never refused on spend (`admit`), so its sum isn't read.
+            const used = run.startedAt === null ? await spentUsd(tx, run.labId) : 0;
+            const refused = admit(limits, run.labId, used, {
               credentials: "voluma",
               started: run.startedAt !== null,
             });
-            if (refused === "concurrent") continue;
             if (refused) {
               await fail(tx, run.id, refusalError[refused]);
               continue;
             }
           }
-          // An own-key run whose sealed keys are gone or unreadable (a rotated secret) waits for the user to resend them.
           const keys =
-            run.credentials === "visitor" ? sealer.open(run.id, run.sealedKeys) : undefined;
-          if (run.credentials === "visitor" && !keys) {
-            await tx
-              .update(runs)
-              .set({ state: "awaiting-keys", awaitingSince: sql`now()` })
-              .where(eq(runs.id, run.id));
+            run.credentials !== "voluma" ? sealer.open(run.id, run.sealedKeys) : undefined;
+          if (run.credentials !== "voluma" && !keys) {
+            await fail(tx, run.id, KEYS_LOST);
             continue;
           }
           const leaseToken = randomBytes(24).toString("hex");
@@ -640,7 +627,6 @@ export function pgRunQueue(
             ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
           };
         }
-        return null;
       }),
 
     /**
@@ -656,7 +642,7 @@ export function pgRunQueue(
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
         // An org dropped from config stops its running Voluma-key runs here (its queued ones fail at claim).
-        if (run.credentials === "voluma" && !limits.voluma.has(run.labId)) {
+        if (run.credentials === "voluma" && !mayUseVolumaKey(limits, run.labId)) {
           await fail(tx, runId, refusalError["no-key"]);
           return { stop: true };
         }
@@ -702,16 +688,7 @@ export function pgRunQueue(
           const late = await lateWrite(tx, runId, report.readSeq);
           // A reopen already stored for that write cannot queue the run again: it would loop.
           if (!late || !(await reopen(tx, runId, late, run.startedBy)))
-            await tx
-              .update(runs)
-              .set({
-                state: "ended",
-                sealedKeys: null,
-                outcome: "completed",
-                endedAt: sql`now()`,
-                error: null,
-              })
-              .where(eq(runs.id, runId));
+            await markEnded(tx, runId, "completed");
         }
       });
       notifier.notify(runId);
