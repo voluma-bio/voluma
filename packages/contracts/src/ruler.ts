@@ -32,6 +32,15 @@ export const affineIn = (detail: unknown): Volume["affine"] | undefined => {
     : undefined;
 };
 
+/** World mm to voxel (z, y, x): the columns are orthogonal, so each index is a projection. */
+export function toVoxel(m: Volume["affine"], world: readonly number[]): Vec3 {
+  const d = [0, 1, 2].map((r) => world[r]! - m[r]![3]);
+  const index = (j: 0 | 1 | 2) =>
+    (m[0][j] * d[0]! + m[1][j] * d[1]! + m[2][j] * d[2]!) /
+    (m[0][j] ** 2 + m[1][j] ** 2 + m[2][j] ** 2);
+  return [index(2), index(1), index(0)];
+}
+
 /** Every voxel `(x, y, z)` of a flat list of triples in world mm, as a flat list of triples. */
 export function xyzToWorld(m: Volume["affine"], xyz: ArrayLike<number>): Float64Array {
   const world = new Float64Array(xyz.length);
