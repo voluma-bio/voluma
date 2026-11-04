@@ -19,7 +19,8 @@
  * sandboxes run on Modal and can reach only an https host, never localhost. The tunnel's URL and
  * the secret join env.json as { gatewayUrl, gatewaySecret }, authoritative for runners using this
  * API. SAM is opt-in because every SAM call costs money and needs Jimmy's yes.
- * VOLUMA_PLATE_API_KEY (a Modal proxy token `<id>:<secret>`) gives that gateway the plate model `segment_plate` calls.
+ * VOLUMA_PLATE_API_KEY (a Modal proxy token `<id>:<secret>`) gives the gateway the plate model `segment_plate` calls, and
+ * starts it without `--sam` too: then `segment_sam` is offered but every SAM call is a 403 (the gateway has no Meta key).
  * Without the tunnel (no `--sam`, no key, or cloudflared can't start) there is no
  * gateway URL: runs work except `segment_sam` and `segment_plate`, which are not offered. The gateway listens on 127.0.0.1 only. If it or the
  * tunnel dies later, the URL is removed from env.json the same way.
@@ -108,7 +109,7 @@ const appUrl = new URL(process.env.PUBLIC_URL ?? `http://localhost:${webPort}`).
 const samOn = process.argv.includes("--sam");
 const metaKey = samOn ? process.env.VOLUMA_META_API_KEY || dotenv.VOLUMA_META_API_KEY : undefined;
 const plateKey = process.env.VOLUMA_PLATE_API_KEY || dotenv.VOLUMA_PLATE_API_KEY;
-const gatewayPort = metaKey ? await freePort() : undefined;
+const gatewayPort = metaKey || plateKey ? await freePort() : undefined;
 const env = {
   apiUrl: `http://localhost:${apiPort}`,
   apiToken: randomBytes(24).toString("hex"),
@@ -209,7 +210,7 @@ if (gatewayPort) {
       ...process.env,
       DATABASE_URL: databaseUrl.href,
       GATEWAY_TOKEN_SECRET: env.gatewaySecret,
-      GATEWAY_META_API_KEY: metaKey,
+      ...(metaKey && { GATEWAY_META_API_KEY: metaKey }),
       // The plate model (`segment_plate`): a Modal proxy token `<id>:<secret>`; unset, its calls are 403s.
       ...(plateKey && { GATEWAY_PLATE_API_KEY: plateKey }),
       PORT: String(gatewayPort),
