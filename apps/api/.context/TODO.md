@@ -9,8 +9,6 @@
   The per-person cap (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and
   guests cost nothing to mint, so clearing cookies gives 50 GB more. After the demo: a combined cap
   on the guest organization's total, or a per-IP limit on minting guests.
-- **Constrain sealed keys after #533 is live.** Add `CHECK (state <> 'ended' OR sealed_keys IS NULL)`
-  on `runs`; before that, the old code's end writes would fail during the deploy overlap.
 - **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
   (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event, because
   its R2 snapshot is the task loop's. Delete that lookup once the deletion PR's snapshot fallback

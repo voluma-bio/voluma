@@ -19,6 +19,7 @@ import { referenceInputId } from "@voluma/contracts/r2";
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -186,5 +187,6 @@ export const runs = pgTable(
     index("runs_active_state").on(t.state).where(sql`${t.state} IN ('queued', 'running')`),
     index("runs_sealed_keys").on(t.id).where(sql`${t.sealedKeys} IS NOT NULL`),
     index("runs_study").on(t.studyId),
+    check("runs_ended_no_keys", sql`${t.state} <> 'ended' OR ${t.sealedKeys} IS NULL`),
   ],
 );

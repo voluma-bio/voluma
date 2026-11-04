@@ -192,11 +192,6 @@ async function sweep(tx: Tx) {
   // that state was deleted, still live in a deploy overlap, may leave a run there.
   const stuck = await tx.select({ id: runs.id }).from(runs).where(eq(runs.state, "awaiting-keys"));
   for (const { id } of stuck) await fail(tx, id, KEYS_LOST);
-  // Self-healing: an end path that missed the column (an old API during a deploy overlap) still
-  // leaves no key behind.
-  await tx.execute(
-    sql`UPDATE runs SET sealed_keys = NULL WHERE sealed_keys IS NOT NULL AND state = 'ended'`,
-  );
 }
 
 const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, "failed", error);
