@@ -35,7 +35,9 @@ export function keysToReopen(
   userId: string,
   run: { credentials: Run["credentials"]; state: { status: string } },
 ): OwnKeys | undefined {
-  return run.credentials === "own" && run.state.status === "ended" ? loadKeys(userId) : undefined;
+  return run.credentials !== "voluma" && run.state.status === "ended"
+    ? loadKeys(userId)
+    : undefined;
 }
 
 const saveKeys = (userId: string, keys: OwnKeys) =>

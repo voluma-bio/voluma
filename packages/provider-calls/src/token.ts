@@ -23,6 +23,11 @@ export type TokenClaims = {
   exp: number;
   /** The starter's own keys: when present they are the only keys this token can spend. */
   ownKeys?: Partial<Record<Provider, string>>;
+  /**
+   * The old name of `ownKeys`. No longer minted; tokens minted before step 2 of the
+   * `visitor` → `own` rename can still be live, so the gateway reads it until step 3 deletes this.
+   */
+  visitorKeys?: Partial<Record<Provider, string>>;
 };
 
 /** How long a token outlives its sandbox's lifetime. */

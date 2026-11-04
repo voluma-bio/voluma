@@ -140,7 +140,7 @@ export const runs = pgTable(
     selectedOutputs: json(),
     notes: text(),
     inputId: text().notNull(),
-    credentials: text({ enum: ["voluma", "own"] }).notNull(),
+    credentials: text({ enum: ["voluma", "own", "visitor"] }).notNull(),
     /** An own-key run's keys, sealed (run-keys.ts) while the run lives; null for a Voluma-key run and once the run ends. */
     sealedKeys: text(),
     /** The model every role of the run uses (`runSchema.model`); null for runs made before the choice existed. */

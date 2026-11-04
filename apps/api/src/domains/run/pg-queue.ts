@@ -352,14 +352,14 @@ export function pgRunQueue(
     if (starts.runs.length === 0) return;
     const credentials = starts.keys ? "own" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
-    if (credentials === "own") {
+    if (credentials !== "voluma") {
       const [{ open } = { open: 0 }] = await tx
         .select({ open: sql<number>`count(*)::int` })
         .from(runs)
         .where(
           and(
             eq(runs.startedBy, caller.userId),
-            eq(runs.credentials, "own"),
+            ne(runs.credentials, "voluma"),
             ne(runs.state, "ended"),
           ),
         );
@@ -586,7 +586,7 @@ export function pgRunQueue(
         // Failing or skipping a run changes none of these counts, so read each org's once.
         const usages = new Map<string, Usage>();
         for (const run of queued) {
-          if (run.credentials === "own") {
+          if (run.credentials !== "voluma") {
             if (counts.ownKeyBusy) continue;
           } else {
             const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
@@ -602,8 +602,9 @@ export function pgRunQueue(
             }
           }
           // An own-key run whose sealed keys are gone or unreadable (a rotated secret) waits for the user to resend them.
-          const keys = run.credentials === "own" ? sealer.open(run.id, run.sealedKeys) : undefined;
-          if (run.credentials === "own" && !keys) {
+          const keys =
+            run.credentials !== "voluma" ? sealer.open(run.id, run.sealedKeys) : undefined;
+          if (run.credentials !== "voluma" && !keys) {
             await tx
               .update(runs)
               .set({ state: "awaiting-keys", awaitingSince: sql`now()` })

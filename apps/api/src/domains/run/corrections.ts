@@ -126,7 +126,7 @@ function reopenKeys(
   caller: Caller,
   run: { id: string; credentials: Run["credentials"] },
 ) {
-  if (run.credentials !== "own") return null;
+  if (run.credentials === "voluma") return null;
   if (!caller.keys)
     throw new HTTPException(403, {
       message:

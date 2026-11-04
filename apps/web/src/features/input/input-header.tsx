@@ -208,7 +208,7 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
         "Not recorded yet"
       ),
     ],
-    ["Keys", run.credentials === "own" ? "The starter's own" : "Voluma's"],
+    ["Keys", run.credentials !== "voluma" ? "The starter's own" : "Voluma's"],
     ["Failed agents", failed > 0 ? String(failed) : "None"],
     [
       "Gateway requests",
@@ -307,7 +307,7 @@ export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string;
   if (
     state.status === "ended" &&
     state.outcome === "completed" &&
-    run.credentials === "own" &&
+    run.credentials !== "voluma" &&
     run.cannotMessage === null
   )
     return <ReopenKeys userId={userId} />;

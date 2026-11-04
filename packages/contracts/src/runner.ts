@@ -13,20 +13,16 @@
  * anyway (expired leases), a poll holds no
  * connection or in-memory wake-up on the API, and a run lasts minutes, so two
  * seconds of pickup delay costs nothing. Every run is created `queued` and
- * only a claim starts it (`run.ts`). `claim` is atomic: it picks the oldest
- * `queued` run the org's limits allow (an own-key run skips the runs-at-once
- * count, and is taken only while the server holds its keys), choosing across
- * orgs so one org's queue never holds another's back: among each org's oldest
- * claimable run, it takes the one whose org was claimed from least recently
- * (from the runs' stored claim times, never from an API process's memory);
- * ties go to the older run. It moves it to
- * `running`, and takes the lease. A run's `startedAt` is its first claim's
- * time; a re-claim keeps it. Taking the
+ * only a claim starts it (`run.ts`). `claim` is atomic: it takes the first `queued` run in the queue order
+ * (`queueOrder`, `apps/api/src/domains/run/pg-runs.ts`) that the caps allow: runs
+ * running at once over every account, one slot for own-key runs, and an organization's
+ * limits for a Voluma-key run. It moves it to `running`, and takes the lease. A run's
+ * `startedAt` is its first claim's time; a re-claim keeps it. Taking the
  * run is what starts it, so the runner reports no "running". `claim` answers
- * `{ claim: null }` when there is nothing to start. For an own-key run the
- * response is the only place the keys go and the server forgets them as it
- * answers. A response lost on the way costs that run its keys, which the lease
- * below recovers like any other lost keys.
+ * `{ claim: null }` when there is nothing to start. An own-key run's keys are sealed
+ * in its row for its life; the claim response opens them for the runner, and an
+ * ended run's row loses them. Keys that cannot be opened (a rotated secret) move the run
+ * to `awaiting-keys` until the browser resends them.
  *
  * Lease. A claim is a lease on the run for `LEASE_SECONDS` from the server's
  * last heartbeat for it. The holder (`runnerId`), the lease token, the expiry
@@ -175,7 +171,7 @@ export const claimSchema = z
     /** Present on every claim after the run's first: why the previous claim ended. */
     previousClaim: z.object({ reason: claimEndReasonSchema }).optional(),
   })
-  .refine((c) => (c.run.credentials === "own") === (c.keys !== undefined), {
+  .refine((c) => (c.run.credentials !== "voluma") === (c.keys !== undefined), {
     path: ["keys"],
     message: "keys go with an own-key run and no other",
   });

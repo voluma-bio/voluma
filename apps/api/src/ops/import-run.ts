@@ -48,7 +48,7 @@ function revive<T extends PgTable>(table: T, row: unknown): T["$inferInsert"] {
  * rows and `studyInputs` the input rows. Delete once no old dump remains (apps/api/.context/TODO.md).
  */
 function readOldDump(json: Record<string, unknown>) {
-  // Dumps made before `credentials: "visitor"` became `"own"` (migration 0031).
+  // Dumps made before `credentials: "visitor"` became `"own"` (migration 0031); delete with step 3 of the rename (apps/api/.context/TODO.md).
   const run = json.run as { credentials?: string };
   if (run.credentials === "visitor") run.credentials = "own";
   if (!("studyScans" in json)) return json;

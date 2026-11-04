@@ -66,7 +66,7 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   There is no internet. The image is a public GHCR image pinned by digest (`SANDBOX_IMAGE` in
   `apps/runner/src/config.ts`), built by the "Sandbox image" workflow from
   `apps/runner/sandbox/Dockerfile`, which installs `workflows/core/requirements.txt`,
-  so every sandbox, a visitor's too, pulls the same one. Every command runs
+  so every sandbox, a guest's too, pulls the same one. Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.

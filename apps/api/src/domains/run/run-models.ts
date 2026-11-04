@@ -63,7 +63,7 @@ export function pickModel(
     throw new HTTPException(400, {
       message: `${requested} is not a model you can pick here. Choose one of: ${CHOICES.map((c) => c.label).join(", ")}.`,
     });
-  if (choice.needsVolumaKey && credentials === "own")
+  if (choice.needsVolumaKey && credentials !== "voluma")
     throw new HTTPException(400, {
       message: `${choice.label} runs only on Voluma's key, not your own. Choose another model or use Voluma's key.`,
     });
