@@ -3,7 +3,7 @@
   uv run --group release modal deploy serve.py                         # app "plate-serve"
   PLATE_SERVE_APP=plate-serve-dev uv run --group release modal deploy serve.py
 
-Runs don't call it yet (.context/TODO.md). README "Serving" has the request, the response and the costs.
+Runs don't call it yet (.context/TODO.md). README "Serving on Modal" has the request, the response and the costs.
 
 Input, the training convention (scans.py): the tibia grid's HU volume and its tibia mask, axes (W, V, U), 10.5 µm voxels; a
 coronal section is vol[:, V, :] (rows W, low W = the joint side, columns U). Either the request body is an .npz with `hu` (any
@@ -13,10 +13,11 @@ vote.py; ignored with one checkpoint), `sections` (comma list of V, default ever
 THRESHOLD by recipe).
 
 Response, an .npz: V; per checkpoint <name>.mask (n, W, U) the detector's mask (the region, or the band for a band model),
-<name>.region (the region; a band model's through band_to_region.band_regions), <name>.cut (n, W, U) the region's cut-side
-boundary (cutline.cut_boundary, what score.py measures) and, for a band model, <name>.top / <name>.bottom (n, U) the proximal
-and distal face rows W per column (NaN: no face; faces.band_faces); with a vote, vote.region and vote.cut. `meta` is a JSON
-string: the options, each checkpoint's recipe, a band model's cut lines {name: {V: [[w, u], ...]}}, and timings.
+<name>.region (the region; a band model's cut on the faces' midline by band_to_region.band_regions), <name>.cut (n, W, U) the
+region's cut-side boundary (cutline.cut_boundary, what score.py measures) and, for a band model, <name>.top / <name>.bottom
+(n, U) the proximal and distal face rows W per column (NaN: no face; faces.band_faces); with a vote, vote.region and vote.cut.
+`meta` is a JSON string: the options, each checkpoint's recipe and threshold, a band model's cut lines {name: {V: [[w, u], ...]}},
+the GPU, and timings.
 
 The base SAM 3.1 weights and the checkpoints load once per container (@modal.enter): one model, each checkpoint's trained
 tensors swapped in per request (they all share the LoRA rank and tensor names). Checkpoints come from the plate-finetune volume,
@@ -62,7 +63,7 @@ with image.imports():
 
 
 @app.cls(gpu=GPU, volumes={"/vol": vol}, secrets=[modal.Secret.from_name("plate-serve-r2")],
-         env={"PLATE_SERVE_APP": APP, "PLATE_CKPT_SOURCE": CKPT_SOURCE, "PLATE_HF_REPO": HF_REPO}, cpu=4, memory=32768,
+         env={"PLATE_SERVE_APP": APP, "PLATE_CKPT_SOURCE": CKPT_SOURCE, "PLATE_HF_REPO": HF_REPO}, cpu=4, memory=16384,
          min_containers=0, scaledown_window=120, timeout=1800)
 class Plate:
     @modal.enter()

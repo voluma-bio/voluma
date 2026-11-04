@@ -124,6 +124,78 @@ vote is 29.0 vs L33's 32.1 µm on OA6-11RK and 29.9 vs 29.5 on OA6-5RK. That is 
 column by interpolation, where L33 took the median of the rows the path crosses there. With L33's rule this code gives L33's
 validation numbers too (OA8-21L 52.5 vs 52.3 µm, the scan with the mask difference).
 
+## Serving on Modal
+
+`serve.py` puts the model behind one web endpoint on a Modal GPU. Voluma runs don't call it yet; wiring it into runs is in
+[.context/TODO.md](.context/TODO.md). It runs the same code as the scripts above (`predict_vol`, `band_to_region.band_regions`,
+`faces.band_faces`, `vote.vote`), so its output follows any change to them.
+
+Deploy (from this directory; the app name defaults to `plate-serve`):
+
+```sh
+PLATE_SERVE_APP=plate-serve-dev uv run --group release modal deploy serve.py
+```
+
+It needs the `plate-finetune` volume (SAM 3.1 weights at `/weights/`, checkpoints under `/runs/`, as `modal_train.py` writes
+them) and a Modal secret `plate-serve-r2` holding `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET`.
+To load checkpoints from Hugging Face instead, deploy with `PLATE_CKPT_SOURCE=hf PLATE_HF_REPO=<owner>/<repo>`; it fetches
+`<name>.pt` as `upload_weights.py` names them. The base SAM 3.1 weights still come from the volume.
+
+The endpoint requires Modal proxy auth: every request sends `Modal-Key` and `Modal-Secret` headers from a workspace proxy
+token (Modal dashboard, Settings, Proxy Auth Tokens; or `modal.Workspace.from_context().proxy_tokens.create()`). A request
+without them gets 401.
+
+```sh
+U=https://<workspace>--plate-serve-dev-plate-predict.us-east.modal.run
+# a grid in R2 (keys must start with dev/), the release recipe: 3 band seeds at threshold 0.3, voted
+curl -s -H "Modal-Key: $KEY" -H "Modal-Secret: $SECRET" --data '' -L -o out.npz \
+  "$U?hu_key=dev/plate-serve-test/OA8-19L/tibia-hu.npy&mask_key=dev/plate-serve-test/OA8-19L/tibia-mask.npy&sections=34,46,64"
+# or the grid in the body: an .npz with hu and mask, here one checkpoint and no vote
+curl -s -H "Modal-Key: $KEY" -H "Modal-Secret: $SECRET" --data-binary @grid.npz -L -o out.npz "$U?ckpt=band-s0&vote=off"
+```
+
+Use `-L` and don't force `-X POST` when sending a body: a request longer than 150 s answers with a 303 redirect to its result,
+which curl follows with GET only when the method isn't forced.
+
+- **Input:** the tibia grid in the training convention (`scans.py`): `hu` the HU volume and `mask` the tibia mask, same shape,
+  axes (W, V, U), 10.5 µm voxels. A coronal section is `hu[:, V, :]`: rows W with the joint side at low W, columns U.
+- **Options** (query string): `ckpt`, a comma list from `region-s0..2` (recipe A, `l29-a-s*`) and `band-s0..2` (`l32-band-s*`),
+  default the three band seeds; `vote` = `abstain` (default), `all` or `off`, as `vote.py`; `sections`, a comma list of V,
+  default every section; `threshold`, default 0.3 for band checkpoints and 0.5 for region ones.
+- **Output:** an .npz. `V`; per checkpoint `<name>.mask` (the detector's mask), `<name>.region` (the IIOC region; for a band
+  model, cut on the faces' midline), `<name>.cut` (the region's cut-side boundary voxels, what `score.py` measures), and for a
+  band model `<name>.top` and `<name>.bottom` (face row W per column U, NaN where there is none); with a vote, `vote.region` and
+  `vote.cut`. Masks are (n, W, U) bool. `meta` is a JSON string with each checkpoint's recipe and threshold, the band cut lines
+  `{name: {V: [[w, u], ...]}}`, the GPU and the timings. Plateau pieces and a reviewer's not-visible ranges are unknown on a new
+  scan, so a band region is cut without them; `band_to_region.py` uses them when the scan has them.
+
+Measured on OA8-19L (A10 or A10G; Modal picks A10 or L40S):
+
+| Call | Wall time | Cost |
+|---|---|---|
+| 14 sections, 3-seed vote, warm | 22 s (predict 3.2 s and post-processing 2.6 s per seed, R2 read 3–15 s) | $0.01 |
+| 14 sections, one seed, warm | 17 s | $0.007 |
+| same, cold (no container running) | +22 s: container start and loading SAM 3.1 plus 6 checkpoints (11 s) | +$0.01 |
+| whole scan (301 sections), one seed | 133 s | $0.06 |
+| whole scan, 3-seed vote | 380 s | $0.16 |
+
+Cost is the container's time at $1.55 an hour (A10G $1.10, 4 CPU cores, 16 GiB). A container stays up 120 s after its last
+call (`scaledown_window`), which adds up to $0.05 to an isolated call. A 194 MB grid sent in the body takes 8–15 s to upload
+from a home connection; an R2 key avoids that.
+
+No container runs between calls (`min_containers=0`). To keep one warm, about $1.55 an hour or $37 a day on an A10G:
+
+```sh
+uv run --group release python -c "import modal; modal.Cls.from_name('plate-serve-dev', 'Plate')().update_autoscaler(min_containers=1)"
+```
+
+and `min_containers=0` to stop paying. `modal app stop plate-serve-dev` removes the app.
+
+On the same checkpoint, the served band masks differ from `predict.py` on an RTX 3090 by 44–139 of 16–27 thousand voxels
+per seed (bf16 on a different GPU), and the 3-seed vote scores the same: 16.4 µm on OA8-19L, served and local. On the same
+mask the server's post-processing equals the local one, except that on Modal's A10 machines (not A10G) the skeleton path
+breaks a tie differently on 2 of 14 sections, moving the region by 8 voxels.
+
 ## Files
 
 | Step | Script | Library |
@@ -134,6 +206,7 @@ validation numbers too (OA8-21L 52.5 vs 52.3 µm, the scan with the mask differe
 | predict | `predict.py` | |
 | band to line to region | `band_to_region.py` | |
 | vote, score | `vote.py`, `score.py`, `faces.py` | |
+| serve | `serve.py` (Modal web endpoint) | |
 | publish | `dataset_r2.py`, `upload_weights.py` | |
 
 Ruff runs on this directory in `pnpm check` (`project.json`); there are no tests.
