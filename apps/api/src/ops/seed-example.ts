@@ -147,6 +147,8 @@ await db.transaction(async (tx) => {
     notes: src.run.notes ?? null,
     inputId: reference.id as string,
     credentials: "voluma",
+    model: src.run.model,
+    harness: src.run.harness,
     example: true,
     state: "ended",
     outcome: "completed",

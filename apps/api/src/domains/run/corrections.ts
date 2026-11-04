@@ -151,6 +151,18 @@ export async function messageRefusal(
     };
   // Only a run on Voluma's keys is left here, and a guest has none of their own to reopen it on.
   if (caller.guest) return { status: 403, message: GUEST_KEYS_MESSAGE };
+  // A converted run (it holds the outputs the conversion wrote) keeps the workflow files of its
+  // task-loop days, which the runner can no longer load; it goes with the snapshot fallback's deletion.
+  const [converted] = await tx
+    .select({ id: events.id })
+    .from(events)
+    .where(and(eq(events.runId, run.id), eq(events.id, `convert:${run.id}:outputs`)));
+  if (converted)
+    return {
+      status: 409,
+      message:
+        "This run was converted from an earlier version of Voluma and can't be reopened yet.",
+    };
   // A run takes the researcher's words while it goes: the claim pulls them in.
   if (run.state === "queued" || run.state === "running") return null;
   if (run.state !== "ended" || run.outcome !== "completed")

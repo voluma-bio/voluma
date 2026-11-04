@@ -26,12 +26,8 @@ import {
   silentMinutes,
   stalledMinutes,
 } from "@voluma/contracts/agents";
-import { refuseOutputsChange } from "@voluma/contracts/final-outputs";
-import {
-  labelMapsOf,
-  type OutputCatalog,
-  type OutputEntry,
-} from "@voluma/contracts/output-catalog";
+import { openingChange, refuseOutputsChange } from "@voluma/contracts/final-outputs";
+import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "@voluma/contracts/thread-records";
@@ -160,16 +156,6 @@ interface AgentLoopOptions {
 }
 
 const BASH_NOTICE: UserSender = { kind: "runtime", notice: true };
-
-/** The run's opening final outputs: the selected ones, or the catalog's `selectable` entries when none were chosen. */
-export function openingOutputs(
-  catalog: readonly OutputEntry[],
-  selected: readonly string[] | undefined,
-) {
-  return selected
-    ? catalog.filter((e) => selected.includes(e.id))
-    : catalog.filter((e) => e.selectable);
-}
 
 export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, threads } = o;
@@ -343,15 +329,9 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   }
 
   async function startup() {
-    const entries = openingOutputs(o.catalog, o.selectedOutputs);
+    const change = openingChange(o.catalog, o.selectedOutputs);
     const id = `${root}:outputs`;
-    if (entries.length > 0 && !derive().written.has(id)) {
-      const change = {
-        by: "runner" as const,
-        reason: "The outputs the researcher chose for this run.",
-        add: entries,
-        labels: labelMapsOf(o.catalog),
-      };
+    if (change && !derive().written.has(id)) {
       const why = refuseOutputsChange(undefined, change, o.catalog);
       if (why) throw new Error(`the run's opening outputs were refused: ${why}`);
       await recorder.append(root, "outputs.changed", change, id);

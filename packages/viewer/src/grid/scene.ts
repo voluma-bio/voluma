@@ -19,7 +19,7 @@ export type GridMark = MarkShape;
 export type ProbeValue = NonNullable<Extract<GridMark, { point: unknown }>["probe"]>;
 
 /** What a marking gesture makes; none is the viewer's own navigation. Probe reads values and keeps a point on click. */
-export type MarkTool = "point" | "box" | "line" | "angle" | "outline" | "probe";
+export type MarkTool = "point" | "box" | "line" | "angle" | "outline" | "path" | "probe";
 
 /** A mark as drawn: the person's own in `--mark-mine`, the AI's dashed in `--mark-ai`. */
 export type ShownMark = {

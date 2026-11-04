@@ -13,7 +13,7 @@ import {
   markPoints,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler } from "lucide-react";
+import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler, Spline } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
@@ -110,6 +110,7 @@ export const TOOLS: Tool[] = [
   { value: "line", label: "Ruler", keys: ["l"], letter: "R", icon: <Ruler /> },
   { value: "angle", label: "Angle", keys: ["a"], letter: "A", icon: <Angle /> },
   { value: "outline", label: "Outline", keys: ["o"], letter: "O", icon: <Lasso /> },
+  { value: "path", label: "Line, drawn freehand", keys: ["d"], letter: "L", icon: <Spline /> },
   { value: "probe", label: "Probe", keys: ["i"], letter: "P", icon: <Pipette /> },
 ];
 
@@ -124,7 +125,9 @@ const kindOf = (mark: GridMark): MarkTool =>
         ? "line"
         : "angle" in mark
           ? "angle"
-          : "outline";
+          : "path" in mark
+            ? "path"
+            : "outline";
 
 /** A new mark's tag: its tool's letter and the next number for that letter. */
 function nextTag(tags: readonly string[], mark: GridMark): string {

@@ -187,8 +187,22 @@
     {
       "idx": 26,
       "version": "7",
-      "when": 1793746142144,
-      "tag": "0026_drop_review_snapshots",
+      "when": 1793751310653,
+      "tag": "0026_convert_task_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793754910653,
+      "tag": "0027_drop_review_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793758510653,
+      "tag": "0028_convert_task_runs_again",
       "breakpoints": true
     }
   ]

@@ -174,6 +174,17 @@ export const labelMapsOf = (catalog: readonly OutputEntry[]): Record<string, str
     catalog.flatMap((e) => (e.kind === "overlay" && e.label ? [[e.id, e.label.of]] : [])),
   );
 
+/** The shapes the review converter reads from a `.npy` (`detail.as`); a point or line has no array. */
+const CONVERTED_SHAPES = new Set<string>(["labels", "mask", "surface"]);
+
+/** How the review converter reads a listed output's file (`detail.as`), where the catalog fixes it. */
+export const convertedAs = (entry: OutputEntry): string | undefined =>
+  entry.kind === "base"
+    ? "image"
+    : entry.kind === "overlay" && entry.shape && CONVERTED_SHAPES.has(entry.shape)
+      ? entry.shape
+      : undefined;
+
 /** The ids `entry` links to, for the cycle check. */
 function linksOf(entry: OutputEntry): string[] {
   switch (entry.kind) {

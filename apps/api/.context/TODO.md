@@ -1,5 +1,9 @@
 # TODO
 
+- **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
+  (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event, because
+  its R2 snapshot is the task loop's. Delete that lookup once the deletion PR's snapshot fallback
+  is live and the 7 old `.snapshot-done` markers are deleted ([convert-task-runs.md](convert-task-runs.md)).
 - **Reconcile abandoned provider calls before archiving their runs.** Archive now refuses
   calls without a completed settlement (`duration_ms IS NULL`), including swept `cut` rows.
   Late settlement is preserved; genuinely settled unknown-cost calls remain archivable.
@@ -49,5 +53,4 @@
 - **Heartbeat after cancel drops usage.** A heartbeat that arrives after the run is cancelled does not add its cost to `runs.model_cost_usd`, so the org spend limit undercounts that tail. Decide whether the cancel path should accept a final usage report.
 - **Delete `POST /ingest/runs/:id/live`** (`domains/run/ingest.ts`), accepted and dropped for runners built before live frames were deleted; once none is live.
 - **Drop the task loop's deploy-overlap leftovers** once no runner or API built before "Delete the task loop" is live: the claim's `harnesses` field (`packages/contracts/src/runner.ts`, `adapters/http/hand-off.ts` in the runner, `ingest.ts`), the `runs.harness` column (`domains/run/schema.ts`, written `agents` by `startRuns` in `pg-queue.ts`) and its migration. `thread.started.harness` in stored events is stripped by the parser; no migration is needed.
-- **After `jimyao/convert-task-runs` merges** (`ops/convert-task-runs.ts`, `drizzle/00NN_convert_task_runs.sql`): merge `origin/main`, delete the converter, and add a migration that re-runs the generic tail of that migration (stored events written by task-loop runs still live during the overlap).
 - **One "may use Voluma's key" rule.** `caller.guest` (`GUEST_KEYS_MESSAGE` in `pg-queue.ts` and `corrections.ts`, `runs.ts`) and the `limits.voluma` map (`no-key` in `admission.ts`) both decide whether a caller has Voluma's key. Replace `caller.guest` with one flag and fold it into `no-key`.
