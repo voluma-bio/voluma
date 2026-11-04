@@ -109,6 +109,8 @@
       /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (segmentation) describes.
     - The file reported is the one finish_labels.py wrote, with its check record cited as evidence;
       each flag the record accepts names the To check item that holds it, or why it is no fault.
+    - "An earlier version reported straight after the SAM merge, with the To check item 'Not yet checked:
+      finish_labels.py pending', is a preview for the researcher: no step starts from it or cites it in madeFrom."
 
 - id: disagreement
   kind: overlay
