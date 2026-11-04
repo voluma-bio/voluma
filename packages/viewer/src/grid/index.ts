@@ -10,6 +10,7 @@ export {
   type QuadView,
   QuadViewer,
   type QuadViewerHandle,
+  type SavedViewEntry,
 } from "./QuadViewer";
 export {
   type Blocks,

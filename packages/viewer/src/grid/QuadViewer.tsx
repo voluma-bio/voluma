@@ -6,7 +6,7 @@
  * between grid cells, so a swap, a layout change or full screen keeps its camera, zoom and loaded
  * data. The tool bar is docked under the panes: the caller's tools on the left; how far the
  * planes are turned (or, on the grid's axes, the grid's name), Align, Turn, Reset, the window,
- * the 1/2/4 layout and Save view on the right; tools, Planes and Contrast are icons named by their tooltips.
+ * the 1/2/4 layout and Views (save this view, open a saved one) on the right; tools, Planes and Contrast are icons named by their tooltips.
  *
  * The three planes turn together (`frame.ts`): tilted by hand from the dots at their crosshair
  * lines' ends, spun by turning one pane's image in place (Alt-drag or `,` `.` in it, or Turn's
@@ -19,10 +19,21 @@
  * catalog entry gives (`planes`), a tilted one by the grid plane nearest it, else left uncoloured.
  */
 import { type Anatomy, unitAsWritten } from "@voluma/contracts/output-catalog";
-import { Button, cx, IconButton, Menu, MenuItem, Popover } from "@voluma/ui";
+import {
+  Button,
+  cx,
+  IconButton,
+  Menu,
+  MenuHeader,
+  MenuItem,
+  MenuSeparator,
+  Popover,
+} from "@voluma/ui";
 import {
   Axis3d,
   Bookmark,
+  BookmarkPlus,
+  Check,
   ChevronDown,
   Columns2,
   Grid2x2,
@@ -129,6 +140,18 @@ export type PlaneTarget = {
   load?(): Promise<{ normal: Vec3 } | { axes: readonly [Vec3, Vec3, Vec3] }>;
 };
 
+/** A saved view as the Views menu lists it: what it is of, which and when, and opening it. */
+export type SavedViewEntry = {
+  id: string;
+  /** What it was saved of ("Bone labels"). */
+  title: string;
+  /** Which of its views and when ("View 2 · 12:52"). */
+  detail: string;
+  /** The view the panes were last set to. */
+  shown: boolean;
+  open(): void;
+};
+
 /** Everything a saved view holds, as the viewer keeps it (`saved-view.ts` stores it). */
 export type QuadState = {
   orientation: Orientation;
@@ -231,6 +254,9 @@ export function QuadViewer({
   onReady,
   targets = [],
   onSave,
+  views,
+  onRestored,
+  viewError,
   restore,
   ref,
 }: {
@@ -267,10 +293,15 @@ export function QuadViewer({
   onReady?(ready: boolean): void;
   /** What Align offers; a target with a `code` is also the GP view. */
   targets?: readonly PlaneTarget[];
-  /** Saves the view as it is now; absent, no Save view. */
+  /** Saves the view as it is now; absent, no Save this view. */
   onSave?(state: QuadState): void;
-  /** A saved view to show: each new object is applied once. */
+  /** The run's saved views, listed under Views beside Save this view. */
+  views?: readonly SavedViewEntry[];
+  /** A saved view to show: each new object is applied once, then `onRestored`. */
   restore?: QuadState;
+  onRestored?(): void;
+  /** Why a view couldn't be saved or opened. */
+  viewError?: string;
   ref?: Ref<QuadViewerHandle>;
 }) {
   const [point, setPoint] = useState<Zyx>(
@@ -399,6 +430,8 @@ export function QuadViewer({
     if (restore.contrast) setContrast(restore.contrast);
     onLayout(restore.layout);
     setRestoring(restore);
+    // Applied: a viewer mounted later (back from a file or list output) must not apply it again.
+    onRestored?.();
   }, [restore]);
   // GP mounts once its plane is fitted; its saved view waits for it while GP is shown.
   useEffect(() => {
@@ -633,7 +666,7 @@ export function QuadViewer({
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background" aria-label="Views">
-      {(notes.length > 0 || contrastError || alignError || plateError) && (
+      {(notes.length > 0 || contrastError || alignError || plateError || viewError) && (
         <div className="grid gap-1 px-3 py-2 text-xs text-muted-foreground">
           {notes.map((note) => (
             <p key={note}>{note}</p>
@@ -646,6 +679,11 @@ export function QuadViewer({
           {alignError && (
             <p className="text-destructive" role="alert">
               {alignError}
+            </p>
+          )}
+          {viewError && (
+            <p className="text-destructive" role="alert">
+              {viewError}
             </p>
           )}
           {plateError && (
@@ -947,11 +985,38 @@ export function QuadViewer({
             </IconButton>
           ))}
         </fieldset>
-        {onSave && (
-          <Button size="sm" onClick={save}>
-            <Bookmark aria-hidden />
-            Save view
-          </Button>
+        {(onSave || !!views?.length) && (
+          <Menu
+            align="end"
+            className="w-72"
+            trigger={
+              <Button size="sm" variant="ghost">
+                <Bookmark aria-hidden />
+                Views
+                <ChevronDown aria-hidden />
+              </Button>
+            }
+          >
+            {onSave && (
+              <MenuItem icon={<BookmarkPlus />} onSelect={save}>
+                Save this view
+              </MenuItem>
+            )}
+            {onSave && <MenuSeparator />}
+            <MenuHeader>Saved views</MenuHeader>
+            {views?.length ? (
+              views.map((v) => (
+                <MenuItem key={v.id} icon={v.shown ? <Check /> : <span />} onSelect={v.open}>
+                  <span className="grid min-w-0 flex-1">
+                    <span className="truncate">{v.title}</span>
+                    <span className="text-fg-subtle text-xs">{v.detail}</span>
+                  </span>
+                </MenuItem>
+              ))
+            ) : (
+              <MenuItem disabled>None yet</MenuItem>
+            )}
+          </Menu>
         )}
       </div>
     </section>

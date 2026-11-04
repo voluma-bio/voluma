@@ -83,7 +83,7 @@ about (as `trail` unless it is the value) and frames the panes on its region; it
 so Back returns to the item before. Reports and items are `version-report.tsx`.
 
 The centre has no bar of its own: a chip (`SceneChip`) names the output in view, its value and its
-status (the waiting one a button to the checks), with the saved views menu, only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
+status (the waiting one a button to the checks), only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
 the top-left pane's corner (`QuadViewer`'s `heading`), under the viewer's notes, which stay in the
 flow above the panes; over a file, a list, an empty centre or a grid still preparing it sits above,
 in the flow. The whole run gets a bar with the way back. Delete mark and Undo delete
@@ -119,8 +119,10 @@ They have no command-key bindings. Point notes have no editor or display; old st
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.
 Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
-(`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene chip's
-"Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
+(`POST /api/review/runs/:runId/views`). The viewer bar's Views menu holds Save this view and
+every view saved in the run, of any output, each named with its output and time; picking one opens
+that output (`show`) and the view on its grid (#594: the old menu only showed the in-view output's
+views, and only while Final outputs was folded). The trail's data is `@voluma/run-view`
 `outputs-trail.ts`.
 
 ### Talking to main (`main-conversation.tsx`, `use-main-message.ts`)
