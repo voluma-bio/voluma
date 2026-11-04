@@ -11,8 +11,9 @@
   on the guest organization's total, or a per-IP limit on minting guests.
 - **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
   (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event. The
-  snapshot is no longer the blocker (the old `.snapshot-done` markers are gone, so a reopen re-cuts it,
-  and the pin check passes: 0026 renamed the pin). The log is. Lifting only the refusal, on a local
+  snapshot is no longer the blocker (a run with no `.snapshot-done` marker re-cuts it on claim, and
+  the pin check passes: 0026 renamed the pin). The log is. ce5a0f21's marker was re-written on
+  2026-11-04 by the local reopen below (commit `b8a0237b`), so delete it again before relying on that. Lifting only the refusal, on a local
   copy of ce5a0f21 (2026-11-04), gave a failed correction: `pinOf` (`packages/harness/src/supervise-run.ts`)
   throws "made by an older version", because the root `thread.started` has no `sandboxImage` and its id
   is `<runId>.supervisor`, not `threadIdOf(runId, ROOT_NAME)`. With `pinOf` also relaxed, the claim
@@ -24,7 +25,11 @@
   root `thread.started`, not deriving it, in `superviseRun`, `pinOf` and the loop's `${root}:outputs`;
   no image pin for a root that recorded none; and a review main that starts with a handover when no
   main came before it (`startMain`/`handoverOf` in `packages/harness/src/loop.ts`, `NO_SUMMARY`).
-  Check it with a local reopen of `import:run --from r2:dev/runs/ce5a0f21-c948-4e20-a03f-04ff7f0e707b`.
+  Check it with a local reopen of `import:run --from r2:dev/runs/ce5a0f21-c948-4e20-a03f-04ff7f0e707b`,
+  first setting the local copy's `runs.model` to `deepseek/deepseek-flash`: a reopen keeps the run's
+  stored model, `RUN_MODEL_OVERRIDE` applies only at creation, and with none stored the runner falls
+  back to its default model. The imported run keeps its id, so the local runner writes
+  `runs/<id>/…` keys that staging's copy also reads (#564).
 - **Reconcile abandoned provider calls before archiving their runs.** Archive now refuses
   calls without a completed settlement (`duration_ms IS NULL`), including swept `cut` rows.
   Late settlement is preserved; genuinely settled unknown-cost calls remain archivable.
