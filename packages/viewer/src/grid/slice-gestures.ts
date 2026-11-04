@@ -583,8 +583,15 @@ export function useSliceGestures(args: {
       const by = { Comma: -1, Period: 1 }[event.code];
       const { onSpin } = latest.current;
       if (by === undefined || !onSpin || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.defaultPrevented || event.isComposing) return;
       const target = event.target as Element;
-      if (target.closest?.("input, textarea, select, [contenteditable]")) return;
+      // Typing, or a key meant for an open dialog or menu, never turns a pane behind it.
+      if (
+        target.closest?.(
+          "input, textarea, select, [contenteditable], dialog, [role='dialog'], [role='menu']",
+        )
+      )
+        return;
       const owner =
         document.querySelector("[data-slice-pane]:hover") ?? target.closest?.("[data-slice-pane]");
       if (owner !== element) return;
