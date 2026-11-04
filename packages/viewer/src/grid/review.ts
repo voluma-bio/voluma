@@ -1,8 +1,10 @@
 /**
  * The grid an output is shown on in review, and what the viewer draws there, from the run's published blocks: blocks share a grid when their volumes
  * share a `gridId`, and every position comes from the run (crop offsets, the volume's own affine).
- * Nothing is aligned or resampled here, and a block on another grid is listed, never drawn.
- * Every output shows the run's labels on its grid as context, with its own blocks over them in
+ * Nothing is resampled here, and a block on another grid is listed, never drawn, with one
+ * exception: a grid with no labels of its own (the aligned tibia grid) shows the scan's label
+ * meshes in 3D, moved rigidly through the two grids' affines (`placement`).
+ * Every output shows the run's labels as context, with its own blocks over them in
  * `--output` and the focused check's in `--check-outline`.
  */
 import type {
@@ -118,8 +120,11 @@ export function reviewGrid({
   const check = { color: token("--check-outline"), opacity: 1, outline: true };
   // What the subject itself shows, over the context: in `--output`, outlined in slices.
   const own = (id: string) => (focused.has(id) ? check : { ...check, color: token("--output") });
-  const labelColour = (label: number) =>
-    token(showLabels ? `--label-${((label - 1) % 12) + 1}` : "--bone");
+  const contextLook = (label: number) => ({
+    color: token(showLabels ? `--label-${((label - 1) % 12) + 1}` : "--bone"),
+    opacity: 1,
+    outline: false,
+  });
   const overlays: Overlay[] = [];
   const meshes: GridMesh[] = [];
   // Meshes of the context labels: see-through once the subject has its own meshes inside them.
@@ -130,6 +135,7 @@ export function reviewGrid({
     name: string,
     offsetZyx: Zyx,
     look: { color: string; opacity: number },
+    placement?: GridMesh["placement"],
   ): GridMesh => ({
     id: `${sha256}/${m.path}`,
     name,
@@ -137,6 +143,7 @@ export function reviewGrid({
     vertices: m.vertices,
     indices: m.indices,
     offsetZyx,
+    placement,
     color: look.color,
     opacity: look.opacity,
   });
@@ -144,15 +151,25 @@ export function reviewGrid({
   // The run's segmentation is context on every output: the labels volume on this grid that the
   // most label structures point into. A run can have several (bone labels and a smaller
   // compartments volume); the one naming the most structures is the anatomy, the earliest on a tie.
-  const labelCounts = new Map<Volume, number>();
-  for (const s of revision.structures) {
-    const volume = s.volumeId ? volumes.get(s.volumeId) : undefined;
-    if (volume?.kind === "labels" && volume.gridId === gridId && s.voxels && "label" in s.voxels)
-      labelCounts.set(volume, (labelCounts.get(volume) ?? 0) + 1);
-  }
-  let context: Volume | undefined;
-  for (const [volume, n] of labelCounts)
-    if (!context || n > labelCounts.get(context)!) context = volume;
+  // A grid with none borrows the scan grid's, in 3D only.
+  const contextOn = (grid: string | undefined) => {
+    const counts = new Map<Volume, number>();
+    for (const s of revision.structures) {
+      const volume = s.volumeId ? volumes.get(s.volumeId) : undefined;
+      if (volume?.kind === "labels" && volume.gridId === grid && s.voxels && "label" in s.voxels)
+        counts.set(volume, (counts.get(volume) ?? 0) + 1);
+    }
+    let best: Volume | undefined;
+    for (const [volume, n] of counts) if (!best || n > counts.get(best)!) best = volume;
+    return best;
+  };
+  // Another grid's labels are placed through the two affines. A run whose affines carry only the
+  // spacing (no rotation or origin) gives another grid the scan's very affine: its pose is unknown,
+  // and drawing the scan's labels there would put them in the wrong place, so nothing is borrowed.
+  const scanContext = contextOn(scanGrid);
+  const context =
+    contextOn(gridId) ?? (scanContext && !sameAffine(scanContext, image) ? scanContext : undefined);
+  const placed = context && context.gridId !== gridId ? placement(context, image) : undefined;
 
   // Structures: a named labels volume brings every structure on it, and the context every label.
   const structureIds = new Set(named);
@@ -170,7 +187,7 @@ export function reviewGrid({
   for (const s of structures) {
     const volume = s.volumeId ? volumes.get(s.volumeId) : undefined;
     if (!volume || !s.voxels) continue;
-    if (volume.gridId !== gridId) {
+    if (volume.gridId !== gridId && !(placed && volume === context && !named.includes(s.id))) {
       notes.elsewhere.push(s.name);
       continue;
     }
@@ -191,6 +208,17 @@ export function reviewGrid({
     const sha256 = volume.data.sha256;
     const a = ready(sha256, volume.name);
     if (!a) continue;
+    // Another grid's context: its meshes moved onto this grid, no slice overlay.
+    if (placed && volume === context) {
+      for (const m of a.meshes) {
+        const l = labels.find((x) => x.label === m.label);
+        if (!l) continue;
+        const drawn = mesh(sha256, m, l.name, [0, 0, 0], contextLook(l.label), placed);
+        contextMeshes.add(drawn);
+        meshes.push(drawn);
+      }
+      continue;
+    }
     const wanted = labels
       .filter((l) => focused.has(l.id) || focusedLabel(volume, l.label))
       .map((l) => l.label);
@@ -205,7 +233,7 @@ export function reviewGrid({
           ? check
           : !whole && (named.includes(l.id) || focused.has(l.id))
             ? own(l.id)
-            : { color: labelColour(l.label), opacity: 1, outline: false },
+            : contextLook(l.label),
       ]),
     );
     if (looks.size)
@@ -435,6 +463,27 @@ function focusPoint(
     .map((world) => voxelOf(image, world));
   return middle(points.map((p) => ({ min: p, max: p })));
 }
+
+/**
+ * A rigid move from `from`'s source voxel (x, y, z) to `to`'s, through world mm: `from`'s affine,
+ * then the inverse of `to`'s. Both are spacing times a rotation, so the result is a rotation with
+ * the two grids' spacing ratios and a shift; geometry moves, no voxel is resampled. Row-major 4×4.
+ */
+function placement(from: Volume, to: Volume): number[][] {
+  const xyzOf = (world: readonly number[]) => voxelOf(to, world).reverse();
+  const a = from.affine;
+  const origin = xyzOf([a[0]![3]!, a[1]![3]!, a[2]![3]!]);
+  const columns = [0, 1, 2].map((j) =>
+    xyzOf([0, 1, 2].map((r) => a[r]![j]! + a[r]![3]!)).map((n, i) => n - origin[i]!),
+  );
+  return [
+    ...[0, 1, 2].map((i) => [columns[0]![i]!, columns[1]![i]!, columns[2]![i]!, origin[i]!]),
+    [0, 0, 0, 1],
+  ];
+}
+
+const sameAffine = (a: Volume, b: Volume) =>
+  a.affine.every((row, r) => row.every((n, c) => n === b.affine[r]![c]));
 
 /** World mm to voxel (z, y, x): the affine's columns are orthogonal, so each is a projection. */
 export function voxelOf(volume: Volume, world: readonly number[]): number[] {

@@ -9,7 +9,12 @@ with it (Review imports it lazily).
 
 The run publishes the geometry; the browser aligns nothing. Blocks share a grid when their
 volumes share `gridId`, and a block on another grid is listed under the viewer ("On another grid,
-not shown here"), never resampled onto this one.
+not shown here"), never resampled onto this one. One exception: a grid with no labels of its own
+(the aligned tibia grid) shows the scan grid's context label meshes in 3D, moved rigidly through
+the two volumes' affines (`GridMesh.placement`, a matrix applied to the geometry; no slice overlay).
+It does so only when the two affines differ: the harness publishes spacing-only affines today
+(`report-output.ts` `detailFromSidecar`), which gives every grid the scan's affine and no pose,
+so until that carries `affine_xyz_to_world_mm` nothing is borrowed (`packages/harness/.context/TODO.md`).
 
 - **Which grid.** The grid most of the focused item's `on` blocks and `volumeId` sit on; else the
   grid most of the output's shown blocks sit on; else the scan's grid, the first image volume's. The grid's image is

@@ -27,3 +27,6 @@
 - `QuadViewer` has one-off sizes (`text-[10px]` on the Align menu's code, `rounded-[2px]` on the
   chip swatch), and no story; neither has `NumberField`, which belongs in `@voluma/ui` with a story
   if anything outside the viewer needs it.
+- Borrowed context meshes (`GridMesh.placement`) can reach past the grid's box, while the 3D pane's
+  far plane comes from the grid's bounding sphere (`Grid3D.tsx`, `clip`): the knee's far side may be
+  cut off when the camera pulls back. Grow `clip` with the loaded meshes' bounds.

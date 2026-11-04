@@ -24,6 +24,7 @@ import {
   DoubleSide,
   FrontSide,
   Group,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -526,9 +527,13 @@ export function Grid3D({
           const mesh = new Mesh(geometry, material);
           makePickable(mesh);
           mesh.name = m.id;
-          // Vertices are voxel (x, y, z), in crop voxels for a cropped mask.
-          mesh.scale.set(sx, sy, sz);
-          mesh.position.copy(toWorld(m.offsetZyx));
+          // Vertices are voxel (x, y, z), in crop voxels for a cropped mask: to mm, the crop
+          // offset, then for another grid's mesh its rigid placement onto this grid's voxels.
+          const [oz, oy, ox] = m.offsetZyx;
+          const matrix = new Matrix4().makeScale(sx, sy, sz);
+          if (m.placement) matrix.multiply(new Matrix4().fromArray(m.placement.flat()).transpose());
+          mesh.matrix.copy(matrix.multiply(new Matrix4().makeTranslation(ox, oy, oz)));
+          mesh.matrixAutoUpdate = false;
           paint(mesh, latestMeshes.current.find((l) => l.id === m.id) ?? m);
           t.meshes.add(mesh);
           t.render();
