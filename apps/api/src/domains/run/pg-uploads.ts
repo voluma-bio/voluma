@@ -4,7 +4,7 @@
  * `Reader`, like every other read of an input.
  */
 import type { UploadFile } from "@voluma/contracts/run";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, eq, gt, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { readableInputs, toInput } from "./pg-runs";
@@ -12,29 +12,65 @@ import { inputs } from "./schema";
 
 export function pgUploads(db: PostgresJsDatabase) {
   return {
-    async create(upload: {
-      id: string;
-      labId: string;
-      uploadedBy: string;
-      name: string;
-      files: UploadFile[];
-    }) {
-      await db.insert(inputs).values({ ...upload, source: "upload", status: "uploading" });
-    },
-
-    /** Uploads `userId` created since `since` that are not complete. */
-    async openCount(userId: string, since: Date): Promise<number> {
-      const [row] = await db
-        .select({ n: count() })
-        .from(inputs)
-        .where(
-          and(
-            eq(inputs.uploadedBy, userId),
-            eq(inputs.status, "uploading"),
-            gt(inputs.createdAt, since),
-          ),
+    /**
+     * Creates the upload unless `userId` already has `maxOpen` uploads in progress, or their
+     * stored total plus this scan would pass `capBytes`. Stored bytes are the declared sizes
+     * of their ready uploads; open bytes those of uploads still in progress and created after
+     * `since` (the PUT URL lifetime; complete refuses older ones, so they stop counting
+     * for good). The reference scan is not an upload and never counts. A per-user advisory
+     * lock makes the checks and the insert atomic.
+     */
+    async create(
+      upload: {
+        id: string;
+        labId: string;
+        uploadedBy: string;
+        name: string;
+        files: UploadFile[];
+      },
+      limits: { capBytes: number; maxOpen: number },
+      since: Date,
+    ): Promise<
+      | { ok: true }
+      | { ok: false; reason: "open" }
+      | { ok: false; reason: "cap"; storedBytes: number; openBytes: number }
+    > {
+      return db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`upload-cap:${upload.uploadedBy}`}))`,
         );
-      return row?.n ?? 0;
+        const rows = await tx
+          .select({ files: inputs.files, status: inputs.status })
+          .from(inputs)
+          .where(
+            and(
+              eq(inputs.uploadedBy, upload.uploadedBy),
+              eq(inputs.source, "upload"),
+              or(
+                eq(inputs.status, "ready"),
+                and(eq(inputs.status, "uploading"), gt(inputs.createdAt, since)),
+              ),
+            ),
+          );
+        const sum = (files: UploadFile[]) => files.reduce((n, f) => n + f.size, 0);
+        let storedBytes = 0;
+        let openBytes = 0;
+        let open = 0;
+        for (const r of rows) {
+          const bytes = sum((r.files ?? []) as UploadFile[]);
+          if (r.status === "ready") storedBytes += bytes;
+          else {
+            openBytes += bytes;
+            open += 1;
+          }
+        }
+        if (open >= limits.maxOpen) return { ok: false, reason: "open" };
+        if (storedBytes + openBytes + sum(upload.files) > limits.capBytes) {
+          return { ok: false, reason: "cap", storedBytes, openBytes };
+        }
+        await tx.insert(inputs).values({ ...upload, source: "upload", status: "uploading" });
+        return { ok: true };
+      });
     },
 
     /**
@@ -54,7 +90,12 @@ export function pgUploads(db: PostgresJsDatabase) {
           ),
         );
       return row
-        ? { input: toInput(row), status: row.status, files: row.files as UploadFile[] }
+        ? {
+            input: toInput(row),
+            status: row.status,
+            files: row.files as UploadFile[],
+            createdAt: row.createdAt,
+          }
         : null;
     },
 

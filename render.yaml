@@ -94,6 +94,9 @@ services:
       # the runs running at once over every account (the claim enforces it; one slot at most goes
       # to runs on callers' own keys). No daily limits: those slots and Modal's spend limit bound
       # sandbox spend. Guest sign-in: GUEST_ORGANIZATION_ID in the dashboard (deploy.md).
+      # Total scan storage per person, GB, the same for every account (apps/api/.context/deploy.md).
+      - key: UPLOAD_LIMIT_PER_USER_GB
+        value: "50"
       - key: RUN_LIMITS_LAB_CONCURRENT
         value: "4"
       - key: RUN_LIMITS_JUDGES_CONCURRENT
