@@ -127,7 +127,7 @@
  *   - app-wide, enforced by the claim (a run over a cap just stays `queued`;
  *     nothing is refused): at most `RUN_LIMITS_APP_RUNNING` runs `running`, of which at most one on a
  *     own-key run's own keys;
- *   - own-key runs that haven't ended, over every account: at most 100; a start past it is
+ *   - own-key runs that haven't ended, per starter: at most 20; a start past it is
  *     refused 429;
  *   - for `voluma` runs only: a total model spend per org (the summed model
  *     cost of its runs). A start or reopen at or past it is refused

@@ -68,8 +68,8 @@ import { events, inputs, runs, studies, studyMembers } from "./schema";
  */
 export const QUEUE_LOCK = 0x76_6f_6c_71;
 
-/** Own-key runs that may be unfinished at once over every account; each holds a sealed key in its row. */
-const MAX_OWN_KEY_RUNS = 100;
+/** Runs on one starter's own key that may be unfinished at once; each holds a sealed key in its row. */
+const MAX_OWN_KEY_RUNS = 20;
 
 /** The error of an own-key run whose sealed keys cannot be opened: only a changed `RUN_KEY_SECRET` does that. */
 const KEYS_LOST = "Voluma's key secret changed; start the run again.";
@@ -362,11 +362,16 @@ export function pgRunQueue(
       const [{ open } = { open: 0 }] = await tx
         .select({ open: sql<number>`count(*)::int` })
         .from(runs)
-        .where(and(ne(runs.credentials, "voluma"), ne(runs.state, "ended")));
+        .where(
+          and(
+            eq(runs.startedBy, caller.userId),
+            ne(runs.credentials, "voluma"),
+            ne(runs.state, "ended"),
+          ),
+        );
       if (open + starts.runs.length > MAX_OWN_KEY_RUNS)
         throw new HTTPException(429, {
-          message:
-            "Too many runs on people's own keys are waiting or running. Try again in a few minutes.",
+          message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
         });
     }
     const refused = admit(limits, reader.labId, await spentUsd(tx, reader.labId), {
