@@ -2,8 +2,8 @@
  * One slice pane of the grid viewer: the plane through the crosshair with normal `basis.normal`,
  * drawn by three.js with an orthographic camera in pane mm (`basis.right` across, `basis.down`
  * down). Untilted (the grid's own axes, the default), it reads whole slices of the grid, opening
- * on the coarsest level and refining to the level the zoom needs. Tilted, it is resliced in the
- * browser from the level the 3D pane loads (`reslice.ts`), so it is softer. The gestures (moving
+ * on the coarsest level and refining to the level the zoom needs. Tilted, it does the same, each
+ * picture resliced from the chunks the plane crosses (`reslice.ts`). The gestures (moving
  * the crosshair, stepping, zooming, panning, marking) are `slice-gestures.ts`; `marks.ts` draws
  * the marks. With `onTilt`, the dots near both ends of the other planes' crosshair lines turn
  * those planes about this pane's normal; this pane stays still. Esc drops a mark being drawn.
@@ -39,8 +39,8 @@ import { loadMesh, sliceSegment, surfaceTrace } from "./geometry";
 import { sliceShape, useMarkLayer } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { corners, quad, texture } from "./picture";
-import { holdLevel, type Plane, readPlane } from "./planes";
-import { type Level3, resample, sampling, samplingCorners, valueAt, voxelAt } from "./reslice";
+import { readPlane, readSlice } from "./planes";
+import { onLevel, sampling, samplingCorners } from "./reslice";
 import {
   type Axis,
   capturePane,
@@ -59,7 +59,6 @@ import {
 } from "./scene";
 import { type PaneCamera, type Probe, useSliceGestures } from "./slice-gestures";
 import { tokenColor } from "./token-color";
-import { volumeLevel } from "./volume";
 
 /**
  * The colour token of the plane holding array axis `axis` constant, when the caller gives none:
@@ -506,65 +505,13 @@ export function SlicePane({
     setLevel(levelFor(scene.image.levels, mmPerPixel / Math.min(s[ra], s[ca])));
   }
 
-  // A tilted pane reslices whole levels: the image's that 3D loads, and each overlay's nearest
-  // to it, no finer. Held while the pane is tilted; shared with every pane and the 3D pane.
-  const [volumes, setVolumes] = useState<{
-    image: Level3;
-    scale: number;
-    overlays: Map<string, Level3>;
-  }>();
-  const [volumeError, setVolumeError] = useState<string>();
-  const overlayKey = scene.overlays.map((o) => `${o.base}|${o.levels[0]?.path}`).join("\n");
-  const latestOverlays = useRef(scene.overlays);
-  latestOverlays.current = scene.overlays;
+  // Load the plane through the crosshair at the level the zoom needs: untilted, a whole slice of
+  // the level; tilted, the plane resliced from the level's chunks it crosses. The coarsest level
+  // shows meanwhile, unless the finer one arrives almost as soon (it does from the worker's cache).
   useEffect(() => {
-    if (whole) return;
-    let gone = false;
-    const imageLevel = scene.image.levels[volumeLevel(scene.image.levels)]!;
-    const level3 = (data: Plane, l: typeof imageLevel, offset: Zyx): Level3 => ({
-      data: data.data,
-      shape: l.shapeZyx,
-      scale: l.scaleZyx,
-      offset,
-    });
-    const image = holdLevel(scene.image.base, imageLevel.path);
-    const held = [image];
-    Promise.all([
-      image.read,
-      ...latestOverlays.current.map(async (o) => {
-        const l =
-          o.levels.find((x) => Math.max(...x.scaleZyx) >= Math.max(...imageLevel.scaleZyx)) ??
-          o.levels.at(-1)!;
-        const level = holdLevel(o.base, l.path);
-        held.push(level);
-        return [o.base, level3(await level.read, l, o.offsetZyx)] as const;
-      }),
-    ])
-      .then(([image, ...overlays]) => {
-        if (gone) return;
-        setVolumes({
-          image: level3(image as Plane, imageLevel, [0, 0, 0]),
-          scale: Math.max(...imageLevel.scaleZyx),
-          overlays: new Map(overlays as (readonly [string, Level3])[]),
-        });
-        setVolumeError(undefined);
-      })
-      .catch((cause) => {
-        if (!gone) setVolumeError((cause as Error).message);
-      });
-    return () => {
-      gone = true;
-      for (const level of held) level.release();
-    };
-  }, [whole, scene.image.base, overlayKey]);
-
-  // Untilted: load the slice through the crosshair at the level the zoom needs. The coarsest
-  // level shows meanwhile, unless the finer one arrives almost as soon (it does from the
-  // worker's cache).
-  useEffect(() => {
-    if (!contrast || !whole) return;
+    if (!contrast) return;
     const abort = new AbortController();
-    const load = async (k: number) => {
+    const slice = async (k: number) => {
       const lvl = scene.image.levels[k]!;
       const sc = lvl.scaleZyx[axis];
       const at = levelIndex(index, 0, sc, lvl.shapeZyx[axis]);
@@ -619,15 +566,66 @@ export function SlicePane({
           inside,
         };
       };
-      return { picture, read };
+      return { ...picture, corners: corners(picture).map(toPane), read };
     };
-    // Whether this effect drew a picture of the requested slice; if none, the old one goes.
+    const tilted = async (k: number) => {
+      const lvl = scene.image.levels[k]!;
+      const sc = Math.max(...lvl.scaleZyx);
+      const at = sampling(
+        basis,
+        point,
+        s,
+        scene.shapeZyx,
+        Math.min(...lvl.scaleZyx.map((v, i) => v * s[i]!)),
+      );
+      const overlays = scene.overlays.map(async (overlay) => {
+        // The coarsest overlay level no coarser than the image's (labels never blend).
+        const o =
+          [...overlay.levels].reverse().find((l) => Math.max(...l.scaleZyx) <= sc) ??
+          overlay.levels[0]!;
+        const on = onLevel(at, basis, s, o.scaleZyx, overlay.offsetZyx);
+        return {
+          overlay,
+          values: (await readSlice(overlay.base, o.path, on, true, abort.signal)).data,
+        };
+      });
+      const [image, ...layers] = await Promise.all([
+        readSlice(
+          scene.image.base,
+          lvl.path,
+          onLevel(at, basis, s, lvl.scaleZyx, [0, 0, 0]),
+          false,
+          abort.signal,
+        ),
+        ...overlays,
+      ]);
+      const values = image.data as Float32Array;
+      // The probe reads the sample nearest the pointer: trilinear on the level, so approximate.
+      const read: Probe = (p) => {
+        const [x, y] = toPane(p);
+        const c = Math.round((x - at.x0) / at.step);
+        const r = Math.round((at.y0 - y) / at.step);
+        if (r < 0 || c < 0 || r >= at.rows || c >= at.cols) return null;
+        const i = r * at.cols + c;
+        if (Number.isNaN(values[i]!)) return null;
+        const inside = layers.filter((l) => l.values[i]).map((l) => l.overlay.name);
+        return { value: values[i]!, unit: scene.imageUnit ?? null, approx: true, inside };
+      };
+      return {
+        rgba: composeSampled(values, contrast, layers),
+        rows: at.rows,
+        cols: at.cols,
+        corners: samplingCorners(at),
+        read,
+      };
+    };
+    const load = whole ? slice : tilted;
+    // Whether this effect drew a picture of the requested plane; if none, the old one goes.
     let current = false;
     const show = (made: Awaited<ReturnType<typeof load>>, k: number) => {
       if (!made || abort.signal.aborted) return;
-      const { picture, read } = made;
-      draw(picture.rgba, picture.cols, picture.rows, corners(picture).map(toPane), false);
-      probe.current = read;
+      draw(made.rgba, made.cols, made.rows, made.corners, !whole);
+      probe.current = made.read;
       setShown({ key: planeKey, level: k, contrast, overlays: scene.overlays });
       setError(undefined);
       current = true;
@@ -654,28 +652,7 @@ export function SlicePane({
         if (!current && !abort.signal.aborted) clear();
       });
     return () => abort.abort();
-  }, [index, level, contrast, axis, scene.overlays, whole]);
-
-  // Tilted: reslice the plane through the crosshair from the whole levels.
-  useEffect(() => {
-    if (!contrast || whole || !volumes) return;
-    const step = Math.min(...volumes.image.scale.map((v, k) => v * s[k]!));
-    const at = sampling(basis, point, s, scene.shapeZyx, step);
-    const image = resample(volumes.image, at, basis, s, false);
-    const layers = scene.overlays.flatMap((overlay) => {
-      const level = volumes.overlays.get(overlay.base);
-      return level ? [{ overlay, values: resample(level, at, basis, s, true), level }] : [];
-    });
-    draw(composeSampled(image, contrast, layers), at.cols, at.rows, samplingCorners(at), true);
-    probe.current = (p) => {
-      const value = valueAt(volumes.image, p);
-      if (value === null) return null;
-      const inside = layers.filter((l) => voxelAt(l.level, p)).map((l) => l.overlay.name);
-      return { value, unit: scene.imageUnit ?? null, approx: true, inside };
-    };
-    setShown({ key: planeKey, level: -1, contrast, overlays: scene.overlays });
-    setError(undefined);
-  }, [planeKey, contrast, volumes, scene.overlays, whole]);
+  }, [planeKey, level, contrast, axis, scene.overlays, whole]);
 
   function draw(
     rgba: Uint8Array,
@@ -775,26 +752,20 @@ export function SlicePane({
 
   const total = scene.shapeZyx[axis];
   // Another slice or level on its way: the picture shown is a stand-in.
-  const refining = shown && (shown.key !== planeKey || (whole && shown.level !== level));
+  const refining = shown && (shown.key !== planeKey || shown.level !== level);
   // A display change (contrast, overlays) also leaves the picture out of date for a moment.
   const stale =
     refining || (shown && (shown.contrast !== contrast || shown.overlays !== scene.overlays));
-  const failed =
-    error ?? (whole ? undefined : volumeError && `Couldn't load the volume: ${volumeError}`);
   const status: PaneStatus =
-    (!shown && !failed) || (traces.size !== traceMeshes.length && !traceError)
+    (!shown && !error) || (traces.size !== traceMeshes.length && !traceError)
       ? "loading"
-      : stale && !failed
+      : stale && !error
         ? "refining"
-        : failed || traceError
+        : error || traceError
           ? "failed"
           : "ready";
   useEffect(() => latest.current.onStatus(status), [status]);
-  const scale = !shown
-    ? null
-    : whole
-      ? scene.image.levels[shown.level]?.scaleZyx[axis]
-      : volumes?.scale;
+  const scale = shown && Math.max(...scene.image.levels[shown.level]!.scaleZyx);
   // A tilted pane counts along the grid axis nearest its normal, primed.
   const counted = whole ? axis : nearestAxis(basis.normal);
   return (
@@ -811,14 +782,14 @@ export function SlicePane({
         {!whole && "′"} / {scene.shapeZyx[counted]}
         {scale && scale > 1 && <span className="ml-2">1:{scale}</span>}
       </span>
-      {(!shown || refining) && !failed && (
+      {(!shown || refining) && !error && (
         <span className={cx(CHIP, "top-2 right-2")} role="status">
-          {shown ? "Loading full resolution…" : whole ? "Loading…" : "Loading the volume…"}
+          {shown ? "Loading full resolution…" : "Loading…"}
         </span>
       )}
-      {failed && (
+      {error && (
         <span className={cx(CHIP, "top-2 right-2")} role="alert">
-          {whole ? `Couldn't load this slice: ${failed}` : failed}
+          Couldn't load this slice: {error}
         </span>
       )}
       {traceError && (

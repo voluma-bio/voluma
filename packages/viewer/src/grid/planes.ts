@@ -1,5 +1,6 @@
 /** The main thread's side of the zarr worker: one worker for every pane, promises per request. */
 
+import type { LevelSampling } from "./reslice";
 import type { Axis } from "./scene";
 import type { PlaneRequest, PlaneResponse, Values } from "./zarr.worker";
 
@@ -68,6 +69,18 @@ export const readPlane = (
   index: number,
   signal: AbortSignal,
 ) => request({ base, path, axis, index }, signal);
+
+/**
+ * A tilted plane's samples on a level (`reslice.ts`), as float32: trilinear (NaN off the level),
+ * or `nearest` (0 off it). Only the chunks the samples cross are read.
+ */
+export const readSlice = (
+  base: string,
+  path: string,
+  reslice: LevelSampling,
+  nearest: boolean,
+  signal: AbortSignal,
+) => request({ base, path, reslice, nearest }, signal);
 
 /** A whole level; meant for the coarsest, which is one or a few chunks. */
 export const readLevel = (base: string, path: string, signal: AbortSignal) =>

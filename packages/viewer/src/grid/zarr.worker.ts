@@ -1,17 +1,19 @@
 /**
- * Reads OME-Zarr levels off the main thread: one plane through a level for a slice pane, or a
- * whole (coarse) level. Decoded chunks are kept in one bounded cache shared by every array, so
+ * Reads OME-Zarr levels off the main thread: one plane through a level for a slice pane, a
+ * tilted plane resliced from the chunks it crosses (`reslice.ts`), or a whole (coarse) level. Decoded chunks are kept in one bounded cache shared by every array, so
  * scrolling within a chunk's 64 planes and crossing panes reuse them. Fetches wait for one of a
  * few slots, newest request first; a chunk that no live request still wants when its slot comes
  * is never fetched. A chunk already fetching finishes into the cache.
  */
 import * as zarr from "zarrita";
+import { crossed, type LevelSampling, sample } from "./reslice";
 import type { Axis } from "./scene";
 import { planeAxes } from "./scene";
 
 export type PlaneRequest =
   | { id: number; base: string; path: string; axis: Axis; index: number }
   | { id: number; base: string; path: string; whole: true }
+  | { id: number; base: string; path: string; reslice: LevelSampling; nearest: boolean }
   | { cancel: number };
 export type Values = Int16Array | Uint16Array | Uint8Array | Int8Array | Float32Array | Int32Array;
 export type PlaneResponse =
@@ -156,6 +158,35 @@ async function plane(id: number, base: string, path: string, axis: Axis, index: 
   return out && { data: out, rows, cols, shape: [...shape] };
 }
 
+async function reslice(
+  id: number,
+  base: string,
+  path: string,
+  at: LevelSampling,
+  nearest: boolean,
+) {
+  const array = await open(base, path);
+  const { shape, chunks: size } = array;
+  const grid = shape.map((n, k) => Math.ceil(n / size[k]!));
+  const wanted = crossed(at, shape, size);
+  const read = await Promise.all(
+    wanted.map((c) =>
+      chunk(id, base + path, array, [
+        Math.floor(c / (grid[1]! * grid[2]!)),
+        Math.floor(c / grid[2]!) % grid[1]!,
+        c % grid[2]!,
+      ]),
+    ),
+  );
+  if (!live.has(id)) return;
+  const chunks: Chunk[] = [];
+  wanted.forEach((c, i) => {
+    chunks[c] = read[i]!;
+  });
+  const data = sample(at, { shape, size, chunks }, nearest);
+  return { data, rows: at.rows, cols: at.cols, shape: [...shape] };
+}
+
 async function whole(base: string, path: string) {
   const array = await open(base, path);
   const { data, shape } = await zarr.get(array);
@@ -173,7 +204,9 @@ self.onmessage = async ({ data: request }: MessageEvent<PlaneRequest>) => {
     const result =
       "whole" in request
         ? await whole(request.base, request.path)
-        : await plane(id, request.base, request.path, request.axis, request.index);
+        : "reslice" in request
+          ? await reslice(id, request.base, request.path, request.reslice, request.nearest)
+          : await plane(id, request.base, request.path, request.axis, request.index);
     if (!result || !live.has(id)) return;
     postMessage({ id, ...result } satisfies PlaneResponse, { transfer: [result.data.buffer] });
   } catch (cause) {
