@@ -167,7 +167,7 @@ def check(labels, sp, expected, far_factor=10, min_piece_mm3=0.01):
             flags[f'absent:{lv}'] = f'{lv} {e["name"]}: expected but absent'
     swapped, caps = swap_check(labels, sp, expected)
     flags.update(swapped)
-    for pair, c in caps.items():
+    for c in caps.values():
         for lv in c:
             if int(lv) in table:
                 table[int(lv)]['joint_cap_solidity'] = c[lv]
