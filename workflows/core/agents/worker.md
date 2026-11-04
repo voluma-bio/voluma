@@ -18,7 +18,7 @@ others would also hit, send main what you saw and where, with the evidence. When
 output was made from.
 
 Read a script's whole output and its exit code: one that exits 2 wrote nothing, and `| tail` or `| head` hides that.
-Pass each argument the file its help names (a header's `hu.json`, not the scan's array).
+Pass each argument the file its help names (the scan's `hu.json`, not `hu.npy`).
 
 `report_output` each output you own as it is made, then `message` main. Message main too when you cannot
 make an output (only main marks one missing) or find something that changes the plan, and end your turn. A message to you arrives with your next
