@@ -36,7 +36,7 @@ import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
-import type { Limits } from "./domains/run/admission";
+import { type Limits, mayUseVolumaKey } from "./domains/run/admission";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
@@ -114,7 +114,7 @@ const auth = createAuth({
   // Who may sign in (auth.ts). No domain reads an organization id.
   organizations: keyOrganizations.map(({ id }) => id),
   // Guests (auth.ts): a request with no credential is a guest in this organization.
-  mayUseVolumaKey: (labId) => limits.voluma.has(labId),
+  mayUseVolumaKey: (labId) => mayUseVolumaKey(limits, labId),
   guest: guestOrganizationId ? { organizationId: guestOrganizationId } : null,
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),
