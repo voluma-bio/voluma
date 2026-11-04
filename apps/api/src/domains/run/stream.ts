@@ -33,7 +33,7 @@ function latch() {
   return { promise, resolve };
 }
 
-const POLL_MS = 5_000;
+const POLL_MS = 100;
 const KEEPALIVE_MS = 15_000;
 
 export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {

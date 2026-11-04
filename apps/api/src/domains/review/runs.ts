@@ -43,6 +43,7 @@ import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { callerOf, parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
+import { replaySourceRunId } from "../../replay-map";
 import type { ReviewDeps } from ".";
 import { assetUrl, openFile } from "./files";
 import { runThumbnail } from "./thumbnail";
@@ -210,7 +211,7 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     // The sandbox mounts the outputs read-write, so a published file's key can be rewritten.
     return serveFile(
       c,
-      await openFile(store, `${outputsPrefix(runId)}${tail}`, c.req.raw.signal),
+      await openFile(store, `${outputsPrefix(replaySourceRunId(runId))}${tail}`, c.req.raw.signal),
       "private, no-cache",
     );
   });

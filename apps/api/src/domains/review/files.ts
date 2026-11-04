@@ -2,6 +2,7 @@
 import { reviewAssetKey } from "@voluma/contracts/r2";
 import { ObjectNotFound, type ObjectStore } from "@voluma/object-store";
 import { HTTPException } from "hono/http-exception";
+import { replaySourceRunId } from "../../replay-map";
 
 /** A URL is signed at the start of a window and valid for `ASSET_URL_SECONDS` from there, so a request gets one with at least the difference left. */
 const ASSET_WINDOW_SECONDS = 240;
@@ -41,7 +42,7 @@ export async function assetUrl(store: ObjectStore, runId: string, sha256: string
   const now = Date.now();
   const windowMs = ASSET_WINDOW_SECONDS * 1000;
   const signingDate = new Date(Math.floor(now / windowMs) * windowMs);
-  const url = await store.presignGet(reviewAssetKey(runId, sha256, path), {
+  const url = await store.presignGet(reviewAssetKey(replaySourceRunId(runId), sha256, path), {
     expiresIn: ASSET_URL_SECONDS,
     signingDate,
     // Content-addressed: the bytes never change. A day, like the files route.

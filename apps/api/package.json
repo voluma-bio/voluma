@@ -12,6 +12,7 @@
     "archive:run": "node --env-file-if-exists ../../.env --import tsx src/ops/archive-run.ts",
     "r2:put": "node --env-file-if-exists ../../.env --import tsx src/ops/put-dir.ts",
     "upload:scan": "node --env-file-if-exists ../../.env --import tsx src/ops/upload-scan.ts",
+    "replay:run": "node --env-file-if-exists ../../.env --import tsx src/ops/replay-run.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },

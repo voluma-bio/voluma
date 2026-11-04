@@ -14,6 +14,7 @@ import type { ReviewAssets } from "@voluma/contracts/review";
 import { ObjectNotFound, type ObjectStore } from "@voluma/object-store";
 import sharp from "sharp";
 import * as zarr from "zarrita";
+import { isReplayRun, replaySourceRunId } from "../../replay-map";
 
 /** Planes smaller than this on their long side are skipped for the next finer level. */
 const MIN_SIDE = 160;
@@ -28,7 +29,9 @@ function assetStore(store: ObjectStore, runId: string, sha256: string): zarr.Rea
   return {
     async get(key) {
       try {
-        const { body } = await store.get(reviewAssetKey(runId, sha256, key.slice(1)));
+        const { body } = await store.get(
+          reviewAssetKey(replaySourceRunId(runId), sha256, key.slice(1)),
+        );
         return new Uint8Array(await new Response(body).arrayBuffer());
       } catch (error) {
         if (error instanceof ObjectNotFound) return undefined;
@@ -121,6 +124,8 @@ export async function runThumbnail(
   generation: string,
   assets: () => Promise<Record<string, ReviewAssets> | null>,
 ): Promise<Uint8Array | null> {
+  // The replay run must not write `runs/<id>/thumbnail-*.webp` (shared R2).
+  if (isReplayRun(runId)) return null;
   const key = runThumbnailKey(runId, generation);
   try {
     const { body } = await store.get(key);

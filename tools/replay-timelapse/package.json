@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "playwright": "^1.56.1"
+  }
+}
