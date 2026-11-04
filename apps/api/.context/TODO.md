@@ -1,5 +1,10 @@
 # TODO
 
+- **Finish deleting `awaiting-keys` (step 2, after the PR that removed it is live).** Delete the
+  `stuck` sweep in `sweep` (`domains/run/pg-queue.ts`) and the `awaiting-keys` case in `toRun`
+  (`pg-runs.ts`); drop `"awaiting-keys"` from the `runs.state` enum and drop the `awaiting_since`
+  column in `schema.ts`, with a migration. Step 1 left both so an API built before it, live in a
+  deploy overlap, cannot strand a run.
 - **A new guest cookie is a fresh upload cap: accepted until after the Nov 4 demo (Jimmy, 3 Nov).**
   The per-person cap (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and
   guests cost nothing to mint, so clearing cookies gives 50 GB more. After the demo: a combined cap
