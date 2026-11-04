@@ -8,8 +8,9 @@ operations, which take out points and never add or move one:
   --cut          removes every column in a U range on a section or a V range of sections. For a stray joined to the plate by a bridge
                  of band: it is one piece with the plate, so dropping it would drop the plate too; cut the bridge and the stray.
 Both faces lose the same columns, so a pruned stretch has no points in either face, never a line drawn across it: iioc.py and
-metaphysis_roi.py refuse a face that leaves bone at plate level untraced, so trace every emptied range that is plate (read it off a
-zoomed view), or leave it empty where it is not (the fibula is not). A section left with fewer than two points is removed whole.
+metaphysis_roi.py refuse a gap over the plate inside a face, but not a face that ends short: an emptied range at a section's end, or a
+section removed whole, passes them. Open every emptied range on qc-prune-<n>.jpg and trace it where it is plate (read it off a zoomed
+view), or leave it empty where it is not (the fibula is not). A section left with fewer than two points is removed whole.
 
 Writes: in <out>
   plate-annotations.json  the pruned curves (annotation A and C), the same grid_id; copy both keys into your annotations.json
