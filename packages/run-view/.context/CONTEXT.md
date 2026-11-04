@@ -42,6 +42,9 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   grid) from `outputsFold` and the bundled catalog. Grid shapes come from the converted levels;
   spacing, crop offsets, surface axes and point/line ends come from the version's `detail` and are
   absent until the writer fills them (`.context/TODO.md`). Units are UCUM, shown by `unitText`.
+  An item's `focus` that names a value is aimed at what the value is measured on (`measuredOn`): a
+  value has no voxels. `waitsOn(row)` lists what a value rests on that has open items: the value
+  waits on those checks, which are drawn and decided under their own output only.
   The trail (`outputs-trail.ts`) is the data behind Final outputs' Rests on and Further back: `trailOf` (one output's
   upstream, breadth first, with roles and the version used), `madeFromIt` (what rests on it),
   `runGraph` (the whole run by column), `versionWords` (a worker's message after its version) and

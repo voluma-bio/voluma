@@ -39,12 +39,18 @@ carry spacing-only affines and borrow nothing.
 - **Display.** The Labels toggle (on by default) changes the context's colours
   without moving the camera or crosshair. A new scene on the same grid redraws in place.
 - **Focus.** A To check item's focused blocks are drawn in `--check-outline`; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
-  drawn even when no structure brings it. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they
-  are scan voxels); else the middle of its cropped masks; else of its annotations (world mm through
-  the grid's own affine, a projection on each orthogonal column); else, for labels, the middle of
-  their bounding box on the coarsest labels level that has them, up to about 32 M voxels
-  (`labelsMiddle`). Surfaces give no point. Each item selection moves the crosshair once; the
-  Labels toggle never does.
+  drawn even when no structure brings it. A labels volume named in `on` is the item's subject as a
+  whole: its labels keep their own colours. An item that singles something out (a label, a mask, an
+  annotation, a point or box, a `volumeId`) dims the other context labels (0.35 on slices, 0.12 for
+  their meshes). Its region: its `point`, or its `box`, only on the scan's grid (they are scan
+  voxels); else the box around its cropped masks; else around its annotations (world mm through the
+  grid's own affine; one ruler puts the crosshair on its first end); else, for labels, their
+  bounding box on the coarsest labels level that has them, up to about 32 M voxels (`labelsBox`),
+  every nonzero label for a whole volume. Surfaces give no region. Each item selection moves the
+  crosshair to the region's middle and frames it once (`QuadViewer` `focus.box`, `PaneHandle.frame`):
+  each slice pane zooms until the box fills about four fifths of it (at least 48 voxels across, never
+  out past the fit; a pane with no size frames when it gets one), 3D looks at it from its current
+  side. The Labels toggle never moves anything.
 
 ## The viewer: one analysis grid from converted review assets
 

@@ -17,10 +17,22 @@ import type {
 } from "@voluma/contracts/review";
 import { toVoxel } from "@voluma/contracts/ruler";
 import { readLevel } from "./planes";
-import type { GridAnnotation, GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
+import type {
+  GridAnnotation,
+  GridMesh,
+  GridScene,
+  Overlay,
+  VoxelBox,
+  ZarrSource,
+  Zyx,
+} from "./scene";
 
 /** How much of a context label mesh shows over the subject's own meshes inside it. */
 const CONTEXT_OPACITY = 0.3;
+/** How much of a context label shows on the slices while a check singles out something else. */
+const DIMMED_OPACITY = 0.35;
+/** A context mesh's opacity then: the camera framing a check often sits inside a bone. */
+const DIMMED_CONTEXT_OPACITY = 0.12;
 
 /** Label values of a labels volume on the grid; none means every nonzero value. */
 export type FocusLabels = { source: ZarrSource; labels: number[] };
@@ -35,9 +47,9 @@ export type ReviewGrid =
       imageId: string;
       name: string;
       scene: GridScene;
-      /** Where the focused check is, when the run says. */
-      focus?: Zyx;
-      /** Else the focused labels, whose middle `labelsMiddle` finds. */
+      /** Where the focused check is, and the region to frame, when the run's blocks say. */
+      focus?: { at: Zyx; box?: VoxelBox };
+      /** Else the focused labels, whose extent `labelsBox` finds. */
       focusLabels?: FocusLabels;
       /** What the subject names that isn't drawn here, and why. */
       notes: string[];
@@ -91,6 +103,14 @@ export function reviewGrid({
   const scanGrid = revision.volumes.find((v) => v.kind === "image")?.gridId;
   // A check's `volumeId` is a labels volume (a disagreement mask) it points into.
   const focusVolume = focus?.volumeId ? volumes.get(focus.volumeId) : undefined;
+  // A check that names something within the anatomy (a label, a mask, a place) singles it out:
+  // the rest of the labels dim. One that names a whole labels volume is about all of it.
+  const singled =
+    !!focus &&
+    (!!focus.volumeId ||
+      !!focus.point ||
+      !!focus.box ||
+      focus.on.some((id) => volumes.get(id)?.kind !== "labels"));
   const gridId =
     mostCommon([...(focus?.on ?? []).map(gridOf), focusVolume?.gridId]) ??
     mostCommon(named.map(gridOf)) ??
@@ -124,7 +144,7 @@ export function reviewGrid({
     focused.has(id) ? check : { ...check, color: token("--output"), own: true as const };
   const contextLook = (label: number) => ({
     color: token(showLabels ? `--label-${((label - 1) % 12) + 1}` : "--bone"),
-    opacity: 1,
+    opacity: singled ? DIMMED_OPACITY : 1,
     outline: false,
   });
   const overlays: Overlay[] = [];
@@ -227,7 +247,8 @@ export function reviewGrid({
     const wanted = labels
       .filter((l) => focused.has(l.id) || focusedLabel(volume, l.label))
       .map((l) => l.label);
-    if (wanted.length && !focusLabels)
+    // The labels a check names, else all of a labels volume it names whole.
+    if ((wanted.length || focused.has(volume.id)) && !focusLabels)
       focusLabels = { source: { base: assetBase(sha256), levels: a.levels }, labels: wanted };
     // A named labels volume is the subject as a whole: every label in its own colour.
     const whole = named.includes(volume.id);
@@ -249,7 +270,7 @@ export function reviewGrid({
         levels: a.levels,
         offsetZyx: [0, 0, 0],
         color: Object.fromEntries([...looks].map(([label, look]) => [label, look.color])),
-        opacity: 1,
+        opacity: Object.fromEntries([...looks].map(([label, look]) => [label, look.opacity])),
         outline: Object.fromEntries([...looks].map(([label, look]) => [label, look.outline])),
       });
     for (const m of a.meshes) {
@@ -346,7 +367,7 @@ export function reviewGrid({
   }
 
   if (meshes.some((m) => !contextMeshes.has(m)))
-    for (const m of contextMeshes) m.opacity = CONTEXT_OPACITY;
+    for (const m of contextMeshes) m.opacity = singled ? DIMMED_CONTEXT_OPACITY : CONTEXT_OPACITY;
 
   return {
     state: "ready",
@@ -362,7 +383,7 @@ export function reviewGrid({
       meshes,
       annotations,
     },
-    focus: focus && focusPoint(focus, revision, image, gridId === scanGrid),
+    focus: focus && focusRegion(focus, revision, image, gridId === scanGrid),
     focusLabels,
     notes: [
       notes.preparing.length && `Still preparing: ${notes.preparing.join(", ")}.`,
@@ -373,27 +394,27 @@ export function reviewGrid({
 }
 
 /**
- * The middle of the labels' bounding box, in grid voxels, from the coarsest level (one or a few
- * chunks): good for centring the crosshair, not for measuring. Undefined if no voxel has them.
+ * The labels' bounding box, in grid voxels, from the coarsest level that has them (one or a few
+ * chunks): good for framing, not for measuring. Undefined if no voxel has them.
  */
-export async function labelsMiddle(
+export async function labelsBox(
   { source, labels }: FocusLabels,
   signal: AbortSignal,
-): Promise<Zyx | undefined> {
+): Promise<VoxelBox | undefined> {
   // Downsampling can drop a thin region, so finer levels are tried up to about 32 M voxels.
   for (const level of [...source.levels].reverse()) {
     if (level.shapeZyx[0] * level.shapeZyx[1] * level.shapeZyx[2] > 2 ** 25) return;
-    const at = await middleOn(source.base, level, labels, signal);
-    if (at) return at;
+    const box = await boxOn(source.base, level, labels, signal);
+    if (box) return box;
   }
 }
 
-async function middleOn(
+async function boxOn(
   base: string,
   level: ZarrSource["levels"][number],
   labels: number[],
   signal: AbortSignal,
-): Promise<Zyx | undefined> {
+): Promise<VoxelBox | undefined> {
   const { data, shape } = await readLevel(base, level.path, signal);
   const [nz = 0, ny = 0, nx = 0] = shape;
   const wanted = new Set(labels);
@@ -412,11 +433,16 @@ async function middleOn(
       }
   if (hi[0]! < 0) return;
   // A level voxel i covers source voxels [i·s, (i+1)·s).
-  return [0, 1, 2].map((a) => {
-    const s = level.scaleZyx[a]!;
-    return Math.floor(((lo[a]! + hi[a]! + 1) * s) / 2);
-  }) as unknown as Zyx;
+  const scale = level.scaleZyx;
+  return {
+    min: [0, 1, 2].map((a) => lo[a]! * scale[a]!) as unknown as Zyx,
+    max: [0, 1, 2].map((a) => (hi[a]! + 1) * scale[a]! - 1) as unknown as Zyx,
+  };
 }
+
+/** The voxel in the middle of a box: where the crosshair goes. */
+export const middleOf = (box: VoxelBox): Zyx =>
+  [0, 1, 2].map((a) => Math.floor((box.min[a]! + box.max[a]!) / 2)) as unknown as Zyx;
 
 /** mm per voxel along z, y, x: the norms of the affine's x, y and z columns, reversed. */
 function spacingZyx(volume: Volume): Zyx {
@@ -425,50 +451,53 @@ function spacingZyx(volume: Volume): Zyx {
 }
 
 /**
- * Where a check points on this grid: its point or box (scan voxels, so only on the scan's grid),
- * else the middle of its cropped masks, else of its annotations (world mm, through the grid's
- * own affine). A labels structure gives no point: its extent isn't in the run's data.
+ * Where a check points on this grid and what to frame: its point or box (scan voxels, so only on
+ * the scan's grid), else its cropped masks, else its annotations (world mm, through the grid's own
+ * affine). A labels structure gives none: its extent isn't in the run's data (`labelsBox`).
  */
-function focusPoint(
+function focusRegion(
   focus: Focus,
   revision: Blocks,
   image: Volume,
   onScanGrid: boolean,
-): Zyx | undefined {
-  const clamp = (p: number[]) =>
+): { at: Zyx; box: VoxelBox } | undefined {
+  const clamp = (p: readonly number[]) =>
     p.map((n, i) => Math.max(0, Math.min(image.shapeZyx[i]! - 1, Math.round(n)))) as unknown as Zyx;
-  const middle = (boxes: { min: number[]; max: number[] }[]) =>
-    boxes.length
-      ? clamp(
-          [0, 1, 2].map(
-            (i) =>
-              (Math.min(...boxes.map((b) => b.min[i]!)) +
-                Math.max(...boxes.map((b) => b.max[i]!))) /
-              2,
-          ),
-        )
-      : undefined;
-  if (onScanGrid && focus.point) return clamp(focus.point);
-  if (onScanGrid && focus.box) return middle([focus.box]);
+  const around = (boxes: { min: readonly number[]; max: readonly number[] }[]) => {
+    if (!boxes.length) return undefined;
+    const box = {
+      min: clamp([0, 1, 2].map((i) => Math.min(...boxes.map((b) => b.min[i]!)))),
+      max: clamp([0, 1, 2].map((i) => Math.max(...boxes.map((b) => b.max[i]!)))),
+    };
+    return { at: middleOf(box), box };
+  };
+  if (onScanGrid && focus.point) {
+    const at = clamp(focus.point);
+    return { at, box: { min: at, max: at } };
+  }
+  if (onScanGrid && focus.box) return around([focus.box]);
   const sameGrid = (volumeId: string | null) =>
     revision.volumes.find((v) => v.id === volumeId)?.gridId === image.gridId;
   const masks = revision.structures.flatMap((s) => {
     const v = s.voxels;
     if (!focus.on.includes(s.id) || !sameGrid(s.volumeId) || !v || !("mask" in v)) return [];
-    return [{ min: [...v.offsetZyx], max: v.offsetZyx.map((o, i) => o + v.mask.shapeZyx[i]! - 1) }];
+    return [{ min: v.offsetZyx, max: v.offsetZyx.map((o, i) => o + v.mask.shapeZyx[i]! - 1) }];
   });
-  if (masks.length) return middle(masks);
+  if (masks.length) return around(masks);
   const marks = revision.annotations.filter((a) => focus.on.includes(a.id) && sameGrid(a.volumeId));
-  // One ruler: its first end, since the panes' slices are thin and an end is grabbed only on a
-  // slice through it. Several marks: their middle.
-  if (marks.length === 1) {
-    const [only] = marks as [(typeof marks)[number]];
-    return clamp(toVoxel(image.affine, only.kind === "point" ? only.position : only.a));
-  }
   const points = marks
     .flatMap((a) => (a.kind === "point" ? [a.position] : [a.a, a.b]))
     .map((world) => toVoxel(image.affine, world));
-  return middle(points.map((p) => ({ min: p, max: p })));
+  const region = around(points.map((p) => ({ min: p, max: p })));
+  // One ruler: the crosshair on its first end, since the panes' slices are thin and an end is
+  // grabbed only on a slice through it.
+  const [only] = marks;
+  if (region && marks.length === 1 && only)
+    return {
+      ...region,
+      at: clamp(toVoxel(image.affine, only.kind === "point" ? only.position : only.a)),
+    };
+  return region;
 }
 
 /**

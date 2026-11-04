@@ -123,19 +123,36 @@ export function itemsOfVersion(id: string, v: OutputVersion): OutputItem[] {
 const strings = (x: unknown): string[] =>
   Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : [];
 
+/** The overlays a value is measured on: its catalog entry's or its own list's, and its latest version's `on` links. */
+function measuredOn(catalog: OutputCatalog, state: OutputState): string[] {
+  const entry = catalog.find((e) => e.id === state.id);
+  const listed = entry?.kind === "value" ? entry.on : strings(state.entry?.on);
+  const linked = state.latest?.madeFrom.filter((l) => l.role === "on").map((l) => l.id) ?? [];
+  return [...new Set([...listed, ...linked])];
+}
+
+/** An item's focus with each value it names replaced by what the value is measured on: a value has no voxels to show. */
+function aimed(fold: OutputsFold, catalog: OutputCatalog, focus: Focus): Focus {
+  const on = focus.on.flatMap((id) => {
+    const state = fold.byId.get(id);
+    return state?.kind === "value" ? measuredOn(catalog, state) : [id];
+  });
+  return { ...focus, on: [...new Set(on)] };
+}
+
 function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): OutputRow {
   // The description is the run's own (its final list's, written from the catalog of the run's
   // commit, or a worker's for an output the workflow does not declare), since it says how this
   // run measured the number; the bundled catalog's only when the run has none.
   const entry = catalog.find((e) => e.id === state.id);
   const loose = state.entry;
-  const value = entry?.kind === "value" ? entry : undefined;
   const description =
     (typeof loose?.description === "string" ? loose.description : undefined) ?? entry?.description;
   const latest = state.latest;
+  const value = entry?.kind === "value" ? entry : undefined;
   const links = (role: string) =>
     latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
-  const on = [...new Set([...(value?.on ?? strings(loose?.on)), ...links("on")])];
+  const on = measuredOn(catalog, state);
   const trail = trailOf(fold, state.id);
   return {
     id: state.id,
@@ -152,13 +169,26 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
     trail,
     chain: state.final ? chainOf(fold, catalog, state.id, on) : [],
     items: trail.flatMap(({ id: output, state }) =>
-      state?.latest ? itemsOfVersion(output, state.latest) : [],
+      state?.latest
+        ? itemsOfVersion(output, state.latest).map((i) =>
+            i.focus ? { ...i, focus: aimed(fold, catalog, i.focus) } : i,
+          )
+        : [],
     ),
   };
 }
 
 /** The items of `row`'s trail still open: the value's own and those of what it rests on. */
 export const openItemsOf = (row: OutputRow): OutputItem[] => row.items.filter((i) => !i.resolved);
+
+/**
+ * The outputs `row` rests on that have open items, nearest first: a value whose own status is fine
+ * waits on a person checking these. The items are drawn and decided under each of them, never
+ * under the values resting on it.
+ */
+export const waitsOn = (row: OutputRow): string[] => [
+  ...new Set(openItemsOf(row).flatMap((i) => (i.output === row.id ? [] : [i.output]))),
+];
 
 /**
  * What "only To check" lists: the rows whose own items are open, plus a row for each open item no
