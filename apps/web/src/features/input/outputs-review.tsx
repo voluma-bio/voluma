@@ -553,7 +553,28 @@ export function OutputsReview({
 
   return (
     <>
-      <InputHeading run={run} study={study.data} waitingOnYou={waiting > 0} toCheck={toCheck} />
+      <InputHeading
+        run={run}
+        study={study.data}
+        waitingOnYou={waiting > 0}
+        toCheck={toCheck}
+        onToCheck={() => {
+          // The first open check, framed in the panes, as its own Show does.
+          const row = finals.find((r) => openItemsOf(r).length > 0);
+          const first = row && openItemsOf(row)[0];
+          if (!row || !first) return;
+          select(
+            {
+              output: row.id,
+              item: first.key,
+              trail: first.output === row.id ? null : first.output,
+              centre: null,
+            },
+            { push: params.get("item") !== first.key },
+          );
+          setPicked((n) => n + 1);
+        }}
+      />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"

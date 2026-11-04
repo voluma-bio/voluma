@@ -84,12 +84,15 @@ export function InputHeading({
   study,
   waitingOnYou,
   toCheck,
+  onToCheck,
 }: {
   run: Run;
   study: StudyDetail | undefined;
   /** The run's main holds a call for your yes: the run waits on you. */
   waitingOnYou: boolean;
   toCheck: number;
+  /** Shows the first open check. */
+  onToCheck: () => void;
 }) {
   const { title, group } = inputTitle(run, study);
   const now = where(run, waitingOnYou);
@@ -105,7 +108,11 @@ export function InputHeading({
         <RunDetails run={run} workflow={workflowLabel(run, study)}>
           <StatusMark status={now.status} label={now.text} />
         </RunDetails>
-        {toCheck > 0 && <StatusMark status="check" label={`${toCheck} to check`} />}
+        {toCheck > 0 && (
+          <Button variant="ghost" size="sm" className="-ml-2" onClick={onToCheck}>
+            <StatusMark status="check" label={`${toCheck} to check`} />
+          </Button>
+        )}
         {now.detail && <span>{now.detail}</span>}
       </div>
     </InputBreadcrumb>
