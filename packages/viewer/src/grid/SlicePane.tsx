@@ -907,11 +907,18 @@ export function SlicePane({
         type="range"
         aria-label="Slice"
         aria-valuetext={`Slice ${at + 1} of ${scene.shapeZyx[counted]}`}
-        title="Drag, Shift + scroll, or ↑/↓ (Page Up/Down for 10)"
+        title="Drag, or Shift + scroll"
         min={0}
         max={scene.shapeZyx[counted]! - 1}
         value={at}
-        onChange={(event) => step(Number(event.target.value) - at)}
+        onChange={(event) => {
+          const by = Number(event.target.value) - point[counted];
+          if (whole) return step(Math.round(by));
+          // A turned pane steps along its normal: convert the counted axis's change into that
+          // (the normal's component can be small or negative).
+          const s = scene.spacingZyx;
+          step((by * s[counted]!) / (Math.min(...s) * basis.normal[counted]!));
+        }}
         onPointerDown={(event) => event.stopPropagation()}
         className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [writing-mode:vertical-lr]"
       />
