@@ -628,7 +628,7 @@ function SceneBar({
           {root.name} ›
         </button>
       ) : standIn ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{root.name} rests on</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{root.name} is based on</span>
       ) : (
         inView.state.section && (
           <span className="shrink-0 text-xs text-muted-foreground">{inView.state.section}</span>
@@ -643,7 +643,7 @@ function SceneBar({
       )}
       <StatusMark status={status} label={word} className="shrink-0" />
       {inherited && (
-        <span className="shrink-0 text-muted-foreground text-xs">rests on a To check</span>
+        <span className="shrink-0 text-muted-foreground text-xs">An input needs checking</span>
       )}
       <span className="flex-1" />
       {viewError && (
