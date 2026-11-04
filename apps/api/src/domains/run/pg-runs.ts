@@ -162,7 +162,9 @@ export const ownKeyBusy = sql`EXISTS (
 )`;
 
 /**
- * The order the claim serves queued runs in, and so their places in line:
+ * The order the claim serves queued runs in, and so their places in line (the claim also takes
+ * only a run the app cap and the own-key slot allow, so group 3 below is never taken before the
+ * slot frees):
  *   0. a run that already started (released at a deploy, lease expired, reopened), so work in
  *      progress finishes before new work begins;
  *   1. an own-key run, while the own-key slot is free, so a backlog of Voluma-key runs can't starve

@@ -18,7 +18,7 @@ import {
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { and, asc, desc, eq, gt, inArray, ne, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, ne, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
@@ -556,31 +556,34 @@ export function pgRunQueue(
 
     /**
      * One transaction: sweep expired leases, then take the first queued run in `queueOrder` that
-     * the slot caps and the org's limits allow, with its keys if it is an own-key run. An own-key run whose sealed keys
+     * the slot caps and the org's spend limit allow, with its keys if it is an own-key run. An own-key run whose sealed keys
      * cannot be opened ends `failed` instead.
      */
     claim: (runnerId: string) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
-        // The slot caps (`Limits`): counted under the lock, from every runner process, so a
-        // deploy overlap of two runners can't take more than the app's total.
-        const [counts] = await tx.execute<{ running: number; ownKeyBusy: boolean }>(sql`
-          SELECT count(*)::int AS running, ${ownKeyBusy} AS "ownKeyBusy"
-          FROM runs WHERE state = 'running' AND NOT example`);
-        if (!counts || counts.running >= limits.appRunning) return null;
-        const queued = await tx
-          .select()
-          .from(runs)
-          .where(eq(runs.state, "queued"))
-          .orderBy(...queueOrder(orgs));
-        // Failing or skipping a run changes no org's spend, so read each org's once.
-        const spent = new Map<string, number>();
-        for (const run of queued) {
-          if (run.credentials === "visitor") {
-            if (counts.ownKeyBusy) continue;
-          } else {
-            const used = spent.get(run.labId) ?? (await spentUsd(tx, run.labId));
-            spent.set(run.labId, used);
+        // The first queued run the slots allow, in the order of its place in line (`queueOrder`).
+        // The slot caps (`Limits`) are counted under the lock, from every runner process, so a
+        // deploy overlap of two runners can't take more than the app's total; an own-key run is
+        // eligible only while the one own-key slot is free. A run failed below leaves the
+        // next one first, so ask again.
+        for (;;) {
+          const [run] = await tx
+            .select()
+            .from(runs)
+            .where(
+              and(
+                eq(runs.state, "queued"),
+                sql`(SELECT count(*) FROM runs r WHERE r.state = 'running' AND NOT r.example) < ${limits.appRunning}`,
+                or(ne(runs.credentials, "visitor"), sql`NOT ${ownKeyBusy}`),
+              ),
+            )
+            .orderBy(...queueOrder(orgs))
+            .limit(1);
+          if (!run) return null;
+          if (run.credentials !== "visitor") {
+            // A run that started is never refused on spend (`admit`), so its sum isn't read.
+            const used = run.startedAt === null ? await spentUsd(tx, run.labId) : 0;
             const refused = admit("claim", limits, run.labId, used, {
               credentials: "voluma",
               started: run.startedAt !== null,
@@ -621,7 +624,6 @@ export function pgRunQueue(
             ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
           };
         }
-        return null;
       }),
 
     /**
