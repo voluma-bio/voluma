@@ -38,6 +38,8 @@
     - Holder, padding and debris are set to air under a removal mask on the scan grid, and the scan
       is unchanged outside it; a piece that may be anatomy stays, with a To check item. Both are
       shown on a 3D view of the cleaned scan and one of the mask.
+    - "An earlier version reported straight after conversion, with the To check item 'Not yet cleaned: holder and
+      debris still in the field', is a preview for the researcher: no step starts from it or cites it in madeFrom."
 
 - id: tibia-grid
   kind: base
