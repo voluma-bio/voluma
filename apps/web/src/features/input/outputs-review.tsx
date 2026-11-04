@@ -326,14 +326,11 @@ export function OutputsReview({
   useEffect(() => {
     setDeleted((had) => {
       const kept = had.filter(
-        (m) =>
-          m === restoring ||
-          (blocks.volumes.some((v) => gridKeyOf(v) === m.gridKey) &&
-            !store.marks.some((mark) => mark.id === m.id)),
+        (m) => m === restoring || blocks.volumes.some((v) => gridKeyOf(v) === m.gridKey),
       );
       return kept.length === had.length ? had : kept;
     });
-  }, [blocks.volumes, store.marks, restoring]);
+  }, [blocks.volumes, restoring]);
   const undo =
     restoring ??
     [...deleted]

@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  useCallback,
   useContext,
   useId,
   useRef,
@@ -121,10 +122,12 @@ export function SidePanel(props: SidePanelProps) {
     : { label: props.title, icon: props.icon, badge: props.badge, badgeLabel: props.badgeLabel };
   const { label, icon, badge, badgeLabel } = strip;
   const toggle = useRef<HTMLButtonElement>(null);
-  const setFolded = (value: boolean) => {
-    shell.fold(side, value);
-    requestAnimationFrame(() => toggle.current?.focus());
-  };
+  const setToggle = useCallback((node: HTMLButtonElement | null) => {
+    // A shell Escape can also replace Show with Hide, without clicking either control.
+    if (!node && toggle.current === document.activeElement)
+      requestAnimationFrame(() => toggle.current?.focus());
+    toggle.current = node;
+  }, []);
 
   const head = (
     <div className="flex h-(--panel-head-h) shrink-0 items-center gap-1 border-b border-border pr-1.5 pl-2 whitespace-nowrap">
@@ -154,9 +157,9 @@ export function SidePanel(props: SidePanelProps) {
         aria-label={`Hide ${label}`}
         variant="ghost"
         size="sm"
-        onClick={() => setFolded(true)}
+        onClick={() => shell.fold(side, true)}
       >
-        <button type="button" ref={folded ? undefined : toggle}>
+        <button type="button" ref={folded ? undefined : setToggle}>
           {side === "left" ? <PanelLeftClose /> : <PanelRightClose />}
           Hide
         </button>
@@ -190,10 +193,10 @@ export function SidePanel(props: SidePanelProps) {
       {folded && (
         <div className="flex flex-col items-center gap-1.5 py-1.5">
           <button
-            ref={toggle}
+            ref={setToggle}
             type="button"
             aria-label={`Show ${label}`}
-            onClick={() => setFolded(false)}
+            onClick={() => shell.fold(side, false)}
             className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-2 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [writing-mode:vertical-rl] [&_svg]:size-3.5"
           >
             {icon}
