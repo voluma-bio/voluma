@@ -87,7 +87,7 @@ export const readLevel = (base: string, path: string, signal: AbortSignal) =>
   request({ base, path, whole: true }, signal);
 
 /**
- * A whole level, shared while held: the 3D pane, the contrast and tilted slices read one copy.
+ * A whole level, shared while held: the 3D pane and the contrast read one copy.
  * Each mounted user holds it and releases it on unmount; the last release drops the level (and
  * cancels its read if still waiting). The drop waits a microtask, so an effect that re-runs
  * (release, then hold again) keeps the level instead of reading it again.
