@@ -122,5 +122,6 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 - **Needs:** `scan`, the femur in `bone-labels`, `frame`.
 - **Check first:** at the condyles and the intercondylar groove the femur label holds no patella, sesamoid or tibia
   voxels and covers the condyles' surface; orient the femur for its own views (`orient-joint`).
-- **Makes:** points `a` to `d`, `dfl-ruler`, `dfw-ruler`, #26–28 (protocol step 9), and the Amira landmarks file
+- **Makes:** points `a` to `d`, `dfl-ruler`, `dfw-ruler`, `femur-frame` (`femur-frame.json`, the femur's axes the viewer
+  aligns to), #26–28 (protocol step 9), and the Amira landmarks file
   (step 11).
