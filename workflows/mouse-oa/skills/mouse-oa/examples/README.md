@@ -83,6 +83,6 @@ as delivered on every traced section over the tibia's outline, and the distal li
 
 `femoral-geometry/deck-points-a-d.jpg`: four points. `a` is the midpoint of the upper line of the intercondylar
 groove and `b` the intercondylar notch, both on the front view of the femur with the shaft and the groove, DFL (4)
-drawn between them; `b` again from the back. `c` is the midpoint of the ridge on the lateral condyle, shown on the
-lateral side view; `d` the vertex of the medial condyle, shown with `c` on the front view, DFW (5) drawn across the
-condyles. DFL is `a` to `b`, DFW is `c` to `d`.
+drawn between them; `b` again from the back. `c` and `d` are the outer vertices of the two condyles, the
+ends of DFW (5) drawn across the distal condyles on the front view; `c` is shown again on the side view. The figure's
+side labels put `c` on the medial side, against the deck text (`c` lateral): the width is the same either way. DFL is `a` to `b`, DFW is `c` to `d`.

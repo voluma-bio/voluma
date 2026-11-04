@@ -141,10 +141,13 @@ schema is `regions-and-landmarks`'):
   possibly age-related) is not representative of the lab's knees, most of which keep the plate whole. Look at the faces drawn on the sections before you run.
 - **D, the landmark points files** (scan grid, each name once across the files, straight from `pick.py`: do not
   copy coordinates into a new file). `a` midpoint of the upper line of the intercondylar groove, `b` intercondylar
-  notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck slide 7). `a` and
-  `b` go on a long view of the femur that shows the shaft and the groove side-on; `c` and `d` can go on the
-  joint-face view. `femoral_frame.py` refuses a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
-  (`a` and `b` placed end-on), an `a`-`b` that runs side to side or a `c`-`d` that does not
+  notch, `c` outer vertex of the lateral condyle, `d` outer vertex of the medial condyle (deck slide 7). `a` and
+  `b` go on a long view of the femur that shows the shaft and the groove side-on. `c` and `d` go on the front
+  (anterior) view: the most lateral and the most medial points of the condyles, at the level of the distal condyles,
+  where the deck figure (`examples/femoral-geometry/deck-points-a-d.jpg`) draws DFW (5) across the condyles; not on
+  a ridge or face inside that outline. `femoral_frame.py` refuses a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
+  (`a` and `b` placed end-on), a DFW under 0.9 of the femur label's width across its distal end (`c` and `d` inside
+  the outer vertices), an `a`-`b` that runs side to side or a `c`-`d` that does not
   (against the femur's mediolateral axis, which it finds from the label, checks against the knee's bending plane in the
   `frame` output and prints: the sides and the front swapped, which happens when an image's axes are read as the wrong scan axes) or an SI axis pointing away from the femur: re-place the points; the
   refusal is not a warning to explain. The printed axis says which scan direction runs side to side, not which side is
@@ -164,8 +167,7 @@ scan, not a starting point for another.
 - #10 tibial width: a chord on one coronal section with both ends on the growth plate's proximal face, from the centre
   of the fibula–tibia junction on the tibial surface to the prominent point on the other side. The old run's chord
   joined the two ends of its traced face: do not reuse those points.
-- #26 DFL: `a` to `b`. #27 DFW: `c` to `d`. The old run used an outer-edge chord at one plane for the width: do not
-  carry it over. #28 is DFW / DFL.
+- #26 DFL: `a` to `b`. #27 DFW: `c` to `d`, outer vertex to outer vertex across the condyles. #28 is DFW / DFL.
 - #7 to #9 heights: from the middle of the growth plate (whole, medial compartment, lateral compartment) up to the
   top surface of the articular bone, "vertically". **Open for the lab:** perpendicular to the growth-plate plane
   or along the tibial shaft axis; it has not chosen. `iioc.py` reports both: along W (the shaft axis) as the three
