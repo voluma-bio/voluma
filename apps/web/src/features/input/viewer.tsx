@@ -108,8 +108,10 @@ export function SceneViewer({
     restore?: { grid: string; state: QuadState };
     /** The run's saved views, under Views on the shown viewer's bar. */
     views?: readonly SavedViewEntry[];
-    /** Why a view couldn't be saved or opened, among the shown viewer's notes. */
+    /** Why a view couldn't be saved or opened, on the shown viewer. */
     viewError?: string;
+    /** `restore` has been applied. */
+    onRestored?(): void;
     /**
      * With Navigate, an end dragged in a slice: of your mark, or of a published ruler (a new mark
      * of yours on the grid's image `volumeId`), with the pane's frame.
@@ -311,7 +313,8 @@ export function SceneViewer({
               layout={quad.layout}
               onLayout={quad.onLayout}
               focus={k.focus}
-              notes={on && quad.viewError ? [...k.notes, quad.viewError] : k.notes}
+              notes={k.notes}
+              viewError={on ? quad.viewError : undefined}
               heading={on ? heading : undefined}
               tool={on ? tool : null}
               marks={shown.get(k.key) ?? NO_MARKS}
@@ -320,6 +323,7 @@ export function SceneViewer({
               targets={k.imageId === live?.imageId ? targets : undefined}
               onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
               restore={quad.restore?.grid === k.imageId ? quad.restore.state : undefined}
+              onRestored={quad.onRestored}
               views={on ? quad.views : undefined}
               onEdit={
                 on && quad.onEdit

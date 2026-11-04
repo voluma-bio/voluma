@@ -255,6 +255,8 @@ export function QuadViewer({
   targets = [],
   onSave,
   views,
+  onRestored,
+  viewError,
   restore,
   ref,
 }: {
@@ -295,8 +297,11 @@ export function QuadViewer({
   onSave?(state: QuadState): void;
   /** The run's saved views, listed under Views beside Save this view. */
   views?: readonly SavedViewEntry[];
-  /** A saved view to show: each new object is applied once. */
+  /** A saved view to show: each new object is applied once, then `onRestored`. */
   restore?: QuadState;
+  onRestored?(): void;
+  /** Why a view couldn't be saved or opened. */
+  viewError?: string;
   ref?: Ref<QuadViewerHandle>;
 }) {
   const [point, setPoint] = useState<Zyx>(
@@ -425,6 +430,8 @@ export function QuadViewer({
     if (restore.contrast) setContrast(restore.contrast);
     onLayout(restore.layout);
     setRestoring(restore);
+    // Applied: a viewer mounted later (back from a file or list output) must not apply it again.
+    onRestored?.();
   }, [restore]);
   // GP mounts once its plane is fitted; its saved view waits for it while GP is shown.
   useEffect(() => {
@@ -659,7 +666,7 @@ export function QuadViewer({
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background" aria-label="Views">
-      {(notes.length > 0 || contrastError || alignError || plateError) && (
+      {(notes.length > 0 || contrastError || alignError || plateError || viewError) && (
         <div className="grid gap-1 px-3 py-2 text-xs text-muted-foreground">
           {notes.map((note) => (
             <p key={note}>{note}</p>
@@ -672,6 +679,11 @@ export function QuadViewer({
           {alignError && (
             <p className="text-destructive" role="alert">
               {alignError}
+            </p>
+          )}
+          {viewError && (
+            <p className="text-destructive" role="alert">
+              {viewError}
             </p>
           )}
           {plateError && (

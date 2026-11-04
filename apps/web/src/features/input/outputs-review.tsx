@@ -539,11 +539,14 @@ export function OutputsReview({
             detail: `${v.title} · ${v.time}`,
             shown: v.id === views.shown,
             open: () => {
-              if (v.output !== inView?.id) show(v.output);
-              views.open(v);
+              if (!views.open(v, inView?.id) || v.output === inView?.id) return;
+              // The view's crosshair, not the output's usual jump to its first mark.
+              aimedFor.current = v.output;
+              show(v.output);
             },
           })),
-          viewError: views.error,
+          viewError: views.errorAt(inView?.id),
+          onRestored: views.restored,
           onEdit,
           onPick: marking.select,
           ref: scene,

@@ -49,16 +49,19 @@ export function useSavedViews(
 ) {
   const [restore, setRestore] = useState<{ grid: string; state: QuadState }>();
   const [shown, setShown] = useState<string>();
-  const [error, setError] = useState<string>();
+  // Kept with the output in view when it happened, so it shows only there.
+  const [error, setError] = useState<{ at: string; text: string }>();
   const mutation = useMutation<void, Error, { output: string; view: ReturnType<typeof storeView> }>(
     {
       mutationFn: (body) => saveView(run.id, body),
       onMutate: () => setError(undefined),
       onSuccess: reopen,
-      onError: (e) =>
-        setError(
-          e instanceof ApiError && e.serverMessage ? e.serverMessage : "Couldn't save the view.",
-        ),
+      onError: (e, body) =>
+        setError({
+          at: body.output,
+          text:
+            e instanceof ApiError && e.serverMessage ? e.serverMessage : "Couldn't save the view.",
+        }),
     },
   );
   // The newest saved view of what was just saved is the one shown.
@@ -71,24 +74,29 @@ export function useSavedViews(
   }, [all]);
   return {
     shown,
-    error,
+    /** The error to show while `output` is in view. */
+    errorAt: (output: string | undefined) =>
+      error && error.at === output ? error.text : undefined,
     restore,
+    restored: () => setRestore(undefined),
     save: run.example
       ? undefined
       : (row: OutputRow, state: QuadState, grid: string) => {
           pendingFor.current = row.id;
           mutation.mutate({ output: row.id, view: storeView(state, grid, shownOf(row)) });
         },
-    open: (v: SavedView) => {
+    /** Opens `v`, reporting on `here` (the output in view) when it can't; whether it opened. */
+    open: (v: SavedView, here: string | undefined) => {
       const grid = (v.view as { review?: { grid?: string } }).review?.grid;
       const state = grid ? readView(v.view, grid) : undefined;
       if (!grid || !state) {
-        setError("This view can't be opened here.");
-        return;
+        setError({ at: here ?? "", text: "This view can't be opened here." });
+        return false;
       }
       setError(undefined);
       setShown(v.id);
       setRestore({ grid, state });
+      return true;
     },
   };
 }
