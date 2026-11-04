@@ -11,9 +11,7 @@ export type Zyx = readonly [number, number, number];
 /**
  * A mark on the grid in source voxels (z, y, x): a voxel (with a note, or the value a probe read
  * there), an inclusive box, a line, an angle (its vertex between two ends), or a closed outline on
- * one plane, which may be tilted: the contract's `MarkShape`, which the outputs review stores. The
- * task review sends these as the message's `Mark` (`@voluma/contracts/messages`), which has no
- * notes, values or angles and whose outlines lie on a grid axis.
+ * one plane, which may be tilted: the contract's `MarkShape`, which the review stores.
  */
 export type GridMark = MarkShape;
 

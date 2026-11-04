@@ -7,4 +7,4 @@
 
 - **Cap the studies a caller can create.** `POST /studies` with `start: []` passes no admission check, and a guest costs nothing to mint, so one can write studies (each with up to 200 `study_members` rows) without limit. Runs stay limited. Cap studies per caller per day in `pg-queue.ts` `createStudy`.
 
-- **Compute `GET /studies` in SQL.** It loads every readable run of the caller's studies (derived results cached) on each Home poll, so the cost grows with the lab's history. Count and pick each scan's newest run in SQL, and derive only those.
+- **Compute `GET /studies` in SQL.** It loads every readable run of the caller's studies (derived results cached) on each Studies read, so the cost grows with the lab's history. Count and pick each scan's newest run in SQL, and derive only those.

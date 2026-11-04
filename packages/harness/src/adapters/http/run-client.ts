@@ -20,7 +20,6 @@
  * does not parse is skipped (the next page starts after its seq), and a read that runs out of retries calls
  * `policy.onUnreachable` and throws `EventLogUnavailable`, like a write. An append
  * answers with the stored seq; a 204 (an API from before that) answers none.
- * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt, cut at HEARTBEAT_ATTEMPT_MS: the caller keeps the usage and resends it if this throws.
  * `report` ends or releases the run, with the last event seq it read; a 409 means the server ended the run first or the lease
  * is no longer ours, so it returns false (the caller logs that nothing was stored). A network failure is retried for REPORT_BUDGET_MS; the
@@ -40,7 +39,6 @@ import {
   SELF_STOP_SECONDS,
   type Usage,
 } from "@voluma/contracts/runner";
-import type { LiveFrame } from "@voluma/contracts/stream";
 import { z } from "zod";
 import { errorText } from "../../error-text";
 import { type EventLog, EventLogUnavailable } from "../../ports/event-log";
@@ -62,8 +60,6 @@ export interface RunClient extends EventLog, History {
   heartbeat(usage: Usage): Promise<HeartbeatResponse>;
   /** True when the server stored the report; false on a 409 (the run ended first, or the lease is gone). */
   report(report: ReportRequest["report"]): Promise<boolean>;
-  /** One batch of live frames: a single attempt, no retry (they are best effort). */
-  live(frames: LiveFrame[]): Promise<void>;
 }
 
 export function runClient(
@@ -154,9 +150,6 @@ export function runClient(
         }
         throw error;
       }
-    },
-    async live(frames) {
-      await post(`${runPath}/live`, { frames });
     },
     async heartbeat(usage) {
       const response = await post(

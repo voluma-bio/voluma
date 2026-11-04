@@ -3,78 +3,55 @@
  * path with its R2 prefix, per thread: the sandbox spec mounts `mounts` (`specOf`), the tool descriptions say
  * `description`, and host-side tools turn paths into keys with `keyOf`.
  *
- * A role's frontmatter picks the shape (`AgentDefinition.scratch`, `outputs`). `scratch: all` mounts the run's
- * `/scratch` read-write and works in `/scratch/<its name>/`. `own` (also for a role without `bash`, which only
- * host-side tools use) mounts `/outputs` as the role's `outputs` says and writes only
- * `/scratch/<its name>/`, the R2 prefix `scratch/<its name>/`. Host-side (`keyOf`, so `view_image`) they also read
- * the run's `/scratch`, but a role that checks another (some role's `checkedBy`) only the files the attempt under review cites as
- * evidence: the worker's scripts, logs and notes stay unread. Its sandbox does
- * not mount the rest. The path namespace is the same for every thread:
- * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
- * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
- *
- * The agent model (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work` (a blind worker's: its own and the one it started from)
+ * An agent (`forAgent`): its own `/work/<folder>` read-write; every agent's folder under `/work` (a blind worker's: its own and the one it started from)
  * (so main's `plan.md` too), `/outputs` (the published versions), `/run` (the files rendered from the
  * events), `/inputs` and `/workflow` read-only. Mounts must not overlap (a nested one is unreliable on
  * Modal: the same spec once wrote and once failed read-only), so the sandbox mounts each peer folder that
- * exists when it is created (`peers`); host-side tools (`read`, `view_image`) see all of `/work`, peers
+ * exists when it is created (`peers`); host-side tools (`read`) see all of `/work`, peers
  * that started later included. The folder is the agent's name, except that every main thread (`main`,
  * `main.2`) works in `main`; the sandbox keeps the thread's name.
  *
- * `/inputs` is mounted read-only in every sandbox. Only a thread of a task whose `tasks.json`
- * entry sets `copyInputs` gets it copied to local disk (`stage`); the others read the mount.
+ * `/inputs` is mounted read-only in every sandbox, read from the bucket and not copied.
  *
- * Every sandbox gets `SCRATCH`, its own folder `/scratch/<name>` (`ThreadLayout.dir`).
+ * Every sandbox gets `WORK`, its own folder `/work/<folder>` (`ThreadLayout.dir`).
  */
 import {
-  evidencePrefix,
   inputReviewPrefix,
   outputsPrefix,
   relativePathSchema,
   reviewAssetPrefix,
   runFilesPrefix,
-  scratchPrefix,
-  toolOutputKey,
   workflowSnapshotPrefix,
   workPrefix,
 } from "@voluma/contracts/r2";
-import type { AgentDefinition, Skill } from "@voluma/workflow/definition";
+import type { Skill } from "@voluma/workflow/definition";
 import type { SandboxMount } from "./ports/sandbox";
-import type { ThreadIdentity } from "./thread-log";
 
 const INPUTS = "/inputs";
 export const OUTPUTS = "/outputs";
-const SCRATCH = "/scratch";
 export const WORKFLOW = "/workflow";
-export const EVIDENCE = "/evidence";
 export const REVIEW = "/review";
 const INPUT_REVIEW = "/input-review";
 const RUN = "/run";
 const WORK = "/work";
 
 export interface ThreadLayout {
-  /** What the thread is in the run (main, a task's worker, a task's check). */
-  place: "worker" | "check" | "main";
-  /** The role file it runs on: the key of `RunLayoutOptions.roles` and of the definition. */
+  /** What the thread is in the run. */
+  place: "worker" | "main";
+  /** The role file it runs on: the key of the definition's `agents`. */
   role: string;
-  /** Its role checks another's tasks: it reads only what the attempt cites of the other's scratch. */
-  reviewer: boolean;
-  /** The thread's name (`ThreadRecord.name`): the sandbox's name, and the folder of its spill and (non-workers) scratch. */
+  /** The thread's name (`AgentRecord.name`): the sandbox's name. */
   name: string;
   /** What the thread's sandbox mounts. */
   mounts: SandboxMount[];
-  /** The thread's writable scratch mount: `/scratch` for a worker, `/scratch/<name>` for the others. */
-  scratch: SandboxMount;
-  /** The thread's own working folder, `/scratch/<name>`: `SCRATCH`, the command workdir, its spill folder. */
+  /** The thread's writable folder mount. */
+  own: SandboxMount;
+  /** The thread's own working folder, `/work/<folder>`: `WORK`, the command workdir, its spill folder. */
   dir: string;
-  /** The sandbox's env: the run's `PYTHONPATH` and `SCRATCH` (`dir`). */
+  /** The sandbox's env: the run's `PYTHONPATH` and `WORK` (`dir`). */
   env: Record<string, string>;
-  /** `/inputs` is copied to local disk in this thread's sandbox; otherwise it is the read-only mount. */
-  copiesInputs: boolean;
   /** The tools its role holds (the role file's, less what the run cannot grant). */
   tools: readonly string[];
-  /** The roles its role may start. */
-  subagents: readonly string[];
   /** The sandbox may reach the gateway (and gets its URL and token): the role holds `segment_sam`. */
   gateway: boolean;
   /** The mounts, as bullet lines for the tool description. */
@@ -100,18 +77,8 @@ export type SandboxLayout = Pick<ThreadLayout, "name" | "mounts" | "env" | "gate
   /** The command workdir; absent: the image's. */ dir?: string;
 };
 
-type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "restartNote"> & {
-  hostOnly: SandboxMount[];
-};
-
 export interface RunLayout {
-  /**
-   * The layout of a thread. `cited` says whether the attempt a check reviews cites a scratch
-   * file (the path after `/scratch/`); it gates the check's host-side reads of the rest of the
-   * run's scratch, and without it a check reads none.
-   */
-  forThread(thread: ThreadIdentity, cited?: (path: string) => boolean): ThreadLayout;
-  /** The layout of an agent-model thread: `tools` are the ones its role holds. */
+  /** The layout of an agent's thread: `tools` are the ones its role holds. */
   forAgent(agent: {
     name: string;
     role: "main" | "worker";
@@ -127,7 +94,6 @@ export interface RunLayout {
 
 export interface RunLayoutOptions {
   runId: string;
-  inputId: string;
   /** The R2 prefix of the run's read-only inputs. */
   inputPrefix: string;
   /**
@@ -135,27 +101,6 @@ export interface RunLayoutOptions {
    * module (module names are unique across skills, a test enforces it).
    */
   skills: readonly Skill[];
-  /**
-   * Each role file's scratch and `/outputs` access, checker, subagents and the tools it holds. The roles
-   * holding `segment_sam` reach the gateway (every sandbox has `voluma-sam` on its PATH, so one
-   * whose role cannot call it gets no network).
-   */
-  roles: Record<
-    string,
-    Pick<AgentDefinition, "scratch" | "outputs" | "checkedBy" | "subagents"> & {
-      tools: readonly string[];
-    }
-  >;
-  /**
-   * Says a task's threads get `/inputs` copied to local disk, which the workflow declares
-   * (`copyInputs`): reading the DICOM straight from a cold mount is slow (measured on Modal:
-   * OA7-1R, 1,126 files, 535 MB, intake took 179-302 s on the mount against a 7-16 s copy plus
-   * 6 s on local disk; OA6-1RK 62-187 s against 5 s plus 4 s), while the 32-way copy hides the
-   * per-file latency. Only the task that reads the DICOM is worth it: later tasks read
-   * `hu.npy` from `/outputs`, and the copy costs every start and idle restart 5-16 s. The
-   * main thread never copies.
-   */
-  copiesInputs?: (taskId: string) => boolean;
 }
 
 /**
@@ -183,8 +128,8 @@ function lookup(table: readonly SandboxMount[], path: string, access: "read" | "
 }
 
 /**
- * The review-asset converter's sandbox, outside the threads and the same for every loop: reads
- * the evidence, the published versions (`/outputs`, the agent loop's) and the workflow, writes the
+ * The review-asset converter's sandbox, outside the threads: reads
+ * the published versions (`/outputs`) and the workflow, writes the
  * run's review prefix and the input's conversion cache, no network. The converter imports
  * `sidecar` through the run's PYTHONPATH.
  */
@@ -196,7 +141,6 @@ export function convertLayout(o: {
   return {
     name: "convert",
     mounts: [
-      { path: EVIDENCE, prefix: evidencePrefix(o.runId), access: "read-only" },
       { path: OUTPUTS, prefix: outputsPrefix(o.runId), access: "read-only" },
       { path: WORKFLOW, prefix: workflowSnapshotPrefix(o.runId), access: "read-only" },
       { path: REVIEW, prefix: reviewAssetPrefix(o.runId), access: "read-write" },
@@ -210,35 +154,21 @@ export function convertLayout(o: {
 const pythonPathOf = (skills: readonly Skill[]) =>
   skills.map((s) => `${s.path}/resources`).join(":");
 
-export function runLayout({
-  runId,
-  inputId,
-  inputPrefix,
-  skills,
-  roles,
-  copiesInputs = () => false,
-}: RunLayoutOptions): RunLayout {
-  const reviewers = new Set(Object.values(roles).map((a) => a.checkedBy));
-  const scratch = scratchPrefix(runId);
+export function runLayout({ runId, inputPrefix, skills }: RunLayoutOptions): RunLayout {
   const pythonPath = pythonPathOf(skills);
-  const inputs = (copy: boolean): SandboxMount => ({
-    path: INPUTS,
-    prefix: inputPrefix,
-    access: "read-only",
-    ...(copy && { stage: true }),
-  });
+  const inputs: SandboxMount = { path: INPUTS, prefix: inputPrefix, access: "read-only" };
   const workflow: SandboxMount = {
     path: WORKFLOW,
     prefix: workflowSnapshotPrefix(runId),
     access: "read-only",
   };
-  const outputs = (access: SandboxMount["access"]): SandboxMount => ({
+  const outputs: SandboxMount = {
     path: OUTPUTS,
     prefix: outputsPrefix(runId),
-    access,
-  });
-  const common = (copy: boolean) =>
-    `- ${INPUTS} is the input data${copy ? ", copied to local disk" : ", read from the bucket (not copied)"}: read it, do not modify it.\n` +
+    access: "read-only",
+  };
+  const common =
+    `- ${INPUTS} is the input data, read from the bucket (not copied): read it, do not modify it.\n` +
     `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n`;
 
   // Measured on Modal's R2 mounts (run p659): a file written whole in one pass works; seeks,
@@ -248,44 +178,7 @@ export function runLayout({
     `- Files under ${writable} live on cloud storage: a file can be created, or replaced, by writing it whole from start to end in one pass, and nothing else. ` +
     "Seeking back, appending, reopening a file to change it, truncating, renaming (mv, sed -i, os.rename, os.replace) and keeping times (cp -p, cp -a, shutil.copy2) fail there; " +
     "so do np.savez, tifffile and memmap writes, and pyvista/VTK saves crash or fail. Anything a library writes in several steps goes to /tmp first; then copy it with a plain `cp` or shutil.copy " +
-    `(cp /tmp/x.vtp $SCRATCH/). Reading is unrestricted.\n`;
-
-  // What differs by role. `hostOnly` entries are readable by host-side tools, not mounted.
-  const full = (dir: string, copy: boolean, outputsAccess: SandboxMount["access"]): RoleParts => {
-    const writable: SandboxMount = { path: SCRATCH, prefix: scratch, access: "read-write" };
-    return {
-      mounts: [inputs(copy), workflow, writable, outputs(outputsAccess)],
-      scratch: writable,
-      hostOnly: [],
-      description:
-        `${common(copy)}${writeRule(`${OUTPUTS} and ${SCRATCH}`)}- ${OUTPUTS} is for files you produce; they are kept.\n` +
-        `- ${SCRATCH} is for intermediate files and is kept too; the other threads' folders are there as well. Work in $SCRATCH (${dir}) and write nothing else under ${SCRATCH}.`,
-      restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${copy ? `${INPUTS} was copied again, ` : ""}and local files elsewhere (including /tmp) are gone.`,
-    };
-  };
-  const confined = (
-    name: string,
-    dir: string,
-    outputsAccess: SandboxMount["access"],
-    copy: boolean,
-  ): RoleParts => {
-    const writable: SandboxMount = {
-      path: dir,
-      prefix: `${scratch}${name}/`,
-      access: "read-write",
-    };
-    return {
-      mounts: [inputs(copy), workflow, outputs(outputsAccess), writable],
-      scratch: writable,
-      // After `mounts`: the more specific writable folder matches first.
-      hostOnly: [{ path: SCRATCH, prefix: scratch, access: "read-only" }],
-      description:
-        `${common(copy)}${writeRule(outputsAccess === "read-write" ? `${OUTPUTS} and ${dir}` : dir)}- ${OUTPUTS} holds the worker's files: ${outputsAccess === "read-write" ? "the files you produce go here too" : "read them, do not modify them"}.\n` +
-        `- ${dir} is for your intermediate files; it is kept. $SCRATCH is ${dir}. Write nothing else under ${SCRATCH}. ` +
-        `bash sees only your folder there; view_image and read also open the files under ${SCRATCH}/ that the worker cited as evidence (read-only).`,
-      restartNote: `The sandbox was restarted. ${dir} was kept, ${copy ? `${INPUTS} was copied again, ` : ""}and local files elsewhere (including /tmp) are gone.`,
-    };
-  };
+    `(cp /tmp/x.vtp $WORK/). Reading is unrestricted.\n`;
 
   return {
     forAgent({ name, role, tools, peers, blind, from }) {
@@ -301,9 +194,9 @@ export function runLayout({
         ? []
         : [{ path: WORK, prefix: work, access: "read-only" }];
       const mounts: SandboxMount[] = [
-        inputs(false),
+        inputs,
         workflow,
-        outputs("read-only"),
+        outputs,
         { path: RUN, prefix: runFilesPrefix(runId), access: "read-only" },
         own,
         ...peerMounts,
@@ -315,18 +208,15 @@ export function runLayout({
       return {
         place: role,
         role,
-        reviewer: false,
         name,
         mounts,
-        scratch: own,
+        own,
         dir,
         env: { PYTHONPATH: pythonPath, WORK: dir },
-        copiesInputs: false,
         tools,
-        subagents: [],
         gateway: tools.includes("segment_sam"),
         description:
-          `${common(false)}- ${OUTPUTS} holds every published output version, one folder per version: read it, do not modify it. ${RUN}/outputs.yaml lists the versions and ${RUN}/final-outputs.yaml the outputs the researcher asked for; both are rewritten as the run goes.\n` +
+          `${common}- ${OUTPUTS} holds every published output version, one folder per version: read it, do not modify it. ${RUN}/outputs.yaml lists the versions and ${RUN}/final-outputs.yaml the outputs the researcher asked for; both are rewritten as the run goes.\n` +
           `${writeRule(dir)}- ${dir} is your own folder and the only place you write: $WORK is ${dir}. It is kept, ` +
           (blind
             ? `and it is the only folder under ${WORK} you can see: you work blind, so no other agent's files are open to you.\n`
@@ -337,48 +227,6 @@ export function runLayout({
         resolve,
         mounted: (path) => table.some((m) => holds(m, path)),
         keyOf: (named, access) => lookup(table, resolve(named), access).key,
-      };
-    },
-    forThread({ name, place, role, taskId }, cited = () => false) {
-      const copy = taskId !== undefined && copiesInputs(taskId);
-      const dir = `${SCRATCH}/${name}`;
-      const facts = roles[role];
-      if (!facts) throw new Error(`${name} runs on ${role}, which is not a role of this run`);
-      const access = facts.outputs === "write" ? "read-write" : "read-only";
-      const reviewer = reviewers.has(role);
-      const parts =
-        facts.scratch === "all" ? full(dir, copy, access) : confined(name, dir, access, copy);
-      const { hostOnly, ...rest } = parts;
-      const table = [...parts.mounts, ...hostOnly];
-      const resolve = (path: string) =>
-        path.startsWith("/") ? path : `${dir}/${path.replace(/^(\.\/)+/, "")}`;
-      return {
-        ...rest,
-        place,
-        role,
-        reviewer,
-        name,
-        copiesInputs: copy,
-        tools: facts.tools,
-        subagents: facts.subagents,
-        gateway: facts.tools.includes("segment_sam"),
-        dir,
-        env: { PYTHONPATH: pythonPath, SCRATCH: dir },
-        toolOutputPath: (toolCallId) =>
-          `${SCRATCH}/${toolOutputKey(runId, name, toolCallId).slice(scratch.length)}`,
-        resolve,
-        mounted: (path) => table.some((m) => path.startsWith(`${m.path}/`)),
-        keyOf(named, access) {
-          const path = resolve(named);
-          const { mount, key, relative } = lookup(table, path, access);
-          if (reviewer && hostOnly.includes(mount)) {
-            if (!cited(relative))
-              throw new Error(
-                `${path} is in the worker's folder and the worker did not cite it as evidence. A check can open the files the worker cited, and its own folder ${dir}.`,
-              );
-          }
-          return key;
-        },
       };
     },
   };

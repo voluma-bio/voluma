@@ -6,16 +6,14 @@
 
 import { approvalRecords, openApprovals } from "@voluma/contracts/agents";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
-import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
 import { outputsIn } from "@voluma/contracts/output-fold";
-import { openCorrectionRevision, progress, reviewState } from "@voluma/contracts/review-state";
-import { hasTaskReview, type Input, type Run, runSchema } from "@voluma/contracts/run";
-import { failedThreads, openThreads } from "@voluma/contracts/threads";
+import { RESULT_EVENT_TYPES, reviewState } from "@voluma/contracts/review-state";
+import type { Input, Run } from "@voluma/contracts/run";
+import { runSchema } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import { events, inputs, referenceInput, runs, studies } from "./schema";
@@ -114,15 +112,8 @@ export function openCorrectionOf(
   return open;
 }
 
-/** The columns `hasTaskReview` reads. */
-const reviewFacts = (run: Row["run"]) => ({
-  state: { status: run.state, outcome: run.outcome ?? undefined },
-  harness: run.harness ?? undefined,
-});
-
 function toRun({ run, input, position, calls }: Row, results: Results): Run {
-  const { summary, revisions } = results;
-  // An agent-loop run's final outputs in, while it goes and once main has listed them.
+  // The final outputs in, while the run goes and once main has listed them.
   const finals = outputsIn(results.outputs);
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
@@ -156,14 +147,11 @@ function toRun({ run, input, position, calls }: Row, results: Results): Run {
     credentials: run.credentials,
     ...(run.model !== null && { model: run.model }),
     ...(run.thinking !== null && { thinking: run.thinking }),
-    ...(run.harness !== null && { harness: run.harness }),
     example: run.example,
     createdAt: run.createdAt.toISOString(),
     state,
     usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },
     providerCalls: calls,
-    review: hasTaskReview(reviewFacts(run)) ? summary : null,
-    tasks: run.state === "ended" ? null : progressOf(revisions.at(-1)),
     ...(run.state !== "ended" && finals.total > 0 && { outputs: finals }),
   });
 }
@@ -252,7 +240,7 @@ async function loadLogs(tx: Tx, ids: string[]) {
     const stored = await tx
       .select()
       .from(events)
-      .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
+      .where(and(inArray(events.runId, ids), inArray(events.type, [...RESULT_EVENT_TYPES])))
       .orderBy(asc(events.seq));
     for (const id of ids) logs.set(id, { events: [], skipped: 0 });
     const { events: read, skipped } = readEvents(stored);
@@ -266,21 +254,13 @@ async function loadLogs(tx: Tx, ids: string[]) {
 }
 
 type Results = ReturnType<typeof reviewState>;
-type Revision = Results["revisions"][number];
 
 /**
- * What the cache keeps of one run: its `reviewState` (the whole `results` for Review; the run's
- * summary and progress, and a study's values and open checks, are read from it), and what
- * `taskStates` needs that only the log knows.
+ * What the cache keeps of one run: its `reviewState` (the whole `results` for Review; a study's
+ * values and open checks are read from it), and the counts that only the log knows.
  */
 export type RunFold = {
   results: Results;
-  /** An open correction's revision, which task states read; none when no correction is open. */
-  correcting: Revision | undefined;
-  /** The threads started and not yet ended (`openThreads`). */
-  open: readonly string[];
-  /** The threads whose latest end failed (`failedThreads`). */
-  failed: ReadonlySet<string>;
   /** The calls main holds for the researcher's answer (`openApprovals`); who may answer is the reader's. */
   waiting: number;
   /** The stored fold events that did not parse and are missing from `results`. */
@@ -291,19 +271,9 @@ const foldRun = (log: RunEvent[], skipped = 0): RunFold => ({
   skipped,
   waiting: openApprovals(approvalRecords(log)).length,
   results: reviewState(log),
-  correcting: openCorrectionRevision(log),
-  open: openThreads(log),
-  failed: failedThreads(log),
 });
 
 const NOTHING = foldRun([]);
-
-/** A revision's finished tasks out of its plan's; null before there is a revision. */
-function progressOf(latest: Revision | undefined): Run["tasks"] {
-  if (!latest) return null;
-  const { done, total } = progress(latest);
-  return { done, total };
-}
 
 /**
  * One run's cache entry, kept against the generation and watermark. `weight` is its event
@@ -345,14 +315,8 @@ export type RunResult = { run: Run; generation: string } & RunFold;
 interface LoadOptions {
   cache?: SummaryCache;
   /**
-   * The lists and the study reads: a completed task-loop run with no review summary (no revision,
-   * which `runSchema` forbids) is left out rather than failing every run listed with it.
-   * Without it (one run's read, a cancel's reply) that run is a 409: its events can't be read.
-   */
-  skipSummaryless?: boolean;
-  /**
-   * Which failed or cancelled runs to fold. A stopped run's row says all a list shows of it
-   * (`review` and `tasks` are null), so the lists take `none`; the study read takes `newest`, a
+   * Which failed or cancelled runs to fold. A stopped run's row says all a list shows of it,
+   * so the lists take `none`; the study read takes `newest`, a
    * input's newest run, to show where it stopped; one run's read (default) takes `all`. A run
    * left out reads as having no events.
    */
@@ -363,7 +327,7 @@ async function loadResults(
   tx: Tx,
   where: SQL | undefined,
   orgs: readonly string[],
-  { cache = newCache(), skipSummaryless = false, stopped = "all" }: LoadOptions = {},
+  { cache = newCache(), stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where, orgs);
   // Rows are newest first, so an input's first row is its newest run.
@@ -379,7 +343,7 @@ async function loadResults(
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
         .from(events)
-        .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
+        .where(and(inArray(events.runId, ids), inArray(events.type, [...RESULT_EVENT_TYPES])))
         .orderBy(events.runId, desc(events.seq))
     : [];
   // Appends move the event watermark; replacements change generation even when event IDs repeat.
@@ -413,21 +377,10 @@ async function loadResults(
     foldOf.set(id, entry.fold);
     remember(cache, id, entry);
   }
-  return rows
-    .filter(
-      // A completed task-loop run with no revision has no review summary, so `runSchema` would
-      // throw: in a list it is left out.
-      ({ run }) =>
-        !skipSummaryless || !hasTaskReview(reviewFacts(run)) || foldOf.get(run.id)?.results.summary,
-    )
-    .map((row) => {
-      const fold = foldOf.get(row.run.id) ?? NOTHING;
-      if (hasTaskReview(reviewFacts(row.run)) && !fold.results.summary)
-        throw new HTTPException(409, {
-          message: "This run's review can't be read: its events don't parse.",
-        });
-      return { run: toRun(row, fold.results), generation: row.run.generation, ...fold };
-    });
+  return rows.map((row) => {
+    const fold = foldOf.get(row.run.id) ?? NOTHING;
+    return { run: toRun(row, fold.results), generation: row.run.generation, ...fold };
+  });
 }
 
 /** `loadResults` through one cache, so the run and study reads fold a run once between them. */
@@ -458,9 +411,7 @@ export function pgRunReads(db: PostgresJsDatabase, results: ResultsLoader) {
     list: (reader: ReadScope) =>
       db.transaction(
         async (tx) =>
-          (await results(tx, readableRuns(reader), { skipSummaryless: true, stopped: "none" })).map(
-            ({ run }) => run,
-          ),
+          (await results(tx, readableRuns(reader), { stopped: "none" })).map(({ run }) => run),
         { isolationLevel: "repeatable read" },
       ),
 

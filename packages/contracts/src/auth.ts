@@ -47,7 +47,6 @@ import { z } from "zod";
 
 /** The `?signin=` value on the redirect after a refused sign-in. Parse it with `safeParse`; an unknown value means the plain sign-in screen. */
 export const signinOutcomeSchema = z.enum(["not-a-member", "failed"]);
-export type SigninOutcome = z.infer<typeof signinOutcomeSchema>;
 
 /** A WorkOS user id, or a server-minted id for a guest (an anonymous visitor). */
 export const userIdSchema = z.string();
@@ -74,11 +73,9 @@ export const meResponseSchema = z.discriminatedUnion("kind", [
 export type Me = z.infer<typeof meResponseSchema>;
 
 export const logoutResponseSchema = z.object({ logoutUrl: z.string() });
-export type LogoutResponse = z.infer<typeof logoutResponseSchema>;
 
 /** A member's own email and password, for a script that signs in without a browser. */
 export const passwordSignInRequestSchema = z.object({
   email: z.string().min(1).max(320),
   password: z.string().min(1).max(1024),
 });
-export type PasswordSignInRequest = z.infer<typeof passwordSignInRequestSchema>;

@@ -111,21 +111,6 @@ export async function openCorrection(tx: Queryable, runId: string): Promise<stri
   return openCorrectionOf(rows)?.id ?? null;
 }
 
-/** Writes `correction.ended`, keyed to the open correction's `run.reopened` (`openCorrection`). */
-export async function endCorrection(
-  tx: Tx,
-  runId: string,
-  reopenId: string,
-  status: "failed" | "cancelled",
-  error?: string,
-) {
-  await appendPersonEvent(tx, runId, {
-    id: `${reopenId.slice(0, -":reopened".length)}:ended`,
-    type: "correction.ended",
-    payload: { status, ...(error !== undefined && { error }) },
-  });
-}
-
 /** What the reopen of a finished run needs besides the run: how to workflow-check it and seal keys. */
 export type ReopenContext = {
   pinsOf: (workflowId: string) => WorkflowPin[] | undefined;
@@ -156,8 +141,6 @@ export type MessageTarget = {
   workflows: WorkflowPin[];
   /** The study's workflow when the caller already holds it, which spares the lookup. */
   studyWorkflowId?: string;
-  /** The loop that drives the run; null or absent: the task loop. */
-  harness?: "tasks" | "agents" | null;
   /** The queue state: `queued`, `running`, `awaiting-keys` or `ended`. */
   state: string;
   outcome: string | null;
@@ -185,11 +168,6 @@ export async function messageRefusal(
   run: MessageTarget,
 ): Promise<{ status: 403 | 409; message: string } | null> {
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
-  if (run.harness !== "agents")
-    return {
-      status: 409,
-      message: "This run came from an earlier version of Voluma and can't be reopened yet.",
-    };
   // A converted run (it holds the outputs the conversion wrote) keeps the workflow files of its
   // task-loop days, which the runner can no longer load; it goes with the snapshot fallback's deletion.
   const [converted] = await tx
@@ -202,7 +180,7 @@ export async function messageRefusal(
       message:
         "This run was converted from an earlier version of Voluma and can't be reopened yet.",
     };
-  // An agent run takes the researcher's words while it goes: the claim pulls them in.
+  // A run takes the researcher's words while it goes: the claim pulls them in.
   if (run.state === "queued" || run.state === "running") return null;
   if (run.state !== "ended" || run.outcome !== "completed")
     return { status: 409, message: "Only a run that completed can be reopened; rerun this one." };
@@ -222,7 +200,8 @@ export async function messageRefusal(
  * A researcher's message to a run, judged in the order the contract lists the refusals. `write`
  * false judges only (nothing is stored, no lock is taken): the route calls that first, so a
  * refused message stores no snapshot, and again with `write` inside the queue's transaction. A run that
- * ended `completed` is reopened through admission. A run still queued or running takes the message as it is (the claim pulls it in). A run whose workflow files are not the study's current ones cannot
+ * ended `completed` is reopened through admission. A run still queued or running takes the message
+ * as it is (the claim pulls it in). A run whose workflow files are not the study's current ones cannot
  * be reopened: the runner could not load them.
  */
 export async function decideMessage(
@@ -258,9 +237,6 @@ export async function decideMessage(
   if (again && refusal?.status !== 403)
     return { eventId, state: await stateNow(), duplicate: true };
   if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
-  const { taskId, itemId, go, marks } = msg.payload;
-  if ([taskId, itemId, go, marks].some((v) => v !== undefined))
-    throw new HTTPException(400, { message: "taskId, itemId, go and marks belong to task runs." });
   // The runner resumes from the whole log and fails on a row it can't read, so a correction on
   // such a run could never finish. Both passes read it all, so a refused message never uploads
   // a snapshot first.
@@ -272,8 +248,8 @@ export async function decideMessage(
       message: "This run has an event that can't be read; rerun it.",
     });
   let payload = msg.payload;
-  // The agent run has no task fold: main reads the log. Check what the message points at, and
-  // freeze its marks from the log so a later `mark.placed` cannot change a sent message.
+  // Main reads the log. Check what the message points at, and freeze its marks from the log so
+  // a later `mark.placed` cannot change a sent message.
   const outputs = outputsFold(log).byId;
   const { output, toCheck } = payload;
   if ([output, toCheck?.output].some((id) => id !== undefined && !outputs.has(id)))
@@ -327,7 +303,7 @@ export async function answerApproval(
   body: AnswerApprovalRequest,
 ): Promise<{ duplicate: boolean }> {
   const run = await lockRun(tx, runId, readableRuns(reader));
-  if (!run || run.harness !== "agents") throw new HTTPException(404, { message: "not found" });
+  if (!run) throw new HTTPException(404, { message: "not found" });
   const refusal = await messageRefusal(tx, o.pinsOf, {
     ...run,
     workflows: run.workflows as WorkflowPin[],

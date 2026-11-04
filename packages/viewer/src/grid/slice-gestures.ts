@@ -2,8 +2,8 @@
  * A slice pane's pointer, wheel and key gestures (`SlicePane.tsx`): left drag moves the crosshair,
  * the wheel steps slices along the normal, Ctrl or ⌘ + wheel zooms at the pointer, Shift, middle
  * or right drag pans, and a press on a tilt handle turns the other planes. With a marking tool,
- * left click or drag marks: Point a voxel, Box a drag's rectangle, Line a drag's two ends (or two
- * clicks, with `clickLines`), Angle three clicks (the vertex second), Outline a freehand loop,
+ * left click or drag marks: Point a voxel, Box a drag's rectangle, Line a drag's two ends or two
+ * clicks, Angle three clicks (the vertex second), Outline a freehand loop,
  * Probe reads the value under the pointer and keeps it as a point on click. Whatever the tool, a
  * drag that starts within `END_HIT_PX` of an end of an editable mark (`ShownMark.movable`: a point, a
  * line, an angle) or of a published ruler moves that end (`onEdit`); a click there goes to the tool
@@ -114,8 +114,6 @@ export function useSliceGestures(args: {
   probe: RefObject<Probe | null>;
   scene: GridScene;
   axis: Axis;
-  /** Line also takes two clicks, not only a drag; the task review's Line takes only a drag. */
-  clickLines: boolean;
   /** The tilt handles in CSS px, for a pane `width` × `height`. */
   handlesNow(width: number, height: number): readonly { x: number; y: number }[];
   /** Picks the level the zoom needs, after a zoom. */
@@ -135,7 +133,7 @@ export function useSliceGestures(args: {
 
   useEffect(() => {
     const element = host.current!;
-    const { scene, axis, clickLines, handlesNow, pickLevel, render } = first.current;
+    const { scene, axis, handlesNow, pickLevel, render } = first.current;
     const [ra, ca] = planeAxes(axis);
     const paneMm = (event: { clientX: number; clientY: number }) => {
       const rect = element.getBoundingClientRect();
@@ -383,7 +381,7 @@ export function useSliceGestures(args: {
         return;
       }
       // A click toward a line or an angle: keep going until the mark has all its ends.
-      if ((d.mode === "line" && clickLines && (!d.moved || clicks.length)) || d.mode === "angle") {
+      if ((d.mode === "line" && (!d.moved || clicks.length)) || d.mode === "angle") {
         clicks.push(toPosition(event));
         const [a, b, c] = clicks;
         const sp = scene.spacingZyx;

@@ -27,6 +27,6 @@ the input it names or pass the question on; do not route around it with code of 
   scripts write under; scripts read it with `--spec`, so you pass no protocol number as a flag.
 - Report each placed object (region, surface, ruler, grid) by passing the `objects` entry of the script's result record to
   `report_output` unchanged, under the id it is keyed by; `morphometry.py cortical` reports its slab under the `--output` id. A named
-  bone is reported as a structure with its label value in `bone-labels` (`{label: 2}` for the tibia; the labels are in
-  `outputs.json`).
+  bone is not reported on its own: it is one label of `bone-labels` (2 for the tibia; the labels are in `outputs.yaml`),
+  and reporting `bone-labels` covers it.
 - The generic micro-CT skills (`workflows/core/skills/`) are listed with this one.

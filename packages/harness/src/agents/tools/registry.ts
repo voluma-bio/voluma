@@ -1,7 +1,5 @@
 /**
- * The agent loop's tools, by name. A role file picks its tools from this list, under the loop
- * its run is pinned to; the task loop's list is `tools/registry.ts`, and `report_output` means
- * something else there. `buildAgentTools` builds exactly the tools a role names for one thread.
+ * The agent loop's tools, by name. A role file picks its tools from this list. `buildAgentTools` builds exactly the tools a role names for one thread.
  */
 
 import type { BashRuntime } from "../../bash-runtime";
@@ -34,7 +32,7 @@ export const AGENT_TOOL_NAMES = [
 ] as const;
 
 const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) => Tool> = {
-  bash: ({ layout, bash }) => bashTool(layout, true, bash, false),
+  bash: ({ layout, bash }) => bashTool(layout, bash),
   bash_manage: ({ bash }) => bashManageTool(bash),
   segment_sam: ({ layout }) => segmentSamTool(layout),
   read: ({ layout, files }, names) =>

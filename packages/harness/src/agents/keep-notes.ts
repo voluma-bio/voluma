@@ -7,8 +7,8 @@
  * the kept plan back where main's prompts point, before the thread's sandbox is built.
  */
 import { notesKey, workPrefix } from "@voluma/contracts/r2";
-import { EvidenceNotFound, EvidenceRefused } from "../ports/evidence";
 import type { Publish } from "../ports/publish";
+import { FileNotFound, FileRefused } from "../ports/publish";
 
 export async function keepNotes(
   publish: Publish,
@@ -24,7 +24,7 @@ export async function keepNotes(
       signal,
     });
   } catch (e) {
-    if (!(e instanceof EvidenceNotFound)) throw e;
+    if (!(e instanceof FileNotFound)) throw e;
   }
 }
 
@@ -38,12 +38,12 @@ export async function restoreMainPlan(
     if ((await publish.read(work, { signal })) !== undefined) return;
   } catch (e) {
     // A plan over `read`'s 1 MiB is there: nothing to restore.
-    if (e instanceof EvidenceRefused) return;
+    if (e instanceof FileRefused) return;
     throw e;
   }
   try {
     await publish.copy(notesKey(runId, "main", "plan.md"), work, { signal });
   } catch (e) {
-    if (!(e instanceof EvidenceNotFound)) throw e;
+    if (!(e instanceof FileNotFound)) throw e;
   }
 }

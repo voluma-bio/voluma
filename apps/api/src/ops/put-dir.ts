@@ -2,8 +2,7 @@
  * Operator script: upload a local folder to R2 (objects whose stored ETag equals the file's MD5 are kept; the rest are overwritten)
  * Writes only under `dev/`.
  *   pnpm --filter @voluma/api r2:put --from <dir> --to r2:<prefix>
- * Publishes the dev data other worktrees load: a run dump (`export:run --out r2:…`) and the
- * ce5a0f21 backfill folder (`seed:example --backfill r2:…`).
+ * Publishes the dev data other worktrees load: a run dump (`export:run --out r2:…`).
  */
 import { parseArgs } from "node:util";
 import { devWritePrefix, r2FromEnv, uploadDir } from "./r2-dir";

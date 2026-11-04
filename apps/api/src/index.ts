@@ -13,7 +13,6 @@
  * GUEST_ORGANIZATION_ID to let anyone in as a guest (the repo .env).
  * RUN_KEY_SECRET (at least 32 characters): seals an own-key run's keys in the database while the run lives (domains/run/run-keys.ts).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
- * DEFAULT_RUN_HARNESS (tasks|agents, default agents): the loop of a run whose start names none.
  * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
  * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
  * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
@@ -24,18 +23,16 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { harnessSchema } from "@voluma/contracts/ids";
 import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
-import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
 import { directoryStore } from "@voluma/object-store/directory";
 import { r2Store } from "@voluma/object-store/r2";
-import { workflowById } from "@voluma/workflow/bundled";
+import { catalog, workflowById } from "@voluma/workflow/bundled";
+import { readOutputCatalog } from "@voluma/workflow/catalog-file";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
-import { pgSnapshots } from "./adapters/pg-snapshots";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
@@ -132,6 +129,11 @@ const results = resultsLoader([...limits.voluma.keys()]);
 const reads = pgRunReads(db, results);
 const studies = pgStudyReads(db, results);
 const notifier = createNotifier();
+// Each bundled workflow's catalog, from this checkout: the outputs a start may select.
+const REPO_ROOT = resolve(import.meta.dirname, "../../..");
+const outputs = Object.fromEntries(
+  Object.values(catalog).map((w) => [w.id, readOutputCatalog(REPO_ROOT, w.path)]),
+);
 const runKeySecret = required("RUN_KEY_SECRET");
 if (runKeySecret.length < 32) throw new Error("RUN_KEY_SECRET must be at least 32 characters");
 const queue = pgRunQueue(
@@ -145,12 +147,11 @@ const queue = pgRunQueue(
     return (
       workflow && {
         pins: [{ repo: "voluma-bio/voluma", path: workflow.path }],
-        outputs: workflow.outputs,
+        outputs: outputs[id] ?? [],
       }
     );
   },
   modelOverride(process.env.RUN_MODEL_OVERRIDE),
-  harnessSchema.parse(process.env.DEFAULT_RUN_HARNESS || "agents"),
 );
 const eventLog = pgEventLog(db, notifier);
 
@@ -192,12 +193,9 @@ const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
 const messageLimit = bodyLimit({ maxSize: MESSAGE_BODY_BYTES });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
-const snapshotLimit = bodyLimit({ maxSize: REVIEW_SNAPSHOT_BODY_BYTES });
 app.use("/api/*", (c, next) => {
   if (c.req.path.startsWith("/api/run/ingest/")) return runnerLimit(c, next);
   if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
-  if (c.req.method === "POST" && /^\/api\/review\/runs\/[^/]+\/snapshots$/.test(c.req.path))
-    return snapshotLimit(c, next);
   if (/^\/api\/review\/runs\/[^/]+\/messages$/.test(c.req.path)) return messageLimit(c, next);
   return browserLimit(c, next);
 });
@@ -234,7 +232,6 @@ app.route(
   "/api/review",
   createReview({
     runs: runRecords,
-    snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage, answer: queue.answerApproval },
     store,
   }),

@@ -8,7 +8,6 @@
  */
 import { randomUUID } from "node:crypto";
 import {
-  acceptRefusal,
   type Run,
   type RunRead,
   resendKeysRequestSchema,
@@ -37,13 +36,14 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   const readOf = async (user: UserPrincipal | undefined, run: Run): Promise<RunRead> => ({
     ...run,
     cannotMessage: user ? await queue.cannotMessage(run) : READ_ONLY_TOKEN,
-    cannotAccept: user ? (acceptRefusal(run)?.message ?? null) : READ_ONLY_TOKEN,
   });
   const userOf = (principal: Principal) => (principal.kind === "user" ? principal : undefined);
 
   app.post("/runs", requireUser, async (c) => {
-    const { studyId, inputId, selectedOutputs, notes, keys, model, thinking, harness } =
-      await parseJson(c, startRunRequestSchema);
+    const { studyId, inputId, selectedOutputs, notes, keys, model, thinking } = await parseJson(
+      c,
+      startRunRequestSchema,
+    );
     const user = c.var.user;
     const result = await queue.start(readerOf(user), callerOf(user), {
       id: randomUUID(),
@@ -54,7 +54,6 @@ export function runsRoutes({ reads, queue }: RunDeps) {
       keys,
       model,
       thinking,
-      harness,
     });
     return c.json(result.run satisfies Run);
   });

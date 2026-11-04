@@ -1,13 +1,9 @@
 /**
- * In-process fan-out to a run's open streams. Two channels, both correct for one API
- * replica only (a second replica would need a shared bus; live frames would reach only the
- * streams on the replica the runner posted to):
- * - `notify`/`watch`: a wake-up after a commit that appends an event or ends the run. It
- *   carries no data: the stream re-reads the log. stream.ts also polls as a backstop.
- * - `publish`/`watchLive`: live frames (`@voluma/contracts/stream`), handed to each open
- *   stream as they arrive. Not stored; a stream that connects later never sees them.
+ * In-process wake-up of a run's open streams, correct for one API replica only (a second
+ * replica would need a shared bus): `notify`/`watch` fire after a commit that appends an event
+ * or ends the run. They carry no data: the stream re-reads the log. stream.ts also polls as a
+ * backstop.
  */
-import type { LiveFrame } from "@voluma/contracts/stream";
 
 function registry<T>() {
   const listeners = new Map<string, Set<T>>();
@@ -27,17 +23,11 @@ function registry<T>() {
 
 export function createNotifier() {
   const wakes = registry<() => void>();
-  const frames = registry<(frame: LiveFrame) => void>();
   return {
     /** Call `wake` on each `notify` of the run. Returns the unsubscribe. */
     watch: wakes.add,
     notify(runId: string) {
       for (const wake of wakes.of(runId)) wake();
-    },
-    /** Call `onFrame` on each `publish` to the run. Returns the unsubscribe. */
-    watchLive: frames.add,
-    publish(runId: string, frame: LiveFrame) {
-      for (const onFrame of frames.of(runId)) onFrame(frame);
     },
   };
 }

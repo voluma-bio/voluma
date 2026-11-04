@@ -36,7 +36,6 @@ import type { BashRuntime } from "../bash-runtime";
 import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
 import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "../loop-config";
 import { loopShell, RUNTIME, type Section, type Step } from "../loop-shell";
-import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "../messages";
 import type { Recorder } from "../recorder";
 import { threadIdOf } from "../thread-id";
 import type { ThreadSpec, Threads } from "../threads";
@@ -69,6 +68,7 @@ import {
   returnedId,
   startedId,
 } from "./effects";
+import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "./messages";
 import { skillMarker } from "./prompts";
 import type { RunFiles } from "./run-files";
 import type { AgentsApi } from "./tools/coordination";
@@ -284,7 +284,6 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const spec = {
       ...model,
       threadId: agent.id,
-      kind: "agent" as const,
       agent: { name: agent.name, role: agent.role },
       systemPrompt,
       prompt,

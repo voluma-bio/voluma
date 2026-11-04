@@ -1,10 +1,10 @@
 /**
- * The agent loop's output catalogs (`outputs.yaml`), bundled for the web app the way `bundled.ts`
- * bundles `outputs.json`: names, label maps and shapes for the review, read at build time, since
- * the API serves no workflow files. A run snapshots its own commit, which may be later than this
+ * The workflows' output catalogs (`outputs.yaml`), bundled for the web app: names, units, label
+ * maps and shapes for the review and the study pages, read at build time, since the API serves
+ * no workflow files. A run snapshots its own commit, which may be later than this
  * bundle: an output the bundle lacks shows its id. Vite-only (`?raw`): the API and runner read the
  * catalog from the run's snapshot (`loadWorkflow`), never from here. A file that fails
- * `outputCatalogSchema` throws at import, as `bundled.ts` does.
+ * `outputCatalogSchema` throws at import.
  */
 import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { parse } from "yaml";

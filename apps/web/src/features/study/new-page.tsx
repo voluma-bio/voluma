@@ -33,7 +33,7 @@ import {
   ShellHeading,
   TextField,
 } from "@voluma/ui";
-import { catalog } from "@voluma/workflow/bundled";
+import { workflowById } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
@@ -42,10 +42,10 @@ import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./in
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
 import { linkTo } from "./link";
 import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
-import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
+import { measurementsOf, WorkflowPanel } from "./workflow-measurements";
 
 /** The one workflow a study can use today, listed as a list of one. */
-const WORKFLOWS = [catalog["mouse-oa"]];
+const WORKFLOWS = [workflowById("mouse-oa")].filter((w) => w !== undefined);
 
 /** A scan on the page: dropped here (uploading under `id`) or uploaded before. */
 interface Row {
@@ -250,10 +250,6 @@ export function NewPage() {
         keys,
         model,
         thinking,
-        // Hidden switch for the agent loop (no UI): /new?harness=agents.
-        ...(new URLSearchParams(location.search).get("harness") === "agents" && {
-          harness: "agents" as const,
-        }),
       };
       // A deploy's reload waits for the answer: leaving mid-request would hide whether it started.
       const release = holdLeave();
@@ -356,13 +352,12 @@ export function NewPage() {
                   <span className="min-w-0">
                     <span className="block font-medium">{w.name}</span>
                     <span className="block text-sm text-muted-foreground">
-                      {w.tasks.length} tasks, {measurementsOf(w).length} measurements
+                      {measurementsOf(w).length} measurements
                     </span>
-                    <span className="block text-sm text-muted-foreground">{measuredBy(w)}</span>
                   </span>
                 </label>
                 <Button variant="link" className="text-sm" onClick={() => setPanel(w.id)}>
-                  See tasks
+                  See measurements
                 </Button>
               </div>
             ))}

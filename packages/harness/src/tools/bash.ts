@@ -2,7 +2,7 @@
  * The `bash` tool: runs a command in the thread's sandbox. The model sees the combined output
  * capped to its head and tail (`bash-output.ts`). A command still running after `timeout_min`
  * is not killed: it moves to the background (`bash-runtime.ts`) and its end reaches the thread
- * as a notice. Live chunks go to `ctx.output`, coalesced.
+ * as a notice.
  */
 import { z } from "zod";
 import type { BashRuntime } from "../bash-runtime";
@@ -25,23 +25,14 @@ const inputSchema = z.object({
     .describe("Start the command in the background at once and return without waiting."),
 });
 
-/** `canRead`: the thread holds `read`, so a cut output's note points at it (a role file from before `read` does not). */
-export function bashTool(
-  layout: ThreadLayout,
-  canRead: boolean,
-  runtime: BashRuntime,
-  /** The task loop stops a thread's commands when its turn ends; an agent's commands run until it closes. */
-  endsWithTurn = true,
-): Tool<typeof inputSchema> {
+export function bashTool(layout: ThreadLayout, runtime: BashRuntime): Tool<typeof inputSchema> {
   return {
     name: "bash",
     description:
       "Run a shell command in the sandbox and return its combined stdout and stderr and exit code. " +
       "Long output is cut to its start and end; the full text is kept at the path the result names. " +
       "A command that outlives timeout_min is not killed: it moves to the background and its end is reported with a later tool result. " +
-      (endsWithTurn
-        ? "Ending your turn stops background commands, so wait for them with bash_manage first. "
-        : "A background command keeps running while you are idle, and its end wakes you with a notice; closing stops it. ") +
+      "A background command keeps running while you are idle, and its end wakes you with a notice; closing stops it. " +
       "Use bash_manage to list, read, wait for, kill or detach background commands. " +
       `${layout.description}\nThere is no network.`,
     input: inputSchema,
@@ -54,9 +45,7 @@ export function bashTool(
         background: background === true,
         sandbox: await ctx.sandbox(),
         spillPath: layout.toolOutputPath(ctx.toolCallId),
-        canRead,
         signal: ctx.signal,
-        output: ctx.output,
       });
       if (started.kind === "backgrounded") {
         const how =
@@ -64,11 +53,7 @@ export function bashTool(
             ? `${started.bashId}: started in the background.`
             : `Command exceeded timeout_min=${started.timeoutMin} and was backgrounded as ${started.bashId}.`;
         return {
-          output: `${how} ${
-            endsWithTurn
-              ? "It keeps running and its end is reported with a later tool result, but ending your turn stops it: use bash_manage (list, output, wait, kill, detach) and wait for it before you end your turn."
-              : "It keeps running, also while you are idle, and its end is reported to you; use bash_manage (list, output, wait, kill, detach) to look at it."
-          }`,
+          output: `${how} It keeps running, also while you are idle, and its end is reported to you; use bash_manage (list, output, wait, kill, detach) to look at it.`,
           isError: false,
           truncated: false,
         };

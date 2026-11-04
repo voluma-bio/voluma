@@ -24,7 +24,7 @@ import { keysToReopen, type OutputItem, type OutputRow, shownOf } from "@voluma/
 import { storeView } from "@voluma/viewer/grid";
 import { type RefObject, useState } from "react";
 import { useOutletContext } from "react-router";
-import type { MarkChange } from "./marks-panel";
+import type { MarkChange } from "./marking";
 import { refusalOf, useDraft, useIdempotentSend } from "./message-send";
 import type { SceneHandle } from "./viewer";
 

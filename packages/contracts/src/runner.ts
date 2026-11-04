@@ -55,12 +55,10 @@
  * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
  * claim's `run.model`, when present, is the model every role uses (`run.ts`); absent on runs made
  * before the choice, the runner then uses its own config. It is optional so either side deploys first. The
- * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
- * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
- * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
+ * claim carries no plan: the runner snapshots the run's workflow directory itself
+ * (`packages/workflow`). One limit stops a run that keeps costing its runner: the API
  * counts consecutive claims that end `loop-stalled`, `refused` or `lease-expired` without run-state
- * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
- * `revision.started` or `plan.changed` event), and the run ends
+ * progress (an `output.published`, `outputs.changed` or `assets.ready` event), and the run ends
  * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
  * and `self-stop` (the runner was alive and no call reached the API) never count, so deploys and API
  * outages don't fail a long run. A `released` report from the lease of a claim the API already swept
@@ -99,7 +97,6 @@
  * values from every error it reports (`run.ts`).
  */
 import { z } from "zod";
-import { harnessSchema } from "./ids";
 import { runSchema, visitorKeysSchema } from "./run";
 
 /**
@@ -145,17 +142,26 @@ export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
   /**
-   * The loops this runner can run. The claim hands out only a run whose loop is listed, so a run
-   * a runner cannot serve is never claimed and given back. Absent: `["tasks"]` (an older runner).
+   * Read and ignored: every run is an agent-loop run. A runner sends `["agents"]`; one built
+   * before the task loop was deleted sends `["tasks", "agents"]`, which must still parse during
+   * the deploy overlap (TODO: drop with `runs.harness`, `apps/api/.context/TODO.md`).
    */
-  harnesses: z.array(harnessSchema).min(1).optional(),
+  harnesses: z.array(z.enum(["tasks", "agents"])).optional(),
 });
-export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
 export const claimSchema = z
   .object({
-    /** In state `running`. */
-    run: runSchema,
+    /**
+     * In state `running`. `harness`, `tasks` and `review` are there for the deploy overlap: a
+     * runner built before the task loop was deleted requires all three (`tasks` and `review`
+     * nullable) and reads `run.harness ?? "tasks"` (TODO: drop with `runs.harness`,
+     * `packages/contracts/.context/TODO.md`).
+     */
+    run: runSchema.extend({
+      harness: z.literal("agents"),
+      tasks: z.unknown(), // null from this API; an older API's value is ignored
+      review: z.unknown(),
+    }),
     /** Changes with every claim; see Lease. */
     leaseToken: z.string().min(1),
     /** Present exactly for a `visitor` run; returned once. */
@@ -187,7 +193,6 @@ export const usageSchema = z.object({
 export type Usage = z.infer<typeof usageSchema>;
 
 export const heartbeatRequestSchema = z.object({ usage: usageSchema });
-export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 
 export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */

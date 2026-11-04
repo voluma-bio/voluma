@@ -10,7 +10,3 @@ services:
       WORKOS_LAB_ORGANIZATION_ID: org_local
       GUEST_ORGANIZATION_ID: org_demo
     health: /health
-    portal:
-      url: /runs/local
-      title: Voluma R2 reference scan
-      description: Open reference scan to download OA6-1RK and view full-resolution 3D automatically. No analysis runner is started.

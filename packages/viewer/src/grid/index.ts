@@ -1,5 +1,4 @@
-/** The grid viewers (the task review's, the outputs review's four panes), and the grid and scene a subject is shown with. */
-export { GridViewer, type GridViewerHandle, type PaneId, type ViewerState } from "./GridViewer";
+/** The review's four-pane grid viewer, and the grid and scene an output is shown with. */
 export { markPoints, outlineAxis, probeText, worldOf } from "./marks";
 export {
   type GridPlanes,
@@ -17,8 +16,6 @@ export {
   labelsMiddle,
   type ReviewGrid,
   reviewGrid,
-  type StructureDisplay,
-  taskBlocks,
   voxelOf,
 } from "./review";
 export { readView, type StoredView, storedWords, storeView } from "./saved-view";

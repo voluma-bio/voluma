@@ -29,16 +29,6 @@ import {
   sendRunMessageResponseSchema,
 } from "@voluma/contracts/messages";
 import {
-  type AcceptCheckRequest,
-  acceptCheckRequestSchema,
-  type MarkReviewedRequest,
-  markReviewedRequestSchema,
-  type ReviewDecisionResponse,
-  type ReviewRun,
-  reviewDecisionResponseSchema,
-  reviewRunSchema,
-} from "@voluma/contracts/review";
-import {
   type CreateUploadRequest,
   type CreateUploadResponse,
   completeUploadConflictSchema,
@@ -62,14 +52,7 @@ import {
   type UserSettings,
   userSettingsSchema,
 } from "@voluma/contracts/settings";
-import {
-  type CreateReviewSnapshotRequest,
-  createReviewSnapshotRequestSchema,
-  listReviewSnapshotsResponseSchema,
-  type ReviewSnapshot,
-  reviewSnapshotSchema,
-} from "@voluma/contracts/snapshot";
-import { END_EVENT, LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
+import { END_EVENT } from "@voluma/contracts/stream";
 import {
   type CreateStudyRequest,
   listStudiesResponseSchema,
@@ -290,28 +273,8 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<RunRead
   );
 }
 
-/** A run's review data, built from its event log on each call. 404: unreadable or unknown run; 409: the run has no plan. */
-export async function getReviewRun(runId: string): Promise<ReviewRun> {
-  return read(reviewRunSchema, await request(`/review/runs/${encodeURIComponent(runId)}`));
-}
-
-/** Accepts one current-result check; never marks the run reviewed. */
-export async function acceptCheck(
-  runId: string,
-  checkId: string,
-  body: AcceptCheckRequest,
-): Promise<ReviewDecisionResponse> {
-  return read(
-    reviewDecisionResponseSchema,
-    await request(
-      `/review/runs/${encodeURIComponent(runId)}/checks/${encodeURIComponent(checkId)}/accept`,
-      { method: "POST", body: acceptCheckRequestSchema.parse(body) },
-    ),
-  );
-}
-
 /**
- * Looks right on one To check item of an output version (a run of the agent loop). The decision
+ * Looks right on one To check item of an output version. The decision
  * comes back on the run's event stream as `tocheck.resolved`: reconnect it to see it.
  */
 export async function acceptToCheck(runId: string, body: AcceptToCheckRequest): Promise<void> {
@@ -325,7 +288,7 @@ export async function acceptToCheck(runId: string, body: AcceptToCheckRequest): 
 }
 
 /**
- * Saves a view of an output (a run of the agent loop). It comes back on the run's event stream
+ * Saves a view of an output. It comes back on the run's event stream
  * as `view.saved`: reconnect it to see it.
  */
 export async function saveView(runId: string, body: SaveViewRequest): Promise<void> {
@@ -339,7 +302,7 @@ export async function saveView(runId: string, body: SaveViewRequest): Promise<vo
 }
 
 /**
- * Places or changes a mark of yours (a run of the agent loop); it comes back on the run's event
+ * Places or changes a mark of yours; it comes back on the run's event
  * stream as `mark.placed`.
  */
 export async function placeMark(runId: string, body: PlaceMarkRequest): Promise<void> {
@@ -362,24 +325,10 @@ export async function deleteMark(runId: string, markId: string): Promise<void> {
   );
 }
 
-/** Explicitly completes review of a revision with no open checks. */
-export async function markReviewed(
-  runId: string,
-  body: MarkReviewedRequest,
-): Promise<ReviewDecisionResponse> {
-  return read(
-    reviewDecisionResponseSchema,
-    await request(`/review/runs/${encodeURIComponent(runId)}/mark-reviewed`, {
-      method: "POST",
-      body: markReviewedRequestSchema.parse(body),
-    }),
-  );
-}
-
 /**
- * Sends the main agent a message (and optional marks, a PNG snapshot, or Go) about a finished run;
+ * Sends the main agent a message (and optional marks, a view snapshot, or Go) about a finished run;
  * reopens a run that ended `completed`. Keep `body.id` across retries. Refusals and limits:
- * `messages.ts`. The chat comes back on the run's event stream: the `person.message` and `reply` events.
+ * `messages.ts`. The conversation comes back on the run's event stream: the `person.message` event and the agent's replies.
  */
 export async function sendRunMessage(
   runId: string,
@@ -395,7 +344,7 @@ export async function sendRunMessage(
 }
 
 /**
- * Answers a call main holds for you (a run of the agent loop). `requestId` is the id of the
+ * Answers a call main holds for you. `requestId` is the id of the
  * `approval.requested` event. The answer comes back on the run's event stream as `approval.given`
  * or `approval.declined`.
  */
@@ -414,23 +363,7 @@ export async function answerApproval(
 }
 
 /**
- * Where the browser reads the view snapshot of a message (`person.message`'s `snapshotKey`,
- * by the message's id: the `id` the panel sent). A PNG; 404: unreadable run or no such snapshot.
- */
-export const runMessageSnapshotUrl = (runId: string, messageId: string) =>
-  `/api/review/runs/${encodeURIComponent(runId)}/messages/${encodeURIComponent(messageId)}/snapshot`;
-
-/**
- * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,
- * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG, PNG, GIF and WebP come back as
- * images; anything else is an attachment. 404: unreadable run or no such file; 503: no file
- * storage configured. Only files under the run's own prefix, not the reference run's keys.
- */
-export const reviewFileUrl = (runId: string, sha256: string) =>
-  `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
-
-/**
- * Where the browser reads a file under a run's outputs (the agent loop): `path` is relative to
+ * Where the browser reads a file under a run's outputs: `path` is relative to
  * `/outputs/`, an output version's `path` and a file name. Images come back as images, anything
  * else as an attachment. 404: unreadable run or no such file.
  */
@@ -457,33 +390,6 @@ export const reviewAssetUrl = (runId: string, sha256: string, path: string) =>
  */
 export const runThumbnailUrl = (runId: string) =>
   `/api/review/runs/${encodeURIComponent(runId)}/thumbnail`;
-
-/** Prepared snapshot API: keep body.id unchanged when retrying a failed or interrupted save. */
-export async function createReviewSnapshot(
-  runId: string,
-  body: CreateReviewSnapshotRequest,
-): Promise<ReviewSnapshot> {
-  return read(
-    reviewSnapshotSchema,
-    await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, {
-      method: "POST",
-      body: createReviewSnapshotRequestSchema.parse(body),
-    }),
-  );
-}
-
-/** Prepared snapshot API: returns the run's immutable screenshot records, oldest first. */
-export async function listReviewSnapshots(
-  runId: string,
-  signal?: AbortSignal,
-): Promise<ReviewSnapshot[]> {
-  return (
-    await read(
-      listReviewSnapshotsResponseSchema,
-      await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, { signal }),
-    )
-  ).snapshots;
-}
 
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {
@@ -572,9 +478,7 @@ export function putUploadFile(
  * in order, once. `EventSource` reconnects by itself and resumes from the last event's `id`.
  * `after` is the highest `seq` the caller already holds, for the first connect only. `onError`
  * is told of a message that fails to parse (a `ContractError` when it doesn't match the schema)
- * or a handler that throws; a dropped connection is not an error. `onLive` gets
- * each live frame (token-level text, reasoning, tool arguments, tool output): unstored, no
- * cursor, not replayed on reconnect; see the contract for how to fold them.
+ * or a handler that throws; a dropped connection is not an error.
  * `onClosed` fires when the stream is over for good, with why: `"ended"` when the server sent
  * every event of an ended run, `"refused"` when the browser gave up on it (a non-200 answer:
  * a 404, a sign-out, a server restarting; `EventSource` hides which, so refetch the run or call
@@ -584,7 +488,6 @@ export function subscribe(
   runId: string,
   handlers: {
     onEvent: (event: RunEvent) => void;
-    onLive?: (frame: LiveFrame) => void;
     onError?: (error: unknown) => void;
     /** The stream will not reconnect: the run has ended, or the server refused it. */
     onClosed?: (why: "ended" | "refused") => void;
@@ -596,25 +499,18 @@ export function subscribe(
   );
   // Messages are handled in order as they arrive, so a mismatch can't wait for the handler: it
   // is reported to `onError` at once, and the handler decides about leaving in the background.
-  const deliver = <T>(schema: Schema<T>, data: string, handle: (value: T) => void) => {
+  source.onmessage = (e) => {
     try {
-      const parsed = matches(schema, JSON.parse(data), source.url, false);
+      const parsed = matches(runEventSchema, JSON.parse(e.data), source.url, false);
       if (!parsed.ok) {
         void contractErrorHandler(parsed.error);
         throw parsed.error;
       }
-      handle(parsed.value);
+      handlers.onEvent(parsed.value);
     } catch (error) {
       handlers.onError?.(error);
     }
   };
-  source.onmessage = (e) => deliver(runEventSchema, e.data, handlers.onEvent);
-  if (handlers.onLive) {
-    const onLive = handlers.onLive;
-    source.addEventListener(LIVE_EVENT, (e) =>
-      deliver(liveFrameSchema, (e as MessageEvent<string>).data, onLive),
-    );
-  }
   // The run ended and every event has been sent; closing here skips the reconnect.
   source.addEventListener(END_EVENT, () => {
     source.close();

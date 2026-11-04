@@ -147,7 +147,7 @@ export const runs = pgTable(
     model: text(),
     /** How hard every role reasons (`runSchema.thinking`); null for runs made before the choice. */
     thinking: text({ enum: ["low", "medium", "high"] }),
-    /** The loop that drives the run (`runSchema.harness`); null for runs made before the choice: the task loop. */
+    /** Read nowhere. New runs write `agents` so a build that still claims by it hands them out (TODO: drop the column). */
     harness: text({ enum: ["tasks", "agents"] }),
     example: boolean().notNull().default(false),
     createdAt: timestamptz().notNull().defaultNow(),

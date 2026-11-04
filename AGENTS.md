@@ -101,8 +101,11 @@ all: select the raw payload and pick fields in JS, because Postgres errors on `\
 in the document. Before step 2, parse every staging run's
 events, and every `run.json` under `r2:dev/runs/`, with the new `runEventSchema`: fetch each run's log from
 `GET /api/run/runs/:id/stream` with `VOLUMA_DEBUG_TOKEN` (agents can't reach
-staging's database), leaving out its `event: live` frames, which are not stored events. A query for the fields you think changed is not enough: it
+staging's database); the stream's `event: end` frame is not a stored event. A query for the fields you think changed is not enough: it
 missed the recorded plans that took the runs list down after #177.
+A run's workflow snapshot in R2 (`workflowSnapshotPrefix`, read by `loadWorkflow`) is stored data too:
+a change to the role files or skill frontmatter it parses must still load the snapshots of live runs
+and of every run a person can reopen, or carry a marked shim that does.
 
 ## Working in parallel
 
@@ -187,11 +190,10 @@ they need:
   Every shared component has a story beside it (`*.stories.tsx`) shown in both themes in
   Storybook: `pnpm --filter @voluma/storybook storybook`.
 - Workflows and analysis code live in `workflows/`. `workflows/core/` is shared
-  by every run: the role files (`agents/` for the task loop, `roles/` for the agent loop) and the generic micro-CT skills
-  (`skills/`). A workflow is `workflows/<name>/`: `outputs.json` (every output
-  a run can produce), `tasks.json` (the task list), `outputs.yaml` (the same
-  catalog in the agent loop's format, `packages/contracts/src/output-catalog.ts`;
-  the agent loop reads it from the run's snapshot and the web build bundles it) and `skills/<skill>/`
+  by every run: the role files (`agents/`) and the generic micro-CT skills
+  (`skills/`). A workflow is `workflows/<name>/`: `outputs.yaml` (every output
+  a run can produce, `packages/contracts/src/output-catalog.ts`; the runner reads it from
+  the run's snapshot, the API at start, and the web build bundles it) and `skills/<skill>/`
   (`SKILL.md`, `references/`, `resources/`), e.g. `workflows/mouse-oa`, the mouse
   knee workflow. Models come from runner config. A run snapshots `core/` and its
   workflow's directory and nothing else. Python lives only in

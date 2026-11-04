@@ -20,7 +20,6 @@ export type RailProps = {
 export function Rail({ home, children, end }: RailProps) {
   return (
     <nav
-      data-shell-edge
       aria-label="App"
       className="relative z-20 flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted py-2"
     >

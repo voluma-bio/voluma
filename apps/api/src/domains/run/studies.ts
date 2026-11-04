@@ -51,7 +51,6 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
         keys: body.keys,
         model: body.model,
         thinking: body.thinking,
-        harness: body.harness,
       },
     });
     const detail = await studies.get(reader, result.studyId, canAnswerAs(user));

@@ -48,15 +48,8 @@ export const notesKey = (runId: string, folder: string, file: "NOTES.md" | "plan
   `${runPrefix(runId)}notes/${seg(folder)}/${file}`;
 /** `/run/final-outputs.yaml` and `/run/outputs.yaml`, written from the events; mounted read-only at `/run`. */
 export const runFilesPrefix = (runId: string) => `${runPrefix(runId)}run/`;
-/** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
+/** The published output versions; the sandboxes mount this read-only at `/outputs`. */
 export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
-/**
- * A copy of the run's outputs taken when the first claim of a correction with a go starts
- * (`outputs.backed-up`, keyed to that `run.reopened`'s id), so a correction that ends unfinished
- * can put them back (`outputs.restored`); deleted at the next reopen's first claim once it finished (`outputs.discarded`). Never read as outputs; the sandbox mounts none of it.
- */
-export const outputsBackupPrefix = (runId: string, reopenId: string) =>
-  `${runPrefix(runId)}corrections/${seg(reopenId)}/`;
 /**
  * A published output version's folder (the agent model), `<id>/<toolCallId>` under `outputs/`, `id` being
  * a catalog id or `<worker>/<id>`. Keyed by the tool call so a repeated call writes the same keys. A provider's
@@ -66,8 +59,6 @@ export const versionPath = (outputId: string, toolCallId: string) =>
   `${outputId.split("/").map(seg).join("/")}/${seg(toolCallId.replace(/[^\w.-]/g, "_"))}`;
 export const versionPrefix = (runId: string, outputId: string, toolCallId: string) =>
   `${outputsPrefix(runId)}${versionPath(outputId, toolCallId)}/`;
-export const taskOutputPrefix = (runId: string, task: string) =>
-  `${outputsPrefix(runId)}${seg(task)}/`;
 
 export const inputKey = (inputId: string, path: string) => `${inputPrefix(inputId)}${rel(path)}`;
 export const uploadKey = (inputId: string, path: string) => `${uploadPrefix(inputId)}${rel(path)}`;
@@ -75,16 +66,6 @@ export const scratchKey = (runId: string, path: string) => `${scratchPrefix(runI
 /** A researcher's view snapshot for a message (`messages.ts`): `scratch/person/` is readable by the main agent and workers. */
 export const messageSnapshotKey = (runId: string, messageId: string) =>
   scratchKey(runId, `person/${messageId}.png`);
-export const outputKey = (runId: string, task: string, path: string) =>
-  `${taskOutputPrefix(runId, task)}${rel(path)}`;
-
-/**
- * Full output of a `bash` call that was truncated for the model. `threadName` is the thread
- * id without the run id (`<taskId>.worker`, `<taskId>.check.2`, `main`): every thread spills
- * under its own folder of the run's scratch, `/scratch/<threadName>/.tool-output/<id>`.
- */
-export const toolOutputKey = (runId: string, threadName: string, toolCallId: string) =>
-  `${scratchPrefix(runId)}${seg(threadName)}/.tool-output/${seg(toolCallId)}`;
 
 /**
  * An image in a thread's stored model history (`adapters/pi/image-refs.ts`): the history row
@@ -94,18 +75,9 @@ export const historyImageKey = (runId: string, threadName: string, sha256: strin
   `${scratchPrefix(runId)}${seg(threadName)}/.images/${sha256Schema.parse(sha256)}`;
 
 /**
- * Content-addressed evidence: a file that backs a stored number, copied here
- * once and never overwritten, so a rerun of a task can't change what an
- * earlier revision points at. Inside the run prefix, so mounts stay isolated.
- */
-export const evidencePrefix = (runId: string) => `${runPrefix(runId)}evidence/`;
-export const evidenceKey = (runId: string, sha256: string) =>
-  `${evidencePrefix(runId)}${sha256Schema.parse(sha256)}`;
-
-/**
  * What the review converter made from one reported file (`events.ts`, `assets.ready`): zarr
  * levels and meshes, keyed by the file's sha256. Per run, inside the run prefix; the convert
- * sandbox mounts `evidence/` read-only and `review/` read-write, which do not overlap.
+ * sandbox mounts `outputs/` read-only and `review/` read-write, which do not overlap.
  */
 export const reviewAssetPrefix = (runId: string) => `${runPrefix(runId)}review/`;
 export const reviewAssetKey = (runId: string, sha256: string, path: string) =>

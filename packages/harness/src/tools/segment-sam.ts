@@ -57,10 +57,7 @@ export function segmentSamTool(layout: ThreadLayout): Tool<typeof samInput> {
       )) {
         if (chunk.type === "exit") exitCode = chunk.code;
         else if (chunk.type === "stdout") stdout += chunk.data;
-        else {
-          stderr += chunk.data;
-          ctx.output("stderr", chunk.data);
-        }
+        else stderr += chunk.data;
       }
       const line = stdout.trim().split("\n").at(-1) ?? "";
       let reply: (Partial<SamResult> & { error?: string; infrastructure?: true }) | undefined;

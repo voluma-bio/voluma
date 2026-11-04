@@ -11,7 +11,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
-import { HARNESSES } from "@voluma/harness/supervise-run";
 import { r2Store } from "@voluma/object-store/r2";
 import { runnerConfig } from "./config.ts";
 import { PROVIDERS } from "./providers.ts";
@@ -91,7 +90,7 @@ try {
     }
     let claim: Awaited<ReturnType<typeof claimRun>>;
     try {
-      claim = await claimRun(config.api, runnerId, HARNESSES);
+      claim = await claimRun(config.api, runnerId);
     } catch (error) {
       log(`claim failed: ${error instanceof Error ? error.message : error}`);
       await sleep(CLAIM_POLL_SECONDS * 1000);

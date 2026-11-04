@@ -1,14 +1,13 @@
 /**
- * A run whose plan predates a unit change in `outputs.json` reports in the old unit, which would
+ * A run that started before a unit change in `outputs.yaml` reports in the old unit, which would
  * plot and flag silently wrong (210 µm drawn as 210 mm): it must stay out of the values, the far
  * rule and the plot.
  */
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
-import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import { describe, expect, it } from "vitest";
-import { farFromGroup, inputValue, otherUnit, valuesOf } from "./study-model";
+import { farFromGroup, inputValue, type Measurement, otherUnit, valuesOf } from "./study-model";
 
-const ctTh = { id: "ct_th", kind: "measurement", unit: "mm" } as OutputEntry;
+const ctTh = { id: "ct_th", kind: "value", unit: "mm" } as Measurement;
 
 const input = (inputId: string, value: number, unit: string) =>
   ({
@@ -16,7 +15,6 @@ const input = (inputId: string, value: number, unit: string) =>
     runs: [],
     resultRunId: `run-${inputId}`,
     values: { ct_th: { value, unit, confidence: null } },
-    acceptable: [],
   }) as unknown as StudyInputDetail;
 
 const detail = {

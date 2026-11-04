@@ -1,157 +1,30 @@
 /**
- * A read model: the review data the API assembles from the thread store. It is not a
- * stored document, so a rerun rewrites no other task's data.
- * Served by `GET /api/review/runs/:runId` (`getReviewRun`): 404 when the caller
- * can't read the run, 409 when it has no plan (no `revision.started`: not started,
- * or ended before one). A run's files (every `evidenceKey`) are read through `GET /api/review/runs/:runId/files/:sha256`
- * (`reviewFileUrl`).
+ * The review's building blocks: the shapes the viewer draws and the converter's manifest.
+ * Nothing here is stored as a document; the agent loop's outputs (`output-fold.ts`) name these
+ * blocks and the run view reads them.
  *
- * Two layers, so a different workflow (vascular, materials) gets its own final
- * review with no new Review-lane code:
+ * - `volumes`, `structures`, `surfaces` and `annotations`: a closed set the shell knows how to
+ *   render. A workflow fills them with what it has; it cannot invent a new kind. A kind the
+ *   shell cannot draw is a small contract PR that adds a block, not a field on an old one.
  *
- * - A generic core: the run, its revisions, and per revision the tasks with
- *   their measurements, scores, checks and evidence files.
- * - Building blocks on each revision, a closed set the shell knows how to
- *   render: `volumes`, `structures`, `surfaces` and `annotations`. A workflow
- *   fills them with what it has; it cannot invent a new kind. A kind the shell
- *   cannot draw is a small contract PR that adds a block, not a field on an old one.
- *   A measurement or score names the blocks it is shown with (`on`, `context`) by
- *   id; the links come from the workflow's declaration, not from the report.
+ * Coordinates: annotations are world mm; the UI converts to voxels through the volume's
+ * `affine`. Structures and surfaces are voxels on their grid.
  *
- * Coordinates: annotations are world mm (the fold maps the voxels an agent reports
- * through the grid's `affine`); the UI converts to voxels through the volume's
- * `affine`. Structures and surfaces are voxels on their grid. Every block on a grid
- * names that volume block as `volumeId`; `Volume.gridId` is only the producer's id.
+ * Converted assets (`ReviewAssets`) are one map for the run, keyed by the sha256 of the file a
+ * block points at: absent means still preparing.
  *
- * Converted assets (`ReviewRun.assets`) are one map for the run, keyed by the
- * sha256 of the file a block points at: absent means still preparing. Revisions
- * stay snapshots of the outputs; the map is of the whole log.
- *
- * Size: each revision repeats every block. That is fine for one revision; the
- * API may serve one revision at a time rather than the whole run.
- *
- * Files are stored as full R2 keys (`storedKeySchema`), always produced by an
- * `r2.ts` builder: `evidenceKey(runId, sha256)` for run files. Never a path relative
- * to some root. Converted review assets (`reviewAssetKey`) are not stored: the assets route builds
- * their keys from the manifest.
- *
- * Nullable fields are what the log may not say (no checker yet, a structure whose grid
- * isn't reported). Display-only state (button
- * labels, signed URLs, visibility, opacity, colours) is not here; the UI
- * derives it.
+ * Files are stored as full R2 keys (`storedKeySchema`), always produced by an `r2.ts` builder:
+ * `evidenceKey(runId, sha256)` for run files. Never a path relative to some root. Converted
+ * review assets (`reviewAssetKey`) are not stored: the assets route builds their keys from the
+ * manifest.
  */
 import { z } from "zod";
-import { userIdSchema } from "./auth";
-import {
-  modelRefSchema,
-  outputKindSchema,
-  runIdSchema,
-  taskIdSchema,
-  taskStatusSchema,
-} from "./ids";
 import {
   relativePathSchema,
   sha256Schema as sha256,
   storedKeySchema,
   storedPrefixSchema,
 } from "./r2";
-import { workflowPinSchema } from "./workflow";
-
-/**
- * Review progress for the latest successfully completed results, shared by Run and
- * ReviewRun; null unless the current execution completed successfully.
- * A correction invalidates review completion;
- * only unchanged task results retain acceptance. Count the latest results' open checks,
- * never historical revisions. Accepting the last check leaves reviewedAt null: only an
- * explicit Mark reviewed sets it, and only with no open checks.
- */
-export const reviewSummarySchema = z
-  .object({
-    revisionId: z.string().min(1),
-    /** Open checks a person can accept ("Looks right"); Mark reviewed needs none left. */
-    acceptable: z.number().int().nonnegative(),
-    /**
-     * Items that need a person (`openItems`): the acceptable ones, plus one card per To check
-     * task with no check, which only a correction clears. What a screen calls "N to check".
-     */
-    needsYou: z.number().int().nonnegative(),
-    reviewedAt: z.iso.datetime().nullable(),
-  })
-  .refine((r) => r.reviewedAt === null || r.acceptable === 0, {
-    path: ["reviewedAt"],
-    message: "reviewed results cannot have open checks",
-  });
-export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
-
-/** Why a To check task with no check carries a card nobody can accept (`cardWithoutCheck`). */
-export const unacceptableSchema = z.enum(["sent-back", "values-missing", "marked"]);
-export type Unacceptable = z.infer<typeof unacceptableSchema>;
-
-/**
- * Cookie-authenticated review commands, returning 200 reviewDecisionResponseSchema.
- *   POST /api/review/runs/:runId/checks/:checkId/accept
- *     body acceptCheckRequestSchema (runId and checkId are URL parameters)
- *   POST /api/review/runs/:runId/mark-reviewed
- *     body markReviewedRequestSchema
- *
- * Both require the latest successfully completed result. 400: invalid request;
- * 404: unknown/unreadable run or unknown task/check; 403: read-only example;
- * 409: obsolete baseRevisionId or task resultRevisionId, no current completed result, or Mark reviewed with
- * open checks. Authentication and Origin rules are the same as run.ts. Readable
- * non-example runs have shared review state: authorized readers can review them,
- * including guests reviewing their own runs, not one review state per researcher.
- *
- * Accept is idempotent for the same check on the same task result; a duplicate changes
- * no count and appends no second decision. Mark reviewed is also idempotent for the
- * same completed revision, preserving its original actor and time. Stale revisions
- * still conflict on a retry. Neither command changes results, confidence, execution
- * or task status. Zero checks alone never means Reviewed; viewing/exporting does not
- * mark a run reviewed. Current-result validation, deduplication, decision append and
- * summary update are one serialized transaction against correction writes. A failure
- * persists neither decision nor summary. Use the response/refetch for UI updates:
- * the existing run SSE connection closes when execution ends.
- */
-export const acceptCheckRequestSchema = z.object({
-  baseRevisionId: z.string().min(1),
-  taskId: taskIdSchema,
-  /** The task result displayed with this check, not a newly fetched run summary. */
-  resultRevisionId: z.string().min(1),
-});
-export type AcceptCheckRequest = z.infer<typeof acceptCheckRequestSchema>;
-
-export const markReviewedRequestSchema = z.object({
-  baseRevisionId: z.string().min(1),
-});
-export type MarkReviewedRequest = z.infer<typeof markReviewedRequestSchema>;
-
-/**
- * Server-authored decisions in the run log, ignored by the scientific fold. Their
- * envelope's threadId is `<runId>.reviewer`, a record of human actions, not a model
- * thread (no thread.started or Pi history). The API supplies by and createdAt from
- * the authenticated caller and its clock; runner ingest rejects these event types.
- * Server writes share the run log's seq allocation, without a runner lease.
- * Decisions and the summary commit atomically. The summary is a projection of these
- * decisions over the latest folded checks, not a second independently editable count.
- */
-export const checkAcceptedSchema = z.object({
-  by: userIdSchema,
-  /** The request's baseRevisionId, verified as the latest completed revision. */
-  revisionId: z.string().min(1),
-  taskId: taskIdSchema,
-  checkId: z.string().min(1),
-  /**
-   * The named task's resultRevisionId at acceptance. Carry acceptance forward only
-   * while that result and check identity are unchanged; a rerun must not reuse an
-   * acceptance merely because its check id survived. Keep earlier results and decisions.
-   */
-  resultRevisionId: z.string().min(1),
-});
-
-/** Only explicit Mark reviewed writes this event; acceptance never does. */
-export const reviewCompletedSchema = z.object({
-  by: userIdSchema,
-  revisionId: z.string().min(1),
-});
 
 /** A position or direction in world mm. */
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
@@ -384,54 +257,6 @@ export const assetSchema = z.object({
 });
 export type Asset = z.infer<typeof assetSchema>;
 
-// ── Generic core ─────────────────────────────────────────────────────────────
-
-export const measurementSchema = z.object({
-  id: z.string(),
-  title: z.string().optional(),
-  /** Null means not supplied; never zero. */
-  value: z.number().finite().nullable(),
-  /** Examples: `mm`, `mm^3`, `1/mm`, `mg HA/cm^3`; `1` for a dimensionless ratio or a count. */
-  unit: z.string(),
-  /** Null when the producer gave no status. */
-  confidence: z.enum(["provisional", "candidate"]).nullable(),
-  /** The producer's own status wording, e.g. "Provisional: boundary/ROI review required". */
-  note: z.string().optional(),
-  definition: z.string().optional(),
-  /** `Asset.id`s in the task's `evidence` that show this number. Empty when the producer gave no link; never filled by guessing. */
-  evidenceIds: z.array(z.string()),
-  /** Values other readers got for the same quantity. */
-  references: z.array(z.object({ reader: z.string(), value: z.number() })),
-  /** Blocks (volume, structure, surface, annotation ids) it was measured on: highlighted with the value. From the declaration. */
-  on: z.array(z.string()),
-  /** Blocks drawn around it. From the declaration. */
-  context: z.array(z.string()),
-  /** Ratios: ids of the measurements divided. */
-  numeratorId: z.string().optional(),
-  denominatorId: z.string().optional(),
-  /** The thread event that reported it. */
-  source: z.object({ threadId: z.string().min(1), eventId: z.string().min(1) }).nullable(),
-});
-export type Measurement = z.infer<typeof measurementSchema>;
-
-/** A level on a scale: an OARSI grade, a yes/no, a QC pass. Same producer-given fields as a measurement. */
-export const scoreSchema = z.object({
-  id: z.string(),
-  title: z.string().optional(),
-  level: z.string().min(1),
-  /** The levels the workflow declared, lowest first; null when it declared none. */
-  scale: z.array(z.string().min(1)).nullable(),
-  confidence: measurementSchema.shape.confidence,
-  note: z.string().optional(),
-  definition: z.string().optional(),
-  evidenceIds: z.array(z.string()),
-  /** What was graded: the medial plateau, the lesion a QC fail is about. */
-  on: measurementSchema.shape.on,
-  context: measurementSchema.shape.context,
-  source: measurementSchema.shape.source,
-});
-export type Score = z.infer<typeof scoreSchema>;
-
 /**
  * What a To check item points at, so the review can outline it. Absent on an
  * item means the whole task. `on` names blocks of any kind (volume, structure,
@@ -453,82 +278,3 @@ export const focusSchema = z
     message: "label needs volumeId",
   });
 export type Focus = z.infer<typeof focusSchema>;
-
-export const taskSchema = z.object({
-  /** The r2 task segment (`outputKey`). */
-  id: taskIdSchema,
-  title: z.string(),
-  dependsOn: z.array(z.string()),
-  /** The task's status in this revision: its status at that point in the log (`fold.ts`) */
-  status: taskStatusSchema,
-  /** The revision in which the task last changed; unchanged tasks keep this id across revisions. */
-  resultRevisionId: z.string(),
-  /** Null when no second agent checked it. */
-  checker: z.object({ verdict: z.enum(["passed", "needs-review"]), text: z.string() }).nullable(),
-  /** Threads in the run record: what the agent did, and its check. */
-  threads: z.object({
-    worker: z.string().min(1).nullable(),
-    check: z.string().min(1).nullable(),
-  }),
-  /** The model each thread called, `provider/id`; null where the thread is null or its start recorded none. */
-  models: z.object({
-    worker: modelRefSchema.nullable(),
-    check: modelRefSchema.nullable(),
-  }),
-  measurements: z.array(measurementSchema),
-  scores: z.array(scoreSchema),
-  /** Outputs the workflow declared for this task and the attempt hasn't reported. Required ones keep the task from `done`. */
-  missing: z.array(
-    z.object({
-      outputId: z.string(),
-      kind: outputKindSchema,
-      required: z.boolean(),
-      /** Why, when the attempt reported it missing or the task was skipped; absent when it simply wasn't reported. */
-      reason: z.string().optional(),
-    }),
-  ),
-  /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare. */
-  undeclared: z.array(z.string()),
-  checks: z.array(
-    z.object({
-      id: z.string(),
-      title: z.string(),
-      detail: z.string(),
-      status: z.enum(["open", "accepted"]),
-      focus: focusSchema.optional(),
-    }),
-  ),
-  evidence: z.array(assetSchema),
-  files: z.array(assetSchema),
-});
-export type ReviewTask = z.infer<typeof taskSchema>;
-
-export const revisionSchema = z.object({
-  id: z.string(),
-  label: z.string(),
-  createdAt: z.iso.datetime(),
-  tasks: z.array(taskSchema),
-  volumes: z.array(volumeSchema),
-  structures: z.array(structureSchema),
-  surfaces: z.array(surfaceSchema),
-  annotations: z.array(annotationSchema),
-});
-export type Revision = z.infer<typeof revisionSchema>;
-
-export const reviewRunSchema = z.object({
-  id: runIdSchema,
-  sample: z.string(),
-  workflows: z.array(workflowPinSchema).min(1),
-  /** Oldest first; the last is the latest. */
-  revisions: z.array(revisionSchema).min(1),
-  /** Converted assets by the sha256 of the file they were made from; absent: still preparing. */
-  assets: z.record(sha256, reviewAssetsSchema),
-  review: reviewSummarySchema.nullable(),
-});
-export type ReviewRun = z.infer<typeof reviewRunSchema>;
-
-/** Commands require successfully completed results, so their summary is non-null. */
-export const reviewDecisionResponseSchema = reviewRunSchema.extend({
-  review: reviewSummarySchema,
-});
-export type ReviewDecisionResponse = z.infer<typeof reviewDecisionResponseSchema>;

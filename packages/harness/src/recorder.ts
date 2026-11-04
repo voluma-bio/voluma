@@ -1,7 +1,7 @@
 /**
  * A run's stream record writer, and the runtime's view of the run. One ordered queue
  * delivers every event, `emit` and `append` alike, so `seq` follows enqueue order. An event
- * joins the view (`events()`; `fold` reads it, `task-tools.ts`) only once the store has
+ * joins the view (`events()`, which the agent log reads) only once the store has
  * acknowledged it, in delivery order, so the view is always a prefix of the store: a
  * recorder started with the stored events (a resume) holds exactly the view the run had.
  * An event with an id the recorder already holds or has queued is a no-op, so a resumed run
@@ -14,8 +14,7 @@
  * waits its turn in the queue and resolves once the store has acknowledged the event; it
  * throws if the event is invalid or the store refuses it, and the id can be written again.
  * A retry after a lost response is safe because the store ignores an event id it already holds.
- * Live frames are not events (see `@voluma/contracts/stream`): `live` hands them to a batcher
- * (`live.ts`) that never waits, and they do not join the queue, the view or `flush`. The creator of the recorder `flush()`es when its threads end so the
+ * The creator of the recorder `flush()`es when its threads end so the
  * record is complete before the process exits.
  *
  * The view is a gapless prefix of the store up to its last `seq`, in store order. The API
@@ -51,8 +50,6 @@ import {
   eventInputSchema,
   type RunEvent,
 } from "@voluma/contracts/events";
-import type { LiveFrame } from "@voluma/contracts/stream";
-import type { LiveBatcher, LiveBody } from "./live";
 import { type EventLog, EventLogUnavailable } from "./ports/event-log";
 import { LeaseLost } from "./ports/lease-lost";
 import { ROOT_NAME, threadIdOf } from "./thread-id";
@@ -62,8 +59,6 @@ export type PayloadOf<T extends EventType> = Extract<EventInput, { type: T }>["p
 export interface Recorder {
   /** Queues the event for background delivery with retries; `id` defaults to a random one. */
   emit<T extends EventType>(threadId: string, type: T, payload: PayloadOf<T>, id?: string): void;
-  /** Sends a live frame, best effort: it returns at once and may be dropped. */
-  live(frame: LiveBody): void;
   /**
    * Stores the event after everything queued before it, with retries, and adds it to the
    * view once stored; an id already held or queued is a no-op. Throws if the event is invalid
@@ -109,7 +104,6 @@ export function recorder(
   runId: string,
   onLeaseLost: () => void,
   stored: readonly RunEvent[] = [],
-  live?: LiveBatcher,
 ): Recorder {
   let queue: Promise<unknown> = Promise.resolve();
   let stopped = false; // the lease is lost or the log unreachable: nothing more is delivered
@@ -214,7 +208,6 @@ export function recorder(
       queue = pulling.catch(() => {});
       return pulling;
     },
-    live: (frame) => live?.push({ ...frame, runId } as LiveFrame),
     emit(threadId, type, payload, id = crypto.randomUUID()) {
       if (ids.has(id)) return;
       const parsed = parse(threadId, type, payload, id);

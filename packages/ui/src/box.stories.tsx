@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { ReactNode } from "react";
 import { Box } from "./box";
 import { Count } from "./count";
-import { List, Row, RowLink } from "./row";
 import { EmptyState } from "./states";
 import { StatusMark } from "./status-mark";
 
@@ -13,6 +13,18 @@ import { StatusMark } from "./status-mark";
  */
 const count = (n: number, check?: boolean) => <Count tone={check ? "check" : "neutral"}>{n}</Count>;
 
+/** A line of a box's list: a name, what it says, and its status. */
+const line = (name: string, says: string, status: ReactNode) => (
+  <li key={name} className="flex items-center gap-3 px-4 py-1.5 text-sm">
+    <span className="min-w-0 flex-1">
+      <span className="font-medium">{name}</span>
+      <span className="block truncate text-fg-subtle">{says}</span>
+    </span>
+    {status}
+  </li>
+);
+const lines = (...items: ReactNode[]) => <ul className="m-0 list-none p-0">{items}</ul>;
+
 const meta = {
   title: "Parts/Box",
   component: Box,
@@ -21,19 +33,9 @@ const meta = {
     count: count(3),
     tools: <span className="text-sm text-fg-subtle">3 at a time</span>,
     foot: "OA7-7, OA7-9 and OA7-19 start as these finish.",
-    children: (
-      <List columns="auto">
-        <Row
-          title="OA7-6, Tibial IIOC"
-          subtitle="Tracing the growth plate"
-          cells={[<StatusMark key="s" status="running" label="4 min" />]}
-        />
-        <Row
-          title="OA7-18, Trabecular thickness"
-          subtitle="Measuring in ROI-3"
-          cells={[<StatusMark key="s" status="running" label="9 min" />]}
-        />
-      </List>
+    children: lines(
+      line("OA7-6", "Tracing the growth plate", <StatusMark status="running" label="4 min" />),
+      line("OA7-18", "Measuring in ROI-3", <StatusMark status="running" label="9 min" />),
     ),
   },
   // Boxes sit on the chassis, meeting at 1 px seams.
@@ -55,21 +57,13 @@ export const NeedsYou: Story = {
         See all 18 to check
       </a>
     ),
-    children: (
-      <List columns="110px">
-        <RowLink
-          to="#oa7-4"
-          title="OA7-4, left knee"
-          subtitle="Osteophyte merges with the condyle"
-          cells={[<StatusMark key="s" status="check" label="2 to check" />]}
-        />
-        <RowLink
-          to="#oa7-15"
-          title="OA7-15, right knee"
-          subtitle="Stopped during Orientation"
-          cells={[<StatusMark key="s" status="stopped" />]}
-        />
-      </List>
+    children: lines(
+      line(
+        "OA7-4, left knee",
+        "Osteophyte merges with the condyle",
+        <StatusMark status="check" label="2 to check" />,
+      ),
+      line("OA7-15, right knee", "Stopped before it finished", <StatusMark status="stopped" />),
     ),
   },
 };

@@ -64,7 +64,6 @@ export function Items({
           key={i.key}
           context={i.output === own ? "Review item" : `Check ${nameOf(i.output)}`}
           title={i.title}
-          text=""
           state={i.resolved ? "accepted" : "open"}
           onAccept={accepting.accept && (() => accepting.accept?.(i))}
           accepting={accepting.pending === i.key}

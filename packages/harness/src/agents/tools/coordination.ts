@@ -96,8 +96,7 @@ async function run(fn: () => Promise<ToolResult>): Promise<ToolResult> {
 }
 
 function caller(api: AgentsApi, ctx: ToolContext) {
-  const agent = ctx.agent;
-  if (!agent) throw new Refusal("This tool belongs to the agent loop.");
+  const { agent } = ctx;
   const d = api.log();
   if (d.rootEnded) throw new Refusal("The run has ended.");
   return { ...agent, d, from: agent.role === "main" ? "main" : agent.name };

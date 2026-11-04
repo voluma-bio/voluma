@@ -4,14 +4,13 @@
  * the Studies page's details pane for the selected study. Each reads only the `StudyDetail`.
  */
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
-import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import { groupNames, groupOf, inputHref, kneeOf, plural, useNow, whenText } from "@voluma/run-view";
 import { Button, cx, Facts, INPUT_WORD, type Status, StatusGlyph, StripPlot } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
-import { measurementsOf } from "../workflow-tasks";
+import { headlinesOf, type Measurement, measurementsOf, unitOf } from "../workflow-measurements";
 import {
   type Activity,
   activityOf,
@@ -22,7 +21,6 @@ import {
   openHref,
   rangeText,
   resultRunQuery,
-  unitOf,
   valuesOf,
 } from "./study-model";
 
@@ -115,7 +113,7 @@ const others = (input: StudyInputDetail) =>
  * can still report one. A stopped run, an output its result skipped and a value in another unit
  * have none.
  */
-const onPlot = (input: StudyInputDetail, output: OutputEntry) =>
+const onPlot = (input: StudyInputDetail, output: Measurement) =>
   input.resultRunId !== null
     ? inputValue(input, output) !== null
     : input.runs[0] !== undefined && input.runs[0].state.status !== "ended";
@@ -127,7 +125,7 @@ export function MeasurePlot({
   className,
 }: {
   detail: StudyDetail;
-  output: OutputEntry;
+  output: Measurement;
   className?: string;
 }) {
   const navigate = useNavigate();
@@ -174,7 +172,7 @@ export function HeadlineBlock({
   detail: StudyDetail;
   workflow: BundledWorkflow;
 }) {
-  const output = workflow.headline[0] ?? measurementsOf(workflow)[0];
+  const output = headlinesOf(workflow)[0] ?? measurementsOf(workflow)[0];
   if (!output) return null;
   const any = valuesOf(detail, output).length > 0;
   const others = measurementsOf(workflow).some((o) => valuesOf(detail, o).length > 0);
@@ -207,7 +205,6 @@ const ACTIVITY_MARK: Record<Activity["kind"], Status> = {
   completed: "done",
   failed: "stopped",
   stopped: "stopped",
-  reviewed: "done",
 };
 
 /** The study's latest run events, each opening its sample. */

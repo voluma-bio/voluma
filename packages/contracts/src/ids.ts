@@ -1,6 +1,5 @@
 /**
- * The leaf of the contracts: path-segment ids and the closed vocabularies
- * (task statuses, output kinds) that several contracts share. It imports only
+ * The leaf of the contracts: path-segment ids that several contracts share. It imports only
  * zod, so `r2.ts`, `workflow.ts` and the rest can all import it without an
  * import cycle (a cycle crashes any entry point run with `tsx`).
  */
@@ -15,82 +14,17 @@ export const segmentSchema = z
   });
 
 /**
- * Run and task ids also hold no '.': a run's thread names are `<taskId>.<role>` and the
- * sandbox name is `<runId>.<name>`, which read back one way only if neither id holds a '.'.
- * Runs recorded before opaque thread ids have thread ids `<runId>.<name>`.
+ * A run id also holds no '.': the sandbox name is `<runId>.<name>`, which reads back one way
+ * only if the id holds none. Runs recorded before opaque thread ids have thread ids `<runId>.<name>`.
  */
 const dotFreeSegmentSchema = segmentSchema.refine((s) => !s.includes("."), {
-  message: "must not contain '.' (thread names are '<taskId>.<role>')",
+  message: "must not contain '.' (sandbox names are '<runId>.<name>')",
 });
 
 export const runIdSchema = dotFreeSegmentSchema;
 export const inputIdSchema = segmentSchema;
 export const studyIdSchema = segmentSchema;
-/** `main` and `supervisor` are thread names (`main`, `supervisor`), so no task takes them. */
-export const taskIdSchema = dotFreeSegmentSchema.refine((s) => s !== "main" && s !== "supervisor", {
-  message: "'main' and 'supervisor' are reserved",
-});
 export const toolCallIdSchema = segmentSchema;
-
-/** Checklist statuses (requirements, Vocabulary). */
-export const taskStatusSchema = z.enum([
-  "pending",
-  "in-progress",
-  "done",
-  "failed",
-  "to-check",
-  "under-review",
-  "stale",
-]);
-export type TaskStatus = z.infer<typeof taskStatusSchema>;
-
-/**
- * Where a task stands as every screen shows it (`taskStates`, review-state.ts): its status,
- * read with the run's state, its threads and the tasks it builds on.
- * - `waiting`: not started, and a task it builds on has no usable result yet; or started while
- *   the run waits in line for a runner (it lost its runner and is queued again).
- * - `ready`: not started, and every task it builds on has one (`satisfied`).
- * - `running`: an AI is working on it now. `checking`: a second AI is checking it now.
- * - `held`: started, and no AI is working on it or checking it: the lead AI decides what's next.
- * - `skipped`: skipped by the plan, or builds on a skipped task.
- * - `failed`: failed, or its AI failed on the error that failed the run.
- * - `stopped`: started when the run ended. `paused`: started while the run waits for its
- *   starter's keys.
- */
-export const taskStateSchema = z.enum([
-  "waiting",
-  "ready",
-  "running",
-  "checking",
-  "held",
-  "done",
-  "to-check",
-  "skipped",
-  "failed",
-  "stopped",
-  "paused",
-]);
-export type TaskState = z.infer<typeof taskStateSchema>;
-
-/** The kinds of output a task reports; `output.ts` has the payload of each. */
-export const outputKindSchema = z.enum([
-  "measurement",
-  "score",
-  "structure",
-  "surface",
-  "annotation",
-  "volume",
-  "file",
-]);
-export type OutputKind = z.infer<typeof outputKindSchema>;
-
-/** The kinds review places in a view (blocks a measurement is shown on); the rest are values and files. */
-export const isObjectKind = (kind: OutputKind) =>
-  kind === "volume" || kind === "structure" || kind === "surface" || kind === "annotation";
-
-/** The loop that drives a run: today's task loop, or the agent loop. A run keeps the one it began on. */
-export const harnessSchema = z.enum(["tasks", "agents"]);
-export type Harness = z.infer<typeof harnessSchema>;
 
 /** A model as the runner names it: `provider/id`, e.g. `meta/muse-spark-1.3`. */
 export const modelRefSchema = z

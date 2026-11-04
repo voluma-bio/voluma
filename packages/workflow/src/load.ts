@@ -7,23 +7,18 @@
  *
  * Both directories hold skills, `skills/<name>/SKILL.md` with optional `references/` and
  * `resources/`. `core/` also holds the role files, the same for every workflow: `agents/<role>.md`
- * for the task loop, `roles/<role>.md` for the agent loop (with `roles/words.md` and
- * `roles/environment.md`, text every role's prompt ends with). The workflow's directory adds
- * `outputs.json` and `tasks.json` for the task loop, `outputs.yaml` for the agent loop. `core/convert/`
- * (the review converter, run by the runner's convert sandbox) is snapshotted too; nothing else
- * in either directory is.
+ * (with `agents/words.md` and `agents/environment.md`, text every role's prompt ends with). The
+ * workflow's directory adds `outputs.yaml`. `core/convert/` (the review converter, run by the
+ * runner's convert sandbox) is snapshotted too; nothing else in either directory is.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Harness } from "@voluma/contracts/ids";
 import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
-import { type WorkflowFiles, workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
 import { isScalar, parseDocument, parse as parseYaml, visit } from "yaml";
 import { z } from "zod";
 import {
   type AgentDefinition,
-  type AgentsDefinition,
   OLDER_VERSION_MESSAGE,
   type Skill,
   THINKING_LEVELS,
@@ -41,10 +36,8 @@ export interface LoadOptions {
   root: string;
   /** The commit that checkout is at, written into the snapshot's marker. */
   commit: string;
-  /** The tool names a role may list (the harness's tool registry). */
+  /** The tool names a role may list (`AGENT_TOOL_NAMES`). */
   knownTools: readonly string[];
-  /** The loop the run is pinned to; it reads its role files from `rolesDirOf`, and only `agents` parses `outputs.yaml`. Default `tasks`. */
-  harness?: Harness;
 }
 
 /** Every run's shared directory: the role files and the generic skills. */
@@ -57,21 +50,37 @@ export const workflowDirSchema = z
   .refine((d) => d !== CORE, "core is not a workflow");
 
 /** Keys of the Agent Skills format that Voluma does not read; any other key must be one it does. */
-const SKILL_KEYS = ["license", "compatibility", "metadata", "allowed-tools", "type"] as const;
+const SKILL_KEYS = [
+  "license",
+  "compatibility",
+  "metadata",
+  "allowed-tools",
+  "type",
+  "harness", // OVERLAP: snapshots cut before the task loop was deleted; see `rolesDirOf`
+] as const;
 const frontmatterSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
-  /** Skills that load beside this one on the agent loop (core skills the method leans on). */
+  /** Skills that load beside this one (core skills the method leans on). */
   companions: z.array(z.string().min(1)).optional(),
-  /** `agents`: a skill of the agent loop only; the task loop does not list or load it. */
-  harness: z.literal("agents").optional(),
   ...Object.fromEntries(SKILL_KEYS.map((k) => [k, z.unknown().optional()])),
 });
 
-/** Both loops' role folders are snapshotted; the pin picks one when the snapshot is read. */
-const ROLE_DIRS = [`${CORE}/agents`, `${CORE}/roles`];
-const rolesDirOf = (harness: Harness) => ROLE_DIRS[harness === "agents" ? 1 : 0] as string;
-/** Files of `roles/` appended to every role's prompt, not roles. */
+/** The role files, the same for every workflow. */
+const ROLES_DIR = `${CORE}/agents`;
+/**
+ * OVERLAP, delete with the `harness` skill key above once no run snapshotted before the task loop
+ * was deleted can still be resumed (TODO in packages/workflow/.context/TODO.md): such a snapshot
+ * keeps the roles in `core/roles/` and holds a `core/agents/` of task-loop roles to ignore.
+ */
+const OLD_ROLES_DIR = `${CORE}/roles`;
+async function rolesDirOf(store: ObjectStore, prefix: string, existing: boolean) {
+  return existing && (await store.head(`${prefix}${OLD_ROLES_DIR}/main.md`))
+    ? OLD_ROLES_DIR
+    : ROLES_DIR;
+}
+
+/** Files of `agents/` appended to every role's prompt, not roles. */
 const PROMPT_TEXTS = ["words.md", "environment.md"];
 const agentSchema = z.strictObject({
   name: z.string().min(1),
@@ -79,16 +88,11 @@ const agentSchema = z.strictObject({
   model: z.string().min(1),
   thinking: z.enum(THINKING_LEVELS).optional(),
   tools: z.array(z.string().min(1)),
-  scratch: z.enum(["own", "all"]).optional(),
-  outputs: z.enum(["read", "write"]).optional(),
-  checkedBy: z.string().min(1).optional(),
-  subagents: z.array(z.string().min(1)).default([]),
   skills: z.array(z.string().min(1)).optional(),
 });
 
 /** Written last, so a snapshot cut short is redone, not trusted; its body is the commit. */
 const DONE = ".snapshot-done";
-const FILES = ["outputs.json", "outputs.yaml", "tasks.json"];
 
 /** Parses the `---` block against `schema`; `body` is what follows it, trimmed. */
 function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
@@ -121,7 +125,6 @@ function parseAgent(
   text: string,
   knownTools: readonly string[],
   existing: boolean,
-  harness: Harness,
 ): ParsedAgent {
   const { data, body } = parseFile(path, text, agentSchema);
   const name = path.slice(path.lastIndexOf("/") + 1, -".md".length);
@@ -133,23 +136,11 @@ function parseAgent(
     // In a snapshot an earlier run wrote, a tool the harness has since dropped means the run is
     // from an older version; in one just cut from the checkout it is a typo.
     if (existing) throw new Error(OLDER_VERSION_MESSAGE);
-    throw new WorkflowParseError(
-      path,
-      `tool "${unknown}" is not a tool of the ${harness} loop (each loop has its own tool registry)`,
-    );
+    throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the agent loop`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
-  const scratch = data.scratch ?? "own";
-  const outputs = data.outputs ?? "read";
-  const hasBash = data.tools.includes("bash");
-  if (
-    !hasBash &&
-    (scratch === "all" || outputs === "write" || data.tools.includes("segment_sam"))
-  ) {
-    throw new WorkflowParseError(
-      path,
-      "scratch: all, outputs: write and segment_sam need a sandbox, which holding bash gives",
-    );
+  if (!data.tools.includes("bash") && data.tools.includes("segment_sam")) {
+    throw new WorkflowParseError(path, "segment_sam needs a sandbox, which holding bash gives");
   }
   return {
     name,
@@ -157,10 +148,6 @@ function parseAgent(
     model: data.model,
     thinking: data.thinking,
     tools: data.tools,
-    scratch,
-    outputs,
-    checkedBy: data.checkedBy,
-    subagents: data.subagents,
     skills: data.skills,
     body,
   };
@@ -201,71 +188,38 @@ async function snapshot(dir: string, { store, prefix, root, commit }: LoadOption
     const names = await readdir(join(root, d)).catch(() => {
       throw new WorkflowParseError(d, "directory not found");
     });
-    if (d === dir)
-      for (const name of FILES.filter((f) => names.includes(f))) await put(`${d}/${name}`);
+    if (d === dir && names.includes("outputs.yaml")) await put(`${d}/outputs.yaml`);
     if (names.includes("skills")) for await (const p of walk(root, `${d}/skills`)) await put(p);
     // The review converter (`core/convert/`), which the runner's convert sandbox runs from /workflow.
     if (d === CORE && names.includes("convert"))
       for await (const p of walk(root, `${d}/convert`)) await put(p);
   }
-  // `roles/` exists once the agent loop does; a checkout without it snapshots `agents/` alone.
-  for (const rolesDir of ROLE_DIRS) {
-    const names = await readdir(join(root, rolesDir)).catch(() => {
-      if (rolesDir === ROLE_DIRS[0]) throw new WorkflowParseError(rolesDir, "directory not found");
-      return [];
-    });
-    for (const name of names) {
-      if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${rolesDir}/${name}`);
-    }
+  const roleFiles = await readdir(join(root, ROLES_DIR)).catch(() => {
+    throw new WorkflowParseError(ROLES_DIR, "directory not found");
+  });
+  for (const name of roleFiles) {
+    if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${ROLES_DIR}/${name}`);
   }
   await store.put(`${prefix}${DONE}`, new TextEncoder().encode(commit));
   return false;
 }
 
-/**
- * Snapshots `dir` (`workflows/<name>`) unless the run already has one, then reads the snapshot
- * for the run's loop: a `tasks` run needs `outputs.json` and `tasks.json`, an `agents` run needs
- * `outputs.yaml` and asks nothing of the other two.
- */
-export function loadWorkflow(
-  dir: string,
-  options: LoadOptions & { harness: "agents" },
-): Promise<AgentsDefinition>;
-export function loadWorkflow(
-  dir: string,
-  options: LoadOptions & { harness?: "tasks" },
-): Promise<WorkflowDefinition>;
-export function loadWorkflow(
-  dir: string,
-  options: LoadOptions,
-): Promise<WorkflowDefinition | AgentsDefinition>;
-export async function loadWorkflow(
-  dir: string,
-  options: LoadOptions,
-): Promise<WorkflowDefinition | AgentsDefinition> {
+/** Snapshots `dir` (`workflows/<name>`) unless the run already has one, then reads the snapshot. */
+export async function loadWorkflow(dir: string, options: LoadOptions): Promise<WorkflowDefinition> {
   workflowDirSchema.parse(dir);
   const existing = await snapshot(dir, options);
   const { store, prefix } = options;
-  const harness = options.harness ?? "tasks";
-  const rolesDir = rolesDirOf(harness);
+  const rolesDir = await rolesDirOf(store, prefix, existing);
   const texts = new Map<string, string>();
   for (const { key } of (await store.list(prefix)).objects) {
     const path = key.slice(prefix.length);
     if (
-      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|(^|\/)outputs\.yaml$|\/references\/suggested-plan\.md$/.test(
-        path,
-      ) ||
+      /(^|\/)SKILL\.md$|(^|\/)outputs\.yaml$|\/references\/suggested-plan\.md$/.test(path) ||
       (path.startsWith(`${rolesDir}/`) && /^[^/]+\.md$/.test(path.slice(rolesDir.length + 1))) ||
       scriptOf(path)
     )
       texts.set(path, await getText(store, key));
   }
-
-  // A snapshot cut before `checker.md` became `check.md` (R2 snapshots are write-once) is refused
-  // before its role files parse, since an old one may not match the current format. One whose role
-  // files name a dropped tool is refused in `parseAgent`.
-  if (texts.has(`${rolesDir}/checker.md`) && !texts.has(`${rolesDir}/check.md`))
-    throw new Error(OLDER_VERSION_MESSAGE);
 
   // The workflow's own skill (named for its directory) first, then its others, then core's, each
   // group sorted: the order must not depend on how the store lists keys.
@@ -296,7 +250,6 @@ export async function loadWorkflow(
     if (skills.some((s) => s.name === fm.name)) {
       throw new WorkflowParseError(path, `skill "${fm.name}" is defined twice`);
     }
-    if (fm.harness === "agents" && harness === "tasks") continue;
     skills.push({
       name: fm.name,
       description: fm.description.replace(/\s+/g, " ").trim(),
@@ -314,36 +267,7 @@ export async function loadWorkflow(
       );
   }
 
-  const json = (name: string) => {
-    const text = texts.get(`${dir}/${name}`);
-    if (text === undefined) throw new WorkflowParseError(`${dir}/${name}`, "not found");
-    try {
-      return JSON.parse(text) as unknown;
-    } catch (e) {
-      throw new WorkflowParseError(`${dir}/${name}`, `invalid JSON: ${(e as Error).message}`);
-    }
-  };
-  // Each loop reads only its own files, so a later change to one's schema never stops the
-  // other's runs resuming.
-  let files: WorkflowFiles | undefined;
-  if (harness === "tasks") {
-    const parsed = workflowFilesSchema.safeParse({
-      outputs: json("outputs.json"),
-      tasks: json("tasks.json"),
-    });
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      const file = issue?.path[0] === "tasks" ? "tasks.json" : "outputs.json";
-      throw new WorkflowParseError(
-        `${dir}/${file}`,
-        `${issue?.path.slice(1).join(".")}: ${issue?.message}`,
-      );
-    }
-    files = parsed.data;
-  }
-
-  let outputCatalog: OutputCatalog | undefined;
-  if (harness === "agents") {
+  const outputCatalog = (() => {
     const file = `${dir}/outputs.yaml`;
     const yaml = texts.get(file);
     if (yaml === undefined) throw new WorkflowParseError(file, "not found");
@@ -362,8 +286,8 @@ export async function loadWorkflow(
       const issue = catalog.error.issues[0];
       throw new WorkflowParseError(file, `${issue?.path.join(".")}: ${issue?.message}`);
     }
-    outputCatalog = catalog.data;
-  }
+    return catalog.data;
+  })();
 
   const toolIndex: ToolIndexEntry[] = [];
   for (const skill of skills) {
@@ -386,24 +310,13 @@ export async function loadWorkflow(
   for (const [path, text] of texts) {
     if (!path.startsWith(`${rolesDir}/`) || PROMPT_TEXTS.some((f) => path.endsWith(`/${f}`)))
       continue;
-    const agent = parseAgent(path, text, options.knownTools, existing, harness);
+    const agent = parseAgent(path, text, options.knownTools, existing);
     found[agent.name] = agent;
   }
   const skillNames = skills.map((s) => s.name);
   const agents: Record<string, AgentDefinition> = {};
   for (const agent of Object.values(found)) {
     const path = `${rolesDir}/${agent.name}.md`;
-    const missing = agent.subagents.find((n) => !found[n]);
-    if (missing) throw new WorkflowParseError(path, `subagent "${missing}" is not a role file`);
-    if (agent.checkedBy && !found[agent.checkedBy]) {
-      throw new WorkflowParseError(path, `checkedBy "${agent.checkedBy}" is not a role file`);
-    }
-    if (agent.tools.includes("submit_task") && !agent.checkedBy) {
-      throw new WorkflowParseError(path, "a role with submit_task names its checker (checkedBy)");
-    }
-    if (agent.tools.includes("start_agent") && agent.subagents.length === 0) {
-      throw new WorkflowParseError(path, "a role with start_agent lists the roles it may start");
-    }
     const unknown = agent.skills?.find((n) => !skillNames.includes(n));
     if (unknown)
       throw new WorkflowParseError(path, `skill "${unknown}" is not a skill of this workflow`);
@@ -411,22 +324,18 @@ export async function loadWorkflow(
   }
   const { main } = agents;
   if (!main) throw new WorkflowParseError(`${rolesDir}/main.md`, "not found");
-  const base = {
-    dir,
-    commit: await getText(store, `${prefix}${DONE}`),
-    skills,
-    toolIndex,
-    agents: { ...agents, main },
-  };
-  if (files) return { ...base, files };
   const promptText = (name: string) => {
     const text = texts.get(`${rolesDir}/${name}`);
     if (text === undefined) throw new WorkflowParseError(`${rolesDir}/${name}`, "not found");
     return text.trim();
   };
   return {
-    ...base,
-    outputCatalog: outputCatalog as OutputCatalog,
+    dir,
+    commit: await getText(store, `${prefix}${DONE}`),
+    skills,
+    toolIndex,
+    agents: { ...agents, main },
+    outputCatalog,
     suggestedPlan: texts.get(`${own.slice(0, -"/SKILL.md".length)}/references/suggested-plan.md`),
     words: promptText("words.md"),
     environment: promptText("environment.md"),

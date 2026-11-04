@@ -1,6 +1,6 @@
 /**
  * What a model is shown of an image: at most 1 MiB and 2000 px a side (the most Claude accepts once
- * a request holds many images). `view_image` and the agent loop's `read` both fit images with this.
+ * a request holds many images). The `read` tool fits images with this.
  */
 import sharp from "sharp";
 

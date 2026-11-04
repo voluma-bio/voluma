@@ -1,16 +1,15 @@
 /**
  * Postgres adapter for the browser's reads of studies (`@voluma/contracts/study`): Home's
  * list, which carries each input's newest run in brief, and one study with its inputs, runs,
- * values, open checks and each input's task states and open items. Reads apply the caller's `ReadScope` as
+ * values and each input's newest outputs. Reads apply the caller's `ReadScope` as
  * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
- * inputs' values, checks and states are read from each fold here. Writes are the queue's.
+ * inputs' values and output statuses are read from each fold here. Writes are the queue's.
  *
  * A run's `waiting` is the open calls its fold counted, kept only when the caller can answer
  * them (`CanAnswer`): the rule the run read applies as `cannotMessage`.
  */
 import { unitAsWritten } from "@voluma/contracts/output-catalog";
 import { finalValues } from "@voluma/contracts/output-fold";
-import { latestRevision, shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
@@ -69,58 +68,24 @@ function newestOf(results: RunResult[]) {
   return { newest, newestCompleted };
 }
 
-/**
- * A completed run's values and acceptable checks: the task loop's from its latest revision, the
- * agent loop's final values from its output fold (it has no checks to accept here).
- */
-function resultOf({ run, results }: RunResult) {
+/** A completed run's final values: each final output's latest number, its unit as people write it. */
+function valuesOf({ results }: RunResult) {
   const values: StudyInputDetail["values"] = {};
-  const acceptable: StudyInputDetail["acceptable"] = [];
   for (const [id, { number, unit }] of finalValues(results.outputs))
-    values[id] = { value: number, unit: unitAsWritten(unit), confidence: null };
-  for (const task of results.revisions.at(-1)?.tasks ?? []) {
-    for (const m of task.measurements) {
-      // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
-      values[m.id.slice(task.id.length + 1)] = {
-        value: m.value,
-        unit: m.unit,
-        confidence: m.confidence,
-      };
-    }
-    for (const check of task.checks) {
-      if (check.status === "open")
-        acceptable.push({
-          runId: run.id,
-          taskId: task.id,
-          resultRevisionId: task.resultRevisionId,
-          checkId: check.id,
-          title: check.title,
-          detail: check.detail,
-        });
-    }
-  }
-  return { values, acceptable };
+    values[id] = { value: number, unit: unitAsWritten(unit) };
+  return values;
 }
 
-/** A run's review in brief (`runReviewBriefSchema`), of either loop. */
+/** A completed run's review in brief (`runReviewBriefSchema`). */
 function reviewOf({ run, results }: RunResult): StudyRunSummary["review"] {
-  if (run.review) {
-    const { acceptable, needsYou, reviewedAt } = run.review;
-    return { acceptable, needsYou, reviewedAt };
-  }
-  if (!completed(run) || run.harness !== "agents") return null;
-  return { acceptable: 0, needsYou: results.outputs.toCheck, reviewedAt: null };
+  return completed(run) ? { needsYou: results.outputs.toCheck } : null;
 }
 
-/** The newest run's final outputs' status, for a run of the agent loop; empty otherwise. */
+/** The newest run's final outputs' status; empty without a run. */
 const outputStatusOf = (newest: RunResult | undefined): StudyInputDetail["outputStatus"] =>
   Object.fromEntries(
     (newest?.results.outputs.outputs ?? []).flatMap((o) => (o.final ? [[o.id, o.status]] : [])),
   );
-
-/** The newest run's tasks as the input review shows them (`shownTasks`); none without a run. */
-const tasksOf = (newest: RunResult | undefined) =>
-  shownTasks(newest && { ...newest, state: newest.run.state, revision: latestRevision(newest) });
 
 async function summarize(
   tx: Queryable,
@@ -152,9 +117,7 @@ async function summarize(
           inputId: result.run.input.id,
           inputName: result.run.input.name,
           state: result.run.state,
-          tasks: result.run.tasks,
           ...(result.run.outputs && { outputs: result.run.outputs }),
-          ...(result.run.harness && { harness: result.run.harness }),
           review: reviewOf(result),
           waiting: await waitingOf(tx, study.workflowId, result, canAnswer),
           example: result.run.example,
@@ -183,7 +146,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           for (const result of await results(
             tx,
             and(readableRuns(reader), inArray(runs.studyId, ids)),
-            { skipSummaryless: true, stopped: "none" },
+            { stopped: "none" },
           )) {
             const group = byStudy.get(result.run.studyId) ?? [];
             group.push(result);
@@ -221,7 +184,6 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             .where(eq(studyMembers.studyId, studyId))
             .orderBy(asc(studyMembers.position));
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
-            skipSummaryless: true,
             stopped: "newest",
           });
           const { newest, newestCompleted } = newestOf(found);
@@ -255,8 +217,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 waiting: waiting.get(member.inputId) ?? 0,
                 outputStatus: outputStatusOf(newestRun),
                 resultRunId: result?.run.id ?? null,
-                ...(result ? resultOf(result) : { values: {}, acceptable: [] }),
-                ...tasksOf(newestRun),
+                values: result ? valuesOf(result) : {},
               };
             }),
           };

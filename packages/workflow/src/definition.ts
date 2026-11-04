@@ -1,10 +1,9 @@
 /**
- * What a run takes from its workflow skill beyond the plan: the skills every role may read and
- * the data files the plan is built from.
+ * What a run takes from its workflow snapshot: the role files, the skills every role may read and
+ * the output catalog.
  */
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { OutputCatalog } from "@voluma/contracts/output-catalog";
-import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 
 export interface Skill {
   name: string;
@@ -13,7 +12,7 @@ export interface Skill {
   path: string;
   /** The `SKILL.md` after its frontmatter: what a first message carries. */
   text: string;
-  /** Skills that always load beside this one (frontmatter `companions:`), on the agent loop. */
+  /** Skills that always load beside this one (frontmatter `companions:`). */
   companions: string[];
 }
 
@@ -39,28 +38,16 @@ export interface AgentDefinition {
   model: string;
   /** The role's thinking level; unset: the runner's `RUNNER_THINKING`. */
   thinking?: ModelThinkingLevel;
-  /** Every tool the role holds, base tools included (names in the harness's tool registry). */
+  /** Every tool the role holds, base tools included (names in `AGENT_TOOL_NAMES`, `harness/agents/tools/registry.ts`). */
   tools: string[];
-  /**
-   * Holding `bash` gives the role's threads a sandbox. `scratch` says what it writes: `own` (only
-   * `/scratch/<name>/`; the rest of `/scratch` is read host-side) or `all` (all of `/scratch`).
-   * Unset: `own`.
-   */
-  scratch: "own" | "all";
-  /** The access to the run's `/outputs`, for the sandbox and host-side tools. Unset: `read`. */
-  outputs: "read" | "write";
-  /** The role that checks a task this role submits; each exists. Unset: its submissions are not checked. */
-  checkedBy?: string;
-  /** The roles this role may start; each exists. */
-  subagents: string[];
   /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
   skills: string[];
   /** The role's job: the file after its frontmatter, trimmed. */
   body: string;
 }
 
-/** What both loops read from a run's snapshot. */
-interface DefinitionBase {
+/** What a run reads from its workflow snapshot. */
+export interface WorkflowDefinition {
   /** The workflow skill's directory, `workflows/<name>`. */
   dir: string;
   /** The commit of the checkout the snapshot was cut from (kept on a resume). */
@@ -70,27 +57,17 @@ interface DefinitionBase {
   /** Every skill's scripts, in `skills` order, each with its docstring's first line. */
   toolIndex: ToolIndexEntry[];
   /**
-   * The role files of the loop's folder (`workflows/core/agents/` or `roles/`), the same for every
-   * workflow. The loader requires `main`, the role the run's first thread runs on.
+   * The role files of `workflows/core/agents/`, the same for every workflow. The loader requires
+   * `main`, the role the run's first thread runs on.
    */
   agents: Record<string, AgentDefinition> & { main: AgentDefinition };
-}
-
-/** A run of the task loop (`harness: "tasks"`): the plan comes from `outputs.json` and `tasks.json`. */
-export interface WorkflowDefinition extends DefinitionBase {
-  /** Its `outputs.json` and `tasks.json`, validated together. */
-  files: WorkflowFiles;
-}
-
-/** A run of the agent loop (`harness: "agents"`): no task list; the catalog and the method are the workflow. */
-export interface AgentsDefinition extends DefinitionBase {
   /** Its `outputs.yaml`, validated. */
   outputCatalog: OutputCatalog;
   /** The workflow skill's `references/suggested-plan.md`, when it has one: main's first message carries it. */
   suggestedPlan?: string;
-  /** `roles/words.md`: the words the researcher reads, appended to every role's system prompt. */
+  /** `agents/words.md`: the words the researcher reads, appended to every role's system prompt. */
   words: string;
-  /** `roles/environment.md`: what the sandbox is, appended to every role's system prompt. */
+  /** `agents/environment.md`: what the sandbox is, appended to every role's system prompt. */
   environment: string;
 }
 

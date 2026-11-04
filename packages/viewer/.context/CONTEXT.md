@@ -1,19 +1,18 @@
 # Viewer specification
 
 The **grid viewer** (`src/grid/`, entry `@voluma/viewer/grid`) reviews one analysis grid of a run
-from its converted review assets. Review shows each task on its own grid: `reviewGrid` (`review.ts`)
+from its converted review assets. Review shows each output on its own grid: `reviewGrid` (`review.ts`)
 picks the grid and builds the scene from the run's blocks. three.js and the zarr reader load only
 with it (Review imports it lazily).
 
-## A task's grid (`review.ts`)
+## An output's grid (`review.ts`)
 
 The run publishes the geometry; the browser aligns nothing. Blocks share a grid when their
 volumes share `gridId`, and a block on another grid is listed under the viewer ("On another grid,
 not shown here"), never resampled onto this one.
 
-- **Which grid.** The grid most of the focused check's `on` blocks and `volumeId` sit on; else the grid most of
-  the task's named blocks sit on (measurements' and scores' `on`, then `context`, then blocks whose
-  id starts with `<taskId>/`); else the scan's grid, the first image volume's. The grid's image is
+- **Which grid.** The grid most of the focused item's `on` blocks and `volumeId` sit on; else the
+  grid most of the output's shown blocks sit on; else the scan's grid, the first image volume's. The grid's image is
   its `image` volume with `.npy` data; spacing is the norms of its affine's columns.
 - **What is drawn.** The named structures on the grid (a named labels volume brings all its
   structures): a labels volume as one ivory overlay (`--bone`, or `--label-n` with Labels on), a
@@ -24,24 +23,22 @@ not shown here"), never resampled onto this one.
   from another slice. In 3D annotations draw over the anatomy so a ruler stays readable.
   Coplanar surface patches show their boundary, not their triangle diagonals; intersections
   are cached by geometry, mesh offsets and slice coordinate, independently of display settings.
-- **Assets.** From `ReviewRun.assets` by the file's sha256: absent is "Preparing…", `failed` is
-  its error. For the image that replaces the viewer; for an overlay it is a note under the heading.
-  Review refetches while a file of the latest revision has no entry (about ten minutes at most).
-- **Display.** The View panel lists structures, surfaces and annotations; its visibility and opacity
-  scale their drawings in every pane. Hidden is opacity 0, so a mesh stays loaded. The Labels toggle
-  changes bone colours without moving the camera or crosshair. A new scene on the same grid redraws in place.
-- **Focus.** A check's focused blocks are drawn in `--check-outline` at full opacity, whatever the
-  panel says; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
+- **Assets.** From the run's `assets.ready`/`assets.failed` events by the file's sha256
+  (`reviewAssetsOf`, run-view): absent is "Preparing…", `failed` is its error. For the image that
+  replaces the viewer; for an overlay it is a note under the heading.
+- **Display.** Every shown block draws at full opacity. The Labels toggle changes bone colours
+  without moving the camera or crosshair. A new scene on the same grid redraws in place.
+- **Focus.** A To check item's focused blocks are drawn in `--check-outline`; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
   drawn even when no structure brings it. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they
   are scan voxels); else the middle of its cropped masks; else of its annotations (world mm through
   the grid's own affine, a projection on each orthogonal column); else, for labels, the middle of
   their bounding box on the coarsest labels level that has them, up to about 32 M voxels
-  (`labelsMiddle`). Surfaces give no point. Each check selection moves the crosshair once; display
-  changes never do.
+  (`labelsMiddle`). Surfaces give no point. Each item selection moves the crosshair once; the
+  Labels toggle never does.
 
 ## The viewer: one analysis grid from converted review assets
 
-`GridViewer` takes a `GridScene`: the grid's shape and voxel size, its image, overlays and meshes
+`QuadViewer` takes a `GridScene`: the grid's shape and voxel size, its image, overlays and meshes
 made on that same grid, each a converted asset (`assets.ready`: OME-Zarr 0.4 levels, finest first,
 level k = 2^k source voxels per axis; raw meshes, float32 voxel (x, y, z) then uint32 indices).
 Every position is a source voxel (z, y, x) of the grid; source voxel i is centred on i, level voxel j
@@ -50,14 +47,12 @@ crop voxels. The run publishes all geometry; the viewer never resamples between 
 drawn in the grid's own mm (voxel × spacing), not rotated into the scan.
 
 ```diagram
-GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane ──► zarr.worker (zarrita, chunk cache)
+QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane ──► zarr.worker (zarrita, chunk cache)
     │                                       compose (window, overlays) → RGBA picture
     └─► Grid3D ── readLevel (whole level) ──► volume rendering; meshes fetched once each
 ```
 
-- **Panes.** Axial holds array axis 0, coronal axis 2, sagittal axis 1 (DESIGN.md's axis colours) in
-  `GridViewer`, the task review's. `QuadViewer`, the outputs review's, names planes by the grid's
-  axes (XY holds z, XZ y, YZ x) and colours them by the anatomy the caller gives per grid
+- **Panes.** `QuadViewer` names planes by the grid's axes (XY holds z, XZ y, YZ x) and colours them by the anatomy the caller gives per grid
   (`planes`, from the base's catalog entry); without it they are uncoloured. Its views stay
   mounted and move between CSS grid cells, so a chip swap, a layout change or full screen never
   remounts a pane; the layout is the caller's, the seams the viewer's.
@@ -75,9 +70,8 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   camera; a new `focus` voxel (a check's) moves the crosshair. A pane with no size (hidden) draws
   nothing; showing it resizes it, which draws, so a caller may keep a viewer mounted and hidden.
 - **Marks.** With `tool` set, left clicks and drags mark instead of moving the crosshair, and
-  `onMark` gets a `GridMark`: the contract's `MarkShape` (`agent-events.ts`, read-only), which a
-  task review's message turns into a `Mark` (`messages.ts`) with the `volumeId` the caller adds
-  from `ReviewGrid.imageId`. The caller holds the marks and passes them back as
+  `onMark` gets a `GridMark`: the contract's `MarkShape` (`agent-events.ts`, read-only); the caller
+  adds the `volumeId` from `ReviewGrid.imageId`. The caller holds the marks and passes them back as
   `ShownMark`s. Point: a click; on a slice the voxel under the pointer, in 3D the nearer of the
   first shown mesh (a see-through shell included) and the volume where it turns half opaque by
   `volume.ts`'s opacity (a CPU march of the shown byte texture, with the shader's trilinear
@@ -103,9 +97,7 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   limits, ray-marched with gradient lighting in `--bone`. The meshes render first into a target
   with depth and each ray stops at it, so a structure inside the bone shows where it is.
 
-## Tilted planes, tools and saved views (`QuadViewer` only)
-
-The task review's panes never tilt; everything here is the outputs review's.
+## Tilted planes, tools and saved views
 
 - **Where a pane lies.** Each slice pane has a basis in the grid's mm, (z, y, x): `right`, `down`,
   `normal` (`frame.ts`). On the grid's axes a pane reads whole slices from zarr as above. Tilted,
@@ -128,7 +120,7 @@ The task review's panes never tilt; everything here is the outputs review's.
   view) the plane is fitted; a grid with nothing to fit shows the view GP replaced in that slot. A target with no published surface is
   listed as "Not traced yet". The fit uses each face's whole height field, rim included, so it can
   differ by a few degrees from a fit inside the bone only (ce5a0f21: 9.97° against the mockup's 12.16°).
-- **Tools.** Beyond the task review's: a point may carry a note (typed in place) or a probe value
+- **Tools.** Beyond the marks above: a point may carry a note (typed in place) or a probe value
   (the image under the cursor, from the pane's loaded level, `≈` when coarser than full
   resolution); a line is two clicks or a drag; an angle is three clicks; an outline has no held
   axis (its area by Newell's method, so it works on a tilted plane). All show in every pane and

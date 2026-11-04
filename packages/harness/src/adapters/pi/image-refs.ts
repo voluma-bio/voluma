@@ -25,7 +25,7 @@ import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
 import { readRow } from "./compaction";
 
-// view_image returns at most 1 MiB per image. Its stored object is on writable scratch,
+// `read` returns at most 1 MiB per image. Its stored object is on writable scratch,
 // so check the stream before buffering it: a sandbox can replace it with a larger file.
 const MAX_IMAGE_BYTES = 1024 * 1024;
 
@@ -41,9 +41,9 @@ const blocksOf = (row: Row): Block[] | undefined =>
 
 const has = (row: Row, type: string) => blocksOf(row)?.some((b) => b.type === type) === true;
 
-const GONE_NOTE = "[the images are no longer shown; call view_image again to see them]";
+const GONE_NOTE = "[the images are no longer shown; call read again to see them]";
 
-/** `nameOf` is a thread's name (`ThreadRecord.name`): the folder its images are written under. */
+/** `nameOf` is a thread's name (`AgentRecord.name`): the folder its images are written under. */
 export function withImageRefs(
   history: History,
   files: Files,

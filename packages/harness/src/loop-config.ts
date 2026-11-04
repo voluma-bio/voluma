@@ -1,4 +1,4 @@
-/** What the host passes both loops: a thread's model setup and the run's tuning, with its defaults. */
+/** What the host passes the loop: a thread's model setup and the run's tuning, with its defaults. */
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
@@ -11,20 +11,17 @@ export interface ModelSetup {
 }
 
 export interface LoopConfig {
-  /** `needs-review` rounds a task gets before it is left to-check. */
-  maxFixRounds: number;
   /** Deliveries with no notice in a row before code ends the run. */
   stuckLimit: number;
-  /** Minutes an agent may work without an `activity` line before it is reminded (agent loop). */
+  /** Minutes an agent may work without an `activity` line before it is reminded. */
   activityMinutes: number;
-  /** Minutes an agent may sit idle before it is pinged (agent loop). */
+  /** Minutes an agent may sit idle before it is pinged. */
   pingMinutes: number;
-  /** Minutes idle before two pings in a row close a worker, whatever the ping interval (agent loop). */
+  /** Minutes idle before two pings in a row close a worker, whatever the ping interval. */
   pingCloseMinutes: number;
 }
 
 export const LOOP_DEFAULTS: LoopConfig = {
-  maxFixRounds: 2,
   stuckLimit: 2,
   activityMinutes: 10,
   pingMinutes: 25,

@@ -22,7 +22,6 @@ export {
   TextField,
   type TextFieldProps,
 } from "./field";
-export { Lightbox, type LightboxProps } from "./lightbox";
 export {
   Menu,
   MenuHeader,
@@ -41,26 +40,12 @@ export {
   FactSections,
   Facts,
   type FactsProps,
-  InfoButton,
-  type InfoButtonProps,
   Popover,
   PopoverClose,
   type PopoverProps,
 } from "./popover";
 export { type Theme, ThemeScope } from "./portal";
 export { Progress, type ProgressProps } from "./progress";
-export { Readout, type ReadoutProps, type ReadoutValue } from "./readout";
-export {
-  type Density,
-  type LinkRenderProps,
-  type LinkTo,
-  List,
-  type ListProps,
-  Row,
-  RowLink,
-  type RowLinkProps,
-  type RowProps,
-} from "./row";
 export {
   type SampleGroup,
   SampleTree,
@@ -86,15 +71,13 @@ export {
 export {
   AppShell,
   ShellHeading,
-  ShellPanel,
-  type ShellPanelProps,
   type ShellSide,
   useFoldWhile,
   useFullView,
-  useOpenPanel,
 } from "./shell/shell";
 export { SidePanel, type SidePanelProps, type SidePanelTab } from "./shell/side-panel";
 export {
+  type Density,
   EmptyState,
   type EmptyStateProps,
   ErrorState,
@@ -115,7 +98,6 @@ export {
   type StripPlotProps,
   type StripPoint,
 } from "./strip-plot";
-export { Table, type TableColumn, type TableProps } from "./table";
 export { Thumbnail, type ThumbnailProps } from "./thumbnail";
 export { Tooltip, type TooltipProps } from "./tooltip";
 export { INPUT_WORD } from "./words";

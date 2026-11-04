@@ -1,10 +1,9 @@
 /**
  * The sandbox spec of a layout (`SandboxLayout`), the one place a sandbox's size and network are
- * written. The layout fixes the mounts and their access (a checker's `/outputs` is read-only,
- * the convert sandbox's `/evidence` too) and whether the sandbox may reach the gateway; this adds the
+ * written. The layout fixes the mounts and their access (`/outputs` is read-only in every sandbox) and whether the sandbox may reach the gateway; this adds the
  * size, the lifetime and, for a sandbox that may reach it, the gateway.
  *
- * All sandboxes are 2 CPUs and 8 GiB: a worker or checker renders volumes, a convert sandbox
+ * All sandboxes are 2 CPUs and 8 GiB: an agent's sandbox renders volumes, a convert sandbox
  * holds a 1.25 GB float32 stack beside the DICOM.
  */
 import type { SandboxLayout } from "./layout";

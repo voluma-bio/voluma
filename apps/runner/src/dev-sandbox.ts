@@ -29,9 +29,8 @@ import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
 import type { Sandbox } from "@voluma/harness/ports/sandbox";
 import { specOf } from "@voluma/harness/sandbox-specs";
-import { HARNESSES } from "@voluma/harness/supervise-run";
 import { segmentSamTool } from "@voluma/harness/tools/segment-sam";
-import { runnerConfig, sandboxIdleSeconds } from "./config.ts";
+import { runnerConfig } from "./config.ts";
 import { holdLease } from "./lease.ts";
 import { claimSandboxes, terminateClaim } from "./modal-sandbox.ts";
 import { redactor } from "./redact.ts";
@@ -60,7 +59,7 @@ const apiHost = new URL(config.api.baseUrl).hostname;
 if (!["localhost", "127.0.0.1", "[::1]"].includes(apiHost) && !values["allow-remote"])
   throw new Error(`${apiHost} is not this machine: pass --allow-remote to claim a run there`);
 
-const claim = await claimRun(config.api, "dev-sandbox", HARNESSES);
+const claim = await claimRun(config.api, "dev-sandbox");
 if (!claim) throw new Error("no queued run: start one in the web app (pnpm dev) first");
 const { run, leaseToken } = claim;
 if (run.id !== values.run) {
@@ -143,21 +142,18 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal
 
 let exitCode = 0;
 try {
-  const devThread = {
-    id: `${run.id}.dev.worker`,
-    name: "dev.worker",
-    place: "worker",
-    role: "worker",
-    taskId: "dev",
-  } as const;
+  const devThreadId = `${run.id}.dev.worker`;
   const thread = runLayout({
     runId: run.id,
-    inputId: run.input.id,
     inputPrefix: inputPrefixOf(run),
     skills: [], // no workflow is loaded here, so no PYTHONPATH
-    copiesInputs: () => true,
-    roles: { worker: { scratch: "all", outputs: "write", subagents: [], tools: ["segment_sam"] } },
-  }).forThread(devThread);
+  }).forAgent({
+    name: "dev.worker",
+    role: "worker",
+    tools: ["segment_sam"],
+    peers: [],
+    blind: false,
+  });
   meter.sandboxUp();
   counted = true;
   sandbox = await claimSandboxes(
@@ -171,7 +167,7 @@ try {
         runId: run.id,
         image: config.sandbox.image,
         lifetimeSeconds: config.sandbox.lifetimeSeconds,
-        idleSeconds: sandboxIdleSeconds(config, run.harness),
+        idleSeconds: config.sandbox.idleSeconds,
       },
       sandboxGateway(
         config,
@@ -187,8 +183,8 @@ try {
   const tool = segmentSamTool(thread);
   const context = {
     runId: run.id,
-    threadId: devThread.id,
-    kind: "worker" as const,
+    threadId: devThreadId,
+    agent: { name: thread.name, role: "worker" as const },
     toolCallId: "dev",
     batch: [],
     signal: abort.signal,
