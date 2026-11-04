@@ -68,8 +68,8 @@ import { events, inputs, runs, studies, studyMembers } from "./schema";
  */
 export const QUEUE_LOCK = 0x76_6f_6c_71;
 
-/** Runs on one starter's own key that may be unfinished at once; each holds a sealed key in its row. */
-const MAX_OWN_KEY_RUNS = 20;
+/** Own-key runs that may be unfinished at once over every account; each holds a sealed key in its row. */
+const MAX_OWN_KEY_RUNS = 100;
 /** How long an own-key run whose keys are gone waits for them. */
 const KEYS_WAIT = sql`interval '24 hours'`;
 
@@ -372,16 +372,11 @@ export function pgRunQueue(
       const [{ open } = { open: 0 }] = await tx
         .select({ open: sql<number>`count(*)::int` })
         .from(runs)
-        .where(
-          and(
-            eq(runs.startedBy, caller.userId),
-            eq(runs.credentials, "visitor"),
-            ne(runs.state, "ended"),
-          ),
-        );
+        .where(and(eq(runs.credentials, "visitor"), ne(runs.state, "ended")));
       if (open + starts.runs.length > MAX_OWN_KEY_RUNS)
         throw new HTTPException(429, {
-          message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
+          message:
+            "Too many runs on people's own keys are waiting or running. Try again in a few minutes.",
         });
     }
     const refused = admit("start", limits, reader.labId, await spentUsd(tx, reader.labId), {
