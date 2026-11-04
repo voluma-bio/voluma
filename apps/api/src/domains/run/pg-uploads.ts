@@ -4,7 +4,7 @@
  * `Reader`, like every other read of an input.
  */
 import type { UploadFile } from "@voluma/contracts/run";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, count, eq, gt, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { readableInputs, toInput } from "./pg-runs";
@@ -12,14 +12,47 @@ import { inputs } from "./schema";
 
 export function pgUploads(db: PostgresJsDatabase) {
   return {
-    async create(upload: {
-      id: string;
-      labId: string;
-      uploadedBy: string;
-      name: string;
-      files: UploadFile[];
-    }) {
-      await db.insert(inputs).values({ ...upload, source: "upload", status: "uploading" });
+    /**
+     * Creates the upload unless `userId`'s stored total plus this scan would pass `capBytes`;
+     * then returns the bytes already stored. The total is the declared size of their ready
+     * uploads plus uploads still in progress that haven't expired (created after `since`),
+     * so an abandoned upload stops counting when its URLs do. The reference scan is not an
+     * upload and never counts. A per-user advisory lock makes the check and insert atomic.
+     */
+    async create(
+      upload: {
+        id: string;
+        labId: string;
+        uploadedBy: string;
+        name: string;
+        files: UploadFile[];
+      },
+      capBytes: number,
+      since: Date,
+    ): Promise<{ ok: true } | { ok: false; usedBytes: number }> {
+      return db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`upload-cap:${upload.uploadedBy}`}))`,
+        );
+        const rows = await tx
+          .select({ files: inputs.files })
+          .from(inputs)
+          .where(
+            and(
+              eq(inputs.uploadedBy, upload.uploadedBy),
+              eq(inputs.source, "upload"),
+              or(
+                eq(inputs.status, "ready"),
+                and(eq(inputs.status, "uploading"), gt(inputs.createdAt, since)),
+              ),
+            ),
+          );
+        const sum = (files: UploadFile[]) => files.reduce((n, f) => n + f.size, 0);
+        const usedBytes = rows.reduce((n, r) => n + sum((r.files ?? []) as UploadFile[]), 0);
+        if (usedBytes + sum(upload.files) > capBytes) return { ok: false, usedBytes };
+        await tx.insert(inputs).values({ ...upload, source: "upload", status: "uploading" });
+        return { ok: true };
+      });
     },
 
     /** Uploads `userId` created since `since` that are not complete. */

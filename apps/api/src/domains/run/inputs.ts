@@ -22,7 +22,12 @@ export interface UploadLimits {
   maxBytes: number;
   /** Uncompleted, unexpired uploads per member, so abandoned ones can't pile up URLs. */
   maxOpen: number;
+  /** Total declared bytes a person may keep stored, the same for every account. */
+  maxStoredBytes: number;
 }
+
+const size = (bytes: number) =>
+  bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${(bytes / 1e6).toFixed(1)} MB`;
 
 /** Every object under `prefix`: key relative to the prefix → bytes. */
 async function sizesUnder(store: ObjectStore, prefix: string): Promise<Map<string, number>> {
@@ -68,7 +73,19 @@ export function inputsRoutes({ reads, uploadStore, store, uploadLimits }: RunDep
       );
     }
     const id = randomUUID();
-    await uploadStore.create({ id, labId: user.labId, uploadedBy: user.userId, name, files });
+    const created = await uploadStore.create(
+      { id, labId: user.labId, uploadedBy: user.userId, name, files },
+      uploadLimits.maxStoredBytes,
+      since,
+    );
+    if (!created.ok) {
+      return c.json(
+        {
+          error: `You've stored ${size(created.usedBytes)} of your ${size(uploadLimits.maxStoredBytes)}. This scan is ${size(bytes)}; delete a scan or ask us for more.`,
+        },
+        413,
+      );
+    }
     const expiresAt = new Date(Date.now() + URL_TTL_SECONDS * 1000).toISOString();
     const uploads = await Promise.all(
       files.map(async (f) => ({
