@@ -710,8 +710,16 @@ export function SlicePane({
         probe.current = made.read;
         shown(k);
       };
+      if (level !== coarsest && drawnKey.current.image === null) {
+        // A pane's first picture: a level two coarser (4×, a few chunks) drawn before the fine
+        // chunks are asked for, since the worker serves its queue newest first and three panes'
+        // full-resolution slices (hundreds of chunks) would bury it for seconds.
+        const k = Math.min(coarsest, level + 2);
+        show(await slice(k).catch(() => null), k);
+        if (abort.signal.aborted) return;
+      }
       const fine = slice(level);
-      if (level !== coarsest) {
+      if (level !== coarsest && drawnKey.current.image !== planeKey) {
         // Only a fine picture that arrives skips the coarse one; a failed fine load doesn't.
         const arrived = fine.then(
           () => true,
