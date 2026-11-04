@@ -325,8 +325,10 @@ export function SlicePane({
     const [rows, cols] = [scene.shapeZyx[ra] * s[ra], scene.shapeZyx[ca] * s[ca]];
     const fitZoom = (width: number, height: number) => Math.min(width / cols, height / rows) * 0.95;
     three.current = state;
-    const now = (): PaneView => {
-      const v = view.current!;
+    // A pane never shown has no size, so no view yet: a saved view still waiting to apply, or none.
+    const now = (): PaneView | null => {
+      const v = view.current;
+      if (!v) return pending.current;
       return { zoom: v.zoom / v.fit, center: [v.center[0], v.center[1]] };
     };
     handle.current = {
