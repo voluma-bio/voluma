@@ -1,4 +1,4 @@
-"""The review's mm onto a grid: a wrong origin, spacing or axis order puts a researcher's mark thousands of voxels away and
+"""A mark's voxels onto a grid: a wrong origin, spacing or axis order puts a researcher's mark thousands of voxels away and
 the worker is refused, or (worse) a few voxels away and nothing says so; the same-grid and cross-grid maps are pinned."""
 
 import json
@@ -30,13 +30,9 @@ def headers(tmp, spacing, degrees):
     return tibia
 
 
-def review_mm(zyx, spacing):
-    """What the review sends for voxels (z, y, x) of an image: index (x, y, z) times spacing, from voxel 0."""
-    return (np.asarray(zyx, float) * spacing)[:, ::-1]
-
-
-def world_line(xyz):
-    return 'at ' + '–'.join(f'({x:.5f}, {y:.5f}, {z:.5f})' for x, y, z in xyz) + ' mm'
+def voxel_line(zyx):
+    """A mark as the delivery prints it: voxels [z, y, x] of the image it was drawn on."""
+    return 'drawn on tibia-grid v1, in the XZ plane at voxels ' + '–'.join(f'[{z:.1f}, {y:.1f}, {x:.1f}]' for z, y, x in zyx) + ', length 1.2 mm'
 
 
 def run(*args):
@@ -50,7 +46,7 @@ def test_a_line_drawn_on_the_tibia_grid_lands_on_its_section(tmp_path):
     headers(tmp_path, UNEVEN, 0)
     zyx = [[202.6, 172, 201.18], [200.93, 172, 226.2], [200.09, 172, 251.21], [202.6, 172, 276.23]]  # run 1f82654f's L1
     f = tmp_path / 'tibia-frame.json'
-    got = run('--curve', '--world', world_line(review_mm(zyx, UNEVEN)), '--drawn-on', f, '--grid', f, '--out', tmp_path / 'c.json')
+    got = run('--curve', '--voxels', voxel_line(zyx), '--drawn-on', f, '--grid', f, '--out', tmp_path / 'c.json')
     assert got['section'] == 172 and got['off_section_vox'] < 0.01
     assert got['points'][0] == [202.6, 201.2]
 
@@ -59,10 +55,10 @@ def test_a_mark_drawn_on_the_scan_lands_where_the_frame_puts_those_scan_voxels(t
     tibia = headers(tmp_path, [0.0105] * 3, 20)
     frame_zyx = np.array([[200.0, 172, 200], [201, 172, 230], [203, 172, 260]])
     scan_zyx = fr.to_scan_points(frame_zyx, tibia)
-    got = run('--curve', '--world', world_line(review_mm(scan_zyx, [0.0105] * 3)), '--drawn-on', tmp_path / 'hu.json',
+    got = run('--curve', '--voxels', voxel_line(scan_zyx), '--drawn-on', tmp_path / 'hu.json',
               '--grid', tmp_path / 'tibia-frame.json', '--out', tmp_path / 'c.json')
-    assert got['section'] == 172 and got['off_section_vox'] < 0.01
-    np.testing.assert_allclose(got['points'], frame_zyx[:, [0, 2]], atol=0.06)
+    assert got['section'] == 172 and got['off_section_vox'] < 0.1  # the delivery prints voxels to 0.1
+    np.testing.assert_allclose(got['points'], frame_zyx[:, [0, 2]], atol=0.1)
 
 
 def test_seed_on_the_scan_with_an_origin(tmp_path):
@@ -72,7 +68,7 @@ def test_seed_on_the_scan_with_an_origin(tmp_path):
     np.save(tmp_path / 'labels.npy', labels)
     (tmp_path / 'labels.json').write_text(json.dumps({'grid_id': 'scan', 'spacing_zyx_mm': UNEVEN}))
     ring = [[20, 16, 26], [20, 16, 34], [20, 24, 34], [20, 24, 26]]
-    got = run('--seed', '--world', world_line(review_mm(ring, UNEVEN)), '--drawn-on', tmp_path / 'hu.json', '--grid', tmp_path / 'hu.json',
+    got = run('--seed', '--voxels', voxel_line(ring), '--drawn-on', tmp_path / 'hu.json', '--grid', tmp_path / 'hu.json',
               '--labels', tmp_path / 'labels.npy')
     z, y, x = got['seed_zyx']
     assert z == 20 and 16 < y < 24 and 26 < x < 34 and got['off_plane_vox'] < 0.01  # inside the ring, on its slice

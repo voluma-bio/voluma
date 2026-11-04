@@ -13,9 +13,9 @@ not shown here"), never resampled onto this one. One exception: a grid with no l
 (the aligned tibia grid) shows the scan grid's context label meshes in 3D, moved rigidly through
 the two volumes' affines (`GridMesh.placement`, a matrix applied to the geometry; no slice overlay).
 It does so only when both affines carry a pose (an origin or a rotation): a spacing-only diagonal,
-a resampled grid's included, places nothing correctly. The harness publishes spacing-only affines
-today (`report-output.ts` `detailFromSidecar`), so until that carries `affine_xyz_to_world_mm`
-(#570) nothing is borrowed (`packages/harness/.context/TODO.md`).
+a resampled grid's included, places nothing correctly. The harness publishes each sidecar's
+`affine_xyz_to_world_mm` (`report-output.ts` `detailFromSidecar`); runs published before that
+carry spacing-only affines and borrow nothing.
 
 - **Which grid.** The grid most of the focused item's `on` blocks and `volumeId` sit on; else the
   grid most of the output's shown blocks sit on; else the scan's grid, the first image volume's. The grid's image is

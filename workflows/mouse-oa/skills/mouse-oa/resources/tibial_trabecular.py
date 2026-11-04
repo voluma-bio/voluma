@@ -90,7 +90,7 @@ def main():
     }
     np.save(out / 'iioc-trab-tissue.npy', roi)
     meta = {'inputs': [a.iioc_tissue, a.growth_plate_face, a.annotations, a.spec], 'params': params}
-    sidecar.write(out / 'iioc-trab-tissue.npy', grid_id=g['grid_id'], spacing_zyx_mm=g['spacing_zyx_mm'], **meta)
+    sidecar.write(out / 'iioc-trab-tissue.npy', like=g, **meta)
     like = sidecar.sidecar_path(a.iioc_tissue)
     placed = {
         'roi-iioc-trabecular': objects.mask(out / 'roi-iioc-trabecular.npy', roi, like=like, **meta),

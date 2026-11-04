@@ -320,7 +320,7 @@ def main():
     arrays = {'plate-centre.npy': np.where(ok, centre, np.nan).astype(np.float32), 'plate-flagged.npy': flagged}
     for name, arr in arrays.items():
         np.save(out / name, arr)
-        sidecar.write(out / name, grid_id=grid['grid_id'], spacing_zyx_mm=grid['spacing_zyx_mm'], inputs=inputs, params=params, script='plate_faces.py')
+        sidecar.write(out / name, like=grid, inputs=inputs, params=params, script='plate_faces.py')
     qc = qc_images(out, h, (centre, upper, lower), kept, flagged, spans, qc_v, sp['qc_panels'], a.window, vox)
     in_span = sum(hi - lo + 1 for lo, hi in spans.values())
     values = {
