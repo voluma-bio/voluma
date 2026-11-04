@@ -69,6 +69,7 @@ export function Grid3D({
   tool,
   marks,
   onMark,
+  onPick,
 }: {
   scene: GridScene;
   contrast: Contrast | null;
@@ -77,6 +78,7 @@ export function Grid3D({
   tool: MarkTool | null;
   marks: readonly ShownMark[];
   onMark(mark: GridMark): void;
+  onPick?(id?: string): void;
   /** Set while the pane is mounted, for screenshots. */
   handle: { current: PaneHandle | null };
   onStatus(status: PaneStatus): void;
@@ -95,8 +97,8 @@ export function Grid3D({
   });
   const latest = useRef(onPoint);
   latest.current = onPoint;
-  const marking = useRef({ tool, marks, onMark });
-  marking.current = { tool, marks, onMark };
+  const marking = useRef({ tool, marks, onMark, onPick });
+  marking.current = { tool, marks, onMark, onPick };
   // The camera as last drawn: the mark layer projects with it between frames.
   const eye = useRef<PerspectiveCamera | null>(null);
   // The volume as drawn, for finding where a ray meets it.
@@ -123,6 +125,7 @@ export function Grid3D({
     },
     tool,
     marks,
+    onPick,
   );
 
   useEffect(() => {
@@ -310,6 +313,7 @@ export function Grid3D({
         return;
       }
       if (!clicked || tool) return;
+      marking.current.onPick?.(undefined);
       const ray = rayAt(event);
       const hits = ray.intersectObjects(meshes.children, true).filter((h) => h.object.visible);
       const opaque = (h: (typeof hits)[number]) =>
@@ -332,6 +336,7 @@ export function Grid3D({
     // so the orbit controls on the canvas below never see the press.
     let line: { from: Zyx } | null = null;
     const lineDown = (event: PointerEvent) => {
+      if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) return;
       if (
         line ||
         marking.current.tool !== "line" ||
@@ -616,7 +621,16 @@ export function Grid3D({
   latestStatus.current = onStatus;
   useEffect(() => latestStatus.current(status), [status]);
   return (
-    <div ref={host} className={PANE}>
+    // biome-ignore lint/a11y/useSemanticElements: an interactive image surface, not a form fieldset.
+    <div
+      ref={host}
+      className={PANE}
+      role="group"
+      aria-label="3D view"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: the focused pane handles drawing cancellation.
+      tabIndex={0}
+      onPointerDown={() => host.current?.focus({ preventScroll: true })}
+    >
       {chip && (
         <span className={cx(CHIP, "top-2 right-2")} role="status">
           {chip}

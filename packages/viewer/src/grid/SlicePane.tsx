@@ -8,8 +8,8 @@
  * the marks. With `onTilt`, the dots near both ends of the other planes' crosshair lines turn
  * those planes about this pane's normal; this pane stays still. Esc drops a mark being drawn.
  */
-import { cx } from "@voluma/ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Button, cx } from "@voluma/ui";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   BufferGeometry,
   CircleGeometry,
@@ -90,7 +90,6 @@ export function SlicePane({
   onTilt,
   onEdit,
   onPick,
-  note,
   planeToken = axisToken,
 }: {
   /** The grid axis the pane holds when untilted; a tilted pane names the axis it started on. */
@@ -110,12 +109,10 @@ export function SlicePane({
   onMark(mark: GridMark): void;
   /** An end of a movable mark or a published ruler dragged; absent, none can be. */
   onEdit?(edit: MarkEdit): void;
-  /** A movable mark's end clicked. */
-  onPick?(id: string): void;
+  /** A mark selected in the pane, or undefined to clear the selection. */
+  onPick?(id?: string): void;
   /** Turns the cut planes by `angle` radians about this pane's normal; absent, no handles. */
   onTilt?(angle: number): void;
-  /** A point waiting for its note: a field at the point, Enter keeps the text, Esc none. */
-  note?: { at: Zyx; done(text: string | null): void };
   /** Set while the pane is mounted, for screenshots. */
   handle: { current: PaneHandle | null };
   onStatus(status: PaneStatus): void;
@@ -131,7 +128,6 @@ export function SlicePane({
   );
   const s = scene.spacingZyx;
   const host = useRef<HTMLDivElement>(null);
-  const noteField = useRef<HTMLInputElement>(null);
   const three = useRef<{
     renderer: WebGLRenderer;
     camera: OrthographicCamera;
@@ -266,6 +262,7 @@ export function SlicePane({
     },
     tool,
     marks,
+    onPick,
   );
 
   // The renderer lives as long as the pane; resizing only changes its size.
@@ -314,7 +311,6 @@ export function SlicePane({
       for (const o of drawings.children) if (o.userData.dot) o.scale.setScalar(1 / v.zoom);
       renderer.render(sc, camera);
       layer.draw();
-      placeNote();
     };
     const [rows, cols] = [scene.shapeZyx[ra] * s[ra], scene.shapeZyx[ca] * s[ca]];
     const fitZoom = (width: number, height: number) => Math.min(width / cols, height / rows) * 0.95;
@@ -739,26 +735,7 @@ export function SlicePane({
     t.render();
   }, [point, basis, cuts]);
 
-  // The note field sits at its point, wherever the pane is panned or zoomed.
-  function placeNote() {
-    const field = noteField.current;
-    const at = latestNote.current?.at;
-    const v = view.current;
-    const element = host.current;
-    if (!field || !at || !v || !element) return;
-    const [x, y] = latest.current.toPane(at);
-    field.style.left = `${(x - v.center[0]) * v.zoom + element.clientWidth / 2 + 12}px`;
-    field.style.top = `${(v.center[1] - y) * v.zoom + element.clientHeight / 2 - 12}px`;
-  }
-  const latestNote = useRef(note);
-  latestNote.current = note;
-  useEffect(() => {
-    if (!note) return;
-    placeNote();
-    noteField.current?.focus({ preventScroll: true });
-  }, [note]);
-
-  const { readout, hovering } = useSliceGestures({
+  const { readout, hovering, step } = useSliceGestures({
     host,
     view,
     render: () => three.current?.render(),
@@ -797,32 +774,47 @@ export function SlicePane({
       : volumes?.scale;
   // A tilted pane counts along the grid axis nearest its normal, primed.
   const counted = whole ? axis : nearestAxis(basis.normal);
+  const sliceHelp = useId();
   return (
+    // biome-ignore lint/a11y/useSemanticElements: an interactive image surface, not a form fieldset.
     <div
       ref={host}
       className={PANE}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the pane takes arrow keys to step slices.
       tabIndex={0}
-      role="img"
+      role="group"
       aria-label={whole ? `Slice ${index + 1} of ${total}` : "Tilted slice"}
+      aria-describedby={sliceHelp}
     >
-      <span className={cx(CHIP, "bottom-2 left-2")}>
+      <div
+        className={cx(CHIP, "pointer-events-auto top-12 left-2 flex items-center gap-1")}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <Button size="sm" variant="ghost" aria-label="Previous slice" onClick={() => step(-1)}>
+          −
+        </Button>
         {Math.round(point[counted]) + 1}
         {!whole && "′"} / {scene.shapeZyx[counted]}
         {scale && scale > 1 && <span className="ml-2">1:{scale}</span>}
+        <Button size="sm" variant="ghost" aria-label="Next slice" onClick={() => step(1)}>
+          +
+        </Button>
+      </div>
+      <span id={sliceHelp} className={cx(CHIP, "top-2 left-2")}>
+        Focus slice: ↑/↓ 1 · Page Up/Down 10
       </span>
       {(!shown || refining) && !failed && (
-        <span className={cx(CHIP, "top-2 right-2")} role="status">
+        <span className={cx(CHIP, "top-24 right-2 left-2")} role="status">
           {shown ? "Loading full resolution…" : whole ? "Loading…" : "Loading the volume…"}
         </span>
       )}
       {failed && (
-        <span className={cx(CHIP, "top-2 right-2")} role="alert">
+        <span className={cx(CHIP, "top-24 right-2 left-2")} role="alert">
           {whole ? `Couldn't load this slice: ${failed}` : failed}
         </span>
       )}
       {traceError && (
-        <span className={cx(CHIP, "top-2 right-2")} role="alert">
+        <span className={cx(CHIP, "top-24 right-2 left-2")} role="alert">
           {traceError}
         </span>
       )}
@@ -833,21 +825,6 @@ export function SlicePane({
         >
           {readout.text}
         </span>
-      )}
-      {note && (
-        <input
-          ref={noteField}
-          aria-label="Note on this point"
-          placeholder="Note, then Enter"
-          className="absolute z-20 h-6 w-56 rounded-sm border border-mark-mine bg-viewer-chip px-1.5 font-mono text-xs text-viewer-chip-fg outline-none placeholder:text-viewer-chip-fg/60"
-          onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            event.stopPropagation();
-            if (event.key === "Enter") note.done(event.currentTarget.value.trim() || null);
-            else if (event.key === "Escape") note.done(null);
-          }}
-          onBlur={(event) => note.done(event.currentTarget.value.trim() || null)}
-        />
       )}
     </div>
   );

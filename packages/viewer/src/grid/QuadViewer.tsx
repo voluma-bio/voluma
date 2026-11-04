@@ -199,7 +199,6 @@ export function QuadViewer({
   onMark,
   onEdit,
   onPick,
-  onNote,
   onReady,
   targets = [],
   onSave,
@@ -219,14 +218,12 @@ export function QuadViewer({
   children?: ReactNode;
   tool?: MarkTool | null;
   marks: readonly ShownMark[];
-  /** A new mark, with the frame of the pane it was made in (null in 3D); returns its id, which a point's note is kept under. */
-  onMark?(mark: GridMark, plane: MarkPlane | null): string | undefined;
+  /** A new mark, with the frame of the pane it was made in (null in 3D). */
+  onMark?(mark: GridMark, plane: MarkPlane | null): void;
   /** An end of a movable mark or a published ruler dragged in a slice, with that pane's frame. */
   onEdit?(edit: MarkEdit, plane: MarkPlane): void;
-  /** A movable mark's end clicked in a slice. */
-  onPick?(id: string): void;
-  /** The note typed at a point just placed with Point. */
-  onNote?(id: string, note: string): void;
+  /** A mark selected in a pane, or undefined to clear the selection. */
+  onPick?(id?: string): void;
   /** Whether every shown pane has a picture. */
   onReady?(ready: boolean): void;
   /** What Align offers; a target with a `code` is also the GP view. */
@@ -255,12 +252,11 @@ export function QuadViewer({
   const plateTarget = targets.find((t) => t.code);
   const [fitted, setFitted] = useState<{ id: string; normal?: Vec3; error?: string }>();
   const plate = fitted?.id === plateTarget?.id ? fitted?.normal : undefined;
-  const [noting, setNoting] = useState<{ view: QuadView; id: string; at: Zyx }>();
   const handles = useRef(
     Object.fromEntries(VIEW_ORDER.map((v) => [v, { current: null as PaneHandle | null }])),
   ).current;
-  const latestMark = useRef({ onMark, onEdit, onPick, tool, onNote, orientation, plate });
-  latestMark.current = { onMark, onEdit, onPick, tool, onNote, orientation, plate };
+  const latestMark = useRef({ onMark, onEdit, onPick, orientation, plate });
+  latestMark.current = { onMark, onEdit, onPick, orientation, plate };
   const area = useRef<HTMLDivElement>(null);
 
   // The contrast spans the coarsest level's values, so the first picture already uses it.
@@ -523,20 +519,12 @@ export function QuadViewer({
       setStatus((had) => (had[view] === next ? had : { ...had, [view]: next })),
     [],
   );
-  /** A mark made in `view`: a point from Point waits there for its note. */
+  /** A mark made in `view`, with that pane's frame. */
   const markIn = useCallback(
     (view: QuadView) => (m: GridMark) => {
-      const {
-        onMark: made,
-        tool: by,
-        onNote: noted,
-        orientation: o,
-        plate: gp,
-      } = latestMark.current;
+      const { onMark: made, orientation: o, plate: gp } = latestMark.current;
       const basis = view === "3d" ? null : view === "gp" ? basisAlong(gp!) : o[FRAME[view]];
-      const id = made?.(m, basis && { ...basis, view: view as MarkPlane["view"] });
-      if (id && noted && by === "point" && "point" in m && view !== "3d")
-        setNoting({ view, id, at: m.point });
+      made?.(m, basis && { ...basis, view: view as MarkPlane["view"] });
     },
     [],
   );
@@ -549,7 +537,7 @@ export function QuadViewer({
     },
     [],
   );
-  const pickMark = useCallback((id: string) => latestMark.current.onPick?.(id), []);
+  const pickMark = useCallback((id?: string) => latestMark.current.onPick?.(id), []);
   const tilts = useMemo(
     () =>
       ([0, 1, 2] as const).map((axis) => (angle: number) => {
@@ -596,16 +584,6 @@ export function QuadViewer({
           const isFull = layout.full === view;
           const slot = layout.views.indexOf(view);
           const look = styleOf(view);
-          const note =
-            noting?.view === view
-              ? {
-                  at: noting.at,
-                  done: (text: string | null) => {
-                    if (text) latestMark.current.onNote?.(noting.id, text);
-                    setNoting(undefined);
-                  },
-                }
-              : undefined;
           let pane: ReactNode;
           if (view === "3d")
             pane = (
@@ -618,6 +596,7 @@ export function QuadViewer({
                 tool={tool}
                 marks={marks}
                 onMark={markIn(view)}
+                onPick={pickMark}
               />
             );
           else if (view === "gp" && !plate)
@@ -647,7 +626,6 @@ export function QuadViewer({
                 onMark={markIn(view)}
                 onEdit={onEdit && editIn(view)}
                 onPick={pickMark}
-                note={note}
               />
             );
           else {
@@ -673,7 +651,6 @@ export function QuadViewer({
                 onEdit={onEdit && editIn(view)}
                 onPick={pickMark}
                 onTilt={tilts[axis]}
-                note={note}
                 planeToken={planeToken}
               />
             );
@@ -701,7 +678,6 @@ export function QuadViewer({
                 <IconButton
                   size="sm"
                   label={isFull ? "Back to the panes" : `Fill the views with ${label}`}
-                  shortcut={isFull ? "Escape" : undefined}
                   className="bg-viewer-chip text-viewer-chip-fg hover:bg-viewer-well hover:text-viewer-chip-fg"
                   onClick={() => setFull(isFull ? null : view)}
                 >
@@ -726,7 +702,7 @@ export function QuadViewer({
       <div
         role="toolbar"
         aria-label="Tools"
-        className="flex h-10 shrink-0 items-center gap-2 border-t border-border bg-card px-2"
+        className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-2 py-1.5"
       >
         {children}
         <span className="flex-1" />

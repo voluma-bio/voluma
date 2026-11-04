@@ -43,8 +43,11 @@ where it is used.
 - **One shell on every page**: a 44 px rail at the far left (Studies, Workflows, Settings), one
   panel on each side, the page's work in the centre. A side holds one panel, with tabs when it
   has more than one thing to show. Both sides resize by dragging, keep their width across pages,
-  and fold to 28 px icon strips. Panels push the centre aside; nothing floats.
+  and fold to 28 px strips with named Show controls. Panels push the centre aside; nothing floats.
 - **No divider lines in lists or between side blocks.** Spacing separates them.
+- **Actions use visible controls, not character-key command shortcuts.** Preserve standard
+  keyboard navigation, focused slice stepping and scoped Escape cancellation. One Escape does
+  one action and restores focus; deleting a mark has a visible, session-only Undo.
 
 ## The review
 

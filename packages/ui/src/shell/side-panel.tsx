@@ -3,7 +3,7 @@
  * Its head holds tabs (the left side: Conversation, Samples) or a title with tools (the right
  * side: Final outputs), and a fold button. The seam beside it resizes it; each side's width is
  * kept across pages and visits, so the study and an input open at the widths last used. Folded (its
- * button, `\` or `]`, F for both) it is a 28 px strip with its icon and badge and no text; what
+ * button) it is a 28 px strip with its name and badge; what
  * is inside stays mounted, so a conversation keeps its scroll and its draft.
  */
 import { PanelLeftClose, PanelRightClose } from "lucide-react";
@@ -16,9 +16,8 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { IconButton } from "../button";
+import { Button } from "../button";
 import { cx } from "../cx";
-import { Tooltip } from "../tooltip";
 import { ShellContext, type ShellSide } from "./shell";
 
 const WIDTH: Record<ShellSide, { min: number; max: number; initial: number }> = {
@@ -121,7 +120,11 @@ export function SidePanel(props: SidePanelProps) {
       }
     : { label: props.title, icon: props.icon, badge: props.badge, badgeLabel: props.badgeLabel };
   const { label, icon, badge, badgeLabel } = strip;
-  const shortcut = side === "left" ? "\\" : "]";
+  const toggle = useRef<HTMLButtonElement>(null);
+  const setFolded = (value: boolean) => {
+    shell.fold(side, value);
+    requestAnimationFrame(() => toggle.current?.focus());
+  };
 
   const head = (
     <div className="flex h-(--panel-head-h) shrink-0 items-center gap-1 border-b border-border pr-1.5 pl-2 whitespace-nowrap">
@@ -146,14 +149,18 @@ export function SidePanel(props: SidePanelProps) {
       )}
       <span className="flex-1" />
       {!tabs && props.tools}
-      <IconButton
-        label={`Fold the ${side} side`}
-        shortcut={shortcut}
+      <Button
+        asChild
+        aria-label={`Hide ${label}`}
+        variant="ghost"
         size="sm"
-        onClick={() => shell.fold(side, true)}
+        onClick={() => setFolded(true)}
       >
-        {side === "left" ? <PanelLeftClose /> : <PanelRightClose />}
-      </IconButton>
+        <button type="button" ref={folded ? undefined : toggle}>
+          {side === "left" ? <PanelLeftClose /> : <PanelRightClose />}
+          Hide
+        </button>
+      </Button>
     </div>
   );
 
@@ -182,16 +189,16 @@ export function SidePanel(props: SidePanelProps) {
     >
       {folded && (
         <div className="flex flex-col items-center gap-1.5 py-1.5">
-          <Tooltip label={label} shortcut={shortcut} side={side === "left" ? "right" : "left"}>
-            <button
-              type="button"
-              aria-label={`Open ${label}`}
-              onClick={() => shell.fold(side, false)}
-              className="grid size-6 cursor-pointer place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5"
-            >
-              {icon}
-            </button>
-          </Tooltip>
+          <button
+            ref={toggle}
+            type="button"
+            aria-label={`Show ${label}`}
+            onClick={() => setFolded(false)}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-2 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [writing-mode:vertical-rl] [&_svg]:size-3.5"
+          >
+            {icon}
+            Show {label}
+          </button>
           {!!badge && <Badge n={badge} label={badgeLabel} />}
         </div>
       )}

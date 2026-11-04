@@ -7,8 +7,8 @@ import { StoryBrand, StoryRail } from "./story-rail";
  * **What:** the one frame every screen sits in: a header line, the rail at the far left, the main
  * area. **Why:** moving between the study and an input keeps the frame still; only the content
  * changes. **Where:** every signed-in screen (`SignedIn`). Screens lay out their own sides with
- * `SidePanel` (Shell/SidePanel), which shows the fold keys: `\` and `]` fold a side, F for Full
- * view, Esc to leave.
+ * `SidePanel` (Shell/SidePanel). Pane expansion belongs to the viewer, not the header; Escape
+ * leaves it only from the workspace, never from unrelated account controls.
  */
 const meta = {
   title: "Shell/AppShell",

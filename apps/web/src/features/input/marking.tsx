@@ -1,7 +1,7 @@
 /**
  * Your marks on the input and the tools that make them. Each has a short tag (P1, R1, A1, O1)
  * drawn beside it in the views and belongs to the image it was made on (`gridKeyOf`); a redo that
- * replaces that image drops it. The tools and their keys are `TOOLS`, picked on the viewer's bar.
+ * replaces that image drops it. The tools are `TOOLS`, picked on the viewer's bar.
  * Marks are the viewer's (`GridMark`); the run's log keeps them (`useRunMarks`), or the page does on
  * an example run (`useLocalMarks`).
  */
@@ -13,8 +13,7 @@ import {
   markPoints,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler, Spline } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * A mark of yours, as the viewer draws it: `volumeId` the grid's image it was made on,
@@ -55,7 +54,7 @@ export type MarkChange = {
   tag: string;
   /** The output it was made on. */
   output: string;
-  /** `place`: main has not seen it; `move`: moved or its note changed; `delete`: deleted since. */
+  /** `place`: main has not seen it; `move`: moved since; `delete`: deleted since. */
   change: "place" | "move" | "delete";
 };
 
@@ -64,17 +63,16 @@ const NO_CHANGES: readonly MarkChange[] = [];
 /** Marks the page holds, lost on reload: an example run's, which keeps none in its log. */
 export function useLocalMarks(): MarkStore {
   const [marks, setMarks] = useState<YourMark[]>([]);
-  const tags = useMemo(() => marks.map((m) => m.tag), [marks]);
+  const [tags, setTags] = useState<string[]>([]);
   const erase = useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []);
-  const place = useCallback(
-    (mark: YourMark) =>
-      setMarks((had) =>
-        had.some((m) => m.id === mark.id)
-          ? had.map((m) => (m.id === mark.id ? mark : m))
-          : [...had, mark],
-      ),
-    [],
-  );
+  const place = useCallback((mark: YourMark) => {
+    setTags((had) => (had.includes(mark.tag) ? had : [...had, mark.tag]));
+    setMarks((had) =>
+      had.some((m) => m.id === mark.id)
+        ? had.map((m) => (m.id === mark.id ? mark : m))
+        : [...had, mark],
+    );
+  }, []);
   return { marks, tags, place, erase, changes: NO_CHANGES, discard: erase };
 }
 
@@ -94,24 +92,22 @@ export function gridKeyOf(image: Volume): string | undefined {
     : undefined;
 }
 
-/** A marking tool: the keys that pick it (the first shown), and the letter of the tags it makes. */
+/** A marking tool and the letter of the tags it makes (not a command key). */
 type Tool = {
   value: MarkTool | "navigate";
   label: string;
-  keys: string[];
   letter?: string;
-  icon?: ReactNode;
 };
 
-/** The marking tools (mockup C's tool bar), icons with their names in the tooltips. */
+/** The marking tools, named on the viewer's bar. */
 export const TOOLS: Tool[] = [
-  { value: "navigate", label: "Navigate", keys: ["v", "Escape"], icon: <Crosshair /> },
-  { value: "point", label: "Point, with a note", keys: ["p"], letter: "P", icon: <MapPin /> },
-  { value: "line", label: "Ruler", keys: ["l"], letter: "R", icon: <Ruler /> },
-  { value: "angle", label: "Angle", keys: ["a"], letter: "A", icon: <Angle /> },
-  { value: "outline", label: "Outline", keys: ["o"], letter: "O", icon: <Lasso /> },
-  { value: "path", label: "Line, drawn freehand", keys: ["d"], letter: "L", icon: <Spline /> },
-  { value: "probe", label: "Probe", keys: ["i"], letter: "P", icon: <Pipette /> },
+  { value: "navigate", label: "Navigate" },
+  { value: "point", label: "Point", letter: "P" },
+  { value: "line", label: "Ruler", letter: "R" },
+  { value: "angle", label: "Angle", letter: "A" },
+  { value: "outline", label: "Outline", letter: "O" },
+  { value: "path", label: "Freehand line", letter: "L" },
+  { value: "probe", label: "Probe", letter: "P" },
 ];
 
 const kindOf = (mark: GridMark): MarkTool =>
@@ -146,10 +142,8 @@ function middleOf(mark: GridMark): Zyx {
 }
 
 /**
- * Your marks and the tool that makes them. A tool's key (`TOOLS`) picks it and Esc puts it away,
- * as the shell's panel keys do: never while typing, never with a modifier. Listening on the
- * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
- * (leaving Full view), so one Esc does one thing.
+ * Your marks and the tool that makes them. Escape within the focused viewer puts the tool away,
+ * after the pane cancels its drawing and before the shell leaves Full view.
  */
 export function useMarking(store: MarkStore) {
   const [tool, setTool] = useState<MarkTool | null>(null);
@@ -171,14 +165,18 @@ export function useMarking(store: MarkStore) {
         target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
       )
         return;
-      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-      const picked = TOOLS.find((t) => t.keys.includes(key));
-      if (!picked) return;
-      const next = picked.value === "navigate" ? null : picked.value;
-      // Esc with no tool out is the shell's.
-      if (next === null && !latest.current.tool) return;
+      if (
+        event.key !== "Escape" ||
+        !target.closest("[data-marking-viewer]") ||
+        !latest.current.tool
+      )
+        return;
       event.preventDefault();
-      setTool(next);
+      setTool(null);
+      target
+        .closest("[data-marking-viewer]")
+        ?.querySelector<HTMLElement>('[aria-label="Marking tool"] button')
+        ?.focus();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -193,7 +191,7 @@ export function useMarking(store: MarkStore) {
     setShown,
     jumpTo: setJump,
     jumped: useCallback(() => setJump(undefined), []),
-    /** Adds a mark; returns its id. */
+    /** Adds a mark. */
     add: useCallback(
       (
         mark: GridMark,
@@ -201,7 +199,7 @@ export function useMarking(store: MarkStore) {
         gridKey: string,
         output: string,
         plane: MarkPlane | null = null,
-      ): string => {
+      ): void => {
         const { store: kept } = latest.current;
         const id = crypto.randomUUID();
         if (issued.current.of !== kept.marks) issued.current = { of: kept.marks, tags: [] };
@@ -216,22 +214,16 @@ export function useMarking(store: MarkStore) {
           mark,
           plane,
         });
-        return id;
       },
       [],
     ),
-    /** Gives a point its note. */
-    note: useCallback((id: string, note: string) => {
-      const { store: kept } = latest.current;
-      const m = kept.marks.find((x) => x.id === id);
-      if (m && "point" in m.mark) kept.place({ ...m, mark: { ...m.mark, note } });
-    }, []),
-    /** Selects a mark and aims the views at it; returns it. */
+    /** Selects a mark and aims the views at it, or clears the selection; returns the mark. */
     select: useCallback(
-      (id: string) => {
+      (id?: string) => {
         setSelected(id);
         const mark = marks.find((m) => m.id === id);
         if (mark) setJump({ at: middleOf(mark.mark), gridKey: mark.gridKey, output: mark.output });
+        else setJump(undefined);
         return mark;
       },
       [marks],

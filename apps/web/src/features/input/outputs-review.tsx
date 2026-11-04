@@ -3,7 +3,7 @@
  * left side's tabs: the conversation with the run's main AI (the default, and the only place
  * anything on the run changes: `main-conversation.tsx`; badged while main waits on your yes) and
  * the inputs (the shared tree, named by `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with
- * the tool bar docked under them, or a file output, the whole run's graph (W) or the run's agents
+ * the tool bar docked under them, or a file output, the whole run's graph or the run's agents
  * in the panes' place. On the right, Final outputs: the picked value opens in place with what it
  * rests on. Everything comes from the run's stream as it arrives: the output fold
  * (`outputsFold`), its converted assets and the conversation, so statuses and values update live.
@@ -66,7 +66,6 @@ import {
   ChevronLeft,
   ListTree,
   MessageSquare,
-  Sigma,
   Workflow,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -74,7 +73,7 @@ import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
 import { MainConversation } from "./main-conversation";
-import { gridKeyOf, useLocalMarks, useMarking } from "./marking";
+import { gridKeyOf, useLocalMarks, useMarking, type YourMark } from "./marking";
 import { FinalOutputs, restsOnOpen, statusOf } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
@@ -312,19 +311,68 @@ export function OutputsReview({
     [],
   );
   // Delete takes away the mark you picked; one main was told of waits as a deletion.
+  const [deleted, setDeleted] = useState<YourMark[]>([]);
+  const markActionFocus = useRef<"delete-mark" | "undo-delete" | null>(null);
   const deleteMark = useCallback((id: string) => {
     const { marks, store: kept } = latestEdit.current;
     const m = marks.find((x) => x.id === id);
-    if (m && !m.theirs) kept.erase(id);
+    if (m && !m.theirs) {
+      markActionFocus.current = "undo-delete";
+      setDeleted((had) => [...had, structuredClone(m)]);
+      kept.erase(id);
+    }
   }, []);
+  const [restoring, setRestoring] = useState<YourMark | null>(null);
+  useEffect(() => {
+    setDeleted((had) => {
+      const kept = had.filter(
+        (m) =>
+          m === restoring ||
+          (blocks.volumes.some((v) => gridKeyOf(v) === m.gridKey) &&
+            !store.marks.some((mark) => mark.id === m.id)),
+      );
+      return kept.length === had.length ? had : kept;
+    });
+  }, [blocks.volumes, store.marks, restoring]);
+  const undo =
+    restoring ??
+    [...deleted]
+      .reverse()
+      .find(
+        (m) =>
+          blocks.volumes.some((v) => gridKeyOf(v) === m.gridKey) &&
+          !store.marks.some((kept) => kept.id === m.id),
+      );
+  const [restored, setRestored] = useState<string>();
+  useEffect(() => {
+    // The write can finish before its streamed mark has returned to the current store.
+    const mark = restored && store.marks.find((m) => m.id === restored);
+    if (!mark) return;
+    if (centre || trailOpen) skipNavigationFocus.current = true;
+    select({ output: mark.output, trail: null, item: null, centre: null });
+    marking.select(mark.id);
+    markActionFocus.current = "delete-mark";
+    setRestored(undefined);
+  }, [restored, store.marks, marking.select, select, centre, trailOpen]);
+  const pickedMark = marking.marks.find((m) => m.id === marking.selected && !m.theirs);
+  useEffect(() => {
+    if (!markActionFocus.current || restoring) return;
+    const button = workspace.current?.querySelector<HTMLButtonElement>(
+      `[data-${markActionFocus.current}]`,
+    );
+    if (button && !button.disabled) {
+      button.focus();
+      markActionFocus.current = null;
+    }
+  }, [pickedMark, undo, restoring, restored]);
 
   // A pane fills the centre in the shell's Full view: filling one folds the side panels, and
-  // leaving Full view (Esc, F, opening a panel) puts the panes back. The page keeps only which
+  // leaving Full view (Escape, opening a panel) puts the panes back. The page keeps only which
   // view fills; whether it shows is the shell's.
   const [shellFull, setShellFull] = useFullView();
   const [arranged, setArranged] = useState<QuadLayout>(QUAD_START);
   const [fill, setFill] = useState<QuadLayout["full"]>(null);
-  // Forgotten once Full view is left, so F later folds the sides without filling a pane.
+  // Forgotten once Full view is left, so entering it later need not fill a pane.
   if (!shellFull && fill) setFill(null);
   const layout = useMemo(
     () => ({ ...arranged, full: shellFull ? fill : null }),
@@ -338,13 +386,8 @@ export function OutputsReview({
     },
     [setShellFull],
   );
-  // The whole run folds Final outputs to its strip while it is up, so the graph gets the width;
-  // unfolding the strip during it leaves the whole run.
-  useFoldWhile(
-    "right",
-    centre === "run",
-    useCallback(() => select({ centre: null }), [select]),
-  );
+  // Showing a panel must not also navigate away, including when leaving Full view.
+  useFoldWhile("right", centre === "run");
   const toggleRun = useCallback(
     () => select({ centre: keys.current.centre === "run" ? null : "run" }),
     [select],
@@ -354,13 +397,24 @@ export function OutputsReview({
     centre,
     trailOpen,
     shellFull,
-    picked: marking.selected,
-    deleteMark,
   });
-  keys.current = { layout, centre, trailOpen, shellFull, picked: marking.selected, deleteMark };
-  // W: the whole run and back. Esc, once a mark and the tool are put away (`useMarking`, on the
-  // document, first) and Full view is left (the shell's): the whole run or the agents, then an
-  // open trail item.
+  keys.current = { layout, centre, trailOpen, shellFull };
+  const workspace = useRef<HTMLDivElement>(null);
+  const centreOpener = useRef<HTMLElement | null>(null);
+  const skipNavigationFocus = useRef(false);
+  const navigationOpen = !!centre || !!trailOpen;
+  useEffect(() => {
+    if (!navigationOpen) return;
+    centreOpener.current = document.activeElement as HTMLElement;
+    return () => {
+      if (skipNavigationFocus.current) {
+        skipNavigationFocus.current = false;
+        return;
+      }
+      requestAnimationFrame(() => centreOpener.current?.focus());
+    };
+  }, [navigationOpen]);
+  // Escape belongs only to this workspace, after a drawing/tool and Full view have handled it.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || event.isComposing) return;
@@ -371,21 +425,19 @@ export function OutputsReview({
         target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
       )
         return;
+      if (!workspace.current?.contains(target)) return;
       const k = keys.current;
-      if (event.key.toLowerCase() === "w") {
+      if (event.key === "Escape" && !k.shellFull) {
+        if (!k.centre && !k.trailOpen) return;
         event.preventDefault();
-        toggleRun();
-      } else if ((event.key === "Delete" || event.key === "Backspace") && k.picked) {
-        event.preventDefault();
-        k.deleteMark(k.picked);
-      } else if (event.key === "Escape" && !k.shellFull) {
         if (k.centre) select({ centre: null });
         else if (k.trailOpen) select({ trail: null, item: null });
+        requestAnimationFrame(() => centreOpener.current?.focus());
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [select, toggleRun]);
+  }, [select]);
 
   let panes: React.ReactNode;
   if (live && inView?.state.status !== "missing" && !inView?.state.latest)
@@ -443,7 +495,6 @@ export function OutputsReview({
           onLayout,
           planesOf,
           fits,
-          onNote: marking.note,
           onSave: views.save && ((state, grid) => views.save!(inView, state, grid)),
           restore: views.restore,
           onEdit,
@@ -484,7 +535,10 @@ export function OutputsReview({
                   answers={answers}
                   markError={runMarks.error}
                   onMark={marking.select}
-                  onDiscard={store.discard}
+                  onDiscard={(id) => {
+                    if (store.changes.find((c) => c.id === id)?.change === "place") deleteMark(id);
+                    else store.discard(id);
+                  }}
                 />
               ),
             },
@@ -496,8 +550,55 @@ export function OutputsReview({
             },
           ]}
         />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <div ref={workspace} className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
           <RunAlert run={run} userId={me.userId} stale={stale} />
+          <div className="flex shrink-0 flex-wrap items-center gap-2 bg-card px-3 py-1.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-pressed={centre === "run"}
+              onClick={(event) => {
+                centreOpener.current = event.currentTarget;
+                toggleRun();
+              }}
+            >
+              <Workflow aria-hidden /> Whole run
+            </Button>
+            {pickedMark && (
+              <Button
+                data-delete-mark
+                size="sm"
+                variant="ghost"
+                onClick={() => deleteMark(pickedMark.id)}
+              >
+                Delete mark {pickedMark.tag}
+              </Button>
+            )}
+            {undo && (
+              <Button
+                data-undo-delete
+                size="sm"
+                variant="secondary"
+                disabled={!!restoring}
+                onClick={async () => {
+                  setRestoring(undo);
+                  store.place(undo);
+                  try {
+                    if (!run.example) await settled([undo.id]);
+                    setDeleted((had) => had.filter((m) => m !== undo));
+                    setRestored(undo.id);
+                  } catch {
+                    // The mark store shows the write error; keep Undo available to retry.
+                    markActionFocus.current = "undo-delete";
+                  } finally {
+                    setRestoring(null);
+                  }
+                }}
+              >
+                Undo delete {undo.tag}
+              </Button>
+            )}
+          </div>
           <SceneBar
             centre={centre}
             live={live}
@@ -541,7 +642,7 @@ export function OutputsReview({
               ? `${review.progress.done} of ${review.progress.total} in`
               : undefined
           }
-          icon={<Sigma />}
+          icon={null}
           badge={toCheck || undefined}
           badgeLabel={`${toCheck} to check`}
           tools={
@@ -557,18 +658,6 @@ export function OutputsReview({
                   To check <span className="font-semibold">{toCheck}</span>
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant={centre === "run" ? "secondary" : "ghost"}
-                aria-pressed={centre === "run"}
-                aria-keyshortcuts="w"
-                onClick={toggleRun}
-                title={live ? "Whole run (W)" : undefined}
-              >
-                <Workflow aria-hidden />
-                {/* Its icon alone while the run goes: the head also counts what is in. */}
-                <span className={live ? "sr-only" : undefined}>Whole run</span>
-              </Button>
             </>
           }
         >
@@ -736,7 +825,7 @@ function OutputScene({
   const shownKey = shown.join();
   const stable = useMemo(() => ({ id: subject, shown }), [subject, shownKey]);
   return (
-    <div className="flex h-full flex-col">
+    <div data-marking-viewer className="flex h-full flex-col">
       {missing.length > 0 && (
         <p className="px-4 pt-3 text-xs text-muted-foreground">
           Not drawn yet: {missing.map(nameOf).join(", ")}.

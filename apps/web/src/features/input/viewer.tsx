@@ -63,13 +63,8 @@ export function SceneViewer({
   /** A mark picked: it moves the crosshair once its grid is shown, then `onJumped`. */
   jump?: { at: Zyx; gridKey: string; output: string };
   onJumped: () => void;
-  /** A new mark, on the image volume `volumeId`; returns its id. */
-  onMark: (
-    mark: GridMark,
-    volumeId: string,
-    gridKey: string,
-    plane?: MarkPlane | null,
-  ) => string | undefined;
+  /** A new mark, on the image volume `volumeId`. */
+  onMark: (mark: GridMark, volumeId: string, gridKey: string, plane?: MarkPlane | null) => void;
   /** The mounted output and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
   /** The four panes' layout, which holds across grids, and each grid's planes by the image's id. */
@@ -79,8 +74,6 @@ export function SceneViewer({
     planesOf(imageId: string): GridPlanes | undefined;
     /** The planes the catalog fits through surfaces, for Align and GP. */
     fits: readonly PlaneFit[];
-    /** A point's note. */
-    onNote(id: string, note: string): void;
     /** Saves the view on the grid of image volume `grid`; absent, no Save view. */
     onSave?(state: QuadState, grid: string): void;
     /** A saved view to show on its grid: each new object is applied once. */
@@ -90,8 +83,8 @@ export function SceneViewer({
      * of yours on the grid's image `volumeId`), with the pane's frame.
      */
     onEdit?(edit: MarkEdit, volumeId: string, gridKey: string, plane: MarkPlane): void;
-    /** A mark of yours clicked at an end. */
-    onPick?(id: string): void;
+    /** A mark selected in a pane, or undefined to clear the selection. */
+    onPick?(id?: string): void;
     /** The shown grid's view and picture, for a message. */
     ref?: Ref<SceneHandle>;
   };
@@ -240,9 +233,8 @@ export function SceneViewer({
             options={TOOLS.map((t) => ({
               value: t.value,
               label: t.label,
-              shortcut: t.keys[0],
-              icon: t.icon,
             }))}
+            className="flex-wrap"
             value={tool ?? "navigate"}
             onValueChange={(v) => onTool(v === "navigate" ? null : v)}
           />
@@ -283,7 +275,6 @@ export function SceneViewer({
               tool={on ? tool : null}
               marks={shown.get(k.key) ?? NO_MARKS}
               onMark={on ? (mark, plane) => onMark(mark, k.imageId, k.key, plane) : undefined}
-              onNote={quad.onNote}
               onReady={report(k.key)}
               targets={k.imageId === live?.imageId ? targets : undefined}
               onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}

@@ -3,8 +3,9 @@
  * a dash and a label keep their size at any zoom. Each pane projects source voxels (z, y, x) to
  * its own CSS pixels; a slice draws only the part of a mark that lies on its slice, 3D draws
  * all of it over the anatomy. `useMarkLayer` owns a pane's canvas, the mark being drawn and the
- * hover ring; moving those redraws only this canvas, never the pane's picture. Also the
- * measures a mark carries (a line's mm, an outline's mm²).
+ * hover ring; moving those redraws only this canvas, never the pane's picture. Selectable tags
+ * have native buttons over their painted labels; the canvas keeps labels for saved snapshots.
+ * Also the measures a mark carries (a line's mm, an outline's mm²).
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
 import type { Slab } from "./frame";
@@ -75,13 +76,17 @@ export function useMarkLayer(
   view: () => MarkView | null,
   tool: MarkTool | null,
   marks: readonly ShownMark[],
+  onPick?: (id?: string) => void,
 ): MarkLayer {
-  const latest = useRef({ view, marks, tool });
-  latest.current = { view, marks, tool };
+  const latest = useRef({ view, marks, tool, onPick });
+  latest.current = { view, marks, tool, onPick };
   const [layer] = useState(() => {
     const canvas = document.createElement("canvas");
     // Above the pane's picture, below its chips.
     canvas.className = "pointer-events-none absolute inset-0 z-1";
+    const labels = document.createElement("div");
+    labels.className = "pointer-events-none absolute inset-0 z-1 overflow-hidden";
+    const buttons = new Map<string, HTMLButtonElement>();
     let ink: Ink | undefined;
     let frame = 0;
     let gesture: { pointerId: number; captured: boolean } | null = null;
@@ -102,15 +107,59 @@ export function useMarkLayer(
           chip: tokenColor("--viewer-chip"),
           chipFg: tokenColor("--viewer-chip-fg"),
         };
-        if (v)
-          drawMarks(
-            canvas,
-            ink,
-            v,
-            latest.current.marks,
-            transient ? own.draft : null,
-            transient ? own.hover : null,
-          );
+        const tags = v
+          ? drawMarks(
+              canvas,
+              ink,
+              v,
+              latest.current.marks,
+              transient ? own.draft : null,
+              transient ? own.hover : null,
+            )
+          : [];
+        const shown = new Set<string>();
+        if (latest.current.onPick) {
+          for (const { mark, x, y, width } of tags) {
+            if (!mark.id || !mark.tag) continue;
+            shown.add(mark.id);
+            let button = buttons.get(mark.id);
+            if (!button) {
+              button = document.createElement("button");
+              button.type = "button";
+              button.className =
+                "pointer-events-auto absolute cursor-pointer border-0 p-0 font-mono text-[11px] leading-none hover:ring-1 hover:ring-viewer-chip-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+              button.onpointerdown = (event) => event.stopPropagation();
+              button.onclick = (event) => {
+                event.stopPropagation();
+                own.cancel();
+                const selected = latest.current.marks.find((m) => m.id === mark.id)?.selected;
+                latest.current.onPick?.(selected ? undefined : mark.id);
+              };
+              labels.append(button);
+              buttons.set(mark.id, button);
+            }
+            button.textContent = mark.tag;
+            button.setAttribute(
+              "aria-label",
+              `${mark.selected ? "Deselect" : "Select"} mark ${mark.tag}`,
+            );
+            button.setAttribute("aria-pressed", String(!!mark.selected));
+            Object.assign(button.style, {
+              left: `${x}px`,
+              top: `${y}px`,
+              width: `${width}px`,
+              height: "16px",
+              backgroundColor: ink[mark.by],
+              color: ink.well,
+            });
+          }
+        }
+        for (const [id, button] of buttons) {
+          if (shown.has(id)) continue;
+          if (document.activeElement === button) host.current?.focus({ preventScroll: true });
+          button.remove();
+          buttons.delete(id);
+        }
       },
       redraw() {
         frame ||= requestAnimationFrame(() => own.draw());
@@ -152,6 +201,7 @@ export function useMarkLayer(
       },
     };
     return Object.assign(own, {
+      labels,
       stop() {
         cancelAnimationFrame(frame);
         frame = 0;
@@ -162,7 +212,7 @@ export function useMarkLayer(
   });
   useEffect(() => {
     const element = host.current!;
-    element.append(layer.canvas);
+    element.append(layer.canvas, layer.labels);
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
@@ -180,29 +230,42 @@ export function useMarkLayer(
     const cancelled = (event: PointerEvent) => {
       if (layer.owns(event)) layer.cancel();
     };
-    // On the window, ahead of the page: one Esc drops the mark being drawn and does nothing else.
+    // Only this focused pane: one Escape cancels its drawing before the page handles it.
     const key = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !layer.active() || !latest.current.tool) return;
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        event.isComposing ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.target !== element ||
+        event.key !== "Escape" ||
+        !layer.active() ||
+        !latest.current.tool
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
       layer.cancel();
     };
     element.addEventListener("lostpointercapture", lost);
     element.addEventListener("pointercancel", cancelled);
-    globalThis.addEventListener("keydown", key, { capture: true });
+    element.addEventListener("keydown", key);
     return () => {
       layer.cancel();
       layer.stop();
       element.removeEventListener("lostpointercapture", lost);
       element.removeEventListener("pointercancel", cancelled);
-      globalThis.removeEventListener("keydown", key, { capture: true });
+      element.removeEventListener("keydown", key);
       observer.disconnect();
       layer.canvas.remove();
+      layer.labels.remove();
     };
   }, [host, layer]);
   useEffect(() => {
     layer.redraw();
-  }, [marks, layer]);
+  }, [marks, onPick, layer]);
   // A tool put away or swapped mid-gesture leaves nothing behind.
   useEffect(() => layer.cancel(), [tool, layer]);
   return layer;
@@ -262,12 +325,6 @@ export function thin<T>(points: readonly T[], max: number): T[] {
 /** Three significant figures: 0.112, 1.39, 12.3. */
 const measure = (n: number) => String(Number(n.toPrecision(3)));
 
-/** What a point says beside it: its note, cut short, or the value a probe read. */
-function pointText(mark: Extract<GridMark, { point: Zyx }>): string | undefined {
-  if (mark.note) return mark.note.length > 28 ? `${mark.note.slice(0, 27)}…` : mark.note;
-  if (mark.probe) return probeText(mark.probe);
-}
-
 /** "≈ −172 HU": a probe's value, three significant figures. */
 export function probeText(p: NonNullable<Extract<GridMark, { point: Zyx }>["probe"]>): string {
   const v = Math.abs(p.value) >= 100 ? String(Math.round(p.value)) : measure(p.value);
@@ -289,7 +346,7 @@ export function sliceShape(
   const onSlice = (p: Zyx) => Math.abs(slab(p)) <= 0.5;
   if ("point" in mark) {
     if (!onSlice(mark.point)) return null;
-    const text = pointText(mark);
+    const text = mark.probe && probeText(mark.probe);
     return { lines: [], dots: [mark.point], ...(text && { measure: { at: mark.point, text } }) };
   }
   if ("box" in mark) {
@@ -361,7 +418,7 @@ export function sliceShape(
 /** The whole mark, for 3D. */
 export function wholeShape(mark: GridMark): Shape {
   if ("point" in mark) {
-    const text = pointText(mark);
+    const text = mark.probe && probeText(mark.probe);
     return { lines: [], dots: [mark.point], ...(text && { measure: { at: mark.point, text } }) };
   }
   if ("angle" in mark) {
@@ -421,10 +478,11 @@ function drawMarks(
   draft: GridMark | null,
   hover: Zyx | null,
 ) {
+  const tags: { mark: ShownMark; x: number; y: number; width: number }[] = [];
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!marks.length && !draft && !hover && !handles.length) return;
+  if (!marks.length && !draft && !hover && !handles.length) return tags;
   // The scale the canvas was sized with, so a pixel-ratio change before the next resize can't skew it.
   const scale = canvas.width / (canvas.clientWidth || 1);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -480,6 +538,8 @@ function drawMarks(
     const y = anchor[1] - 10;
     if (m.tag) {
       const w = ctx.measureText(m.tag).width + 8;
+      if (x + w > 0 && x < canvas.clientWidth && y + 8 > 0 && y - 8 < canvas.clientHeight)
+        tags.push({ mark: m, x, y: y - 8, width: w });
       ctx.fillStyle = color;
       ctx.fillRect(x, y - 8, w, 16);
       if (m.selected) {
@@ -520,6 +580,7 @@ function drawMarks(
     ctx.lineWidth = 1.5;
     ctx.stroke();
   }
+  return tags;
 }
 
 /**
