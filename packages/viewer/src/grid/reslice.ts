@@ -1,8 +1,8 @@
 /**
  * A tilted slice pane's picture, resliced from a level's zarr chunks: the image trilinear,
  * overlays nearest (a label never blends). Samples are `step` mm apart on the plane and cover the
- * grid's whole outline on it, so panning never needs a new picture; only moving or turning the
- * plane, or zooming to another level, does. The main thread works out where the samples lie
+ * grid's outline on it, or the part of it in a window of the pane (`Window`): a level-0 plane
+ * crosses hundreds of chunks, and a zoomed pane shows a few of them. The main thread works out where the samples lie
  * (`sampling`, `onLevel`); the zarr worker fetches the chunks they cross (`crossed`) and samples
  * them (`sample`). Untilted panes read whole slices of the grid instead (`planes.ts`).
  */
@@ -44,13 +44,21 @@ export type ChunkGrid = {
 /** The longest side of a resliced picture, in samples: coarser steps beyond it. */
 const MAX_SIDE = 1024;
 
-/** The samples over the grid's outline on the plane through `at` (source voxel). */
+/** A rectangle in pane mm: x across, y up. */
+export type Window = { xMin: number; xMax: number; yMin: number; yMax: number };
+
+/**
+ * The samples over the grid's outline on the plane through `at` (source voxel), within `window`
+ * if given. Windowed samples stay on the whole outline's lattice, so two windows' pictures line
+ * up.
+ */
 export function sampling(
   basis: Basis,
   at: Zyx,
   spacingZyx: Zyx,
   shapeZyx: Zyx,
   step: number,
+  window?: Window,
 ): Sampling {
   const mm = (p: readonly number[]) => p.map((v, k) => v * spacingZyx[k]!);
   const xs: number[] = [];
@@ -66,13 +74,24 @@ export function sampling(
     Math.min(...ys),
     Math.max(...ys),
   ];
-  const fit = Math.max(step, (xMax - xMin) / MAX_SIDE, (yMax - yMin) / MAX_SIDE);
+  const w = window ?? { xMin, xMax, yMin, yMax };
+  const fit = Math.max(
+    step,
+    (Math.min(xMax, w.xMax) - Math.max(xMin, w.xMin)) / MAX_SIDE,
+    (Math.min(yMax, w.yMax) - Math.max(yMin, w.yMin)) / MAX_SIDE,
+  );
+  // The outline's lattice of samples, from the first column and row the window reaches.
+  const c0 = Math.max(0, Math.floor((w.xMin - xMin) / fit));
+  const c1 = Math.min(Math.ceil((xMax - xMin) / fit), Math.ceil((w.xMax - xMin) / fit));
+  const r0 = Math.max(0, Math.floor((yMax - w.yMax) / fit));
+  const r1 = Math.min(Math.ceil((yMax - yMin) / fit), Math.ceil((yMax - w.yMin) / fit));
   return {
-    cols: Math.ceil((xMax - xMin) / fit),
-    rows: Math.ceil((yMax - yMin) / fit),
+    // At least one sample, so a window off the grid still makes a (transparent) picture.
+    cols: Math.max(1, c1 - c0),
+    rows: Math.max(1, r1 - r0),
     step: fit,
-    x0: xMin + fit / 2,
-    y0: yMax - fit / 2,
+    x0: xMin + (c0 + 0.5) * fit,
+    y0: yMax - (r0 + 0.5) * fit,
     depth: dot(mm(at), basis.normal),
   };
 }

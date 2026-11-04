@@ -40,7 +40,7 @@ import { sliceShape, useMarkLayer } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { corners, quad, texture } from "./picture";
 import { readPlane, readSlice } from "./planes";
-import { onLevel, sampling, samplingCorners } from "./reslice";
+import { onLevel, sampling, samplingCorners, type Window } from "./reslice";
 import {
   type Axis,
   capturePane,
@@ -136,6 +136,8 @@ export function SlicePane({
     camera: OrthographicCamera;
     scene: Scene;
     image: Mesh<BufferGeometry, MeshBasicMaterial>;
+    /** A tilted pane's coarse picture of the whole outline, under the windowed fine one. */
+    under: Mesh<BufferGeometry, MeshBasicMaterial>;
     cross: LineSegments<BufferGeometry, LineBasicMaterial>;
     drawings: Group;
     render(): void;
@@ -144,6 +146,12 @@ export function SlicePane({
   // A saved view shown before the pane had a size: applied when it gets one.
   const pending = useRef<{ zoom: number; center: [number, number] } | null>(null);
   const [level, setLevel] = useState(scene.image.levels.length - 1);
+  // A tilted pane's fine picture covers this window of pane mm; panning near its edge bumps
+  // `reframe`, which loads a new one.
+  const fineWindow = useRef<Window | null>(null);
+  const [reframe, setReframe] = useState(0);
+  // The plane the fine picture (`image`) shows.
+  const imageKey = useRef<string | null>(null);
   const [shown, setShown] = useState<{
     key: string;
     level: number;
@@ -279,18 +287,22 @@ export function SlicePane({
     const sc = new Scene();
     // Transparent, so a resliced picture's corners off the grid show the well.
     const image = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ transparent: true }));
+    const under = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ transparent: true }));
+    under.position.z = -1;
+    under.renderOrder = -1;
     const cross = new LineSegments(
       new BufferGeometry(),
       new LineBasicMaterial({ vertexColors: true, transparent: true, depthTest: false }),
     );
     cross.renderOrder = 1;
     const drawings = new Group();
-    sc.add(image, cross, drawings);
+    sc.add(under, image, cross, drawings);
     const state = {
       renderer,
       camera,
       scene: sc,
       image,
+      under,
       cross,
       drawings,
       // One frame per animation frame, however many changes asked for it.
@@ -314,6 +326,18 @@ export function SlicePane({
       renderer.render(sc, camera);
       layer.draw();
       placeNote();
+      // A tilted pane panned or zoomed out near its fine picture's edge loads a new window.
+      const w = fineWindow.current;
+      if (
+        w &&
+        (camera.left - (camera.right - camera.left) / 8 < w.xMin ||
+          camera.right + (camera.right - camera.left) / 8 > w.xMax ||
+          camera.bottom - (camera.top - camera.bottom) / 8 < w.yMin ||
+          camera.top + (camera.top - camera.bottom) / 8 > w.yMax)
+      ) {
+        fineWindow.current = null;
+        setReframe((n) => n + 1);
+      }
     };
     const [rows, cols] = [scene.shapeZyx[ra] * s[ra], scene.shapeZyx[ca] * s[ca]];
     const fitZoom = (width: number, height: number) => Math.min(width / cols, height / rows) * 0.95;
@@ -360,9 +384,11 @@ export function SlicePane({
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
-      image.geometry.dispose();
-      image.material.map?.dispose();
-      image.material.dispose();
+      for (const m of [image, under]) {
+        m.geometry.dispose();
+        m.material.map?.dispose();
+        m.material.dispose();
+      }
       cross.geometry.dispose();
       cross.material.dispose();
       renderer.forceContextLoss();
@@ -506,8 +532,9 @@ export function SlicePane({
   }
 
   // Load the plane through the crosshair at the level the zoom needs: untilted, a whole slice of
-  // the level; tilted, the plane resliced from the level's chunks it crosses. The coarsest level
-  // shows meanwhile, unless the finer one arrives almost as soon (it does from the worker's cache).
+  // the level; tilted, the plane resliced from the level's chunks it crosses, over the coarsest
+  // level's picture of the whole outline. Untilted, the coarsest level shows meanwhile, unless the
+  // finer one arrives almost as soon (it does from the worker's cache).
   useEffect(() => {
     if (!contrast) return;
     const abort = new AbortController();
@@ -568,7 +595,7 @@ export function SlicePane({
       };
       return { ...picture, corners: corners(picture).map(toPane), read };
     };
-    const tilted = async (k: number) => {
+    const tilted = async (k: number, window?: Window) => {
       const lvl = scene.image.levels[k]!;
       const sc = Math.max(...lvl.scaleZyx);
       const at = sampling(
@@ -577,6 +604,7 @@ export function SlicePane({
         s,
         scene.shapeZyx,
         Math.min(...lvl.scaleZyx.map((v, i) => v * s[i]!)),
+        window,
       );
       const overlays = scene.overlays.map(async (overlay) => {
         // The coarsest overlay level no coarser than the image's (labels never blend).
@@ -619,32 +647,74 @@ export function SlicePane({
         read,
       };
     };
-    const load = whole ? slice : tilted;
     // Whether this effect drew a picture of the requested plane; if none, the old one goes.
     let current = false;
-    const show = (made: Awaited<ReturnType<typeof load>>, k: number) => {
-      if (!made || abort.signal.aborted) return;
-      draw(made.rgba, made.cols, made.rows, made.corners, !whole);
-      probe.current = made.read;
+    const shown = (k: number) => {
       setShown({ key: planeKey, level: k, contrast, overlays: scene.overlays });
       setError(undefined);
       current = true;
     };
     const coarsest = scene.image.levels.length - 1;
-    (async () => {
-      const fine = load(level);
+    const untilted = async () => {
+      fineWindow.current = null;
+      const show = (made: Awaited<ReturnType<typeof slice>>, k: number) => {
+        if (!made || abort.signal.aborted) return;
+        draw("under", null);
+        draw("image", made, false);
+        probe.current = made.read;
+        shown(k);
+      };
+      const fine = slice(level);
       if (level !== coarsest) {
         // Only a fine picture that arrives skips the coarse one; a failed fine load doesn't.
         const arrived = fine.then(
           () => true,
           () => false,
         );
-        const coarse = await load(coarsest).catch(() => null);
+        const coarse = await slice(coarsest).catch(() => null);
         const quick = await Promise.race([arrived, new Promise((go) => setTimeout(go, 80))]);
         if (!quick) show(coarse, coarsest);
       }
       show(await fine, level);
-    })()
+    };
+    const tiltedPair = async () => {
+      // The view grown by half its size each way: room to pan before the next window.
+      const v = view.current;
+      const el = host.current;
+      const window =
+        v && el?.clientWidth
+          ? {
+              xMin: v.center[0] - el.clientWidth / v.zoom,
+              xMax: v.center[0] + el.clientWidth / v.zoom,
+              yMin: v.center[1] - el.clientHeight / v.zoom,
+              yMax: v.center[1] + el.clientHeight / v.zoom,
+            }
+          : undefined;
+      fineWindow.current = window ?? null;
+      const fine = tilted(level, window);
+      let coarseRead: Probe | null = null;
+      let fineRead: Probe | null = null;
+      const read: Probe = (p) => fineRead?.(p) ?? coarseRead?.(p) ?? null;
+      const coarse = tilted(coarsest).then((made) => {
+        if (abort.signal.aborted) return;
+        draw("under", made, true);
+        coarseRead = made.read;
+        // Another plane's fine picture would cover this one's coarse picture.
+        if (imageKey.current !== planeKey) {
+          draw("image", null);
+          probe.current = read;
+          shown(coarsest);
+        }
+      });
+      const made = await fine;
+      if (abort.signal.aborted) return;
+      draw("image", made, true);
+      fineRead = made.read;
+      probe.current = read;
+      shown(level);
+      await coarse;
+    };
+    (whole ? untilted() : tiltedPair())
       .catch((cause) => {
         if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
       })
@@ -652,23 +722,26 @@ export function SlicePane({
         if (!current && !abort.signal.aborted) clear();
       });
     return () => abort.abort();
-  }, [planeKey, level, contrast, axis, scene.overlays, whole]);
+  }, [planeKey, level, contrast, axis, scene.overlays, whole, reframe]);
 
+  /** Shows a picture in one of the pane's two layers, or hides that layer. */
   function draw(
-    rgba: Uint8Array,
-    cols: number,
-    rows: number,
-    at: [number, number][],
-    smooth: boolean,
+    layer: "image" | "under",
+    picture: { rgba: Uint8Array; cols: number; rows: number; corners: [number, number][] } | null,
+    smooth = false,
   ) {
     const t = three.current;
     if (!t) return;
-    t.image.geometry.dispose();
-    t.image.geometry = quad(at.map(([x, y]) => [x, y, 0]));
-    t.image.material.map?.dispose();
-    t.image.material.map = texture({ rgba, cols, rows }, smooth);
-    t.image.material.needsUpdate = true;
-    t.image.visible = true;
+    const mesh = t[layer];
+    if (layer === "image") imageKey.current = picture && planeKey;
+    mesh.visible = !!picture;
+    if (picture) {
+      mesh.geometry.dispose();
+      mesh.geometry = quad(picture.corners.map(([x, y]) => [x, y, 0]));
+      mesh.material.map?.dispose();
+      mesh.material.map = texture(picture, smooth);
+      mesh.material.needsUpdate = true;
+    }
     t.render();
   }
 
@@ -677,6 +750,8 @@ export function SlicePane({
     const t = three.current;
     if (t) {
       t.image.visible = false;
+      t.under.visible = false;
+      imageKey.current = null;
       t.render();
     }
     probe.current = null;

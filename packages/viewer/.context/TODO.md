@@ -17,8 +17,10 @@
 - The growth plate's fitted plane takes each face's whole height field. Fitting only inside the
   tibia (as the mockup and iioc-worker did) needs the face to carry its valid region, or the
   worker to publish the plane itself.
-- Tilted panes reslice from the 3D pane's level (at most 16 M voxels), so they blur at high zoom.
-  If that matters, reslice from the zarr chunks the plane crosses at the pane's level.
+- A tilted pane at level 0 reads every chunk its window crosses, about twice an untilted plane's
+  (a 10° plane crosses two chunk layers): on 4df02afe at 4× zoom about 5 s to sharp from local dev
+  (R2 behind it), 15 s before windowing. Showing chunks as they land, nearest the crosshair first,
+  would make it feel quicker.
 - The saved-view format (`saved-view.ts`, the `review` block of `view.saved`) lives outside
   contracts, whose `viewSchema` is loose: a `QuadLayout` change quietly makes old saved views
   unopenable, with none of the stored-event discipline, and `readView` ignores `version`. Move the
