@@ -19,6 +19,8 @@ export function failureKind(
 }
 
 /**
+ * - a failure recorded before the latest `run.reopened` belongs to an earlier request: the
+ *   researcher's new request gets a fresh main (handed over from the failed one), whatever the error;
  * - a transient provider error (Pi's retries ran out before any reply) fails the run;
  * - an interrupted reply resumes the same main, history as it was, unless its previous end was
  *   an interrupted failure too and it has made no reply since its latest start: then the run fails;
@@ -33,7 +35,10 @@ export function mainFailureAction(m: {
   endBefore: ThreadEnd | undefined;
   /** The main before this one failed too. */
   previousFailed: boolean;
+  /** Its failure was recorded before the latest `run.reopened`: an earlier request's, not this one's. */
+  failedBeforeRequest: boolean;
 }): "fail" | "resume" | "replace" {
+  if (m.failedBeforeRequest) return "replace";
   if (m.kind === "transient" && m.startedHere) return "fail";
   if (m.kind === "interrupted") {
     return !m.replied && m.endBefore?.status === "failed" && m.endBefore.interrupted

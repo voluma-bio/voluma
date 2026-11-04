@@ -85,7 +85,7 @@ export async function cancelOpenThreads(tx: Tx, runId: string) {
  * The end of an agent-loop claim in review (a run with a `run.reopened`) that failed or was
  * cancelled. The workers end `cancelled`, and so does the root for this claim, but main is left
  * cut off, as a deploy leaves it: the researcher's next message resumes it, so nothing of the
- * review is discarded and no `correction.ended` is written. A user's cancel (`withdraw`) also settles an approval given but not yet settled as
+ * review is discarded; the caller (`endUnfinished`) then writes `correction.ended` with how the request ended. A user's cancel (`withdraw`) also settles an approval given but not yet settled as
  * withdrawn, so the next unrelated message does not restart its job.
  */
 export async function cancelReviewWorkers(tx: Tx, runId: string, withdraw: boolean) {

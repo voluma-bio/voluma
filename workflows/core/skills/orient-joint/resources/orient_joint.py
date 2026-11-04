@@ -299,7 +299,7 @@ if __name__ == '__main__':
     stack = fr.resample(hu, frame, cval=frame['background_hu'])
     np.save(out / 'oriented.npy', stack)
     fr.save(frame, out / 'frame.json')
-    sidecar.write(out / 'oriented.npy', grid_id=frame['grid_id'], spacing_zyx_mm=sp, inputs=[a.src, a.header],
+    sidecar.write(out / 'oriented.npy', like=frame, inputs=[a.src, a.header],
                   params=params)
     k = frame['keyframe']
     render_slices.render(stack[k], out / 'keyframe.jpg', a.window,

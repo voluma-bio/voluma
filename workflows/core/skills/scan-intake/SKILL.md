@@ -27,6 +27,11 @@ description: >
 
   Do not infer what the notes do not say. The notes are the researcher's account: what you see on the scan goes in
   your report, not here.
+- **Report the converted scan at once** when the workflow asks for it: as soon as `hu.npy` and `hu.json` exist, before
+  cleanup, report `header` (`hu.json`), then `scan` (`hu.npy`; its sidecar is read from the published header), with the
+  To check item "Not yet cleaned: holder and debris still in the field". `report_output`
+  moves the files and leaves a `<file>.removed.txt` pointer to the published copy: copy `hu.npy` and `hu.json` back into
+  your folder from it before the cleanup below. The cleaned scan is the next version, and nothing is made from the first.
 - **Clean up the scan.** The field can hold the sample holder, padding and debris beside the specimen; every later
   step, and the researcher's 3D view, reads `hu.npy`. Set what is not the specimen to air (-1000 HU) in `hu.npy`,
   keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar

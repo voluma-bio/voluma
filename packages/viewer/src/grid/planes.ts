@@ -1,5 +1,6 @@
 /** The main thread's side of the zarr worker: one worker for every pane, promises per request. */
 
+import type { LevelSampling } from "./reslice";
 import type { Axis } from "./scene";
 import type { PlaneRequest, PlaneResponse, Values } from "./zarr.worker";
 
@@ -69,12 +70,24 @@ export const readPlane = (
   signal: AbortSignal,
 ) => request({ base, path, axis, index }, signal);
 
+/**
+ * A tilted plane's samples on a level (`reslice.ts`), as float32: trilinear (NaN off the level),
+ * or `nearest` (0 off it). Only the chunks the samples cross are read.
+ */
+export const readSlice = (
+  base: string,
+  path: string,
+  reslice: LevelSampling,
+  nearest: boolean,
+  signal: AbortSignal,
+) => request({ base, path, reslice, nearest }, signal);
+
 /** A whole level; meant for the coarsest, which is one or a few chunks. */
 export const readLevel = (base: string, path: string, signal: AbortSignal) =>
   request({ base, path, whole: true }, signal);
 
 /**
- * A whole level, shared while held: the 3D pane, the contrast and tilted slices read one copy.
+ * A whole level, shared while held: the 3D pane and the contrast read one copy.
  * Each mounted user holds it and releases it on unmount; the last release drops the level (and
  * cancels its read if still waiting). The drop waits a microtask, so an effect that re-runs
  * (release, then hold again) keeps the level instead of reading it again.

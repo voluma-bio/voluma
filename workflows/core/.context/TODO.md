@@ -62,13 +62,17 @@ in the tibia mask (the femur/tibia regrow splits a block touching both along a s
 `~/experiments/plate-data/tracing/pieces/RESULTS-L24.md`. Add a check-first line to `segmentation-check`: look for a piece
 joined to the plateau along a dark seam, and split it with `classic_segment.py --within` before the tibial regions are built.
 
-## Real world mm in the review ([#553](https://github.com/voluma-bio/voluma/issues/553))
+## A base with no affine ([#553](https://github.com/voluma-bio/voluma/issues/553))
 
-The review places every image at its voxel 0, unrotated: `Volume.affine` is spacing only (`report-output.ts`
-`detailFromSidecar`; `.npy` sidecars carry no `affine_xyz_to_world_mm`). So a researcher's mark arrives in mm on the image it
-was drawn on, and `marks_to_grid.py --drawn-on` turns them into voxels. When a second reader needs the scan's world mm
-(lab coordinates, Amira), publish each base with its true affine (`hu.json` / `frame.json`) and drop `--drawn-on`'s spacing
-step in the same change.
+A new run publishes each `.npy` with its grid's `affine_xyz_to_world_mm` (`sidecar.write` records it from the grid's header;
+`report-output.ts` `gridAffine` keeps one affine per grid), and marks reach the agents as voxels of the image they were drawn
+on. Left: a base whose sidecar has neither the affine nor `spacing_zyx_mm` still reads as identity in the review
+(`packages/run-view/src/outputs-model.ts`, `affineOf`), so a mark or point on it is placed in raw voxels without an error;
+refuse those instead. A grid published before this change keeps its spacing-only affine, and a run spanning the deploy (or an
+old run's grid first published after it) can mix them: the scan with `hu.json`'s real affine, the tibia grid diagonal at origin 0
+from an old `tibia_frame.py` sidecar. Nothing records which affines are real poses, so before the review shows one grid against
+another in world mm (today it uses only axis directions across grids, `targets.ts`), mark them (a flag in `detail`, or "the
+grid's first block came from a header").
 
 ## HU calibration for a scan without it
 
@@ -79,3 +83,5 @@ scaling, or a phantom's known values. Failing that, it uses two references found
 soft tissue as water. It writes `hu.json` with the calibration marked estimated and its evidence. A To check item says the
 HU are estimated. The measurement scripts then need `--threshold`, unless the units give the lab's 2.16/cm directly (a scan in
 linear attenuation). Keep the rule that a scan with HU is never re-mapped from its histogram.
+
+- **`merge_labels.py` repeats the small side's feature transform per contested big label** (`[distance_at(own_small, at, spacing) for _, at in contested]`): a track touching three bones runs it three times over its box. Compute once per final label, stack the contested points, split by big label. Time only (~63 s on OA6-2RK), not memory. (PR #566 review)

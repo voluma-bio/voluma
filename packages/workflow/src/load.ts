@@ -9,7 +9,8 @@
  * `resources/`. `core/` also holds the role files, the same for every workflow: `agents/<role>.md`
  * (with `agents/words.md` and `agents/environment.md`, text every role's prompt ends with). The
  * workflow's directory adds `outputs.yaml`. `core/convert/` (the review converter, run by the
- * runner's convert sandbox) is snapshotted too; nothing else in either directory is.
+ * runner's convert sandbox) and `core/review.md` (the review main's prompt text) are snapshotted
+ * too; nothing else in either directory is.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -80,8 +81,15 @@ async function rolesDirOf(store: ObjectStore, prefix: string, existing: boolean)
     : ROLES_DIR;
 }
 
-/** Files of `agents/` appended to every role's prompt, not roles. */
+/** Files of `agents/` that are prompt texts, not roles: they go in every role's prompt. */
 const PROMPT_TEXTS = ["words.md", "environment.md"];
+
+/**
+ * The review main's prompt text. It sits outside `agents/` because a runner from before it parses
+ * every other `.md` there as a role and fails on a file with no frontmatter: a run this runner
+ * snapshotted must still load in an older one during a deploy.
+ */
+const REVIEW = `${CORE}/review.md`;
 const agentSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -194,6 +202,7 @@ async function snapshot(dir: string, { store, prefix, root, commit }: LoadOption
     // The review converter (`core/convert/`), which the runner's convert sandbox runs from /workflow.
     if (d === CORE && names.includes("convert"))
       for await (const p of walk(root, `${d}/convert`)) await put(p);
+    if (d === CORE && names.includes("review.md")) await put(REVIEW);
   }
   const roleFiles = await readdir(join(root, ROLES_DIR)).catch(() => {
     throw new WorkflowParseError(ROLES_DIR, "directory not found");
@@ -216,6 +225,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     const path = key.slice(prefix.length);
     if (
       /(^|\/)SKILL\.md$|(^|\/)outputs\.yaml$|\/references\/suggested-plan\.md$/.test(path) ||
+      path === REVIEW ||
       (path.startsWith(`${rolesDir}/`) && /^[^/]+\.md$/.test(path.slice(rolesDir.length + 1))) ||
       scriptOf(path)
     )
@@ -347,5 +357,6 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     suggestedPlan: texts.get(`${own.slice(0, -"/SKILL.md".length)}/references/suggested-plan.md`),
     words: promptText("words.md"),
     environment: promptText("environment.md"),
+    ...(texts.has(REVIEW) && { review: (texts.get(REVIEW) as string).trim() }),
   };
 }

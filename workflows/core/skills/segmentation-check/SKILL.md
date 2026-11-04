@@ -9,11 +9,12 @@ description: >
 # Segmentation check
 
 SAM proposes; whoever reports the labels owns them. Code checks gate and eyes confirm: run `label_stats.py` and
-`unlabelled.py` first, then look at what they flag and at the 3D sheet (`visual-check`). Looking alone has passed a
-fragment carrying the wrong label. A labels volume is finished when you have made every correction below that you
+`unlabelled.py` first, both with `--ranges anatomy.json`, then look at what they flag and at the 3D sheet
+(`visual-check`). Looking alone has passed a fragment carrying the wrong label. A labels volume is finished when you have made every correction below that you
 can make, and each flag you looked at and could not correct, and each disagreement the CT could not settle, is a To
-check item that names its region: then report the labels. The workflow's `anatomy.json`
-holds the label table, the expected volumes and pieces, and which labels must touch which.
+check item that names its region: then finish it with `finish_labels.py` (section 6), measure from the file it
+writes, and report that file with its check record. The workflow's `anatomy.json` holds the label table, the expected
+volumes and pieces, which labels must touch which, and which sit apart from which.
 
 ## 1. Each label
 
@@ -21,6 +22,7 @@ holds the label table, the expected volumes and pieces, and which labels must to
 
 | Flag | It means | The correction |
 |---|---|---|
+| `swapped:A-B`: A has the solid joint end, B the notched one | the two labels are each other's bone (a femur labelled tibia and the tibia femur): a SAM request named the boxes the wrong way round, or a relabel moved the wrong piece | `relabel.py --swap A,B`, check the 3D sheet, run the checks again. Never accepted; the tibial frame refuses swapped labels too |
 | volume above range | the label took bone from a neighbour | a piece wholly the neighbour's goes to it (`relabel.py`); two bones joined at a contact are split (`classic_segment.py --within <label> --seeds`, one seed per connected piece of each part, the contact piece included) |
 | volume below range | it lost bone to a neighbour that is above | the pair is corrected together |
 | `identity_unsupported` (far below range) | the box found a different piece, or a sliver | not that structure: the label is removed (`relabel.py --to 0`) and the real one looked for (section 2) |
@@ -32,12 +34,29 @@ one scan, so a value just outside is a question, not an error. On the quad view,
 run through the dark joint space, not through bone. `unlabelled.py` lists bone no label covers: each piece is a
 candidate small structure or other anatomy (one touching the scan border is usually other anatomy).
 
+`unlabelled.py --ranges anatomy.json` grows every label and every candidate through the threshold bone it reaches
+and flags what is joined through bone: a contact patch over the tolerance. A volume in range and no contact in `neighbour_voxels` prove nothing here: a small label holding
+a bone's cortex passed both, with a strip of bone no label covers between it and the bone.
+
+| Flag | It means | The correction |
+|---|---|---|
+| `<label> is joined to <bone> through bone` | a small structure the anatomy puts across joint space (`apart_from`) shares bone with a big bone over a patch above the tolerance, directly or through bone no label covers: one label holds the other's bone | open the patch at the voxel given; give each bone's voxels to its own label (`classic_segment.py --within` with seeds, `relabel.py` for a piece apart), or redo the structure's SAM track (`sam-segmentation`, "When a track fails") or write your own cleanup and show it on a crop sheet; then run it again. A joint mineralization or sesamoid ends apart from the bone; no fused-osteophyte allowance. Where they still touch, cut them apart at the narrowest bone between them (`classic_segment.py --within A,B`, which seeds itself and changes bone only near the contact; open a crop at the cut) and pass the cut to `finish_labels.py --cut`. Never accepted |
+| `<bone> is joined to <bone> through bone`, two big bones (the femur and the tibia or the patella) | one big track took the other bone's bone, or one label is threshold bone the others left over; the next step's frame trips over it (the tibia's joint end reads as a femur's) | split it: `classic_segment.py --within <label>` with seeds from each bone's core, the joined piece included; or redo the big-bone request (`sam-segmentation`, "When a track fails"). Never set a bone to the threshold bone the other labels left. Where bone bridges the joint at threshold (OA can), cut them apart the same way (`--within A,B`, then `--cut`). Never accepted |
+| `candidate <n> ... joined through bone to a big bone` | bone no label covers that touches a big bone over a patch above the tolerance: the big label missed part of its own bone (or other anatomy touches it) | open it; the bone's own bone goes to that label (`relabel.py --pieces`); never name it a small structure while it is fused |
+
+The tolerance (`--contact-mm2`, 0.011 mm2: 100 voxel faces at 10.5 um) is partial volume closing a narrow joint gap:
+good structures measure at most 0.006 mm2, as labels or as candidates, and bone cut off a label 0.24 to 1.28 mm2; good
+femur and tibia labels at most 0.0034 mm2, and a tibia that was threshold remainder 0.31 mm2.
+`fused_to` on each candidate gives its largest contact patch with each label it touches.
+
 ## 2. Find, name, or declare absent
 
 Small structures (sesamoids, ossicles, fragments) decide measurements, and one merged into a big bone inflates it.
 A finished labels volume accounts for each candidate from `unlabelled.py` and each piece `label_stats.py` flags:
 seen on its crop sheet (`render_crops.py`), named from the anatomy table and labelled (`relabel.py`, or a
 small-structure SAM request, `sam-segmentation`), or left unlabelled with a To check item asking what it is. A
+candidate becomes a label only when it has no contact patch with a big bone over the tolerance (it is not in `fused`) and its crop shows it apart from
+the bone across joint space; it never stands in for a structure whose SAM track failed (redo that track). A
 structure in two pieces is two components, each labelled. A model's name for a piece is a guess.
 
 The scan's notes come before any naming. A structure is **absent** when the notes put it
@@ -61,6 +80,7 @@ the floor:
 | one boundary through the joint space, the other through bone | keep the one in the joint space; note it in your report |
 | a one-voxel rim of partial volume along a surface | ignore it; say so once per label |
 | a fragment that is its own bone in one method and part of a big bone in the other | a small structure (section 2) |
+| a region that is a large share of one of your labels (`your_label_pct`) | not a rim: most of that label is in question; settle it as a boundary or an identity before you keep the label |
 | you cannot tell from the CT | keep neither by default: a To check item naming which label you kept meanwhile |
 
 Volumes decide only when the region is a sizeable share of the smaller structure's range, or would move a big bone
@@ -71,7 +91,7 @@ average or vote.
 
 A wrong box or a missing neighbour: a new `segment_sam` request with the prompt fixed. A whole piece with the wrong
 label: `relabel.py`. Two bones under one label: `classic_segment.py --within` with seeds. A piece the researcher outlined as not part of a
-region: a seed inside it from `marks_to_grid.py --seed --drawn-on <the image it was drawn on>` (`regions-and-landmarks`), then `relabel.py` for a piece apart from the
+region: a seed inside it from `marks_to_grid.py --seed --voxels "<the delivery's line>" --drawn-on <the image it was drawn on>` (`regions-and-landmarks`), then `relabel.py` for a piece apart from the
 bone, or `classic_segment.py --within` for one joined to it; the script says which. Give the piece the label of what it
 is, or 0 when it is no structure the workflow reports. After any fix, the label
 checks, the quad view and the 3D sheet again.
@@ -81,3 +101,25 @@ checks, the quad view and the 3D sheet again.
 The title gives the place, the question and the label kept ("Joint face, slices 140-170: bone A or bone B? Kept A").
 Point its focus at the disagreement volume and the region's label, so the researcher's view opens there: the volume is
 always reported (section 3).
+
+## 6. Finish and report
+
+`finish_labels.py` is the last step before the labels are reported, run on the volume you would report: it clears the
+specks (the loose fragments a clipped label leaves, dots off the bone in 3D), runs the checks of sections 1 and 2 on the
+cleaned volume, and writes it with a check record (`<out stem>-check.json`) only when no flag is open. A flag stays
+open until the labels no longer raise it or you pass `--accept <key>=<why>`: the title of the To check item that holds
+it when the CT cannot settle it, or why it is no fault (a structure the scan's notes put outside the field, or one you recorded as absent in its
+region, section 2). A `joined:` or `fused:` flag is never accepted (the script refuses it). Two bones that touch are
+separated, as well as the CT allows: redo the track first; where they still touch, cut them apart with
+`classic_segment.py --within A,B` (it seeds itself from each bone near the contact, moves bone only within about 0.15 mm
+of it, and prints what moved: open a crop at the cut) and pass its output with `--cut`. The contact then passes as a cut, recorded under `cuts` in the check record with
+where it lies; a join the cut does not account for (contact off the cut, or through bone no label holds) stays open. A
+`fused:` candidate is labelled (section 1). Finish the labels you made, the
+merged SAM labels with your fixes; `classic_segment.py`'s watershed is the cross-check of section 3, never the reported
+labels (the script refuses it): it gives every threshold voxel to some label, so bones that touch at threshold always join.
+Report the file it wrote and cite the check record as evidence; checks you ran on another volume (a watershed, an
+earlier merge) are not this volume's. After any later change to the labels, run it again.
+
+A workflow may ask for the merged labels first, as a preview the researcher sees at once: report them with the To check
+item "Not yet checked: finish_labels.py pending", make nothing from them, and report the file `finish_labels.py` writes
+as the next version of the same output.

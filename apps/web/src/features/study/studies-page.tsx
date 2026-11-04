@@ -4,7 +4,7 @@
  * counts. Like a file browser's details pane, a click selects a study and the right side
  * describes it (details, samples by group, the headline measurement, recent activity); the row's
  * chevron, a double-click, Enter or "Open study" opens it. Up and Down move the selection. A study
- * of one opens its input.
+ * of one keeps its overview too.
  *
  * Data: `listStudies` for the list (it refetches every 5 s while a run is live); the selected
  * study's `getStudy` for the side.
@@ -24,7 +24,6 @@ import {
   whenText,
 } from "@voluma/run-view";
 import {
-  Breadcrumb,
   Button,
   cx,
   EmptyState,
@@ -32,7 +31,6 @@ import {
   INPUT_WORD,
   LoadingState,
   Progress,
-  ShellHeading,
   SidePanel,
   type Status,
   StatusGlyph,
@@ -45,11 +43,8 @@ import { Link, useNavigate } from "react-router";
 import { ACT_ON, PLACES, type Place, placeOf } from "./study/study-model";
 import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study/study-side";
 
-/** Where a study opens: its page, or a study of one's input once it has a run. */
-const hrefOf = (study: StudySummary) => {
-  const one = study.inputCount === 1 ? study.newestRuns[0] : undefined;
-  return one ? inputHref(study.id, one.inputId) : `/studies/${study.id}`;
-};
+/** Every study opens its overview, including a study of one. */
+const hrefOf = (study: StudySummary) => `/studies/${study.id}`;
 
 /** One mark per sample: its newest run's status; a sample with no run waits. */
 function marksOf(study: StudySummary): Status[] {
@@ -146,36 +141,31 @@ export function StudiesPage() {
 
   const samples = list.reduce((n, s) => n + s.inputCount, 0);
   return (
-    <>
-      <ShellHeading>
-        <Breadcrumb trail={[]} current="Studies" />
-        <Button asChild variant="ghost" size="sm" className="ml-auto">
-          <Link to="/new">
-            <Plus aria-hidden />
-            New study
-          </Link>
-        </Button>
-      </ShellHeading>
-      <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-8">
-          <header className="mb-4 flex items-baseline gap-3">
-            <h1 className="m-0 text-xl font-semibold">Studies</h1>
-            {list.length > 0 && (
-              <span className="text-sm text-muted-foreground">
-                {plural(list.length, "study", "studies")} ·{" "}
-                {plural(samples, INPUT_WORD.one, INPUT_WORD.many)}
-              </span>
-            )}
-          </header>
-          {body}
-        </div>
-        {selected && (
-          <SidePanel side="right" title={selected.name} icon={<Info />}>
-            <StudyPane study={selected} />
-          </SidePanel>
-        )}
+    <div className="flex min-h-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-8">
+        <header className="mb-4 flex flex-wrap items-baseline gap-3">
+          <h1 className="m-0 text-xl font-semibold">Studies</h1>
+          {list.length > 0 && (
+            <span className="text-sm text-muted-foreground">
+              {plural(list.length, "study", "studies")} ·{" "}
+              {plural(samples, INPUT_WORD.one, INPUT_WORD.many)}
+            </span>
+          )}
+          <Button asChild variant="primary" size="sm" className="ml-auto">
+            <Link to="/new">
+              <Plus aria-hidden />
+              New study
+            </Link>
+          </Button>
+        </header>
+        {body}
       </div>
-    </>
+      {selected && (
+        <SidePanel side="right" title={selected.name} icon={<Info />}>
+          <StudyPane study={selected} />
+        </SidePanel>
+      )}
+    </div>
   );
 }
 
@@ -314,7 +304,7 @@ function StudyPane({ study }: { study: StudySummary }) {
     <div className="grid content-start gap-7 px-4 pt-3 pb-6">
       <Button asChild className="justify-self-start">
         <Link to={hrefOf(study)}>
-          {study.inputCount === 1 ? `Open ${INPUT_WORD.one}` : "Open study"}
+          Open study
           <ChevronRight aria-hidden />
         </Link>
       </Button>

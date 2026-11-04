@@ -42,11 +42,29 @@ run agent.
     contested voxels; the same rule gives a sesamoid its voxels where the femur claim is a thin slab over it. It names no anatomy, and a
     leak that covers a whole big label hands that label over whole (`big_lost` shows it).
   - Memory: 1.8 GB peak on OA7-1L (277M voxels, 10 s), 2.3 GB on OA6-1RK (311M voxels), about 7 bytes per voxel; the sandbox has 8 GiB.
+  - 2026-11-04, OA6-2RK rehearsal (4df02afe) tracks, map 61:5 62:8 63:6 64:6 65:6 66:9 67:9 68:7: share of each big label a temp
+    takes after the nearest rule: good tracks at most 2.8% (temp 63 of the tibia; 62 0.9% and 68 1.3% of the femur); the tracks that
+    followed a bone 31% of the tibia and 19% of the fibula (64), 42% of the fibula (65). The refusal (`--max-big-share` 0.10) uses this
+    share. With scipy's distance transform the merge peaked at 8.9 GB (a 74M-voxel box, then 137M for the tibia); computing distances
+    at the contested voxels from the feature transform gives the same output at 3.4 GB, 63 s.
 - Repeat requests on one stack agreed at Dice 0.994-0.998.
 
 ## segmentation-check
 
 - On OA6-1RK the four biggest `unlabelled.py` candidates sit at the scan edge and are not knee labels.
+- `unlabelled.py` contact patches, 2026-11-04 (threshold 2500 HU on OA6-1RK run 3fc56eec labels, 2430 on OA6-2RK 4df02afe): good
+  small structures as labels at most 0.0055 mm2 (OA6-1RK label 6 on the femur); as candidates, with OA6-1RK's labels 6, 7, 8 or 12
+  removed one at a time, at most 0.0061 mm2 (label 6's larger piece on the femur; 7, 8 and 12 0.0003). On 4df02afe, label 6
+  holding bone off the tibia measured 1.28 mm2 with the femur, 0.24 with the tibia and 0.56 with the fibula; with label 6 cleared, the
+  same bone as a 0.145 mm3 candidate measured 1.28 / 0.24 / 0.56. Measured as the share of the candidate a big bone's flood took, the
+  old `fused` rule flagged OA6-1RK's sesamoids. Peak RSS on OA6-1RK (236M voxels): 4.78 GB, 11 s.
+- Big-bone contacts, 2026-11-04, same measure and tolerance: femur–tibia 0.0034 mm2 on OA6-1RK (3fc56eec's last labels) and
+  0.0007 on 4df02afe; 0.31 mm2 (0.89 in all, direct) on b023b073 (OA6-2RK), whose tibia was set to the threshold bone no other
+  label held after its SAM track ran away (63M voxels) and whose tibial frame then refused the joint ends. Femur–patella: no
+  contact on OA6-1RK; 3.17 mm2 on 4df02afe, where the femur label wraps the patella's cortex (patella 0.70 mm3, under range).
+  `finish_labels.py` on these: OA6-1RK raises no flag and writes the labels (25 s, 4.8 GB peak); 4df02afe 12 open flags,
+  b023b073 13 (joined:1-2 and joined:9-2 among them), neither written. b023b073's intake ran `unlabelled.py --ranges` on its
+  watershed volume, which shows no flag, and never on the labels it published.
 - Classic labels grown from SAM's femur, tibia and patella alone agreed with the reference at Dice 0.92 / 0.90 / 0.92, against
   SAM's 0.97 / 0.95 / 0.94, because the fibula and the small bones were unlabelled and the watershed absorbed them.
 - Disagreement region 2 (4,849 voxels, 0.006 mm³) is 0.1% of the femur's range width and 1.5% of the sesamoid's; region 1 in the

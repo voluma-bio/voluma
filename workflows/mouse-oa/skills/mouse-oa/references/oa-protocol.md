@@ -36,15 +36,15 @@ on.
 
 | # | Do | Script | Look at |
 |---|---|---|---|
-| 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` (it refuses a femur passed as the tibia, and a `--joint-end` on the wrong side: fix the labels or the flag it names) | `tibia-frame-qc.jpg`: coronal sections, joint at top, the tibial plateau at the top of the outline (not the femoral condyles and the notch between them), the fibula beside the shaft, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
+| 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): the shaft's long axis on W (0° in coronal and sagittal sections; the growth plate keeps its own roll), +W from joint toward shaft, crop around the joint end | `tibia_frame.py` (it refuses a femur passed as the tibia, and a `--joint-end` on the wrong side: fix the labels or the flag it names) | `tibia-frame-qc.jpg` (coronal) and `tibia-frame-qc-sagittal.jpg`: joint at top, the tibial plateau at the top of the outline (not the femoral condyles and the notch between them), the fibula beside the shaft, tibia outline following the bone; on the two sections of each sheet that carry the yellow axis line, the centroid dots and the line run down the middle of the tibial shaft, below the metaphyseal flare and not on the fibula (the other four cut the shaft obliquely, so no line is drawn on them; the line lying on the magenta W line is not a check, the fit puts it there). Dots on the flare or the fibula, or `converged: false`: rerun with `--axis-mm` on the shaft. Shaft still leaning where the dots are wrong: `--tilt-deg`, after which the yellow line leaves magenta by about the tilt. A crop that cuts bone: set the epiphysis range |
 | 2 | Propose the growth plate's two faces, check them, and trace the proximal face (annotation A) | `segment_plate` (`plate_faces.py` only when it is not in your tools or returns an error), `prune_plate.py` for strays, then you write `annotations.json` | `qc-plate-<n>.jpg`: every proposed section (the default), each framed on the U span the proposal covered, flagged stretches ticked red, suspect band pieces named in the title; `qc-prune-<n>.jpg` for what you pruned; then zoomed coronal sections of `tibia-hu.npy` with a pixel grid over each flagged or wrong stretch, and over each stretch you trace beyond the spans |
-| 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`; the later tibial steps read ROI-1 and its faces) | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc), and every `qc-faces-<n>.jpg`: the proximal face as delivered, on every traced section, which you open sheet by sheet before you report |
+| 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`; the later tibial steps read ROI-1 and its faces) | `iioc.py`, with `--labels`: the scan-grid `labels.npy` the frame was made from | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc), and every `qc-faces-<n>.jpg`: the proximal face as delivered, on every traced section, which you open sheet by sheet before you report |
 | 4 | Trace the boundary under the subchondral plate (annotation B) | you | coronal sections with the ROI-1 outline |
 | 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py` | `qc-coronal.jpg` against `examples/README.md` (trabecular-roi) |
 | 6 | Check the distal face the proposal gave and retrace what is wrong or flagged (annotation C), then ROI-3 and the cortex under the plate (`--out meta`; the cortical step reads this cortex and face) | `metaphysis_roi.py` | `qc-roi3.jpg` and `qc-roi3-axial.jpg` against `examples/README.md` (metaphyseal-roi), and every `qc-faces-<n>.jpg`: both faces as delivered, on every traced section, which you open sheet by sheet |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes --output roi-iioc` and `roi-iioc-trabecular`; `trabecular --output roi-metaphyseal` | the QC images `trabecular` writes (`bone-morphometry`) |
 | 8 | Ct.Th at the two levels below the distal face (#24, #25), on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment (#11, #12) on the plate runs `iioc.py` wrote, under the articular top surface | `morphometry.py cortical --output roi-cortex-100um`, `roi-cortex-1000um`, `roi-subchondral-plate-medial` or `-lateral` (the slab's declared id; its depth and thickness are in the spec) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
-| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
+| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote; it also writes `femur-frame.json`, reported as `femur-frame` (its first file) | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
 | 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec <protocol.json> --outputs /workflow/workflows/mouse-oa/outputs.yaml --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab | `amira_landmarks.py` | the lab opens it in Amira |
 
@@ -54,7 +54,13 @@ boundary matters: a sensitivity check, not an error bar.
 ## Aligned grid and annotations
 
 `tibia_frame.py` writes `tibia-hu.npy`, `tibia-mask.npy` and `tibia-frame.json` on an **aligned grid**: array
-axes (W, V, U), the scan's voxel size, W from the joint toward the shaft. +U medial and +V anterior come from a sign
+axes (W, V, U), the scan's voxel size, W from the joint toward the shaft. W is the tibia's long axis, fitted on the
+shaft: the centroids of the filled shaft sections between `--axis-mm` (default 2.0 to 3.9 mm from the joint end, below the
+flare on the lab scans; sampled from the scan, so the range may reach past the crop) lie on a line along W, under 0.1° off in both planes (`axis_residual_deg`). The fit
+follows the centroids, so when the dots are pulled off the shaft (by the flare, the fibula, or a label piece), move
+`--axis-mm` first; use `--tilt-deg CORONAL SAGITTAL` only for a lean the line misses: positive CORONAL when the shaft's
+lower end sits at larger U than its top on the coronal sheet (V on the sagittal one), the degrees you read off; the script
+turns W to cancel it, and `axis_residual_deg` then reads about minus the tilt. +U medial and +V anterior come from a sign
 rule on scan y and the joint end that assumes one knee and one scan orientation: **confirm it on the QC montage**
 before you name a side (a left knee flips it). Every annotation is an index on that grid and carries its `grid_id`;
 the scripts refuse a file without one or from another grid, because indices mean nothing on another frame. They
@@ -76,7 +82,7 @@ schema is `regions-and-landmarks`'):
   curves have a gap over the plate wider than the spec's `max_gap_um` (about 24 rows): on a section, two points that far apart where the tibia lies
   within that below the line between them and anywhere above it (a line across empty space between two pieces of bone does not count); across V, two sections that
   far apart over the rows with tibia near the face. They do not test where a face ends, in U or V: the mask does not show where the plate ends
-  (the condyles overhang it, the fibula lies beside it), so open the ends on the QC. They name the V rows and U ranges; they also stop on a point more than
+  (the condyles overhang it, the fibula lies beside it), so open the ends on the QC. `iioc.py` does stop where ROI-1's side runs through bone (a patch over the spec's `cut_max_area_mm2` with bone off the tibia mask for `cut_depth_um` beyond it, by V and U range; bone the femur, patella or fibula label holds, `cut_other_bones`, does not count): the tibia label stops inside the bone there, and retracing the face cannot fix that. The fix is the labels (segmentation-check) and a rerun of `tibia_frame.py`, which makes a new aligned grid: `iioc.py` refuses annotations from another `grid_id`, so the curves, eroded marks and width points are traced again on it. Check the tibia label reaches the cortex before you trace (suggested plan, step 2). They name the V rows and U ranges; they also stop on a point more than
   `off_tibia_margin_um` off the tibia mask, and on a face that jumps between neighbouring traced sections by more than `max_jump_um` plus
   their distance apart (the median W change over the bone both cover): trace each section they name from its own image. Say where the proposal covered and where you traced. Copy its two curve keys
   (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
@@ -109,7 +115,7 @@ schema is `regions-and-landmarks`'):
   never replaces the points. Retrace a stretch that is wrong but not flagged the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
   eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. A growth-plate line or path the researcher drew
   on a coronal section of the tibia grid goes into that section's curve of the face it corrects: the face your brief names, or the
-  face output the mark was drawn on (`marks_to_grid.py --curve --drawn-on <the image the delivery names> --into annotations.json --key growth_plate_curves` for
+  face output the mark was drawn on (`marks_to_grid.py --curve --voxels "<the delivery's line>" --drawn-on <the image the delivery names> --into annotations.json --key growth_plate_curves` for
   the proximal face, `growth_plate_distal_curves` for the distal; `regions-and-landmarks`). A mark drawn on anything else
   names no face, and a correction can sit nearer the other face than its own: with no face named, or the brief and the mark
   naming different faces, apply nothing and report that, so the researcher is asked. Retrace the sections beside it to meet it. Where part of the tibia label is really femur or fibula
@@ -135,19 +141,25 @@ schema is `regions-and-landmarks`'):
   possibly age-related) is not representative of the lab's knees, most of which keep the plate whole. Look at the faces drawn on the sections before you run.
 - **D, the landmark points files** (scan grid, each name once across the files, straight from `pick.py`: do not
   copy coordinates into a new file). `a` midpoint of the upper line of the intercondylar groove, `b` intercondylar
-  notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck slide 7). `a` and
-  `b` go on a long view of the femur that shows the shaft and the groove side-on; `c` and `d` can go on the
-  joint-face view. `femoral_frame.py` refuses a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
-  (`a` and `b` placed end-on), an `a`-`b` that runs side to side or a `c`-`d` that does not
+  notch, `c` outer vertex of the lateral condyle, `d` outer vertex of the medial condyle (deck slide 7). `a` and
+  `b` go on a long view of the femur that shows the shaft and the groove side-on. `c` and `d` go on the front
+  (anterior) view: the most lateral and the most medial points of the condyles, at the level of the distal condyles,
+  where the deck figure (`examples/femoral-geometry/deck-points-a-d.jpg`) draws DFW (5) across the condyles; not on
+  a ridge or face inside that outline. `femoral_frame.py` refuses a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
+  (`a` and `b` placed end-on), a DFW under 0.9 of the femur label's width across its distal end (`c` and `d` inside
+  the outer vertices), an `a`-`b` that runs side to side or a `c`-`d` that does not
   (against the femur's mediolateral axis, which it finds from the label, checks against the knee's bending plane in the
   `frame` output and prints: the sides and the front swapped, which happens when an image's axes are read as the wrong scan axes) or an SI axis pointing away from the femur: re-place the points; the
   refusal is not a warning to explain. The printed axis says which scan direction runs side to side, not which side is
   lateral or where the front is: read those from a render of this scan. When the refusal says the axis is confirmed,
   a render that seems to disagree has its image axes mislabelled: name the scan axis along each image axis, then
-  re-place. Three refusals are not about the points, so do not move them: a femur label too short along its shaft to
+  re-place. Four refusals are not about the points, so do not move them: a femur label too short along its shaft to
   give the axes (the labels or the field of view cut the shaft off); points whose two rulers both fit the knee's bending plane
-  but not the label's axis (the refusal says so); and an axis the bending plane does not confirm that a render of this scan,
-  its image axes named, contradicts. For each, stop and raise a To check item naming it.
+  but not the label's axis (the refusal says so); an axis the bending plane does not confirm that a render of this scan,
+  its image axes named, contradicts; and a DFW under 0.9 of the label's width where `c` and `d` already sit on the
+  condyles' outermost points and one of the two label voxels the refusal prints at the ends of that width is on something
+  fused to the femur label (a fabella, a piece of patella or meniscus, an osteophyte). For each, stop and raise a To check
+  item naming it.
 
 `oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (A and B, no C) in that schema, with
 the `grid_id` of the frame it was traced on: a worked example of the keys and the point order, and a record of that
@@ -158,8 +170,7 @@ scan, not a starting point for another.
 - #10 tibial width: a chord on one coronal section with both ends on the growth plate's proximal face, from the centre
   of the fibula–tibia junction on the tibial surface to the prominent point on the other side. The old run's chord
   joined the two ends of its traced face: do not reuse those points.
-- #26 DFL: `a` to `b`. #27 DFW: `c` to `d`. The old run used an outer-edge chord at one plane for the width: do not
-  carry it over. #28 is DFW / DFL.
+- #26 DFL: `a` to `b`. #27 DFW: `c` to `d`, outer vertex to outer vertex across the condyles. #28 is DFW / DFL.
 - #7 to #9 heights: from the middle of the growth plate (whole, medial compartment, lateral compartment) up to the
   top surface of the articular bone, "vertically". **Open for the lab:** perpendicular to the growth-plate plane
   or along the tibial shaft axis; it has not chosen. `iioc.py` reports both: along W (the shaft axis) as the three

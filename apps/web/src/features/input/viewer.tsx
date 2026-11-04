@@ -7,7 +7,7 @@
  * id. The page learns which grid is shown (`onShown`), since marks and the picture belong to it.
  */
 import { reviewAssetUrl } from "@voluma/api-client";
-import type { Focus, ReviewAssets } from "@voluma/contracts/review";
+import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
 import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
 import {
   type Blocks,
@@ -74,6 +74,8 @@ export function SceneViewer({
     planesOf(imageId: string): GridPlanes | undefined;
     /** The planes the catalog fits through surfaces, for Align and GP. */
     fits: readonly PlaneFit[];
+    /** Every grid the run published (`outputBlocks`), which Align lists. */
+    grids: readonly Grid[];
     /** Saves the view on the grid of image volume `grid`; absent, no Save view. */
     onSave?(state: QuadState, grid: string): void;
     /** A saved view to show on its grid: each new object is applied once. */
@@ -89,7 +91,7 @@ export function SceneViewer({
     ref?: Ref<SceneHandle>;
   };
 }) {
-  const [labels, setLabels] = useState(false);
+  const [labels, setLabels] = useState(true);
   const grid = useMemo(
     () =>
       reviewGrid({
@@ -160,8 +162,9 @@ export function SceneViewer({
     }
     return byGrid;
   }, [marks, selected]);
-  // What the shown grid's planes can be aligned to: the catalog's fitted planes, the other grids.
-  const { fits } = quad;
+  // What the shown grid's planes can be aligned to: the other published grids, the catalog's
+  // fitted planes.
+  const { fits, grids } = quad;
   const targets = useMemo(
     () =>
       imageId
@@ -170,10 +173,11 @@ export function SceneViewer({
             imageId,
             assets,
             fits,
+            grids,
             assetBase: (sha256) => reviewAssetUrl(runId, sha256, "x").slice(0, -1),
           })
         : undefined,
-    [revision, imageId, assets, fits, runId],
+    [revision, imageId, assets, fits, grids, runId],
   );
 
   // Each grid shown keeps its viewer, hidden while another grid is shown, so going back is
@@ -184,6 +188,7 @@ export function SceneViewer({
       ? {
           key: gridKey,
           imageId: grid.imageId,
+          name: grid.name,
           scene: grid.scene,
           notes: grid.notes,
           focus: shownFocus,
@@ -267,6 +272,7 @@ export function SceneViewer({
           <div key={k.key} className="h-full" hidden={!on}>
             <QuadViewer
               scene={k.scene}
+              gridName={k.name}
               planes={quad.planesOf(k.imageId)}
               layout={quad.layout}
               onLayout={quad.onLayout}
@@ -307,6 +313,7 @@ export type SceneHandle = {
 type View = {
   key: string;
   imageId: string;
+  name: string;
   scene: GridScene;
   notes: string[];
   focus: { at: Zyx } | undefined;

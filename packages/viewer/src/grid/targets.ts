@@ -1,31 +1,19 @@
 /**
- * What the outputs review can align a grid's planes to, from the run's blocks: a plane fitted
+ * What the outputs review can align a grid's planes to, in Align's order after the shown grid
+ * itself (QuadViewer lists that): the frames tasks oriented for, every plane fitted
  * (least squares) through the vertices of published surfaces, such as the growth plate's two
- * faces, and every other grid's axes. Both reach the shown grid through world mm: each volume's
- * affine maps its voxels (x, y, z) to world, with orthogonal columns.
+ * faces, then the other grids the run published. A grid is any published base or file output whose `detail` carries a `gridId` and its
+ * affine (an image volume, or a frame such as intake's joint frame), one per `gridId`. All reach
+ * the shown grid through world mm (`@voluma/contracts/ruler`).
  */
-import type { ReviewAssets, Volume } from "@voluma/contracts/review";
-import { fitNormal, type Vec3 } from "./frame";
+import type { Grid, ReviewAssets } from "@voluma/contracts/review";
+import { axesOf, directionInGrid, xyzToWorld } from "@voluma/contracts/ruler";
+import { dot, fitNormal } from "./frame";
 import type { PlaneTarget } from "./QuadViewer";
 import type { Blocks } from "./review";
 
 /** A plane fitted through surfaces: its view's code ("GP"), its name in words, the surfaces' ids. */
 export type PlaneFit = { code: string; name: string; surfaces: readonly string[] };
-
-/** A volume's axes as world unit vectors, x, y, z (the affine's columns). */
-const axesOf = (v: Volume): [Vec3, Vec3, Vec3] =>
-  [0, 1, 2].map((j) => {
-    const col: Vec3 = [v.affine[0][j]!, v.affine[1][j]!, v.affine[2][j]!];
-    const n = Math.hypot(...col);
-    return [col[0] / n, col[1] / n, col[2] / n];
-  }) as unknown as [Vec3, Vec3, Vec3];
-
-/** A world direction in the grid's mm, (z, y, x). */
-function inGrid(image: Volume, world: Vec3): Vec3 {
-  const [x, y, z] = axesOf(image);
-  const d = (a: Vec3) => a[0] * world[0] + a[1] * world[1] + a[2] * world[2];
-  return [d(z), d(y), d(x)];
-}
 
 export function planeTargets({
   revision,
@@ -33,6 +21,7 @@ export function planeTargets({
   assets,
   assetBase,
   fits,
+  grids,
 }: {
   revision: Blocks;
   /** The shown grid's image volume. */
@@ -41,6 +30,8 @@ export function planeTargets({
   /** The URL prefix of a converted file, ending in "/". */
   assetBase(sha256: string): string;
   fits: readonly PlaneFit[];
+  /** Every grid the run published (`outputBlocks`), the shown one included. */
+  grids: readonly Grid[];
 }): PlaneTarget[] {
   const image = revision.volumes.find((v) => v.id === imageId);
   if (!image) return [];
@@ -65,36 +56,36 @@ export function planeTargets({
               const response = await fetch(`${assetBase(s.sha256)}${m.path}`);
               if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const xyz = new Float32Array(await response.arrayBuffer(), 0, m.vertices * 3);
-              const a = s.on.affine;
-              const world = new Float64Array(xyz.length);
-              for (let i = 0; i < xyz.length; i += 3)
-                for (let r = 0; r < 3; r++)
-                  world[i + r] =
-                    a[r]![0]! * xyz[i]! +
-                    a[r]![1]! * xyz[i + 1]! +
-                    a[r]![2]! * xyz[i + 2]! +
-                    a[r]![3]!;
-              return world;
+              return xyzToWorld(s.on.affine, xyz);
             }),
           ),
         );
         const normal = fitNormal(points);
         if (!normal) throw new Error("the surfaces have too few points");
-        return { normal: inGrid(image, normal) };
+        return { normal: directionInGrid(image.affine, normal) };
       },
     };
   });
-  const grids = revision.volumes
-    .filter((v) => v.kind === "image" && v.gridId !== image.gridId && v.data)
-    .map(
-      (v): PlaneTarget => ({
-        id: `grid:${v.id}`,
-        name: `the ${v.name.charAt(0).toLowerCase()}${v.name.slice(1)}`,
-        load: async () => {
-          const [x, y, z] = axesOf(v);
-          return { axes: [inGrid(image, z), inGrid(image, y), inGrid(image, x)] as const };
-        },
-      }),
-    );
-  return [...planes, ...grids];
+  // A grid whose axes are the shown grid's (any run published before the harness wrote poses
+  // gives every grid the scan's) would only do what Reset does.
+  const [ix, iy, iz] = axesOf(image.affine);
+  const same = (g: Grid) =>
+    axesOf(g.affine).every((a, k) => Math.abs(dot(a, [ix, iy, iz][k]!)) > 1 - 1e-9);
+  const targetOf = (g: Grid): PlaneTarget => ({
+    id: `grid:${g.id}`,
+    name: `the ${g.name.charAt(0).toLowerCase()}${g.name.slice(1)}`,
+    tag: g.by,
+    load: async () => {
+      const [x, y, z] = axesOf(g.affine);
+      const inGrid = (a: readonly [number, number, number]) => directionInGrid(image.affine, a);
+      return { axes: [inGrid(z), inGrid(y), inGrid(x)] as const };
+    },
+  });
+  const other = grids.filter((g) => g.id !== imageId && !same(g));
+  // Frames a task oriented for come before the plane fits, other grids after them.
+  return [
+    ...other.filter((g) => g.kind === "file").map(targetOf),
+    ...planes,
+    ...other.filter((g) => g.kind === "base").map(targetOf),
+  ];
 }

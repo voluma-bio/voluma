@@ -21,6 +21,7 @@ import { agentLog, openApprovals } from "@voluma/contracts/agents";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
 import { outputsFold } from "@voluma/contracts/output-fold";
+import { toVoxel } from "@voluma/contracts/ruler";
 import type { RunRead } from "@voluma/contracts/run";
 import {
   type AgentLinks,
@@ -56,7 +57,6 @@ import {
   type PlaneFit,
   QUAD_START,
   type QuadLayout,
-  voxelOf,
   type Zyx,
 } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
@@ -183,7 +183,7 @@ export function OutputsReview({
     review.undeclared[0];
   const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
   const live = run.state.status !== "ended";
-  const { trailOpen, standIn } = inViewOf(review, selected, opened, live);
+  const { trailOpen, standIn, soFar } = inViewOf(review, selected, opened, live, blocks);
   // Picking any output: a listed value opens in place; anything else under the value resting on it.
   const show = useCallback(
     (id: string) => {
@@ -258,7 +258,7 @@ export function OutputsReview({
     if (!a || image?.data?.format !== "npy" || !gridKey) return;
     if (assets[image.data.sha256]?.state !== "ready") return;
     aimedFor.current = inViewId;
-    const end = voxelOf(image, a.kind === "point" ? a.position : a.a);
+    const end = toVoxel(image.affine, a.kind === "point" ? a.position : a.a);
     const at = end.map((n, i) => Math.max(0, Math.min(image.shapeZyx[i]! - 1, Math.round(n))));
     jumpTo({ at: at as unknown as Zyx, gridKey, output: inViewId });
   }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
@@ -495,6 +495,7 @@ export function OutputsReview({
           onLayout,
           planesOf,
           fits,
+          grids: blocks.grids,
           onSave: views.save && ((state, grid) => views.save!(inView, state, grid)),
           restore: views.restore,
           onEdit,
@@ -506,7 +507,7 @@ export function OutputsReview({
 
   return (
     <>
-      <InputHeading run={run} study={study.data} waitingOnYou={waiting > 0} />
+      <InputHeading run={run} study={study.data} waitingOnYou={waiting > 0} toCheck={toCheck} />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"
@@ -604,6 +605,7 @@ export function OutputsReview({
             live={live}
             root={selected}
             standIn={!!standIn}
+            soFar={!!soFar}
             inView={inView}
             trailOpen={!!trailOpen}
             onBack={() => select({ trail: null, item: null })}
@@ -692,6 +694,7 @@ function SceneBar({
   live,
   root,
   standIn,
+  soFar,
   inView,
   trailOpen,
   onBack,
@@ -706,6 +709,8 @@ function SceneBar({
   root: OutputRow | undefined;
   /** `inView` is what `root`, not in yet, rests on. */
   standIn: boolean;
+  /** `inView` is the run's newest drawable output, shown while nothing `root` rests on is in. */
+  soFar: boolean;
   inView: OutputRow | undefined;
   trailOpen: boolean;
   onBack: () => void;
@@ -731,7 +736,7 @@ function SceneBar({
         </Button>
       </header>
     );
-  if (!inView || !root) return null;
+  if (!inView || (!root && !soFar)) return null;
   const { status, word } = statusOf(inView, live);
   // A reported value can still rest on something to check.
   const inherited = !trailOpen && restsOnOpen(inView);
@@ -744,9 +749,11 @@ function SceneBar({
           aria-keyshortcuts="Escape"
           className="shrink-0 cursor-pointer text-xs text-muted-foreground hover:text-foreground"
         >
-          {root.name} ›
+          {root?.name} ›
         </button>
-      ) : standIn ? (
+      ) : soFar ? (
+        <span className="shrink-0 text-xs text-muted-foreground">Made so far, not final:</span>
+      ) : standIn && root ? (
         <span className="shrink-0 text-xs text-muted-foreground">{root.name} is based on</span>
       ) : (
         inView.state.section && (

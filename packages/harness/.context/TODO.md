@@ -18,9 +18,17 @@
 - **Delete the pre-pull API fallback (R3p, two-step).** After the API that answers `POST /events` with `{seq}` and heartbeats with `lastSeq` is live on every environment: in `adapters/http/run-client.ts` `append`, drop the `204 → undefined` branch; make `EventLog.append` return a `number`; in `recorder.ts` drop the `seq !== undefined` guard and the `viewSeq() + 1` numbering.
 
 - **Keep `options.input` on a resume with no user message in History.** `start-thread.ts:311-322` drops `options.input` in that branch; add the input after the prompt there (#494 review, note 1).
+- **Delete the pre-`review.md` fallback.** `reviewText` in `prompts.ts` uses the snapshot's `corrections` skill when the snapshot has no `core/review.md` (runs started before the review-loop PR; their roles are in `core/roles/`). Delete it, and `WorkflowDefinition.review` becomes required, once no run that can still be reopened predates it.
+- **Write the handover right after the run main's close (Later, review-loop design).** The first reply after a run ends waits for the summary call. Make it while the main's cache is warm, store it under the kept notes (`notesKey`), and have `handoverOf` read it. Not done: it adds a stored file and a second call site.
 
 - A mark's "drawn on <image> vN" names that image's latest version when main is told, not the one it was drawn on: they
   differ only if a new version of the base is published between send and delivery. Freeze the version in the attached
   mark at send (`freezeAttached`) to close it.
 
 - **`segment_plate` is a mouse-oa tool in the shared worker role.** `workflows/core/agents/worker.md` lists it, so every workflow's workers are offered it, and outside mouse-oa `python3 -m plate_model` fails with `ModuleNotFoundError` and the fallback hint. Let a workflow declare the tools it adds to a role, the way it lists skills, and move `segment_plate` to mouse-oa's declaration (#550 review).
+
+- **Delete `preFixStartFailure` in `review-assets.ts`** once no run a person can reopen holds an `assets.failed` from before `START_FAILED` ("the convert sandbox failed: the sandbox could not be started: …", e.g. staging `4df02afe`): reopen those first, or check every staging run's stream for the phrase (#559 review).
+
+- **Delete the image-mm half of a mark's delivery line.** `personLines` (`deliveries.ts`) prints a mark as voxels and, in parentheses, as image mm (voxel times spacing) for runs whose workflow snapshot's `marks_to_grid.py` still reads `--world` mm. Once no run started before `--voxels` (2026-11-04) can be reopened, drop the parentheses.
+
+- **A quick first look at the scan.** On a 2 GB OA6 scan the scan's review assets are ready about 8 minutes after it is published (staging `27ccb04f`: published 11:10:57 PT, `assets.ready` 11:18:51), so the panes show "Preparing" that long. Convert a low-resolution level first (e.g. the 1:4 level and no meshes), record it so review can draw it, then the full pyramid; review asks for what is ready. Needs a contract for a partial `assets.ready` (or a second event) and the viewer to take the coarser level.

@@ -1,7 +1,8 @@
 /**
  * What the grid viewer draws: one analysis grid with its image, the overlays and meshes made
  * on that same grid, all from converted review assets (OME-Zarr levels and raw meshes). Every
- * position is a source voxel (z, y, x) of the grid; the viewer never resamples between grids.
+ * position is a source voxel (z, y, x) of the grid; the viewer never resamples between grids. The
+ * one exception is a mesh's `placement`: a rigid move of another grid's geometry onto this one.
  */
 
 import type { MarkShape } from "@voluma/contracts/agent-events";
@@ -58,6 +59,11 @@ export type Overlay = ZarrSource & {
   color: string | Readonly<Record<number, string>>;
   /** 0 to 1, of the overlay's full blend: one for the mask, or one per label value (default 1). */
   opacity: number | Readonly<Record<number, number>>;
+  /**
+   * The subject's own region, for every value or per label value: filled stronger, and a pixel
+   * whose 4-neighbour holds another value of this overlay is painted at full opacity.
+   */
+  outline?: boolean | Readonly<Record<number, boolean>>;
 };
 
 /** float32 vertices (x, y, z) in source voxels, then uint32 indices, little-endian. */
@@ -68,11 +74,18 @@ export type GridMesh = {
   vertices: number;
   indices: number;
   offsetZyx: Zyx;
+  /**
+   * For a mesh made on another grid: a 4×4 row-major matrix from that grid's source voxel
+   * (x, y, z), after `offsetZyx`, to this grid's. It moves the geometry; no voxel is resampled.
+   */
+  placement?: readonly (readonly number[])[];
   color: string;
   /** 0 hides the mesh but keeps it loaded. */
   opacity: number;
   /** A surface sheet also intersects each slice as a trace. */
   trace?: boolean;
+  /** The output's own object (not context, not a focused check): the 3D pane opens facing it. */
+  own?: true;
 };
 
 /** Published annotations, mapped from world mm into this grid's source voxels. */
@@ -141,11 +154,13 @@ export type PaneView =
  */
 export type PaneStatus = "loading" | "refining" | "ready" | "failed";
 
-/** What a pane does for screenshots: its pixels as drawn now, and showing a saved view. */
+/** What a pane does for saved views and screenshots: its view now, showing a saved view, and its canvases. */
 export type PaneHandle = {
-  capture(): { pngBase64: string; width: number; height: number; view: PaneView };
-  /** The pane's own view now, without drawing. */
-  view(): PaneView;
+  /**
+   * The pane's own view now, without drawing; null for a slice pane that has never had a size
+   * (a mounted view no layout has shown yet).
+   */
+  view(): PaneView | null;
   show(view: PaneView): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
@@ -180,13 +195,3 @@ export async function pngWithin(frozen: HTMLCanvasElement, maxBytes: number): Pr
 
 /** The widest picture a snapshot is drawn at, in pixels. */
 export const SNAPSHOT_WIDTH = SNAPSHOT_WIDTHS[0]!;
-
-/** Draws the pane now and reads its canvas, before the browser clears the drawing buffer. */
-export function capturePane(canvas: HTMLCanvasElement, draw: () => void) {
-  draw();
-  return {
-    pngBase64: canvas.toDataURL("image/png").slice("data:image/png;base64,".length),
-    width: canvas.width,
-    height: canvas.height,
-  };
-}

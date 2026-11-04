@@ -7,6 +7,7 @@ import { type AgentLog, agentLog } from "@voluma/contracts/agents";
 import { openingOutputs } from "@voluma/contracts/final-outputs";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import { summarizeRows } from "./adapters/pi/compaction";
 import type { BashRuntime } from "./bash-runtime";
 import type { ProviderError } from "./failure-policy";
 import { keepNotes, restoreMainPlan } from "./keep-notes";
@@ -15,9 +16,16 @@ import { GATEWAY_TOOLS, runLayout } from "./layout";
 import { agentLoop, interruptedResult } from "./loop";
 import type { LoopConfig, ModelSetup } from "./loop-config";
 import type { Section } from "./loop-shell";
+import { usageOf } from "./model-usage";
 import { FileNotFound, type RunBucket } from "./ports/bucket";
 import type { History } from "./ports/history";
-import { type AgentStart, firstMessageOf, skillBlock, systemPromptOf } from "./prompts";
+import {
+  type AgentStart,
+  firstMessageOf,
+  HANDOVER_INSTRUCTION,
+  skillBlock,
+  systemPromptOf,
+} from "./prompts";
 import type { Recorder } from "./recorder";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
@@ -159,6 +167,30 @@ export async function runAgents(o: RunAgentsOptions): Promise<void> {
         agent,
         signal: o.signal,
       }),
+    handoverSummary: async (previous, forThread) => {
+      const rows = await o.history.load(previous.id);
+      if (rows.length === 0) throw new Error("it stored no history");
+      const { model, thinkingLevel, streamFn } = o.model("main", undefined);
+      const { text, reply } = await summarizeRows(
+        { threadId: previous.id, model, thinkingLevel, streamFn },
+        rows,
+        HANDOVER_INSTRUCTION,
+        o.signal,
+      );
+      // The call is spend, like a compaction's: recorded on the thread it summarized.
+      const used = usageOf(reply);
+      await recorder.append(
+        previous.id,
+        "message",
+        { role: "assistant", text, compaction: true, ...(used && { usage: used }) },
+        `${previous.id}:handover:${forThread}`,
+      );
+      if (!text)
+        throw new Error(
+          reply.errorMessage ?? `the model wrote no summary (stop reason ${reply.stopReason})`,
+        );
+      return text;
+    },
     providerError: o.providerError,
     config: o.config,
     signal: o.signal,
@@ -217,7 +249,7 @@ export async function runAgents(o: RunAgentsOptions): Promise<void> {
               finalOutputs: renderFinalOutputs(recorder.events()),
               selected: openingOutputs(catalog, o.selectedOutputs).length,
               limit: api.limit,
-              ...(agent.takeover !== undefined && { takeover: agent.takeover }),
+              ...(agent.handover && { handover: agent.handover }),
               ...(o.notes && { notes: o.notes }),
             }
           : {
@@ -238,7 +270,7 @@ export async function runAgents(o: RunAgentsOptions): Promise<void> {
       });
       return {
         ...setup,
-        systemPrompt: systemPromptOf({ definition, layout }),
+        systemPrompt: systemPromptOf({ definition, layout, review: agent.review }),
         prompt: firstMessageOf({ definition, start }),
         tools,
         labelOf: (sender) => {

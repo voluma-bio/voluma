@@ -52,7 +52,7 @@ export type MarkLayer = {
   layers(picture: HTMLCanvasElement, paint: () => void): HTMLCanvasElement[];
   /**
    * A gesture begins with this pointer, captured on the pane unless `capture` is false (a 3D
-   * click leaves the pointer to the orbit controls).
+   * click leaves the pointer to the camera controls).
    */
   start(event: PointerEvent, capture?: boolean): void;
   /** Lets the pointer go and keeps the draft: a mark made by clicks, between clicks. */
@@ -223,7 +223,7 @@ export function useMarkLayer(
       layer.draw();
     });
     observer.observe(element);
-    // Only the pane's own capture: the orbit controls capture on the canvas inside it.
+    // Only the pane's own capture: the 3D pane captures on the canvas inside it.
     const lost = (event: PointerEvent) => {
       if (event.target === element && layer.owns(event)) layer.cancel();
     };
@@ -594,12 +594,4 @@ export function markPoints(mark: GridMark): readonly Zyx[] {
   if ("angle" in mark) return [mark.angle.aZyx, mark.angle.vertexZyx, mark.angle.bZyx];
   if ("path" in mark) return mark.path.zyx;
   return mark.outline.zyx;
-}
-
-/** A voxel (z, y, x) in world mm (x, y, z) through a volume's 4x4 row-major affine. */
-export function worldOf(p: Zyx, affine: readonly (readonly number[])[]): [number, number, number] {
-  const [x, y, z] = [p[2], p[1], p[0]];
-  const row = (r: number) =>
-    affine[r]![0]! * x + affine[r]![1]! * y + affine[r]![2]! * z + affine[r]![3]!;
-  return [row(0), row(1), row(2)];
 }

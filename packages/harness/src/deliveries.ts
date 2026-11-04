@@ -14,6 +14,8 @@ import {
 import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
+import type { Volume } from "@voluma/contracts/review";
+import { toVoxel } from "@voluma/contracts/ruler";
 import { callKey } from "@voluma/contracts/thread-records";
 
 /** Characters of a worker-to-worker message shown to main as a receipt. */
@@ -129,7 +131,12 @@ function approvalLine(
   }
 }
 
-const mm = (v: readonly number[]) => `(${v.map((x) => Number(x.toFixed(2))).join(", ")})`;
+const IDENTITY: Volume["affine"] = [
+  [1, 0, 0, 0],
+  [0, 1, 0, 0],
+  [0, 0, 1, 0],
+  [0, 0, 0, 1],
+];
 
 const SHAPES: Record<string, string> = {
   point: "a point",
@@ -142,9 +149,10 @@ const SHAPES: Record<string, string> = {
 
 /**
  * The message the researcher sent, with each mark they attached in the plain terms of the notice (`design-r3.md`). Positions
- * are mm on the image the mark was drawn on, named by output id and version: voxel index times spacing from that image's
- * voxel 0, the review's own placement (`detailFromSidecar`), not the scan's world mm, so a worker maps them with that
- * image's header (`marks_to_grid.py --drawn-on`).
+ * are voxels `[z, y, x]` of the image the mark was drawn on, named by output id and version: the mark's mm taken back through
+ * the affine that version was published with, the one the review placed it by (identity when it has none, as the review
+ * does). So they are right whether that affine is the grid's world pose or, on a run published before sidecars carried one,
+ * spacing only; a worker maps them onto another grid with both headers (`marks_to_grid.py --drawn-on`).
  */
 function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?: string): string {
   const fold = outputsFold(events);
@@ -152,9 +160,23 @@ function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?:
     const shape = SHAPES[Object.keys(a.mark.mark).find((k) => k in SHAPES) ?? ""] ?? "a mark";
     const view = a.mark.plane ? `the ${a.mark.plane.view.toUpperCase()} plane` : "3D";
     const image = fold.byId.get(a.mark.volume)?.latest;
-    // With no spacing in its sidecar the review shows that image at 1 mm a voxel: its "mm" are voxel indices.
-    const unspaced = image && !(image.detail as { affine?: unknown } | undefined)?.affine;
-    const where = `${shape} drawn on ${a.mark.volume}${image ? ` v${image.version}` : ""}${unspaced ? " (no spacing known: its mm below are voxel indices)" : ""}, in ${view}`;
+    const affine = (image?.detail as { affine?: Volume["affine"] } | undefined)?.affine ?? IDENTITY;
+    const at = (world: readonly (readonly number[])[]) => world.map((p) => toVoxel(affine, p));
+    const voxels = (world: readonly (readonly number[])[]) =>
+      at(world)
+        .map((v) => `[${v.map((n) => Number(n.toFixed(1))).join(", ")}]`)
+        .join("–");
+    // For a run whose workflow snapshot's marks_to_grid.py predates `--voxels`: it reads the last
+    // "at"/"to" group of (x, y, z) image mm (voxel index times spacing). Delete with that snapshot.
+    const spacing = [0, 1, 2].map((j) => Math.hypot(affine[0][j]!, affine[1][j]!, affine[2][j]!));
+    const imageMm = (world: readonly (readonly number[])[]) =>
+      at(world)
+        .map(
+          ([z, y, x]) =>
+            `(${[x, y, z].map((n, i) => Number((n * spacing[i]!).toFixed(2))).join(", ")})`,
+        )
+        .join("–");
+    const where = `${shape} drawn on ${a.mark.volume}${image ? ` v${image.version}` : ""}, in ${view}`;
     const head = `- ${a.change}: "${a.mark.tag}" on ${a.mark.output} v${a.version}, ${where}`;
     const { line, path } = a.mark.mark as {
       line?: { lengthMm?: number };
@@ -162,15 +184,15 @@ function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?:
     };
     const lengthMm = line?.lengthMm ?? path?.lengthMm;
     const length = lengthMm === undefined ? "" : `, length ${Number(lengthMm.toFixed(2))} mm`;
-    const ends = a.mark.world.map(mm).join("–");
+    const ends = `at voxels ${voxels(a.mark.world)} (image mm at ${imageMm(a.mark.world)})`;
     if (a.change === "move" && a.was)
-      return `${head}, from ${a.was.world.map(mm).join("–")} to ${ends} mm${length}`;
+      return `${head}, from voxels ${voxels(a.was.world)} to voxels ${voxels(a.mark.world)} (image mm from ${imageMm(a.was.world)} to ${imageMm(a.mark.world)})${length}`;
     if (a.change === "place") {
       // A ruler end dragged is a first `mark.placed` of an output the AI drew: the original is in its files.
       const drawn = fold.byId.get(a.mark.output)?.latest?.detail?.points !== undefined;
-      return `${head} at ${ends} mm${length}${drawn ? `; the AI's version is in ${a.mark.output} v${a.version}'s files (\`/run/outputs.yaml\` gives the path)` : ""}`;
+      return `${head} ${ends}${length}${drawn ? `; the AI's version is in ${a.mark.output} v${a.version}'s files (\`/run/outputs.yaml\` gives the path)` : ""}`;
     }
-    return `${head} at ${ends} mm${length}`;
+    return `${head} ${ends}${length}`;
   });
   const checkTitle = m.toCheck
     ? fold.byId.get(m.toCheck.output)?.versions.find((v) => v.version === m.toCheck?.version)
@@ -190,7 +212,7 @@ function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?:
     ...about,
     ...(marks.length > 0
       ? [
-          "Marks they attached (their annotations, not outputs; nothing changed until you change it). Their mm are on the image each was drawn on, not the scan's world mm:",
+          "Marks they attached (their annotations, not outputs; nothing changed until you change it), as voxels [z, y, x] of the image each was drawn on:",
           ...marks,
         ]
       : []),
@@ -255,7 +277,7 @@ interface DeliveryParts {
   pending: string[];
   /** The researcher is reviewing: an out-of-date output may also be left to them. */
   reviewing: boolean;
-  /** Skill texts due with this delivery (`researcher`, `corrections`). */
+  /** Skill texts due with this delivery (`researcher`). */
   skills: string[];
 }
 

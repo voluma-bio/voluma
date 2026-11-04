@@ -6,15 +6,18 @@ Every `.npy` a resource writes has `<name>.json` beside it:
   spacing_zyx_mm   voxel size in mm, axes in array order
   inputs           {path: sha256} of every file the array was computed from
   params           the parameters that produced it
+  affine_xyz_to_world_mm  the grid's placement in the scan's world mm, when the grid's header has it (`hu.json`, a `frame.json`):
+                   `report_output` publishes the array with it, so the review places one grid against another
   offset_zyx       only on a cropped array: the index on the grid of its [0, 0, 0] (`objects.mask`, the morphometry maps)
   surface_axis     only on a surface: the array axis its heights are measured along (`objects.surface`)
-`write` owns the keys above: it writes `offset_zyx` and `surface_axis` when given and removes a stale one when not. A sidecar that
-already exists keeps its other keys (`segment_sam` puts its prompts, per-object confidence and its own `axis`, the one it sliced along, in the same file).
+`write` owns the keys above: it writes `affine_xyz_to_world_mm`, `offset_zyx` and `surface_axis` when it has them and removes a stale
+one when not. A sidecar that already exists keeps its other keys (`segment_sam` puts its prompts, per-object confidence and its own
+`axis`, the one it sliced along, in the same file).
 
 Library use (other resources import this file):
   import sidecar
   sidecar.write(out_npy, like='hu.json', inputs=[hu_path], params={...})   # same grid as `like`
-  sidecar.write(out_npy, grid_id=new_id, spacing_zyx_mm=[...], inputs=[...], params={...})   # a new grid
+  sidecar.write(out_npy, like=frame, inputs=[...], params={...})   # a grid given as a dict: a frame (`frame.py`), or sidecar.grid(...)
   sidecar.grid(path)       # the grid fields (grid_id, spacing_zyx_mm, and shape when the file has one) of a sidecar or an intake header
   sidecar.bone_threshold_hu(header, override)   # the lab's measurement threshold in this scan's HU, or the override
   sidecar.emit(**fields)   # print the one JSON line a resource prints to stdout (fails on NaN)
@@ -167,17 +170,16 @@ def derived_grid_id(parent_grid_id, frame):
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
-def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=(), params=None, script=None, offset_zyx=None,
-          surface_axis=None):
-    """Write the sidecar of `array_path`, beside the keys of an existing one that this function does not own."""
-    if like is not None:
-        g = grid(like)
-        grid_id, spacing_zyx_mm = g['grid_id'], g['spacing_zyx_mm']
-    if grid_id is None:
-        fail('sidecar.write needs `like` or a grid_id')
+def write(array_path, *, like, inputs=(), params=None, script=None, offset_zyx=None, surface_axis=None):
+    """Write the sidecar of `array_path`, beside the keys of an existing one that this function does not own. `like` is the grid
+    the array is on: the path of a header or sidecar, or a dict with its `grid_id`, `spacing_zyx_mm` and, when known,
+    `affine_xyz_to_world_mm` (a frame from `frame.py`, or `grid(...)`)."""
+    g = like if isinstance(like, dict) else grid(like)
+    affine = g.get('affine_xyz_to_world_mm')
     a = np.load(array_path, mmap_mode='r')
     meta = {
-        'grid_id': grid_id, 'shape': list(a.shape), 'dtype': str(a.dtype), 'spacing_zyx_mm': spacing_zyx_mm,
+        'grid_id': g['grid_id'], 'shape': list(a.shape), 'dtype': str(a.dtype), 'spacing_zyx_mm': g['spacing_zyx_mm'],
+        **({'affine_xyz_to_world_mm': affine} if affine is not None else {}),
         'inputs': {str(p): sha256_file(p) for p in inputs}, 'params': params or {},
         'script': script or Path(sys.argv[0]).name,
         **({'offset_zyx': [int(i) for i in offset_zyx]} if offset_zyx is not None else {}),
@@ -185,7 +187,8 @@ def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=()
     }
     out = sidecar_path(array_path)
     if out.exists():  # segment_sam writes its own <labels>.json (prompt, per-object confidence): keep its keys
-        old = {k: v for k, v in json.loads(out.read_text()).items() if k not in ('offset_zyx', 'surface_axis')}  # positional: never stale
+        owned = ('affine_xyz_to_world_mm', 'offset_zyx', 'surface_axis')  # never stale
+        old = {k: v for k, v in json.loads(out.read_text()).items() if k not in owned}
         meta = {**old, **meta}
     out.write_text(json.dumps(meta, indent=1, default=float) + '\n')
     return out

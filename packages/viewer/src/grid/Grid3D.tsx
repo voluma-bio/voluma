@@ -1,8 +1,14 @@
 /**
- * The grid viewer's 3D pane: the image as a volume rendering with the scene's meshes in it, in
- * the grid's own mm (voxel × spacing; the grid's rotation into the scan is not applied). Drag
- * rotates, right drag pans, the wheel zooms; a click on a mesh moves the crosshair there. Loading
- * the volume or meshes never moves the camera.
+ * The grid viewer's 3D pane: the scene's meshes, or the image as a volume rendering when the
+ * scene has none (the scan before segmentation), in the grid's own mm (voxel × spacing; the grid's
+ * rotation into the scan is not applied). Drag turns the scene like a ball in any direction, over
+ * the top and around the view axis (a drag near the edge rolls); Shift, Ctrl/⌘ or right drag
+ * pans; the wheel or middle drag zooms. A click on a mesh moves the crosshair there.
+ *
+ * The camera opens on the grid's centre from the side of the output's own meshes (`GridMesh.own`),
+ * so they sit in front of the see-through context. It turns there each time an output's own
+ * meshes have loaded, until a gesture or a restored view has touched the camera; after that,
+ * loading the volume or meshes never moves it. The reset button returns to that view for the meshes shown now.
  *
  * With Point, a click marks the visible surface under the pointer (the first shown mesh, or the
  * volume where it becomes half opaque, whichever is nearer) and a ring shows where it would land;
@@ -11,9 +17,10 @@
  * the anatomy (`marks.ts`).
  *
  * Each frame renders the meshes into a target with depth, copies it to the canvas, then
- * ray-marches the volume over it, stopping each ray at the meshes' depth (`volume.ts`).
+ * ray-marches the volume, if any, over it (`volume.ts`).
  */
-import { cx } from "@voluma/ui";
+import { cx, IconButton } from "@voluma/ui";
+import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
@@ -22,10 +29,13 @@ import {
   DepthTexture,
   DirectionalLight,
   DoubleSide,
+  FrontSide,
   Group,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  type Object3D,
   OrthographicCamera,
   PerspectiveCamera,
   PlaneGeometry,
@@ -39,23 +49,22 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { ArcballControls } from "three/addons/controls/ArcballControls.js";
 import type { Contrast } from "./compose";
 import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { holdLevel } from "./planes";
-import {
-  type AssetLevel,
-  capturePane,
-  type GridMark,
-  type GridMesh,
-  type GridScene,
-  type MarkTool,
-  type PaneHandle,
-  type PaneStatus,
-  type ShownMark,
-  type Zyx,
+import type {
+  AssetLevel,
+  GridMark,
+  GridMesh,
+  GridScene,
+  MarkTool,
+  PaneHandle,
+  PaneStatus,
+  ShownMark,
+  Zyx,
 } from "./scene";
 import { tokenColor } from "./token-color";
 import { volumeBytes, volumeLevel, volumeMesh, volumeSteps } from "./volume";
@@ -90,10 +99,14 @@ export function Grid3D({
     volumes: Scene;
     depth: DepthTexture;
     render(): void;
+    reset(): void;
+    aim(): void;
   } | null>(null);
   const [meshLoad, setMeshLoad] = useState<{ left: number; error?: string }>({ left: 0 });
+  // The raw image is drawn only under no meshes: with them its threshold surface hides them.
+  const volumeWanted = scene.meshes.length === 0;
   const [volumeLoad, setVolumeLoad] = useState<{ loading: boolean; error?: string }>({
-    loading: true,
+    loading: volumeWanted,
   });
   const latest = useRef(onPoint);
   latest.current = onPoint;
@@ -138,8 +151,6 @@ export function Grid3D({
     const s = new Scene();
     const camera = new PerspectiveCamera(30, 1, 0.01, 1000);
     eye.current = camera;
-    // Array z runs down the screen, as in the slice panes.
-    camera.up.set(0, 0, -1);
     const size = toWorld(scene.shapeZyx);
     const center = size.clone().multiplyScalar(0.5);
     const radius = size.length() / 2;
@@ -152,9 +163,27 @@ export function Grid3D({
       );
     }
     const clip = bounds.getBoundingSphere(new Sphere());
-    camera.position
-      .copy(center)
-      .add(new Vector3(1.2, 2.2, -0.8).normalize().multiplyScalar(radius * 3.6));
+    // The opening view looks at the grid's centre from the side of the output's own meshes, so
+    // they sit in front of the see-through context; from a default side when they are near the
+    // centre or there are none. Array z runs down the screen, as in the slice panes, unless the
+    // view is nearly along z.
+    const opening = () => {
+      const own = new Box3();
+      for (const child of meshes.children)
+        if (child.visible && child.userData.own) own.expandByObject(child);
+      const offset = own.isEmpty() ? new Vector3() : own.getCenter(new Vector3()).sub(center);
+      const direction = (
+        offset.length() > radius * 0.05 ? offset : new Vector3(1.2, 2.2, -0.8)
+      ).normalize();
+      return {
+        position: center.clone().add(direction.clone().multiplyScalar(radius * 3.6)),
+        target: center,
+        up:
+          Math.abs(direction.z) > Math.cos((10 * Math.PI) / 180)
+            ? new Vector3(0, -1, 0)
+            : new Vector3(0, 0, -1),
+      };
+    };
     const light = new DirectionalLight(0xffffff, 2.2);
     camera.add(light);
     light.position.set(0.3, 0.6, 1);
@@ -175,9 +204,18 @@ export function Grid3D({
     const volumes = new Scene();
     const annotations = new Scene();
     const size2 = new Vector2();
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.copy(center);
-    controls.enableDamping = false;
+    // No scene, so no gizmos; no fling after a drag, no double-click focus.
+    const controls = new ArcballControls(camera, renderer.domElement);
+    controls.enableAnimations = false;
+    controls.enableFocus = false;
+    // Its defaults, less FOV on Shift (Shift + wheel or middle drag zooms), plus Shift drag pans.
+    controls.unsetMouseAction("WHEEL", "SHIFT");
+    controls.unsetMouseAction(1, "SHIFT");
+    controls.setMouseAction("PAN", 0, "SHIFT");
+    // `target` (untyped in @types/three) is where `setCamera` looks and pivots. The pivot after
+    // that is the private gizmo group's position: a pan moves it and leaves `target` behind.
+    const arcball = controls as unknown as { target: Vector3; _gizmos: Object3D };
+    const pivot = arcball._gizmos.position;
     // One frame per animation frame, however many changes asked for it.
     let frame = 0;
     const draw = () => {
@@ -217,23 +255,49 @@ export function Grid3D({
       frame ||= requestAnimationFrame(draw);
     };
     controls.addEventListener("change", render);
-    controls.update();
-    three.current = { meshes, annotations, volumes, depth, render };
+    // Sets the camera from outside; `setCamera` makes the controls continue from it.
+    const place = (position: Vector3, target: Vector3, up: Vector3) => {
+      camera.position.copy(position);
+      camera.up.copy(up);
+      arcball.target.copy(target);
+      controls.setCamera(camera);
+      // Gestures read the pivot from the group's matrix, which nothing renders to refresh, and
+      // `setCamera` moves only its position: unrefreshed, a pan or zoom jumps to the origin.
+      arcball._gizmos.updateMatrix();
+      render();
+    };
+    const reset = () => {
+      const { position, target, up } = opening();
+      place(position, target, up);
+    };
+    reset();
+    // The camera turns to face the output whenever its own meshes have loaded, until a gesture or
+    // a restored view has touched it.
+    let touched = false;
+    controls.addEventListener("start", () => {
+      touched = true;
+    });
+    const aim = () => {
+      if (!touched) reset();
+    };
+    three.current = { meshes, annotations, volumes, depth, render, reset, aim };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
+    // Up from the camera's own turn: the controls leave `camera.up` meaningless after a rotate.
     const now = () => ({
-      camera: { position: xyz(camera.position), target: xyz(controls.target), up: xyz(camera.up) },
+      camera: {
+        position: xyz(camera.position),
+        target: xyz(pivot),
+        up: xyz(new Vector3(0, 1, 0).applyQuaternion(camera.quaternion)),
+      },
     });
     handle.current = {
-      capture: () => ({ ...capturePane(renderer.domElement, draw), view: now() }),
       view: now,
       layers: () => layer.layers(renderer.domElement, draw),
       show(saved) {
         if (!("camera" in saved)) return;
-        camera.position.set(...saved.camera.position);
-        camera.up.set(...saved.camera.up);
-        controls.target.set(...saved.camera.target);
-        controls.update();
-        render();
+        const { position, target, up } = saved.camera;
+        touched = true;
+        place(new Vector3(...position), new Vector3(...target), new Vector3(...up));
       },
     };
     const observer = new ResizeObserver(() => {
@@ -244,7 +308,8 @@ export function Grid3D({
       target.setSize(size2.x, size2.y);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      render();
+      // The ball's size follows the pane's aspect; this also draws.
+      controls.setTbRadius(controls.radiusFactor);
     });
     observer.observe(element);
 
@@ -287,6 +352,8 @@ export function Grid3D({
       ];
     };
     const down = (event: PointerEvent) => {
+      // The controls follow the pointer on the window; the release comes back here.
+      renderer.domElement.setPointerCapture(event.pointerId);
       downAt =
         event.button === 0 && !event.shiftKey && !event.ctrlKey && !event.metaKey
           ? { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
@@ -333,12 +400,13 @@ export function Grid3D({
     renderer.domElement.addEventListener("pointerup", up);
 
     // Line: a drag that starts on the surface draws instead of rotating. Captured on the pane,
-    // so the orbit controls on the canvas below never see the press.
+    // so the controls on the canvas below never see the press.
     let line: { from: Zyx } | null = null;
     const lineDown = (event: PointerEvent) => {
       if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) return;
       if (
         line ||
+        event.target !== renderer.domElement ||
         marking.current.tool !== "line" ||
         event.button !== 0 ||
         event.shiftKey ||
@@ -492,10 +560,16 @@ export function Grid3D({
   useEffect(() => {
     const t = three.current;
     if (!t) return;
+    let ownLoaded = false;
+    let ownLeft = false;
     for (const m of scene.meshes) {
       const mesh = t.meshes.getObjectByName(m.id);
       if (mesh instanceof Mesh) paint(mesh, m);
+      if (m.own && mesh) ownLoaded = true;
+      else if (m.own) ownLeft = true;
     }
+    // Another output on this grid can name meshes already loaded as its own.
+    if (ownLoaded && !ownLeft) t.aim();
     t.render();
   }, [scene.meshes]);
   useEffect(() => {
@@ -513,9 +587,12 @@ export function Grid3D({
     }
     const missing = latestMeshes.current.filter((m) => !t.meshes.getObjectByName(m.id));
     setMeshLoad({ left: missing.length });
-    const settle = (error?: string) => {
-      if (!abort.signal.aborted)
-        setMeshLoad((had) => ({ left: had.left - 1, error: had.error ?? error }));
+    // Aim once every own mesh has loaded or failed.
+    let ownLeft = missing.filter((m) => m.own).length;
+    const settle = (m: GridMesh, error?: string) => {
+      if (abort.signal.aborted) return;
+      setMeshLoad((had) => ({ left: had.left - 1, error: had.error ?? error }));
+      if (m.own && !--ownLeft) t.aim();
     };
     for (const m of missing)
       loadMesh(m, abort.signal)
@@ -528,23 +605,36 @@ export function Grid3D({
           const mesh = new Mesh(geometry, material);
           makePickable(mesh);
           mesh.name = m.id;
-          // Vertices are voxel (x, y, z), in crop voxels for a cropped mask.
-          mesh.scale.set(sx, sy, sz);
-          mesh.position.copy(toWorld(m.offsetZyx));
+          // Vertices are voxel (x, y, z), in crop voxels for a cropped mask: to mm, the crop
+          // offset, then for another grid's mesh its rigid placement onto this grid's voxels.
+          const [oz, oy, ox] = m.offsetZyx;
+          const matrix = new Matrix4().makeScale(sx, sy, sz);
+          if (m.placement) matrix.multiply(new Matrix4().fromArray(m.placement.flat()).transpose());
+          mesh.matrix.copy(matrix.multiply(new Matrix4().makeTranslation(ox, oy, oz)));
+          mesh.matrixAutoUpdate = false;
+          // So its world matrix is current before the first render, for the opening view's box.
+          mesh.matrixWorldNeedsUpdate = true;
           paint(mesh, latestMeshes.current.find((l) => l.id === m.id) ?? m);
           t.meshes.add(mesh);
           t.render();
-          settle();
+          settle(m);
         })
-        .catch((cause) => settle(`Couldn't load the ${m.name} mesh: ${(cause as Error).message}`));
+        .catch((cause) =>
+          settle(m, `Couldn't load the ${m.name} mesh: ${(cause as Error).message}`),
+        );
     return () => abort.abort();
   }, [meshIds]);
 
   // The volume: the coarsest level at once, then the finest that fits (`volumeLevel`); the raw
   // values are kept so a contrast change only rebuilds the bytes. Keyed by the asset, not the
-  // object: Review rebuilds the scene on every display change.
+  // object: Review rebuilds the scene on every display change. Not loaded at all under meshes.
   const [levels, setLevels] = useState<{ k: number; values: ArrayLike<number> }[]>([]);
   useEffect(() => {
+    if (!volumeWanted) {
+      setLevels([]);
+      setVolumeLoad({ loading: false });
+      return;
+    }
     const abort = new AbortController();
     const { base, levels: all } = scene.image;
     const coarsest = all.length - 1;
@@ -571,7 +661,7 @@ export function Grid3D({
       abort.abort();
       for (const level of held) level.release();
     };
-  }, [scene.image.base]);
+  }, [scene.image.base, volumeWanted]);
   const shown = levels.reduce<(typeof levels)[number] | undefined>(
     (best, l) => (!best || l.k < best.k ? l : best),
     undefined,
@@ -610,7 +700,7 @@ export function Grid3D({
           : undefined)));
   // A missing surface is missing content; the finer volume only sharpens the coarsest one.
   const status: PaneStatus =
-    (!shown && !volumeLoad.error) || meshLoad.left > 0
+    (volumeWanted && !shown && !volumeLoad.error) || meshLoad.left > 0
       ? "loading"
       : volumeLoad.loading
         ? "refining"
@@ -631,11 +721,21 @@ export function Grid3D({
       tabIndex={0}
       onPointerDown={() => host.current?.focus({ preventScroll: true })}
     >
-      {chip && (
-        <span className={cx(CHIP, "top-2 right-2")} role="status">
-          {chip}
-        </span>
-      )}
+      <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
+        {chip && (
+          <span className={cx(CHIP, "static")} role="status">
+            {chip}
+          </span>
+        )}
+        <IconButton
+          size="sm"
+          label="Reset the 3D view"
+          className="bg-viewer-chip text-viewer-chip-fg hover:bg-viewer-well hover:text-viewer-chip-fg"
+          onClick={() => three.current?.reset()}
+        >
+          <RotateCcw />
+        </IconButton>
+      </div>
     </div>
   );
 }
@@ -646,10 +746,15 @@ function paint(mesh: Mesh, m: GridMesh) {
   material.opacity = m.opacity;
   material.transparent = m.opacity < 1;
   material.depthWrite = m.opacity >= 1;
+  // A see-through shell shows its outer faces only: its back and inner faces would stack and
+  // hide what it contains.
+  material.side = m.opacity < 1 ? FrontSide : DoubleSide;
   material.needsUpdate = true;
   mesh.visible = m.opacity > 0;
   // Draw see-through shells after what they contain.
   mesh.renderOrder = m.opacity < 1 ? 1 : 0;
+  // Which meshes the opening view faces (`opening` in the pane).
+  mesh.userData.own = m.own;
 }
 
 /**

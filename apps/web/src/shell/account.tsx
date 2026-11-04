@@ -1,6 +1,6 @@
 /**
- * The brand lockup (the sign-in screen), the header's mark, and the rail's foot: a guest's Sign in,
- * and Settings (the theme and who is signed in, with Sign in or Sign out). Settings opens by itself
+ * The brand lockup (the sign-in screen), the sidebar's mark, and the rail's Settings and Account
+ * dropdowns: the theme and who is signed in, with Sign in or Sign out. Settings opens by itself
  * when the location's state carries `openSettings` (the old `/settings` page redirects so).
  */
 
@@ -9,7 +9,7 @@ import { signIn, signOut } from "@voluma/api-client";
 import { userSettingsQuery, useUpdateUserSettings } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import { Button, Popover, RailButton, SegmentedControl, volumaMarkUrl } from "@voluma/ui";
-import { LogIn, Settings } from "lucide-react";
+import { CircleUserRound, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
@@ -23,7 +23,7 @@ export function BrandLockup({ className }: { className: string }) {
   );
 }
 
-/** The header's non-interactive brand mark. */
+/** The sidebar's non-interactive brand mark; it fills the slot without a text label. */
 export function BrandMark() {
   return (
     <img
@@ -31,18 +31,7 @@ export function BrandMark() {
       alt="Voluma"
       width={224}
       height={176}
-      className="size-6 object-contain"
-    />
-  );
-}
-
-/** On the rail for a guest, so Sign in needs no hunting. */
-export function RailSignIn() {
-  return (
-    <RailButton
-      label="Sign in"
-      icon={<LogIn />}
-      onClick={() => signIn(location.pathname + location.search)}
+      className="size-9 object-contain"
     />
   );
 }
@@ -57,10 +46,8 @@ export function SettingsMenu({ me }: { me: Me }) {
     // Drop the state so a reload or Back doesn't reopen it.
     navigate(pathname + search, { replace: true, state: null });
   }, [state, pathname, search, navigate]);
-  const who = me.name ?? (me.kind === "member" ? me.email : "Guest");
   const settings = useQuery(userSettingsQuery(me.userId));
   const save = useUpdateUserSettings(me.userId);
-  const [signOutState, setSignOutState] = useState<"idle" | "pending" | "failed">("idle");
   return (
     <Popover
       side="right"
@@ -68,10 +55,7 @@ export function SettingsMenu({ me }: { me: Me }) {
       label="Settings"
       className="w-64 p-3"
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next && signOutState === "failed") setSignOutState("idle");
-      }}
+      onOpenChange={setOpen}
       trigger={<RailButton label="Settings" icon={<Settings />} />}
     >
       <p className="m-0 mb-1.5 text-muted-foreground text-sm">Theme</p>
@@ -97,7 +81,24 @@ export function SettingsMenu({ me }: { me: Me }) {
           Couldn't save your theme. Choose it again to retry.
         </p>
       )}
-      <div className="mt-4">
+    </Popover>
+  );
+}
+
+export function AccountMenu({ me }: { me: Me }) {
+  const who = me.name ?? (me.kind === "member" ? me.email : "Guest");
+  const [signOutState, setSignOutState] = useState<"idle" | "pending" | "failed">("idle");
+  return (
+    <Popover
+      side="right"
+      label="Account"
+      className="w-64 p-3"
+      onOpenChange={(open) => {
+        if (!open && signOutState === "failed") setSignOutState("idle");
+      }}
+      trigger={<RailButton label="Account" icon={<CircleUserRound />} />}
+    >
+      <div>
         <p className="m-0 truncate font-medium text-sm">{who}</p>
         {me.kind === "member" && me.name && (
           <p className="m-0 truncate text-muted-foreground text-xs">{me.email}</p>

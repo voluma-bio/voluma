@@ -1,6 +1,6 @@
 /**
- * The app shell: one frame on every screen. A header line across the top, the rail (`Rail`) at
- * the far left, and the main area. A screen lays out its own side panels (`SidePanel`): the shell
+ * The app shell: one frame on every screen. A narrow navigation rail, optional breadcrumb
+ * context in the header, and the main area. A screen lays out its own side panels (`SidePanel`): the shell
  * keeps whether each side is folded, so it carries across pages. The main area (`children`) is
  * rendered once and never remounts when a side folds, so a viewer inside it keeps its state.
  *
@@ -31,14 +31,11 @@ export const ShellContext = createContext<ShellState | null>(null);
 const HeadingContext = createContext<HTMLElement | null>(null);
 
 export function AppShell({
-  brand,
   rail,
   theme,
   children,
 }: {
-  /** The non-interactive brand mark in the header, above the rail. */
-  brand: ReactNode;
-  /** The app's rail (`Rail`), at the far left under the header line. */
+  /** The single global navigation rail. */
   rail: ReactNode;
   /** The whole frame's theme, chosen by the app; image wells use their own viewer tokens. */
   theme: "light" | "dark";
@@ -93,13 +90,13 @@ export function AppShell({
   return (
     <ShellContext.Provider value={state}>
       <HeadingContext.Provider value={heading}>
-        <ThemeScope theme={theme} className="flex h-dvh flex-col bg-background text-foreground">
-          <header className="flex h-[var(--header-h)] shrink-0 items-center border-b border-border bg-card">
-            <div className="grid w-11 shrink-0 place-items-center">{brand}</div>
-            <div ref={setHeading} className="flex min-w-0 flex-1 items-center gap-3 px-3.5" />
-          </header>
-          <div className="flex min-h-0 flex-1">
-            {rail}
+        <ThemeScope theme={theme} className="flex h-dvh bg-background text-foreground">
+          {rail}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <header
+              ref={setHeading}
+              className="flex min-h-[var(--header-h)] shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-3.5 py-1 empty:hidden"
+            />
             <main
               data-shell-workspace
               className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-card"
@@ -154,7 +151,7 @@ export function useFoldWhile(side: ShellSide, active: boolean): void {
   }, [folded]);
 }
 
-/** What the header line says about this screen: where you are, and its one-line facts. */
+/** Page context only: the breadcrumb, never the page's h1, metadata or run status. */
 export function ShellHeading({ children }: { children: ReactNode }) {
   const slot = useContext(HeadingContext);
   return slot ? createPortal(children, slot) : null;

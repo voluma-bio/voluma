@@ -39,7 +39,12 @@ async function appendPersonEvent(
   runId: string,
   event: {
     id: string;
-    type: "person.message" | "run.reopened" | "approval.given" | "approval.declined";
+    type:
+      | "person.message"
+      | "run.reopened"
+      | "correction.ended"
+      | "approval.given"
+      | "approval.declined";
     payload: unknown;
   },
 ) {
@@ -106,6 +111,21 @@ export async function openCorrection(tx: Queryable, runId: string): Promise<stri
   return openCorrectionOf(rows)?.id ?? null;
 }
 
+/** Writes `correction.ended`, keyed to the open correction's `run.reopened` (`openCorrection`). */
+export async function endCorrection(
+  tx: Tx,
+  runId: string,
+  reopenId: string,
+  status: "failed" | "cancelled",
+  error?: string,
+) {
+  await appendPersonEvent(tx, runId, {
+    id: `${reopenId.slice(0, -":reopened".length)}:ended`,
+    type: "correction.ended",
+    payload: { status, ...(error !== undefined && { error }) },
+  });
+}
+
 /** What the reopen of a finished run needs besides the run: how to workflow-check it and seal keys. */
 export type ReopenContext = {
   pinsOf: (workflowId: string) => WorkflowPin[] | undefined;
@@ -167,8 +187,8 @@ export async function messageRefusal(
   run: MessageTarget,
 ): Promise<{ status: 403 | 409; message: string } | null> {
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
-  // A converted run (it holds the outputs the conversion wrote) keeps the workflow files of its
-  // task-loop days, which the runner can no longer load; it goes with the snapshot fallback's deletion.
+  // A converted run (it holds the outputs the conversion wrote) keeps a task-loop log the runner
+  // cannot resume as a review: see "Let converted runs be reopened" in apps/api/.context/TODO.md.
   const [converted] = await tx
     .select({ id: events.id })
     .from(events)

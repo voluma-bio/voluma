@@ -1,8 +1,8 @@
 /**
- * Workflows (`/workflows`, on the left strip): the workflows a study can use, each with its
+ * Workflows (`/workflows`, in global navigation): the workflows a study can use, each with its
  * measurements, read from the bundle. No versions or editing yet.
  */
-import { Box, Breadcrumb, Count, PageHead, ShellHeading } from "@voluma/ui";
+import { Box, Count, PageHead } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
 import { MeasurementList, measurementsOf } from "./workflow-measurements";
 
@@ -11,9 +11,6 @@ const WORKFLOWS = [workflowById("mouse-oa")].filter((w) => w !== undefined);
 export function WorkflowsPage() {
   return (
     <div className="shrink-0">
-      <ShellHeading>
-        <Breadcrumb current="Workflows" />
-      </ShellHeading>
       <PageHead title="Workflows" count={<Count>{WORKFLOWS.length}</Count>} />
       {WORKFLOWS.map((w) => (
         <Box

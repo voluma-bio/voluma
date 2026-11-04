@@ -7,6 +7,13 @@ page shows the input's newest run in that study (from the study read, `studyQuer
 several studies, so the input alone can't pick the run. Links use
 `inputHref` (`@voluma/run-view`); they never carry `?run=` unless they mean an earlier run.
 
+The shell keeps global destinations separate from `InputBreadcrumb` (Studies / study / sample).
+`InputHeading` renders the page h1 outside navigation, explicit Group metadata, run state and
+the output fold's outstanding-check count in a compact single row, wrapping only when space
+runs out. Run details stays at the right. “Run finished” means computation ended, not that
+results are checked. An earlier run is labelled beside its status. Run details holds the source
+filename and troubleshooting facts; the study member's `inputLabel` is the page identity.
+
 ## The run's stream and the run read
 
 `use-run-stream.ts` feeds the run's durable events into the run store (`@voluma/run-view`
@@ -22,7 +29,7 @@ backlog and stays closed until a message is sent or the run resumes.
 ## Each grid keeps its viewer
 
 An output is shown on its own grid (`reviewGrid`, `viewer.tsx`'s `SceneViewer`); mouse-oa has two,
-the Scan and the aligned tibia grid. `SceneViewer` keeps one `QuadViewer` per grid shown, at most
+the Scan and the tibia long-axis grid. `SceneViewer` keeps one `QuadViewer` per grid shown, at most
 two mounted at any commit (`MAX_KEPT`: each holds four WebGL contexts, and Chrome allows 16 per
 page), and hides the others (`hidden`). One function, `keep`, decides what is kept, both for what
 mounts in a render and for the `kept` state: viewers whose image is still among the blocks, least
@@ -68,10 +75,11 @@ Running, "last news <age>" (the newest stored event, on a timer) and the latest 
 its Rests on); "not yet" for nothing published; "N of M in" in the panel head (the scan header
 says only Running), with Needs you only once something does; and "Other outputs so far" under the
 values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
-stays open until Esc. A section's tick waits for every value in it. The centre says the run is going and the
-AI is still setting up (its plan comes in the conversation) until the value has a version, is marked missing, or something
-on its chain has a version; then it shows the nearest such link, the scene bar saying "<value>
-rests on". `studiesQuery` refetches while a run is live, so the Samples tab
+stays open until Esc. A section's tick waits for every value in it. Until the value has a version or is
+marked missing, the centre shows the nearest link on its chain with a version (the scene bar saying
+"<value> is based on"), else the output published last whose whole scene has blocks to draw (the scan, from intake
+on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the
+run is going and the AI is still setting up only while nothing drawable is published. `studiesQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item`,

@@ -1,7 +1,10 @@
 /**
  * A slice pane's pointer, wheel and key gestures (`SlicePane.tsx`): left drag moves the crosshair,
  * the wheel steps slices along the normal, Ctrl or ⌘ + wheel zooms at the pointer, Shift, middle
- * or right drag pans, and a press on a tilt handle turns the other planes. With a marking tool,
+ * or right drag pans, and a press on a tilt handle turns the other planes. With no marking tool,
+ * Alt + left drag turns this pane's image about the crosshair like a dial (`onSpin`), and `,` / `.`
+ * (`<` `>` unshifted) turn the pane under the pointer (else the focused one) 1° anticlockwise /
+ * clockwise, 0.1° with Shift. With a marking tool,
  * left click or drag marks: Point a voxel, Box a drag's rectangle, Line a drag's two ends or two
  * clicks, Angle three clicks (the vertex second), Outline a freehand loop,
  * Probe reads the value under the pointer and keeps it as a point on click. Whatever the tool, a
@@ -47,6 +50,8 @@ export type GestureInputs = {
   tool: MarkTool | null;
   onMark(mark: GridMark): void;
   onTilt?(angle: number): void;
+  /** Turns this pane's image by `angle` radians clockwise on screen; absent, it can't be. */
+  onSpin?(angle: number): void;
   toPane(p: Zyx): [number, number];
   fromPane(x: number, y: number, at: Zyx): Zyx;
   basis: Basis;
@@ -70,6 +75,11 @@ const OUTLINE_STEP_PX = 3;
 const OUTLINE_MAX = 500;
 /** How near a tilt handle a press must land (CSS px). */
 const HANDLE_HIT_PX = 9;
+/** Within this distance of the crosshair (CSS px) a spin drag's angle is too unsteady to follow. */
+const SPIN_STILL_PX = 12;
+/** What `,` and `.` turn by, in degrees; with Shift, the fine step. */
+const SPIN_KEY_DEGREES = 1;
+const SPIN_FINE_DEGREES = 0.1;
 /** How near a mark's end a press must land to drag it (CSS px), whatever the zoom: the dot drawn is smaller. */
 const END_HIT_PX = 10;
 
@@ -229,7 +239,7 @@ export function useSliceGestures(args: {
     };
     // The gesture's pointer is the mark layer's; the rest of it is the pane's.
     let drag: {
-      mode: "cross" | "pan" | "tilt" | "end" | MarkTool;
+      mode: "cross" | "pan" | "tilt" | "spin" | "end" | MarkTool;
       x: number;
       y: number;
       /** The crosshair at press: a drawn mark stays on its slice if the wheel steps mid-drag. */
@@ -241,6 +251,11 @@ export function useSliceGestures(args: {
       last: [number, number];
       /** A tilt's direction from the crosshair, in mm, at the last move. */
       toward?: Vec3;
+      /**
+       * A spin's crosshair in client px (it stays put as the image turns about it) and the
+       * pointer's screen angle about it at the last move.
+       */
+      dial?: { x: number; y: number; angle: number | null };
       /** The end being dragged. */
       end?: End;
     } | null = null;
@@ -275,16 +290,33 @@ export function useSliceGestures(args: {
         };
       return null;
     };
+    /** The crosshair in client px. */
+    const crosshairPx = () => {
+      const rect = element.getBoundingClientRect();
+      const v = view.current!;
+      const [x, y] = latest.current.toPane(latest.current.point);
+      return {
+        x: rect.left + rect.width / 2 + (x - v.center[0]) * v.zoom,
+        y: rect.top + rect.height / 2 + (v.center[1] - y) * v.zoom,
+      };
+    };
+    /** The pointer's screen angle about the dial's centre, clockwise; null too near it. */
+    const dialAngle = (event: PointerEvent, at: { x: number; y: number }) => {
+      const dx = event.clientX - at.x;
+      const dy = event.clientY - at.y;
+      return Math.hypot(dx, dy) < SPIN_STILL_PX ? null : Math.atan2(dy, dx);
+    };
     const down = (event: PointerEvent) => {
       if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) return;
       if (drag || !view.current) return;
       element.focus({ preventScroll: true });
       const pan = event.button === 1 || event.button === 2 || event.shiftKey;
       const tool = latest.current.tool;
+      const spin = !pan && !tool && event.altKey && !!latest.current.onSpin;
       // A press on a tilt handle turns the other planes.
       const rect = element.getBoundingClientRect();
       const hit =
-        !pan && !tool && latest.current.onTilt
+        !pan && !spin && !tool && latest.current.onTilt
           ? handlesNow(rect.width, rect.height).find(
               (h) =>
                 Math.hypot(h.x - (event.clientX - rect.left), h.y - (event.clientY - rect.top)) <=
@@ -293,11 +325,12 @@ export function useSliceGestures(args: {
           : undefined;
       // Mid-way through a click-made line or angle, a press adds its next end, even on an old one.
       // Under a tool the end is only a candidate: `move` makes it a drag once the pointer leaves.
-      const end = !pan && !hit && !clicks.length ? endAt(event) : null;
+      const end = !pan && !spin && !hit && !clicks.length ? endAt(event) : null;
       layer.start(event);
       const from = toPosition(event);
+      const centre = spin ? crosshairPx() : null;
       drag = {
-        mode: pan ? "pan" : hit ? "tilt" : end && !tool ? "end" : (tool ?? "cross"),
+        mode: pan ? "pan" : spin ? "spin" : hit ? "tilt" : end && !tool ? "end" : (tool ?? "cross"),
         x: event.clientX,
         y: event.clientY,
         at: latest.current.point,
@@ -306,6 +339,7 @@ export function useSliceGestures(args: {
         path: [from],
         last: [event.clientX, event.clientY],
         ...(hit && { toward: towardPointer(event) }),
+        ...(centre && { dial: { ...centre, angle: dialAngle(event, centre) } }),
         ...(end && { end }),
       };
       if (drag.mode === "cross") latest.current.onPoint(toVoxel(event));
@@ -333,6 +367,16 @@ export function useSliceGestures(args: {
         const angle = angleAbout(drag.toward!, toward, latest.current.basis.normal);
         drag.toward = toward;
         if (angle) latest.current.onTilt?.(angle);
+      } else if (drag.mode === "spin") {
+        const dial = drag.dial!;
+        const angle = dialAngle(event, dial);
+        if (angle === null) return;
+        if (dial.angle !== null) {
+          // The change across ±π, the short way round.
+          const by = Math.atan2(Math.sin(angle - dial.angle), Math.cos(angle - dial.angle));
+          if (by) latest.current.onSpin?.(by);
+        }
+        dial.angle = angle;
       } else if (drag.mode !== "pan") {
         if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
           return;
@@ -436,7 +480,13 @@ export function useSliceGestures(args: {
     };
     // The mark a finished gesture makes, if any: a click marks only with Point and Probe.
     const finish = (d: NonNullable<typeof drag>, event: PointerEvent): GridMark | null => {
-      if (d.mode === "cross" || d.mode === "pan" || d.mode === "tilt" || d.mode === "end")
+      if (
+        d.mode === "cross" ||
+        d.mode === "pan" ||
+        d.mode === "tilt" ||
+        d.mode === "spin" ||
+        d.mode === "end"
+      )
         return null;
       if (d.mode === "point")
         return d.moved ? null : { point: [...round(d.from)] as unknown as Zyx };
@@ -544,6 +594,28 @@ export function useSliceGestures(args: {
       event.preventDefault();
       step(by);
     };
+    // `,` and `.` go to the pane under the pointer, else the focused one, so turning needs no click.
+    // By `code`, so Shift (`<`, `>` on US keys) and other layouts keep them. (`]` is the shell's.)
+    const spinKey = (event: KeyboardEvent) => {
+      const by = { Comma: -1, Period: 1 }[event.code];
+      const { onSpin } = latest.current;
+      if (by === undefined || !onSpin || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.defaultPrevented || event.isComposing) return;
+      const target = event.target as Element;
+      // Typing, or a key meant for an open dialog or menu, never turns a pane behind it.
+      if (
+        target.closest?.(
+          "input, textarea, select, [contenteditable], dialog, [role='dialog'], [role='menu']",
+        )
+      )
+        return;
+      const owner =
+        document.querySelector("[data-slice-pane]:hover") ?? target.closest?.("[data-slice-pane]");
+      if (owner !== element) return;
+      event.preventDefault();
+      const degrees = event.shiftKey ? SPIN_FINE_DEGREES : SPIN_KEY_DEGREES;
+      onSpin((by * degrees * Math.PI) / 180);
+    };
     const menu = (event: Event) => event.preventDefault();
     element.addEventListener("pointerdown", down);
     element.addEventListener("pointermove", move);
@@ -552,6 +624,8 @@ export function useSliceGestures(args: {
     element.addEventListener("pointerleave", leave);
     element.addEventListener("wheel", wheel, { passive: false });
     element.addEventListener("keydown", key);
+    // Capture: ahead of the page's own window shortcuts, whatever order they were added in.
+    globalThis.addEventListener("keydown", spinKey, true);
     element.addEventListener("contextmenu", menu);
     return () => {
       stopReset();
@@ -562,6 +636,7 @@ export function useSliceGestures(args: {
       element.removeEventListener("pointerleave", leave);
       element.removeEventListener("wheel", wheel);
       element.removeEventListener("keydown", key);
+      globalThis.removeEventListener("keydown", spinKey, true);
       element.removeEventListener("contextmenu", menu);
     };
   }, []);

@@ -52,15 +52,23 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 - **Check first:** the spacing the researcher stated against the header (a mismatch is a To check item). Before
   labelling, the keyframe cuts femur and tibia through the joint, with the joint space dark between them, and the
   femur sits where the orientation puts it; every piece the cleanup found is one you can find in the labels.
-- **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask), then
+- **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask; report the
+  converted scan first, as soon as `hu.npy` and `hu.json` exist and before any cleanup, orientation or SAM, so the
+  researcher sees it at once, with `header` and the To check item "Not yet cleaned: holder and debris still in the
+  field"; the cleaned scan is its next version, and nothing is made from the first), then
   `scan-settings` (this scan's display window and segmentation threshold: chosen next, before the orientation and
   every mask, which take it), `frame` (the rough orientation and its keyframe), `scan-notes` and `bone-pieces`
   (`scan-intake`, `orient-joint`); then
   `bone-labels` (with the structures in it), `bone-threshold` (the segmentation threshold of `scan-settings`), `disagreement`, and the label volumes #1–3 (protocol
   step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason
   and the view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`,
-  `anatomy.md` "Segmentation notes").
-- **Leaves:** every step reads `scan`, and steps 2 to 7 read the tibia or the femur from `bone-labels`. A new
+  `anatomy.md` "Segmentation notes"). Report `bone-labels` twice: first the merged labels as soon as the SAM merge
+  is done, so the researcher sees them at once, with the To check item "Not yet checked: finish_labels.py pending";
+  then the file `finish_labels.py` writes as the next version, its check record the evidence (`segmentation-check`,
+  section 6). The first version is a preview: nothing is made from it, the label volumes #1–3 included, which are
+  measured on the `finish_labels.py` file.
+- **Leaves:** every step reads `scan`, and steps 2 to 7 read the tibia or the femur from `bone-labels`, starting only
+  once a version cites a `finish_labels.py` check record. A new
   `scan` puts everything out of date and a new `bone-labels` all of steps 2 to 7, so settle the labels here, on
   the 3D sheet, before anyone measures.
 
@@ -68,7 +76,9 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 
 - **Needs:** `scan`, the tibia in `bone-labels`.
 - **Check first:** from the articular surface to about 1 mm below the growth plate, the tibia label holds no femur,
-  patella, meniscus or fibula voxels, and its top runs through the joint space, not through femur. Which side is
+  patella, meniscus or fibula voxels, its top runs through the joint space, not through femur, and its sides reach the
+  bone's outer surface: where the label stops short of the cortex, `iioc.py` stops after the tracing, and fixing the labels
+  then makes a new `tibia-grid` that the tracing is redone on. Which side is
   medial: the fibula is lateral. On a view of the aligned grid that shows the fibula beside the tibia (an axial
   slice just below the plateau), find which way along U is medial on this knee, and record it before you name a
   compartment. `tibia_frame.py`'s sign rule assumes one knee and one scan orientation and has no flip, so where +U
@@ -120,5 +130,6 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 - **Needs:** `scan`, the femur in `bone-labels`, `frame`.
 - **Check first:** at the condyles and the intercondylar groove the femur label holds no patella, sesamoid or tibia
   voxels and covers the condyles' surface; orient the femur for its own views (`orient-joint`).
-- **Makes:** points `a` to `d`, `dfl-ruler`, `dfw-ruler`, #26–28 (protocol step 9), and the Amira landmarks file
+- **Makes:** points `a` to `d`, `dfl-ruler`, `dfw-ruler`, `femur-frame` (`femur-frame.json`, the femur's axes the viewer
+  aligns to), #26–28 (protocol step 9), and the Amira landmarks file
   (step 11).

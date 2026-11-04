@@ -1,7 +1,11 @@
 /**
  * The grid an output is shown on in review, and what the viewer draws there, from the run's published blocks: blocks share a grid when their volumes
  * share a `gridId`, and every position comes from the run (crop offsets, the volume's own affine).
- * Nothing is aligned or resampled here, and a block on another grid is listed, never drawn.
+ * Nothing is resampled here, and a block on another grid is listed, never drawn, with one
+ * exception: a grid with no labels of its own (the aligned tibia grid) shows the scan's label
+ * meshes in 3D, moved rigidly through the two grids' affines (`placement`).
+ * Every output shows the run's labels as context, with its own blocks over them in
+ * `--output` and the focused check's in `--check-outline`.
  */
 import type {
   Annotation,
@@ -11,8 +15,12 @@ import type {
   Surface,
   Volume,
 } from "@voluma/contracts/review";
+import { toVoxel } from "@voluma/contracts/ruler";
 import { readLevel } from "./planes";
 import type { GridAnnotation, GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
+
+/** How much of a context label mesh shows over the subject's own meshes inside it. */
+const CONTEXT_OPACITY = 0.3;
 
 /** Label values of a labels volume on the grid; none means every nonzero value. */
 export type FocusLabels = { source: ZarrSource; labels: number[] };
@@ -48,7 +56,8 @@ type Input = {
   /** The block ids the subject shows, before the focused check's. */
   shown: readonly string[];
   assets: Record<string, ReviewAssets>;
-  labels?: boolean;
+  /** Label colours on the context labels; off draws them `--bone`. */
+  labels: boolean;
   focus?: Focus;
   /** The URL prefix (ending in "/") of a file's converted assets. */
   assetBase(sha256: string): string;
@@ -60,7 +69,7 @@ export function reviewGrid({
   revision,
   shown,
   assets,
-  labels: showLabels = false,
+  labels: showLabels,
   focus,
   assetBase,
   token,
@@ -109,16 +118,26 @@ export function reviewGrid({
   const focused = new Set(focus?.on ?? []);
   const focusedLabel = (volume: Volume, label: number) =>
     volume === focusVolume && (focus?.label === undefined || focus.label === label);
-  const paint = (id: string, color: string) =>
-    focused.has(id) ? { color: token("--check-outline"), opacity: 1 } : { color, opacity: 1 };
+  const check = { color: token("--check-outline"), opacity: 1, outline: true };
+  // What the subject itself shows, over the context: in `--output`, outlined in slices.
+  const own = (id: string) =>
+    focused.has(id) ? check : { ...check, color: token("--output"), own: true as const };
+  const contextLook = (label: number) => ({
+    color: token(showLabels ? `--label-${((label - 1) % 12) + 1}` : "--bone"),
+    opacity: 1,
+    outline: false,
+  });
   const overlays: Overlay[] = [];
   const meshes: GridMesh[] = [];
+  // Meshes of the context labels: see-through once the subject has its own meshes inside them.
+  const contextMeshes = new Set<GridMesh>();
   const mesh = (
     sha256: string,
     m: { path: string; vertices: number; indices: number },
     name: string,
     offsetZyx: Zyx,
-    look: { color: string; opacity: number },
+    look: { color: string; opacity: number; own?: true },
+    placement?: GridMesh["placement"],
   ): GridMesh => ({
     id: `${sha256}/${m.path}`,
     name,
@@ -126,48 +145,66 @@ export function reviewGrid({
     vertices: m.vertices,
     indices: m.indices,
     offsetZyx,
-    ...look,
+    placement,
+    color: look.color,
+    opacity: look.opacity,
+    ...(look.own && { own: true }),
   });
 
-  // Structures: a named labels volume brings every structure on it.
+  // The run's segmentation is context on every output: the labels volume on this grid that the
+  // most label structures point into. A run can have several (bone labels and a smaller
+  // compartments volume); the one naming the most structures is the anatomy, the earliest on a tie.
+  // A grid with none borrows the scan grid's, in 3D only.
+  const contextOn = (grid: string | undefined) => {
+    const counts = new Map<Volume, number>();
+    for (const s of revision.structures) {
+      const volume = s.volumeId ? volumes.get(s.volumeId) : undefined;
+      if (volume?.kind === "labels" && volume.gridId === grid && s.voxels && "label" in s.voxels)
+        counts.set(volume, (counts.get(volume) ?? 0) + 1);
+    }
+    let best: Volume | undefined;
+    for (const [volume, n] of counts) if (!best || n > counts.get(best)!) best = volume;
+    return best;
+  };
+  // Another grid's labels are placed through the two affines, only when both carry a pose. An
+  // affine of the spacing alone (no rotation or origin) is what a run publishes when it lost the
+  // pose, a resampled grid's included: placing through it would draw the scan's labels in the
+  // wrong place, so nothing is borrowed.
+  const scanContext = contextOn(scanGrid);
+  const context =
+    contextOn(gridId) ??
+    (scanContext && posed(scanContext) && posed(image) ? scanContext : undefined);
+  const placed = context && context.gridId !== gridId ? placement(context, image) : undefined;
+
+  // Structures: a named labels volume brings every structure on it, and the context every label.
   const structureIds = new Set(named);
   for (const s of revision.structures)
-    if (s.volumeId && named.includes(s.volumeId) && volumes.get(s.volumeId)?.kind === "labels")
+    if (
+      s.volumeId &&
+      (s.volumeId === context?.id ||
+        (named.includes(s.volumeId) && volumes.get(s.volumeId)?.kind === "labels"))
+    )
       structureIds.add(s.id);
   const structures = revision.structures.filter((s) => structureIds.has(s.id) && s.voxels);
   const labelsOn = new Map<Volume, { label: number; id: string; name: string }[]>();
-  let colour = 0;
-  const nextColour = () => token(`--label-${(colour++ % 12) + 1}`);
+  if (context) labelsOn.set(context, []);
+  const masks: Structure[] = [];
   for (const s of structures) {
     const volume = s.volumeId ? volumes.get(s.volumeId) : undefined;
     if (!volume || !s.voxels) continue;
-    if (volume.gridId !== gridId) {
+    if (volume.gridId !== gridId && !(placed && volume === context && !named.includes(s.id))) {
       notes.elsewhere.push(s.name);
       continue;
     }
-    if ("label" in s.voxels) {
+    if ("label" in s.voxels)
       labelsOn.set(volume, [
         ...(labelsOn.get(volume) ?? []),
         { label: s.voxels.label, id: s.id, name: s.name },
       ]);
-      continue;
-    }
-    const { mask, offsetZyx } = s.voxels;
-    const look = paint(s.id, nextColour());
-    const a = ready(mask.sha256, s.name);
-    if (!a) continue;
-    if (look.opacity > 0)
-      overlays.push({
-        id: s.id,
-        name: s.name,
-        base: assetBase(mask.sha256),
-        levels: a.levels,
-        offsetZyx,
-        ...look,
-      });
-    meshes.push(...a.meshes.map((m) => mesh(mask.sha256, m, s.name, offsetZyx, look)));
+    else masks.push(s);
   }
   let focusLabels: FocusLabels | undefined;
+  // The context first, so the subject's own overlays draw over it.
   for (const [volume, labels] of labelsOn) {
     if (volume.data?.format !== "npy") {
       notes.failed.push(...labels.map((l) => l.name));
@@ -176,35 +213,71 @@ export function reviewGrid({
     const sha256 = volume.data.sha256;
     const a = ready(sha256, volume.name);
     if (!a) continue;
+    // Another grid's context: its meshes moved onto this grid, no slice overlay.
+    if (placed && volume === context) {
+      for (const m of a.meshes) {
+        const l = labels.find((x) => x.label === m.label);
+        if (!l) continue;
+        const drawn = mesh(sha256, m, l.name, [0, 0, 0], contextLook(l.label), placed);
+        contextMeshes.add(drawn);
+        meshes.push(drawn);
+      }
+      continue;
+    }
     const wanted = labels
       .filter((l) => focused.has(l.id) || focusedLabel(volume, l.label))
       .map((l) => l.label);
     if (wanted.length && !focusLabels)
       focusLabels = { source: { base: assetBase(sha256), levels: a.levels }, labels: wanted };
+    // A named labels volume is the subject as a whole: every label in its own colour.
+    const whole = named.includes(volume.id);
     const looks = new Map(
       labels.map((l) => [
         l.label,
         focusedLabel(volume, l.label)
-          ? { color: token("--check-outline"), opacity: 1 }
-          : paint(l.id, token(showLabels ? `--label-${((l.label - 1) % 12) + 1}` : "--bone")),
+          ? check
+          : !whole && (named.includes(l.id) || focused.has(l.id))
+            ? own(l.id)
+            : contextLook(l.label),
       ]),
     );
-    const shown = [...looks].filter(([, look]) => look.opacity > 0);
-    if (shown.length)
+    if (looks.size)
       overlays.push({
         id: volume.id,
         name: volume.name,
         base: assetBase(sha256),
         levels: a.levels,
         offsetZyx: [0, 0, 0],
-        color: Object.fromEntries(shown.map(([label, look]) => [label, look.color])),
-        opacity: Object.fromEntries(shown.map(([label, look]) => [label, look.opacity])),
+        color: Object.fromEntries([...looks].map(([label, look]) => [label, look.color])),
+        opacity: 1,
+        outline: Object.fromEntries([...looks].map(([label, look]) => [label, look.outline])),
       });
     for (const m of a.meshes) {
       const look = m.label === undefined ? undefined : looks.get(m.label);
       const l = labels.find((x) => x.label === m.label);
-      if (look && l) meshes.push(mesh(sha256, m, l.name, [0, 0, 0], look));
+      if (!look || !l) continue;
+      const drawn = mesh(sha256, m, l.name, [0, 0, 0], look);
+      if (!look.outline && !whole) contextMeshes.add(drawn);
+      meshes.push(drawn);
     }
+  }
+  for (const s of masks) {
+    if (!s.voxels || !("mask" in s.voxels)) continue;
+    const { mask, offsetZyx } = s.voxels;
+    const a = ready(mask.sha256, s.name);
+    if (!a) continue;
+    const look = own(s.id);
+    overlays.push({
+      id: s.id,
+      name: s.name,
+      base: assetBase(mask.sha256),
+      levels: a.levels,
+      offsetZyx,
+      color: look.color,
+      opacity: look.opacity,
+      outline: look.outline,
+    });
+    meshes.push(...a.meshes.map((m) => mesh(mask.sha256, m, s.name, offsetZyx, look)));
   }
   // A focused labels volume no structure brings (a disagreement mask): its region in the check colour.
   if (focusVolume && focusVolume.kind === "labels" && !labelsOn.has(focusVolume)) {
@@ -227,6 +300,7 @@ export function reviewGrid({
           offsetZyx: [0, 0, 0],
           color: Object.fromEntries(values.map((v) => [v, outline])),
           opacity: 1,
+          outline: true,
         });
         focusLabels ??= {
           source: { base: assetBase(sha256), levels: a.levels },
@@ -242,7 +316,7 @@ export function reviewGrid({
       notes.elsewhere.push(s.name);
       continue;
     }
-    const look = paint(s.id, nextColour());
+    const look = own(s.id);
     const a = ready(s.heights.sha256, s.name);
     if (a)
       meshes.push(
@@ -264,11 +338,15 @@ export function reviewGrid({
       id: a.id,
       name: a.name,
       points: (a.kind === "point" ? [a.position] : [a.a, a.b]).map(
-        (p) => voxelOf(image, p) as unknown as Zyx,
+        (p) => toVoxel(image.affine, p) as unknown as Zyx,
       ),
-      ...paint(a.id, token("--ruler")),
+      color: focused.has(a.id) ? check.color : token("--ruler"),
+      opacity: 1,
     });
   }
+
+  if (meshes.some((m) => !contextMeshes.has(m)))
+    for (const m of contextMeshes) m.opacity = CONTEXT_OPACITY;
 
   return {
     state: "ready",
@@ -385,27 +463,35 @@ function focusPoint(
   // slice through it. Several marks: their middle.
   if (marks.length === 1) {
     const [only] = marks as [(typeof marks)[number]];
-    return clamp(voxelOf(image, only.kind === "point" ? only.position : only.a));
+    return clamp(toVoxel(image.affine, only.kind === "point" ? only.position : only.a));
   }
   const points = marks
     .flatMap((a) => (a.kind === "point" ? [a.position] : [a.a, a.b]))
-    .map((world) => voxelOf(image, world));
+    .map((world) => toVoxel(image.affine, world));
   return middle(points.map((p) => ({ min: p, max: p })));
 }
 
-/** World mm to voxel (z, y, x): the affine's columns are orthogonal, so each is a projection. */
-export function voxelOf(volume: Volume, world: readonly number[]): number[] {
-  const m = volume.affine;
-  const d = [0, 1, 2].map((r) => world[r]! - m[r]![3]!);
-  const xyz = [0, 1, 2].map((j) => {
-    const col = [m[0][j]!, m[1][j]!, m[2][j]!];
-    return (
-      (col[0]! * d[0]! + col[1]! * d[1]! + col[2]! * d[2]!) /
-      (col[0]! ** 2 + col[1]! ** 2 + col[2]! ** 2)
-    );
-  });
-  return [xyz[2]!, xyz[1]!, xyz[0]!];
+/**
+ * A rigid move from `from`'s source voxel (x, y, z) to `to`'s, through world mm: `from`'s affine,
+ * then the inverse of `to`'s. Both are spacing times a rotation, so the result is a rotation with
+ * the two grids' spacing ratios and a shift; geometry moves, no voxel is resampled. Row-major 4×4.
+ */
+function placement(from: Volume, to: Volume): number[][] {
+  const xyzOf = (world: readonly number[]) => toVoxel(to.affine, world).reverse();
+  const a = from.affine;
+  const origin = xyzOf([a[0]![3]!, a[1]![3]!, a[2]![3]!]);
+  const columns = [0, 1, 2].map((j) =>
+    xyzOf([0, 1, 2].map((r) => a[r]![j]! + a[r]![3]!)).map((n, i) => n - origin[i]!),
+  );
+  return [
+    ...[0, 1, 2].map((i) => [columns[0]![i]!, columns[1]![i]!, columns[2]![i]!, origin[i]!]),
+    [0, 0, 0, 1],
+  ];
 }
+
+/** Whether a volume's affine carries a pose: an origin, or a rotation off the grid's axes. */
+const posed = (v: Volume) =>
+  v.affine.slice(0, 3).some((row, r) => row.some((n, c) => c !== r && n !== 0));
 
 const unique = <T>(xs: T[]) => [...new Set(xs)];
 
