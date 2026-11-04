@@ -195,7 +195,7 @@ function StatusLine({
   if (run && status.status === "check" && input.waiting === 0) {
     mark = <StatusMark status="check" label={toCheckText(needsYouOf(input))} />;
   } else if (run && (status.status === "running" || status.status === "checking")) {
-    mark = <StatusMark {...liveStatus({ ...run, toCheck: input.toCheck, waiting: 0 })} />;
+    mark = <StatusMark {...liveStatus({ ...run, review: input.review, waiting: 0 })} />;
   } else if (status.status === "stopped") {
     // `label` is "Failed" or "Stopped", from the run's outcome.
     mark = <StatusMark status="stopped" label={`${status.label} before it finished`} />;

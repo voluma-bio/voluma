@@ -96,10 +96,10 @@ export const inputHref = (studyId: string, inputId: string, query: Record<string
 
 export type RunStatus = { label: string; status: Status };
 
-/** A run as a status reads it: a study's newest-run summary, or a run with its input's newest To check count. */
+/** A run as a status reads it: a study's newest-run summary, or a run with its input's review. */
 type StatusFacts = Pick<StudyRunSummary, "state" | "outputs" | "waiting"> & {
-  /** The run's open To check items once it completed; null before. */
-  toCheck: number | null;
+  /** The run's review in brief: its open To check items once it completed; null before. */
+  review: { needsYou: number } | null;
 };
 
 /**
@@ -122,8 +122,8 @@ export const toCheckText = (n: number) => `${n} to check`;
 /** A run with a held call the researcher can answer (`StudyRunSummary.waiting`): whatever its row says. */
 const WAITING_ON_YOU: RunStatus = { label: "Waiting on you", status: "check" };
 
-/** A run's status from its state and its open To check items. */
-export function runStatus({ state, toCheck }: Pick<StatusFacts, "state" | "toCheck">): RunStatus {
+/** A run's status from its state and its review in brief. */
+export function runStatus({ state, review }: Pick<StatusFacts, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Waiting", status: "waiting" };
@@ -133,8 +133,8 @@ export function runStatus({ state, toCheck }: Pick<StatusFacts, "state" | "toChe
       return { label: "Needs your keys", status: "paused" };
     case "ended":
       if (state.outcome === "completed")
-        return toCheck
-          ? { label: toCheckText(toCheck), status: "check" }
+        return review?.needsYou
+          ? { label: toCheckText(review.needsYou), status: "check" }
           : { label: "Checked", status: "done" };
       if (state.outcome === "failed") return { label: "Failed", status: "stopped" };
       return { label: "Stopped", status: "stopped" };

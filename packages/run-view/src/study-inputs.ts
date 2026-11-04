@@ -9,7 +9,7 @@ import { liveStatus, toCheckText } from "./run-status";
 type InputStatus = { label: string; status: Status; open: number };
 
 /** What needs a person on an input: its newest run's open To check items once it completed, as Studies counts it too. */
-export const needsYouOf = (input: StudyInputDetail) => input.toCheck ?? 0;
+export const needsYouOf = (input: StudyInputDetail) => input.review?.needsYou ?? 0;
 
 /**
  * An input's status: its newest run's (`liveStatus`, which reads To check from the items that need
@@ -18,10 +18,10 @@ export const needsYouOf = (input: StudyInputDetail) => input.toCheck ?? 0;
 export function inputStatus(input: StudyInputDetail): InputStatus {
   const [run] = input.runs;
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
-  // The input's `toCheck` is its newest run's.
+  // The input's `review` is its newest run's.
   const { label, status } = liveStatus({
     ...run,
-    toCheck: input.toCheck,
+    review: input.review,
     waiting: input.waiting,
   });
   const open = status === "check" && input.waiting === 0 ? needsYouOf(input) : 0;
