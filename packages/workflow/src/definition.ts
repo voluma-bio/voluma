@@ -70,7 +70,7 @@ export interface WorkflowDefinition {
   /** `agents/environment.md`: what the sandbox is, appended to every role's system prompt. */
   environment: string;
   /**
-   * `agents/review.md`: appended to the review main's system prompt (`agents/prompts.ts`). Absent in
+   * `core/review.md`: appended to the review main's system prompt (`agents/prompts.ts`). Absent in
    * a snapshot cut before it existed.
    */
   review?: string;
