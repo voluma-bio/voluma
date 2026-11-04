@@ -223,8 +223,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * Every `thread.ended` is deliberate. A runtime abort (shutdown, self-stop, lost lease)
-   * writes none, so `cancelled` always means a stop someone chose: `stop_worker`, the run
-   * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`). A
+   * writes none, so `cancelled` always means a stop someone chose: the run loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`). A
    * stopped thread is not resumed (a correction's message to a stopped main agent starts a new
    * `main.<n>`); a `completed` end is resumable: a person message reopens a finished run with
    * `run.reopened`, and the agent log then clears the root's ended flag.
