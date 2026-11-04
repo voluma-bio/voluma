@@ -275,7 +275,7 @@ function startRefusals(
   if (role !== "main") throw new Refusal("Only main starts workers: message main.");
   if (![...d.messages.values()].some((m) => m.from === "main" && m.to === "researcher"))
     throw new Refusal(
-      "Send your plan note to the researcher first: message `researcher` with the text of /work/main/plan.md, then start workers.",
+      "Tell the researcher your plan first, in a few lines (`message`, `to: researcher`), then start workers.",
     );
   const started = d.records.get(threadIdOf(api.runId, name));
   if (started?.spawnedBy === toolCallId) return true;
