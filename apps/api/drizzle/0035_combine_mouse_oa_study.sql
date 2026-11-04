@@ -6,6 +6,9 @@
 -- other database, or staging after a new run in a source study, is left untouched. Each later
 -- step is guarded by row id, lab and current study, so a second apply changes nothing.
 -- Its creation time is the earliest source study's, so Home's last activity stays the runs'.
+-- Holds the run queue's lock (QUEUE_LOCK in pg-queue.ts) so an old API's start in a source study
+-- during the deploy can't land between the guard and the delete.
+SELECT pg_advisory_xact_lock(1987013745);--> statement-breakpoint
 INSERT INTO "studies" ("id", "lab_id", "name", "workflow_id", "budget_usd", "created_by", "example", "created_at")
 SELECT 'study-combined-mouse-oa', s."lab_id", 'Mouse OA knees (combined)', s."workflow_id", NULL, s."created_by", false,
   (SELECT min(o."created_at") FROM "studies" o
