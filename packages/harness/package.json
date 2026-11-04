@@ -19,12 +19,7 @@
     "./adapters/http/run-client": "./src/adapters/http/run-client.ts",
     "./supervise-run": "./src/supervise-run.ts",
     "./tools/segment-sam": "./src/tools/segment-sam.ts",
-    "./keep-notes": "./src/keep-notes.ts",
-    "./sandbox-hash": "./src/sandbox-hash.ts",
-    "./tools/registry": "./src/tools/registry.ts",
-    "./tools/report-output": "./src/tools/report-output.ts",
-    "./tools/keep-output": "./src/tools/keep-output.ts",
-    "./tools/tool": "./src/tools/tool.ts"
+    "./tools/registry": "./src/tools/registry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
