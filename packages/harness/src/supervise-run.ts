@@ -166,7 +166,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     });
     const convert = convertLayout({ runId, inputId: options.inputId, skills: definition.skills });
     // Created before the session factory: recovery requests the convert sandbox while the
-    // worker is still constructing, and must not read `conversion.signal` (TDZ).
+    // worker is still constructing, so the factory must not read anything the worker returns.
     const convertHalt = new AbortController();
     const convertSignal = AbortSignal.any([cutOff, convertHalt.signal]);
     // The sandboxes of the run: one per thread, and the review-asset converter's.
