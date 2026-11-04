@@ -20,11 +20,11 @@ end and on the sections with no span. The spans, the V range and what ended each
 `growth_plate_distal_curves` (annotation C, for metaphysis_roi.py), one curve per proposed section, many points each, none in a
 flagged stretch. Copy both keys into your annotations.json. The flagged stretches are in `plate-faces.json` (`stretches`:
 {"<V>": [{"u": [first U, last U], "why": [tests that fired]}]}): where to look hardest and to retrace, by adding your points to the
-section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold the faces to one rule, flagged or not: the plate is traced where the tibia exists at plate level (the tibia
-within `max_gap_um` of the curve's height there): on each section, points at most `max_gap_um` apart over its bone and the first and last within that of the bone's ends; across V,
-sections at most that far apart over the rows where that tibia exists and the first and last within that of those rows' ends (a surface is linear between points and held constant past them, so an
-untraced stretch is a straight bridge, wrong geometry however the plate looks there; a span over columns without bone, such as the
-notch between the condyles at the front, does not count),
+section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold the faces to one rule, flagged or not: no gap over the plate wider than `max_gap_um`, on a section
+between two points where the tibia lies both above and below the line between them (a line across empty space between two pieces of bone
+does not count), or in V between two sections over the rows with tibia near the face (a surface is linear between points and held constant
+past them, so an untraced stretch is a straight bridge, wrong geometry however the plate looks there). Where a face ends is not tested:
+carry it to the plate's ends yourself, past every span end, and check them on the QC,
 and no point more than `off_tibia_margin_um` off the tibia mask. Look at every flagged stretch and retrace it wherever it is wrong, and add points wherever a gap
 wider than `max_gap_um` is open; that the points lie on the plate is for you to see, not for the rule. Your points and the proposed ones count alike.
 Where the plate is destroyed, mark the U range where it is gone, on every traced section it reaches, in your annotations as `plate_eroded`:

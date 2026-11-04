@@ -73,9 +73,10 @@ schema is `regions-and-landmarks`'):
   an error; faces you judge wrong are retraced, never replaced by the other proposal. The proposal covers only part of the tibia (the V range and each section's U span are in `plate-faces.json`
   and the script's output) and is where you start, not where you stop: you trace the plate over the whole tibia at plate level, on zoomed
   views, past every span end, on the sections with no span, and out to the V ends. `iioc.py` and `metaphysis_roi.py` stop on a face whose
-  curves leave bone at plate level uncovered, by the spec's `max_gap_um` (about 24 rows): on a section, points more than that apart over its bone or the first or last point more than that short of
-  the bone's ends; across V, sections more than that apart over the rows with tibia at plate level or the first or last more than that short of those rows' ends. A span over columns
-  without bone does not count. A short section among full ones is refused: its points must cover its own bone. They name the V rows and U ranges; they also stop on a point more than
+  curves have a gap over the plate wider than the spec's `max_gap_um` (about 24 rows): on a section, two points that far apart where the tibia lies
+  both above and below the line between them (a line across empty space between two pieces of bone does not count); across V, two sections that
+  far apart over the rows with tibia near the face. They do not test where a face ends, in U or V: the mask does not show where the plate ends
+  (the condyles overhang it, the fibula lies beside it), so open the ends on the QC. They name the V rows and U ranges; they also stop on a point more than
   `off_tibia_margin_um` off the tibia mask, and on a face that jumps between neighbouring traced sections by more than `max_jump_um` plus
   their distance apart (the median W change over the bone both cover): trace each section they name from its own image. Say where the proposal covered and where you traced. Copy its two curve keys
   (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.

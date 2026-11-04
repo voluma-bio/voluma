@@ -3,7 +3,7 @@
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
 it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `start_um` below it, and
 there is no thickness fallback. A curve point more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused,
-naming the section, and so is a face that leaves the plate untraced (on a section, points more than `max_gap_um` of the spec apart where the tibia lies above and below the line between them, or the first or last point more than that inside the tibia's outline; in V, sections more than that apart over the rows with tibia at plate level, or the tibia going on more than that past the first or last section),
+naming the section, and so is a face with a gap over the plate (on a section, two points more than `max_gap_um` of the spec apart where the tibia lies both above and below the line between them, each within that; in V, two sections more than that apart over the rows with tibia within that of the face; where the face ends is not tested),
 and so is a face that jumps between neighbouring traced sections (a median W change, over the U columns both cover on the tibia's footprint
 when they share at least `jump_overlap_um`, of more than `max_jump_um` plus the sections' distance apart). The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
