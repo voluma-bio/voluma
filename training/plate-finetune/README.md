@@ -41,11 +41,11 @@ Band rows: threshold 0.3, and the per-seed row uses the midline cut. These band 
 threshold, the vote and the midline cut on the validation scans before it scored the test scans. Each test scan was scored once
 by L33; the face rule below was changed after that.
 
-### OA8-19L: what each method draws
+### Cross-scan examples
 
 <figure>
-<img src="figures/oa8-19l-cut-comparison.webp" alt="Five representative coronal sections of OA8-19L, with the expert growth-plate cut line and the lines from untrained SAM 3.1, Muse Spark, an Opus agent, and the released model.">
-<figcaption><strong>Figure:</strong> representative sections from the expert-checked OA8-19L test scan. Gold is Dr. Yao's corrected line in every panel; the coloured line is the method's cut. Untrained SAM 3.1 uses the same “growth plate” text prompt, returns nothing on all 14 sections (0 Dice), and is shown honestly as “nothing found”; its empty-section distance is 1050 µm under the scoring convention. The best Muse Spark variant on this scan is text-only. Distances are the <a href="#current-scores">cut-line distance, median per section</a>, in µm. Means over all 14 expert sections: expert 0.0, untrained SAM 3.1 1050.0, Muse Spark (text) 82.1, Opus agent trace 15.2, and released model 16.4.</figcaption>
+<img src="figures/plate-cut-comparison.webp" alt="Eight representative sections from six scans, comparing the reference trace, untrained Meta SAM 3.1 with the growth plate prompt, and Voluma's released fine-tune with the same prompt.">
+<figcaption><strong>Figure:</strong> eight representative sections from the two test scans and four validation scans. The first column shows the row's reference line: OA8-19L is expert-corrected; every other row is agent-traced and not expert-checked. Each panel shows only its own line, with its <a href="#current-scores">cut-line distance, median per section</a>, in µm to that row's reference. Meta's untrained SAM 3.1 uses the exact “growth plate” prompt and returned nothing on every displayed section, shown as “nothing found” (0 Dice on the expert-checked OA8-19L sections; empty sections score 1050 µm). Our fine-tune uses the released three-seed band vote, threshold 0.3 and face-midline cut; its worst displayed example is OA8-21L V58 at 245.1 µm. For context, the published full-scan fine-tune means are 16.4 µm on OA8-19L, 18.7 µm on OA6-9RK, and 33 µm across the four validation scans; the earlier OA8-19L-only means were 15.2 µm for the Opus trace and 82.1 µm for Muse Spark text-only.</figcaption>
 </figure>
 
 Caveats:

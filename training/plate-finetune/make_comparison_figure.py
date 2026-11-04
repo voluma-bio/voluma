@@ -1,8 +1,8 @@
-"""Render a labeled OA8-19L comparison from the local plate experiment outputs.
+"""Render cross-scan cut-line examples from the local plate experiment outputs.
 
-The public repository does not contain the lab scan or predictions. By default this reads
-~/experiments/plate-data, reuses the released band predictions and Spark traces, and writes
-figures/oa8-19l-cut-comparison.webp.
+By default this reads ~/experiments/plate-data and writes the compressed figure used by
+the README. The stock SAM 3.1 run returned an empty mask on every displayed section;
+the figure renders that observed result as "nothing found".
 """
 import argparse
 import json
@@ -14,22 +14,20 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
-SCAN = "OA8-19L"
-SECTIONS = (34, 64, 118, 208, 262)
-UM = 10.5
-METHODS = {
-    "image": "spark",
-    "text": "text-only",
-    "text+image": "text-plus-images",
-    "text grid": "text-grid",
-}
-COLOURS = {
-    "expert": (255, 214, 0, 220),
-    "untrained": (255, 88, 88, 235),
-    "spark": (255, 82, 82, 255),
-    "opus": (65, 150, 255, 255),
-    "release": (0, 220, 255, 255),
-}
+TEST_SCANS = {"OA8-19L", "OA6-9RK"}
+ROWS = (
+    ("OA8-19L", 34, "expert-corrected"),
+    ("OA8-19L", 208, "expert-corrected"),
+    ("OA6-9RK", 63, "agent-traced\nnot expert-checked"),
+    ("OA6-9RK", 103, "agent-traced\nnot expert-checked"),
+    ("OA6-11RK", 88, "agent-traced\nnot expert-checked"),
+    ("OA7-2R", 55, "agent-traced\nnot expert-checked"),
+    ("OA8-21L", 58, "agent-traced\nnot expert-checked"),
+    ("OA6-5RK", 78, "agent-traced\nnot expert-checked"),
+)
+REFERENCE = (255, 214, 0, 255)
+FINE_TUNE = (0, 220, 255, 255)
+EMPTY = (255, 88, 88, 235)
 
 
 def font(size, bold=False):
@@ -48,7 +46,7 @@ def read_curves(path):
     return {int(v): (np.asarray(proximal[v], float), np.asarray(distal[v], float)) for v in proximal if v in distal}
 
 
-def lines_from_trace(root, sections, n_u):
+def trace_lines(root, sections, n_u):
     curves = read_curves(root / "trace/annotations.json")
     ends_path = root / "trace/ends.json"
     ends = {int(v): x for v, x in json.loads(ends_path.read_text()).items()} if ends_path.exists() else {}
@@ -59,18 +57,18 @@ def lines_from_trace(root, sections, n_u):
     }
 
 
-def add_line(draw, line, offset, scale, colour, width=2):
+def draw_line(draw, line, offset, fit, colour, width=3):
     if line is None:
         return
     points, gaps = line if isinstance(line, tuple) else (line, [])
     points = np.asarray(points, float)
     for a, b in zip(points[:-1], points[1:]):
-        gap = any(g0 - 1 <= min(a[1], b[1]) <= max(a[1], b[1]) <= g1 + 1 for g0, g1 in gaps)
+        in_gap = any(g0 - 1 <= min(a[1], b[1]) <= max(a[1], b[1]) <= g1 + 1 for g0, g1 in gaps)
         xy = [
-            ((a[1] - offset[1]) * scale[0], (a[0] - offset[0]) * scale[1]),
-            ((b[1] - offset[1]) * scale[0], (b[0] - offset[0]) * scale[1]),
+            ((a[1] - offset[1]) * fit[0], (a[0] - offset[0]) * fit[1]),
+            ((b[1] - offset[1]) * fit[0], (b[0] - offset[0]) * fit[1]),
         ]
-        draw.line(xy, fill=colour[:3] + ((105 if gap else colour[3]),), width=width)
+        draw.line(xy, fill=colour[:3] + ((110 if in_gap else colour[3]),), width=width)
 
 
 def line_from_region(region, env):
@@ -97,63 +95,48 @@ def score_map(scan, prediction, labels):
     return {v: float(np.median(dist)) if len(dist) else None for v, (_, dist, _) in rows.items()}
 
 
-def load_release(data_root, tibia, labels):
+def release_prediction(data_root, scan, tibia, labels):
     prediction_root = data_root / "finetune" / "preds"
-    regions = []
-    lines = []
-    vs = None
+    regions, vs = [], None
     for seed in range(3):
-        z = np.load(prediction_root / f"l33-prob-s{seed}" / f"{SCAN}.npz")
-        this_vs = [int(v) for v in z["V"]]
+        z = np.load(prediction_root / f"l33-prob-s{seed}" / f"{scan}.npz")
+        seed_vs = [int(v) for v in z["V"]]
         if vs is None:
-            vs = this_vs
-        if this_vs != vs:
-            raise ValueError("release predictions cover different sections")
+            vs = seed_vs
+        if seed_vs != vs:
+            raise ValueError(f"release predictions cover different sections for {scan}")
         band = z["smax"].transpose(1, 0, 2) > 0.3
-        region, seed_lines, _ = band_to_region.band_regions(band, vs, tibia, "midline")
+        region, _, _ = band_to_region.band_regions(band, vs, tibia, "midline")
         regions.append(region)
-        lines.append(seed_lines)
     voted = (np.stack(regions).sum(0) >= 1.5) & (np.stack(regions).sum(0) > 0)
     prediction = {"V": np.asarray(vs), "mask": voted}
-    scores = score_map(SCAN, prediction, labels)
-    voted_lines = {}
-    for v in vs:
-        i = vs.index(v)
-        voted_lines[v] = line_from_region(voted[i], cutline.envelope(tibia[:, v, :]))
-    return voted_lines, scores
+    scores = score_map(scan, prediction, labels)
+    lines = {v: line_from_region(voted[vs.index(v)], cutline.envelope(tibia[:, v, :])) for v in vs}
+    return lines, scores
 
 
-def panel(image, expert_line, method_line, score_text, box, method):
+def panel(image, line, score_text, box, method):
     w0, w1, u0, u1 = box
     crop = image[w0:w1, u0:u1]
     height, width = crop.shape
-    max_w, max_h = 252, 188
-    fit = min(max_w / width, max_h / height)
-    size = (max(1, round(width * fit)), max(1, round(height * fit)))
+    max_w, max_h = 345, 142
+    fit_value = min(max_w / width, max_h / height)
+    size = (max(1, round(width * fit_value)), max(1, round(height * fit_value)))
     base = Image.fromarray(crop).resize(size, Image.Resampling.LANCZOS).convert("RGBA")
     canvas = Image.new("RGBA", (max_w, max_h), (10, 12, 14, 255))
     left, top = (max_w - size[0]) // 2, (max_h - size[1]) // 2
     canvas.alpha_composite(base, (left, top))
-    draw = ImageDraw.Draw(canvas, "RGBA")
-    offset = (w0, u0)
-    panel_scale = (fit, fit)
-    expert = np.asarray(expert_line[0], float) if isinstance(expert_line, tuple) else np.asarray(expert_line, float)
-    shifted = ImageDraw.Draw(canvas, "RGBA")
-    # The reference is intentionally faint and remains visible under every prediction.
-    old = shifted
-    ref_points = np.asarray(expert, float).copy()
-    ref_points[:, 0] = (ref_points[:, 0] - w0) * fit + left
-    ref_points[:, 1] = (ref_points[:, 1] - u0) * fit + top
-    for a, b in zip(ref_points[:-1], ref_points[1:]):
-        old.line([(a[1], a[0]), (b[1], b[0])], fill=COLOURS["expert"], width=2)
-    if method_line is not None and method != "expert":
+    if line is not None:
         layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-        add_line(ImageDraw.Draw(layer, "RGBA"), method_line, offset, panel_scale, COLOURS[method], width=3)
+        colour = REFERENCE if method == "reference" else FINE_TUNE
+        draw_line(ImageDraw.Draw(layer, "RGBA"), line, (w0, u0), (fit_value, fit_value), colour)
         canvas.alpha_composite(layer, (left, top))
     if method == "untrained":
-        draw.rounded_rectangle((max_w // 2 - 65, max_h // 2 - 26, max_w // 2 + 65, max_h // 2 + 26), radius=7, fill=(20, 22, 24, 220), outline=COLOURS["untrained"], width=2)
-        draw.text((max_w // 2, max_h // 2 - 10), "nothing found", font=font(13, True), fill=(255, 245, 240), anchor="mm")
-    draw.rounded_rectangle((7, 7, 93, 30), radius=4, fill=(8, 10, 12, 205))
+        draw = ImageDraw.Draw(canvas, "RGBA")
+        draw.rounded_rectangle((max_w // 2 - 67, max_h // 2 - 24, max_w // 2 + 67, max_h // 2 + 24), radius=7, fill=(20, 22, 24, 220), outline=EMPTY, width=2)
+        draw.text((max_w // 2, max_h // 2 - 9), "nothing found", font=font(13, True), fill=(255, 245, 240), anchor="mm")
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    draw.rounded_rectangle((7, 7, 100, 30), radius=4, fill=(8, 10, 12, 205))
     draw.text((13, 10), score_text, font=font(12, True), fill=(255, 255, 255))
     return canvas.convert("RGB")
 
@@ -161,11 +144,9 @@ def panel(image, expert_line, method_line, score_text, box, method):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", type=Path, default=Path.home() / "experiments/plate-data")
-    parser.add_argument("--out", type=Path, default=HERE / "figures/oa8-19l-cut-comparison.webp")
-    parser.add_argument("--sections", default=",".join(map(str, SECTIONS)))
+    parser.add_argument("--out", type=Path, default=HERE / "figures/plate-cut-comparison.webp")
     args = parser.parse_args()
     data_root = args.data_root.expanduser()
-    sections = [int(v) for v in args.sections.split(",")]
     os.environ["PLATE_SCANS"] = str(data_root / "scans")
     sys.path.insert(0, str(HERE))
     global band_to_region, cutline, labels, scans, score
@@ -175,92 +156,82 @@ def main():
     import scans
     import score
 
-    volume = scans.load_vol(SCAN)
-    tibia = scans.load_tibia_mask(SCAN)
-    labels_file = data_root / "finetune/data/L16C4/heldout/labels/OA8-19L.npz"
-    labels_data = np.load(labels_file)
-    expert, _ = labels.label_sections(SCAN)
-    n_u = tibia.shape[2]
-    agent = lines_from_trace(data_root / "scans" / SCAN, sections, n_u)
-    spark_scores = {}
-    spark_lines = {}
-    for display, directory in METHODS.items():
-        score_file = data_root / "spark" / directory / "scores.json"
-        if not score_file.exists():
-            continue
-        score_data = json.loads(score_file.read_text())["spark"]
-        spark_scores[display] = score_data
-        if display == "text":
-            spark_lines = lines_from_trace(data_root / "spark" / directory / SCAN, sections, n_u)
-    best_spark = min(spark_scores, key=lambda name: spark_scores[name]["med_sec"])
-    if best_spark != "text":
-        spark_lines = lines_from_trace(data_root / "spark" / METHODS[best_spark] / SCAN, sections, n_u)
-    release_lines, release_scores = load_release(data_root, tibia, labels_data)
-    agent_score_data = json.loads((data_root / "spark/scores.json").read_text())["opus"]
-    scores = {
-        "expert": {int(v): 0.0 for v in labels_data["V"]},
-        "untrained": {int(v): 1050.0 for v in labels_data["V"]},
-        "spark": {int(v): float(x) for v, x in spark_scores[best_spark]["per"].items()},
-        "opus": {int(v): float(x) for v, x in agent_score_data["per"].items()},
-        "release": release_scores,
-    }
-    means = {name: float(np.mean(list(values.values()))) for name, values in scores.items()}
-    if abs(means["release"] - 16.4) > 0.05:
-        raise ValueError(f"release vote is {means['release']:.3f} µm, not the README's 16.4 µm")
+    scans_data = {}
+    release_lines, release_scores = {}, {}
+    reference_lines, labels_data = {}, {}
+    for scan in sorted({row[0] for row in ROWS}):
+        split = "heldout" if scan in TEST_SCANS else "val"
+        label_path = data_root / f"finetune/data/L32pub/{split}/labels/{scan}.npz"
+        labels_data[scan] = np.load(label_path)
+        tibia = scans.load_tibia_mask(scan)
+        volume = scans.load_vol(scan)
+        scans_data[scan] = (volume, tibia)
+        n_u = tibia.shape[2]
+        if scan == "OA8-19L":
+            reference_lines[scan], _ = labels.label_sections(scan)
+        else:
+            reference_lines[scan] = trace_lines(data_root / "scans" / scan, [v for row_scan, v, _ in ROWS if row_scan == scan], n_u)
+        release_lines[scan], release_scores[scan] = release_prediction(data_root, scan, tibia, labels_data[scan])
+
+    rows = []
+    for scan, v, source in ROWS:
+        reference = reference_lines[scan][v]
+        release_score = release_scores[scan][v]
+        rows.append((scan, v, source, reference, release_lines[scan][v], release_score))
+    worst = max(rows, key=lambda row: row[5])
+    if worst[:2] != ("OA8-21L", 58):
+        raise ValueError(f"expected selected worst case OA8-21L V58, got {worst[0]} V{worst[1]} ({worst[5]:.1f} µm)")
 
     headers = [
-        ("Expert", "expert"),
-        ('SAM 3.1\nuntrained', "untrained"),
-        (f"Muse Spark\n{best_spark}", "spark"),
-        ("Opus agent\ntrace", "opus"),
-        ("Released model\n3-seed vote", "release"),
+        ('Expert labelled', "reference"),
+        ('Meta SAM 3.1\nprompt "growth plate"', "untrained"),
+        ('Our fine-tune\nprompt "growth plate"', "release"),
     ]
-    row_h, row_gap, left, top, label_w, col_w, col_gap = 188, 23, 18, 74, 74, 252, 12
+    row_h, row_gap, left, top, label_w, col_w, col_gap = 142, 14, 18, 92, 166, 345, 14
     width = left + label_w + len(headers) * col_w + (len(headers) - 1) * col_gap + left
-    height = top + len(sections) * row_h + (len(sections) - 1) * row_gap + 105
+    height = top + len(rows) * row_h + (len(rows) - 1) * row_gap + 94
     figure = Image.new("RGB", (width, height), (246, 244, 239))
     draw = ImageDraw.Draw(figure)
-    draw.text((left, 18), "OA8-19L growth-plate cut line", font=font(24, True), fill=(25, 29, 32))
-    draw.text((left, 47), "Gold: Dr. Yao's corrected line in every panel. Colour: the method's line.", font=font(12), fill=(75, 80, 84))
+    draw.text((left, 18), "Growth-plate cut lines", font=font(24, True), fill=(25, 29, 32))
+    draw.text((left, 48), "Six scans; each panel shows only its own line and its distance to that row's reference.", font=font(12), fill=(75, 80, 84))
     for i, (header, _) in enumerate(headers):
         x = left + label_w + i * (col_w + col_gap) + col_w // 2
-        draw.multiline_text((x, top - 51), header, font=font(12, True), fill=(25, 29, 32), anchor="ma", align="center")
-    for r, v in enumerate(sections):
-        env = cutline.envelope(tibia[:, v, :])
-        box = crop_box(env)
+        draw.multiline_text((x, top - 34), header, font=font(12, True), fill=(25, 29, 32), anchor="ma", align="center")
+
+    for r, (scan, v, source, reference, release_line, release_score) in enumerate(rows):
+        volume, tibia = scans_data[scan]
+        box = crop_box(cutline.envelope(tibia[:, v, :]))
         image = scans.section_img(volume, v)[:, :, 0]
         row_y = top + r * (row_h + row_gap)
-        verdict = "end" if v in (sections[0], sections[-1]) else ""
-        draw.text((left + label_w - 8, row_y + row_h // 2), f"V{v}\n{verdict}".rstrip(), font=font(12, True), fill=(45, 49, 52), anchor="rm", align="right")
+        label = f"{scan} V{v}\n{source}"
+        draw.multiline_text((left + label_w - 8, row_y + row_h // 2), label, font=font(10, True), fill=(45, 49, 52), anchor="rm", align="right")
+        panels = {
+            "reference": (reference, "reference"),
+            "untrained": (None, "1050.0 µm"),
+            "release": (release_line, f"{release_score:.1f} µm"),
+        }
         for c, (_, method) in enumerate(headers):
-            line = {
-                "expert": expert[v],
-                "untrained": None,
-                "spark": spark_lines.get(v),
-                "opus": agent.get(v),
-                "release": release_lines.get(v),
-            }[method]
-            score_value = scores[method].get(v)
-            score_text = "reference" if method == "expert" else f"{score_value:.1f} µm" if score_value is not None else "—"
-            tile = panel(image, expert[v], line, score_text, box, method)
+            line, score_text = panels[method]
+            tile = panel(image, line, score_text, box, method)
             x = left + label_w + c * (col_w + col_gap)
             figure.paste(tile, (x, row_y))
             ImageDraw.Draw(figure).rectangle((x, row_y, x + col_w - 1, row_y + row_h - 1), outline=(205, 201, 194), width=1)
-    legend_y = height - 83
+
+    legend_y = height - 68
     draw = ImageDraw.Draw(figure)
-    legend = [("expert", "expert line"), ("spark", "Spark"), ("opus", "Opus"), ("release", "released model")]
-    x = left + label_w
-    for key, text in legend:
-        draw.line((x, legend_y + 8, x + 22, legend_y + 8), fill=COLOURS[key][:3], width=3)
-        draw.text((x + 29, legend_y), text, font=font(11), fill=(55, 60, 63))
-        x += 125 if key != "release" else 170
-    draw.text((left + label_w, legend_y + 28), "Untrained SAM 3.1 returns no mask on all 14 expert sections; its empty-section score is 1050 µm.", font=font(11), fill=(75, 80, 84))
+    draw.line((left + label_w, legend_y + 8, left + label_w + 23, legend_y + 8), fill=REFERENCE[:3], width=3)
+    draw.text((left + label_w + 30, legend_y), "reference line", font=font(11), fill=(55, 60, 63))
+    x = left + label_w + 145
+    draw.line((x, legend_y + 8, x + 23, legend_y + 8), fill=FINE_TUNE[:3], width=3)
+    draw.text((x + 30, legend_y), "our fine-tune", font=font(11), fill=(55, 60, 63))
+    draw.text((left + label_w, legend_y + 28), "The stock SAM 3.1 returned no mask on every displayed section; empty sections score 1050 µm.", font=font(11), fill=(75, 80, 84))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     figure.save(args.out, "WEBP", quality=88, method=6)
     print(f"wrote {args.out} ({figure.width}×{figure.height})")
-    print("best Spark variant:", best_spark)
-    print("means (all 14 sections):", " ".join(f"{name}={value:.1f} µm" for name, value in means.items()))
-    print("release per section:", " ".join(f"V{v}={release_scores[v]:.1f}" for v in sorted(release_scores)))
+    print("fine-tune worst displayed row:", worst[0], f"V{worst[1]}", f"{worst[5]:.1f} µm")
+    for scan in sorted(release_scores):
+        values = list(release_scores[scan].values())
+        print(scan, f"mean={np.mean(values):.1f} µm")
 
 
 if __name__ == "__main__":
