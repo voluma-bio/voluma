@@ -13,6 +13,20 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
 - **The run's events** live in one store per run page (`RunStoreProvider`, keyed on the run, fed by
   the page's stream; `useEvents`), so the page and its header read one log. Only durable events are
   kept.
+- **An agent's thread** (`transcript.ts`, `agent-threads.ts`, `transcript-view.tsx`,
+  `agent-thread.tsx`) is the agents view's body: `agentEntries` lists main first (only when the
+  run has one; `main` and every `main.N` of a review are one entry, a divider where each later
+  one starts), then every worker or check in start order, from `workersOf` and `agentLog`'s
+  `place`, never a thread's `kind` or `role`. `threadRows` derives rows for the picked thread
+  only, from durable events (the stream sends no token deltas): prose in the open; reasoning and
+  runs of tool calls fold closed under a digest, their bodies built on first open
+  (`ProcessDisclosure`, `ActivityRow`); a call with no result is running, and the live line names
+  it; on an ended run it reads stopped. Tool arguments and output show their last 8000
+  characters with a "Shortened" note. `start_worker`, `message` and `close_worker` name their
+  worker through `AgentLinks`, and `Markdown`'s `agents` prop turns inline code that is exactly
+  an agent's name into the same link. Tool titles are `toolTitle`: a new tool shows as its name and
+  arguments until it gets a case. Origin: the transcript viewer deleted with the task loop
+  (`eed32205^1`), without tasks, attempts or verdicts.
 - **Researcher words** everywhere: the AI, main; no paths, file names or tool names. Values take
   the workflow's names (`outputName`, from the bundled `outputs.yaml`), an output's id as words for
   one the catalog lacks.

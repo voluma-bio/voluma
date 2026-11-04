@@ -70,8 +70,8 @@ on its chain has a version; then it shows the nearest such link, the scene bar s
 rests on". `studiesQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.
 
-The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item` and
-`centre` (`run` for the whole run, `agents`). An `output` that isn't a listed value opens under
+The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item`,
+`centre` (`run` for the whole run, `agents`) and `agent` (the agent's thread name open in the agents view; none opens main, else the agent working now, else the first). An `output` that isn't a listed value opens under
 the first value resting on it (`show`, also what a click in the whole run does). A published ruler or point in view (an item's own focus wins) puts the slices through its first end once on selecting it, through the one-shot `marking.jump` (not the To check `focus`, so later events and your own panning are left alone), where a Navigate drag can take it; the end is drawn as a dot and shows a grab cursor. The panes'
 layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
 (both sides folded) plus that pane: the page keeps only which view fills and derives the rest
@@ -79,7 +79,7 @@ from the shell, so leaving Full view by any means gives the panes back. The whol
 outputs while it is up and unfolds it after (the shell's `useFoldWhile`); unfolding the strip
 during it leaves it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
-whole run and the agents. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate
+whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate
 (V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Line, drawn freehand (D: an open path, tag L), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
 (`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
