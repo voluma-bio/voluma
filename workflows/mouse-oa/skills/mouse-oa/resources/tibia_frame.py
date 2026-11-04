@@ -38,6 +38,7 @@ Exits 2 with one sentence on bad input, before writing anything.
 from pathlib import Path
 
 import frame as fr
+import joint_cap as jc
 import numpy as np
 import objects
 import sidecar
@@ -46,48 +47,16 @@ from envelope import close_and_fill
 from scipy import ndimage as ndi
 
 SUBSAMPLE = 2  # epiphysis points for the PCA are taken every 2nd voxel
-CAP_MM = 0.63  # how far from its joint end a bone's cap reaches, for the femur/tibia check
-CAP_GAP = 0.05  # cap solidities closer than this cannot tell the two bones apart
 FIT_STEP = 2  # the axis refit samples the mask every 2nd aligned voxel; the reported residual is at full resolution
 MAX_ITER = 5
 CONVERGED_DEG = 0.1
 MIN_SECTIONS = 10
 
 
-def largest_piece(m):
-    """The largest 6-connected piece of mask `m`: a fragment or stray voxel under the same label does not move the bone's ends."""
-    zs, ys, xs = (np.flatnonzero(m.any(axis=ax)) for ax in ((1, 2), (0, 2), (0, 1)))
-    box = np.s_[zs[0] : zs[-1] + 1, ys[0] : ys[-1] + 1, xs[0] : xs[-1] + 1]
-    pieces, n = ndi.label(m[box])
-    out = np.zeros_like(m)
-    if n:
-        out[box] = pieces == 1 + int(np.argmax(np.bincount(pieces.ravel())[1:]))
-    return out
-
-
-def cap_solidity(m, low_end, cap_vox):
-    """Area over convex-hull area of the cap of mask `m` within `cap_vox` slices of its low or high end, projected along z.
-    The femur's cap holds the intercondylar notch, open toward the joint, so its footprint is U-shaped; the tibial plateau's is a solid blob. On ten lab scans the femur's cap gave 0.51 to 0.80 and the
-    tibia's 0.83 to 0.95, the smallest gap 0.12."""
-    from skimage.morphology import convex_hull_image
-
-    zs = np.flatnonzero(m.any(axis=(1, 2)))
-    z0, z1 = zs[0], zs[-1]
-    lo, hi = (z0, z0 + cap_vox) if low_end else (max(z1 - cap_vox + 1, z0), z1 + 1)
-    foot = m[lo:hi].any(axis=0)
-    return float(foot.sum() / max(convex_hull_image(foot).sum(), 1))
-
-
 def extent(m):
     """`m`'s scan z range, as text."""
     zs = np.flatnonzero(m.any(axis=(1, 2)))
     return f'{zs[0]} to {zs[-1]}'
-
-
-def inside(m):
-    """A voxel of `m` (scan z,y,x text) near its centroid, for relabel.py --at."""
-    p = np.argwhere(m[::4, ::4, ::4]) * 4
-    return ','.join(str(int(i)) for i in p[np.argmin(((p - p.mean(axis=0)) ** 2).sum(axis=1))])
 
 
 def check_bone(labels, mask, label, other, joint_end, vox):
@@ -98,25 +67,20 @@ def check_bone(labels, mask, label, other, joint_end, vox):
     oth = labels == other
     if not oth.any():
         return {'tibia_check': f'not made: label {other} (the femur) is empty, so nothing to compare against; check the QC'}
-    mask, oth = largest_piece(mask), largest_piece(oth)
-    zc, zo = (float(np.flatnonzero(m.any(axis=(1, 2))).mean()) for m in (mask, oth))
-    facing_low = zo < zc  # the end of this bone that faces the femur
-    cap = round(CAP_MM / vox)
-    s, so = cap_solidity(mask, facing_low, cap), cap_solidity(oth, not facing_low, cap)
-    if s < so - CAP_GAP:
-        at, ato = (inside(m) for m in (mask, oth))
+    mask, oth = jc.largest_piece(mask), jc.largest_piece(oth)
+    s, so, facing_low = jc.caps(mask, oth, vox)  # facing_low: the end of this bone that faces the femur
+    if s < so - jc.CAP_GAP:
         sidecar.fail(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap '
                      f'solidity {s:.3f} against {so:.3f}). First suspect: the two labels are swapped (on a staging run the 3D sheet '
                      f'was read three times as right while they were swapped). Compare each label with the scan: label {label} '
-                     f'spans scan z {extent(mask)}, label {other} z {extent(oth)}. If label {label} is the femur, swap them: '
-                     f'relabel.py --at {at} --to 99, then --at {ato} --to {label}, then --at {at} --to {other} (segmentation-check; '
-                     'each moves one connected piece, so check the fragments after), and report the corrected bone-labels. Only if '
+                     f'spans scan z {extent(mask)}, label {other} z {extent(oth)}. If label {label} is the femur, swap them with '
+                     f'segmentation-check\'s relabel.py --swap {label},{other} and report the corrected bone-labels. Only if '
                      f'label {label} really is the tibia, look for a femur piece merged into its joint end. Tell main either way, with '
                      'the 3D sheet, before any tibial step')
     if (joint_end == 'low') != facing_low:
         sidecar.fail(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {"low" if facing_low else "high"} '
                      f'end of scan z for label {label} on this scan, so pass --joint-end {"low" if facing_low else "high"}')
-    verdict = 'tibia' if s > so + CAP_GAP else 'unclear: the caps are too alike to tell the bones apart; check the QC montage for the plateau'
+    verdict = 'tibia' if s > so + jc.CAP_GAP else 'unclear: the caps are too alike to tell the bones apart; check the QC montage for the plateau'
     return {'tibia_check': verdict, 'cap_solidity': {'tibia_label': round(s, 3), 'femur_label': round(so, 3)}}
 
 
