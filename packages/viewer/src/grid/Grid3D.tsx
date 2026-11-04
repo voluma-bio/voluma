@@ -22,6 +22,7 @@ import {
   DepthTexture,
   DirectionalLight,
   DoubleSide,
+  FrontSide,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -639,6 +640,9 @@ function paint(mesh: Mesh, m: GridMesh) {
   material.opacity = m.opacity;
   material.transparent = m.opacity < 1;
   material.depthWrite = m.opacity >= 1;
+  // A see-through shell shows its outer faces only: its back and inner faces would stack and
+  // hide what it contains.
+  material.side = m.opacity < 1 ? FrontSide : DoubleSide;
   material.needsUpdate = true;
   mesh.visible = m.opacity > 0;
   // Draw see-through shells after what they contain.
