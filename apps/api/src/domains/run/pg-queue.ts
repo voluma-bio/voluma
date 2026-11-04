@@ -11,7 +11,7 @@
 import { randomBytes } from "node:crypto";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
 import { type OutputCatalog, unselectable } from "@voluma/contracts/output-catalog";
-import type { Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
+import { type OwnKeys, type Run, type RunThinking, usesOwnKey } from "@voluma/contracts/run";
 import {
   LEASE_SECONDS,
   type ReleaseReason,
@@ -90,7 +90,7 @@ export type Claimed = {
   run: Run;
   leaseToken: string;
   /** The own-key run's keys, opened from the run's sealed column for this claim. */
-  keys?: VisitorKeys;
+  keys?: OwnKeys;
   /** The study's budget (`claimSchema.budgetUsd`); null: none. */
   budgetUsd: number | null;
   /** Present on every claim after the run's first. */
@@ -266,7 +266,7 @@ type Starts = {
   runs: { id: string; inputId: string }[];
   selectedOutputs?: string[];
   notes?: string;
-  keys?: VisitorKeys;
+  keys?: OwnKeys;
   /** The model the caller asked for; `pickModel` decides the run's. */
   model?: string;
   /** The thinking level the caller asked for; absent: `DEFAULT_THINKING`. */
@@ -549,7 +549,7 @@ export function pgRunQueue(
     /**
      * `awaiting-keys` → `queued`, for the run's own starter, sealing the new keys.
      */
-    resume: (reader: Reader, runId: string, keys: VisitorKeys) =>
+    resume: (reader: Reader, runId: string, keys: OwnKeys) =>
       locked(async (tx) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), orgs);
         if (!run) throw new HTTPException(404, { message: "not found" });
@@ -586,7 +586,7 @@ export function pgRunQueue(
         // Failing or skipping a run changes none of these counts, so read each org's once.
         const usages = new Map<string, Usage>();
         for (const run of queued) {
-          if (run.credentials === "visitor") {
+          if (usesOwnKey(run.credentials)) {
             if (counts.ownKeyBusy) continue;
           } else {
             const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
@@ -602,9 +602,10 @@ export function pgRunQueue(
             }
           }
           // An own-key run whose sealed keys are gone or unreadable (a rotated secret) waits for the user to resend them.
-          const keys =
-            run.credentials === "visitor" ? sealer.open(run.id, run.sealedKeys) : undefined;
-          if (run.credentials === "visitor" && !keys) {
+          const keys = usesOwnKey(run.credentials)
+            ? sealer.open(run.id, run.sealedKeys)
+            : undefined;
+          if (usesOwnKey(run.credentials) && !keys) {
             await tx
               .update(runs)
               .set({ state: "awaiting-keys", awaitingSince: sql`now()` })

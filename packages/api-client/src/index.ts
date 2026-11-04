@@ -37,6 +37,7 @@ import {
   inputSchema,
   listInputsResponseSchema,
   listRunsResponseSchema,
+  type OwnKeys,
   type ResendKeysRequest,
   type Run,
   type RunModelsResponse,
@@ -45,7 +46,6 @@ import {
   runReadSchema,
   runSchema,
   type StartRunRequest,
-  type VisitorKeys,
 } from "@voluma/contracts/run";
 import {
   type UpdateUserSettingsRequest,
@@ -265,7 +265,7 @@ export async function cancelRun(id: string): Promise<RunRead> {
 }
 
 /** Resends a visitor run's keys after the runner lost them (state `awaiting-keys`). */
-export async function resendKeys(id: string, keys: VisitorKeys): Promise<RunRead> {
+export async function resendKeys(id: string, keys: OwnKeys): Promise<RunRead> {
   const body: ResendKeysRequest = { keys };
   return read(
     runReadSchema,

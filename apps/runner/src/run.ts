@@ -6,7 +6,7 @@
  * (`lease.ts`) and stops at once on any of: the server ending the run, a lost lease, a
  * self-stop, or the service shutting down. Then it reports.
  *
- * A visitor run uses the claim's Meta key for the model, held in this function's
+ * An own-key run uses the claim's Meta key for the model, held in this function's
  * scope only. Everything that leaves the process goes through the run's `redact`: the
  * run client (`runClient`) redacts what it sends, the console line is redacted before it is
  * clipped. The function never rejects: every failure after `redact` exists is caught and
@@ -80,7 +80,7 @@ const roleModelUnset = (alias: string) =>
 /** What the researcher reads when a run's chosen model cannot be used by this runner. */
 const runModelUnavailable = (model: string) =>
   `this run's AI (${model}) is not set up on this server; whoever runs Voluma sets it up`;
-const runModelNotForVisitors = (model: string) =>
+const runModelNotForOwnKey = (model: string) =>
   `${model} cannot run on your own key; start the run again with a model that can, or with Voluma's key`;
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
@@ -163,11 +163,11 @@ async function claimBody(
   const { run, leaseToken, keys, budgetUsd } = claim;
   const runId = run.id;
   const claimId = randomUUID();
-  const visitor = keys !== undefined;
-  /** The key for a provider: a visitor's Meta key is good for Meta alone. */
+  const own = keys !== undefined;
+  /** The key for a provider: an own Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
-    visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
-  const redact: Redact = redactor([...config.secrets, ...(visitor ? [keys.metaApiKey] : [])]);
+    own ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
+  const redact: Redact = redactor([...config.secrets, ...(own ? [keys.metaApiKey] : [])]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
   /** The report keeps only `errorText`; the stack shows where an error came from. */
   const logStack = (e: unknown) => log(e instanceof Error && e.stack ? e.stack : String(e));
@@ -244,7 +244,7 @@ async function claimBody(
         void events?.pull(seq).catch((e) => log(`pull failed, will retry: ${errorText(e)}`)),
       log,
     });
-    log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
+    log(`claimed (${own ? "own" : "voluma"} key)`);
 
     // Metered from the start of creation (the sweep included) to destroy: a conservative upper bound.
     const modal = claimSandboxes(config, config.modal, claimId);
@@ -398,18 +398,18 @@ async function claimBody(
           );
           throw new Error(roleModelUnset(alias));
         }
-        if (visitor && !ownKeyMayUse(`${model.provider}/${model.id}`)) {
+        if (own && !ownKeyMayUse(`${model.provider}/${model.id}`)) {
           log(
             `the model ${model.provider}/${model.id} cannot take a run's own Meta key (not a Standard-mode Meta model)`,
           );
-          throw new Error(runModelNotForVisitors(`${model.provider}/${model.id}`));
+          throw new Error(runModelNotForOwnKey(`${model.provider}/${model.id}`));
         }
         return model;
       };
       // The level every role uses: the run's own (`run.thinking`, picked at /new), else the role
       // file's, else none is sent ("off"), at the nearest level the model supports (DeepSeek
       // Flash has no `medium`).
-      // A visitor's run thinks like anyone's: only whose key it uses differs.
+      // An own-key run thinks like anyone's: only whose key it uses differs.
       const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
         const level = nearestThinking(run.thinking ?? thinking, model);
         assertThinking(level, [model], `the ${name} role's`);
@@ -483,7 +483,7 @@ async function claimBody(
         ? (sandbox) =>
             sandboxGateway(
               config,
-              { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
+              { runId, leaseToken, ownMetaKey: keys?.metaApiKey },
               sandbox,
               redact,
             )

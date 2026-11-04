@@ -2,7 +2,7 @@
  * The provider gateway: a streaming reverse proxy that sandboxes reach providers through. A
  * request is `/<provider>/<upstream path>` with `Authorization: Bearer <gateway token>` (or the
  * `x-api-key` Anthropic's SDK sends). In order: open the token; check the provider, our key (a
- * visitor's token has only its own keys and never falls back to ours), the exact route and, for
+ * own-key token has only its own keys and never falls back to ours), the exact route and, for
  * a model call, the model (read from the top level of the first 4 KB of the body); admit the call against the
  * database (`admitCall`: run live, lease matches, in-flight limit, `open` row); forward with our key and the caller's auth headers stripped; stream the
  * reply back unbuffered while reading usage from its lines; settle the row.
@@ -96,7 +96,7 @@ export async function isMigrated(db: PostgresJsDatabase): Promise<boolean> {
 export type GatewayDeps = {
   db: PostgresJsDatabase;
   secrets: readonly TokenSecret[];
-  /** Our key per provider; a provider without one serves visitor tokens only. */
+  /** Our key per provider; a provider without one serves own-key tokens only. */
   keys: Partial<Record<Provider, string>>;
   /** Where each provider is, default the real one (tests point these at stubs). */
   baseUrls: Record<Provider, string>;
@@ -176,8 +176,9 @@ export function createGateway(deps: GatewayDeps) {
     const claims = token ? openGatewayToken(token, secrets) : null;
     if (!claims) throw new Refused(401, "invalid or expired token");
     if (!claims.providers.includes(provider)) throw new Refused(403, `no access to ${provider}`);
-    // A visitor token holds the visitor's keys and nothing falls back to ours.
-    const key = claims.visitorKeys ? claims.visitorKeys[provider] : keys[provider];
+    // An own-key token holds the starter's keys and nothing falls back to ours.
+    const ownKeys = claims.ownKeys ?? claims.visitorKeys;
+    const key = ownKeys ? ownKeys[provider] : keys[provider];
     if (!key) throw new Refused(403, `no ${provider} key for this token`);
     const method = req.method ?? "GET";
     const matched = matchRoute(provider, method, upstreamPath);
@@ -216,7 +217,7 @@ export function createGateway(deps: GatewayDeps) {
         route: `${method} ${matched.fileId ? `${matched.route.path}{id}` : upstreamPath}`,
         model,
         instance,
-        visitor: claims.visitorKeys !== undefined,
+        own: ownKeys !== undefined,
       });
     } catch (error) {
       log(`admit failed: ${error instanceof Error ? error.message : error}`);

@@ -14,7 +14,7 @@
  * connection or in-memory wake-up on the API, and a run lasts minutes, so two
  * seconds of pickup delay costs nothing. Every run is created `queued` and
  * only a claim starts it (`run.ts`). `claim` is atomic: it picks the oldest
- * `queued` run the org's limits allow (a `visitor` run skips the runs-at-once
+ * `queued` run the org's limits allow (an own-key run skips the runs-at-once
  * count, and is taken only while the server holds its keys), choosing across
  * orgs so one org's queue never holds another's back: among each org's oldest
  * claimable run, it takes the one whose org was claimed from least recently
@@ -23,7 +23,7 @@
  * `running`, and takes the lease. A run's `startedAt` is its first claim's
  * time; a re-claim keeps it. Taking the
  * run is what starts it, so the runner reports no "running". `claim` answers
- * `{ claim: null }` when there is nothing to start. For a `visitor` run the
+ * `{ claim: null }` when there is nothing to start. For an own-key run the
  * response is the only place the keys go and the server forgets them as it
  * answers. A response lost on the way costs that run its keys, which the lease
  * below recovers like any other lost keys.
@@ -49,7 +49,7 @@
  * `released` with its reason, so the run is recovered without waiting out the lease.
  * When a lease expires, or the runner releases it, the run is recovered the
  * same way: a `voluma` run goes back to `queued`, ahead of newer runs; a
- * `visitor` run goes back to `queued` too: its sealed keys stay with the run. The runner
+ * own-key run goes back to `queued` too: its sealed keys stay with the run. The runner
  * keeps its `events` already written, and the next claim resumes the thread
  * from them. That claim carries `previousClaim.reason`, why the claim before it ended
  * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
@@ -97,7 +97,7 @@
  * values from every error it reports (`run.ts`).
  */
 import { z } from "zod";
-import { runSchema, visitorKeysSchema } from "./run";
+import { ownKeysSchema, runSchema, usesOwnKey } from "./run";
 
 /**
  * How long a run stays leased after the server's last heartbeat for it. It must stay longer than
@@ -164,8 +164,8 @@ export const claimSchema = z
     }),
     /** Changes with every claim; see Lease. */
     leaseToken: z.string().min(1),
-    /** Present exactly for a `visitor` run; returned once. */
-    keys: visitorKeysSchema.optional(),
+    /** Present exactly for an own-key run; returned once. */
+    keys: ownKeysSchema.optional(),
     /**
      * The run's study budget in model dollars (`Study.budgetUsd`); null when the study has none.
      * Absent from a server that predates the field, read as null. The runner fails the run once
@@ -175,9 +175,9 @@ export const claimSchema = z
     /** Present on every claim after the run's first: why the previous claim ended. */
     previousClaim: z.object({ reason: claimEndReasonSchema }).optional(),
   })
-  .refine((c) => (c.run.credentials === "visitor") === (c.keys !== undefined), {
+  .refine((c) => usesOwnKey(c.run.credentials) === (c.keys !== undefined), {
     path: ["keys"],
-    message: "keys go with a visitor run and no other",
+    message: "keys go with an own-key run and no other",
   });
 export type Claim = z.infer<typeof claimSchema>;
 

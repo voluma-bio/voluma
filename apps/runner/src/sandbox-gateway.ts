@@ -2,7 +2,7 @@
  * A worker sandbox's way to providers: the gateway's URL and a token minted for that sandbox.
  * `sandbox` is the name the runner writes in the sandbox's `sandbox` event, which the run page
  * attributes spend by. The token is scoped to Meta (the only provider a sandbox tool uses); a
- * visitor's own Meta key rides inside it. It goes on the run's redact list, since the agent can
+ * starter's own Meta key rides inside it. It goes on the run's redact list, since the agent can
  * read it from the sandbox's environment.
  */
 import { mintGatewayToken } from "@voluma/provider-calls/token";
@@ -11,7 +11,7 @@ import type { Redact } from "./redact.ts";
 
 export function sandboxGateway(
   config: Config,
-  claim: { runId: string; leaseToken: string; visitorMetaKey?: string },
+  claim: { runId: string; leaseToken: string; ownMetaKey?: string },
   sandbox: string,
   redact: Redact,
 ): { url: string; token: string; ipv4?: string } | undefined {
@@ -25,7 +25,7 @@ export function sandboxGateway(
       sandbox,
       providers: ["meta"],
       lifetimeSeconds: config.sandbox.lifetimeSeconds,
-      ...(claim.visitorMetaKey && { visitorKeys: { meta: claim.visitorMetaKey } }),
+      ...(claim.ownMetaKey && { ownKeys: { meta: claim.ownMetaKey } }),
     },
     secret,
   );
