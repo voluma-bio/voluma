@@ -42,8 +42,8 @@ change it safely.
   (`<id>:<secret>`). A query string is refused (`noQuery`): the sandbox holds the token, and `plate-serve`'s options pick
   checkpoints and read R2 objects. An own-key token is served with our key there. Its route is `timed`: cost is the call's duration at the
   route's `usdPerHour`, which leaves out Modal's container start and idle tail. A reply over 150 s is Modal's 303 to its
-  result; the gateway's `fetch` follows redirects by default, so the caller should see one 200 (not exercised: calls take
-  about a minute).
+  result; the gateway's `fetch` follows it with the auth headers, so the caller sees one 200 (a 240-section call: 398 s,
+  redirected, 200). A run's call is about 35 sections and a minute.
 - **The body is the caller's.** `body.ts` reads `model` as a top-level key only,
   and one scanner runs over the whole body as it is forwarded, in constant memory. The first 4 KB
   must hold a top-level `model` (else 403); a repeated `model` key anywhere, or an
