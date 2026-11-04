@@ -1,10 +1,14 @@
 /**
- * Voxel to world mm, and the ruler check: a line annotation's length must equal the length
- * measurement that names it, so a ruler that disagrees with its number is refused when the
- * second of the pair is reported. Pure; the caller supplies the lengths.
+ * A grid's affine (voxel index (x, y, z) to world mm, 4x4 row-major, orthogonal columns): points
+ * and directions between voxels and world mm, the one place this maths lives. And the ruler
+ * check: a line annotation's length must equal the length measurement that names it, so a ruler
+ * that disagrees with its number is refused when the second of the pair is reported. Pure; the
+ * caller supplies the lengths.
  */
 
 import type { Volume } from "./review";
+
+type Vec3 = [number, number, number];
 
 const REL_TOLERANCE = 0.005;
 const ABS_TOLERANCE_MM = 0.005;
@@ -18,21 +22,54 @@ export const toWorld = (
   return [row(m[0]), row(m[1]), row(m[2])];
 };
 
-/**
- * World mm (x, y, z) to a grid voxel `[z, y, x]` (fractional) through the grid's affine: its
- * columns are orthogonal (the contract's spaced-rigid rule), so each index is a projection.
- */
-export const toVoxel = (
-  m: Volume["affine"],
-  world: readonly number[],
-): [number, number, number] => {
-  const [dx, dy, dz] = [world[0]! - m[0][3], world[1]! - m[1][3], world[2]! - m[2][3]];
-  const along = (j: 0 | 1 | 2) => {
-    const [a, b, c] = [m[0][j], m[1][j], m[2][j]];
-    return (a * dx + b * dy + c * dz) / (a * a + b * b + c * c);
-  };
-  return [along(2), along(1), along(0)];
+/** The affine in an output's `detail` (written by the harness), else undefined. */
+export const affineIn = (detail: unknown): Volume["affine"] | undefined => {
+  const a = (detail as { affine?: unknown } | null | undefined)?.affine;
+  return Array.isArray(a) &&
+    a.length === 4 &&
+    a.every((r) => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite))
+    ? (a as Volume["affine"])
+    : undefined;
 };
+
+/** World mm to voxel (z, y, x): the columns are orthogonal, so each index is a projection. */
+export function toVoxel(m: Volume["affine"], world: readonly number[]): Vec3 {
+  const d = [0, 1, 2].map((r) => world[r]! - m[r]![3]);
+  const index = (j: 0 | 1 | 2) =>
+    (m[0][j] * d[0]! + m[1][j] * d[1]! + m[2][j] * d[2]!) /
+    (m[0][j] ** 2 + m[1][j] ** 2 + m[2][j] ** 2);
+  return [index(2), index(1), index(0)];
+}
+
+/** Every voxel `(x, y, z)` of a flat list of triples in world mm, as a flat list of triples. */
+export function xyzToWorld(m: Volume["affine"], xyz: ArrayLike<number>): Float64Array {
+  const world = new Float64Array(xyz.length);
+  for (let i = 0; i + 2 < xyz.length; i += 3)
+    for (let r = 0; r < 3; r++) {
+      const row = m[r]!;
+      world[i + r] = row[0] * xyz[i]! + row[1] * xyz[i + 1]! + row[2] * xyz[i + 2]! + row[3];
+    }
+  return world;
+}
+
+/** The grid's x, y and z axes as world unit vectors (the affine's columns, normalized). */
+export const axesOf = (m: Volume["affine"]): [Vec3, Vec3, Vec3] => {
+  const axis = (j: 0 | 1 | 2): Vec3 => {
+    const n = Math.hypot(m[0][j], m[1][j], m[2][j]);
+    return [m[0][j] / n, m[1][j] / n, m[2][j] / n];
+  };
+  return [axis(0), axis(1), axis(2)];
+};
+
+/** A world direction in the grid's mm, (z, y, x): its components along the grid's axes. */
+export function directionInGrid(
+  m: Volume["affine"],
+  world: readonly [number, number, number],
+): Vec3 {
+  const [x, y, z] = axesOf(m);
+  const along = (a: Vec3) => a[0] * world[0] + a[1] * world[1] + a[2] * world[2];
+  return [along(z), along(y), along(x)];
+}
 
 /** Distance in mm between two world points. */
 export const distanceMm = (

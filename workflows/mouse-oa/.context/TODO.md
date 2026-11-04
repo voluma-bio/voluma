@@ -1,5 +1,15 @@
 # mouse-oa TODO
 
+- **A labels fix after the tracing voids the tracing.** `iioc.py` stops where ROI-1's side runs through bone the tibia label
+  left out; fixing the labels and rerunning `tibia_frame.py` makes a new `grid_id` (the frame's origin and crop come from the
+  mask), and every traced curve, eroded mark and width point is refused on it. Next: `tibia_frame.py --frame <tibia-frame.json>`
+  to resample a corrected mask onto the existing frame, or run the side test before tracing (at `tibia_frame.py`).
+- **A face's straight line between two pieces reads as a traced face.** Where a coronal section cuts the plateau in two (the
+  notch, the posterior condyles), a curve has points on both pieces and the schema joins them with a line across empty space
+  (4df02afe V=271: 788 um more than `off_tibia_margin_um` off the mask; the hand traces in `~/experiments/plate-data/scans` do the
+  same on 30 of 45 scans, up to 1134 um, and OA6-2RK's NOTES call it "not a traced point"). So no check refuses it: ROI-1 and ROI-3
+  are clipped to the mask, and the line adds no volume. `face_qc.delivered_faces` draws it solid, which a reviewer reads as a face
+  through air: draw it dotted where it is more than the margin off the tibia.
 - **`femoral_frame.py`'s femur-length gate sits at the edge of real scans.** `MIN_FEMUR_MM` 4.5 was set from two scans; femur
   length along the shaft on threshold-split labels of five lab scans: OA6-2RK 5.86, OA6-1RK 5.31, OA7-1L 5.19, OA7-4R 5.14,
   OA8-17L 4.57 mm. A scan framed a little lower stops the femoral step with a To check. Next: fit the shaft on narrow
@@ -8,8 +18,8 @@
   oblique aligned grids (OA7-5L, OA7-6L, OA7-8L, OA8-1R: shaft leaving the grid, plateau sloping steeply across coronal
   sections, no clean plate level). Their tibia labels came from a quick threshold-and-erosion split
   (`~/experiments/plate-data/scans/TIBIA-MASK.md`), not from segmentation, and OA7-8L's took femur pieces, so the cause may be
-  the label rather than the shaft-axis fit. Next: run `tibia_frame.py` on one of them with a checked tibia label; if still
-  oblique, the fit needs to follow the proximal shaft only. Notes per scan: `~/experiments/plate-data/scans/_skipped/<scan>/SKIPPED.md`.
+  the label rather than the shaft-axis fit. The fit now follows the shaft over `--axis-mm` from the joint end, which may already fix them. Next: rerun
+  `tibia_frame.py` on one of them with a checked tibia label and check both QC sheets. Notes per scan: `~/experiments/plate-data/scans/_skipped/<scan>/SKIPPED.md`.
 - **Each region mask is saved twice.** `iioc.py`, `tibial_trabecular.py` and `metaphysis_roi.py` write the full-grid array later
   scripts read (`iioc-tissue.npy`, `iioc-trab-tissue.npy`, `roi3-tissue.npy`, `cortex.npy`) and a cropped copy that is the mask object
   (`roi-iioc.npy`, `roi-iioc-trabecular.npy`, `roi-metaphyseal.npy`, `cortex-object.npy`). The voxels are identical. Direction: the

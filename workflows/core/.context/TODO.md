@@ -79,3 +79,5 @@ scaling, or a phantom's known values. Failing that, it uses two references found
 soft tissue as water. It writes `hu.json` with the calibration marked estimated and its evidence. A To check item says the
 HU are estimated. The measurement scripts then need `--threshold`, unless the units give the lab's 2.16/cm directly (a scan in
 linear attenuation). Keep the rule that a scan with HU is never re-mapped from its histogram.
+
+- **`merge_labels.py` repeats the small side's feature transform per contested big label** (`[distance_at(own_small, at, spacing) for _, at in contested]`): a track touching three bones runs it three times over its box. Compute once per final label, stack the contested points, split by big label. Time only (~63 s on OA6-2RK), not memory. (PR #566 review)

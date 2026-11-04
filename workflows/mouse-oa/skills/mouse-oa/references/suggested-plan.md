@@ -68,7 +68,9 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 
 - **Needs:** `scan`, the tibia in `bone-labels`.
 - **Check first:** from the articular surface to about 1 mm below the growth plate, the tibia label holds no femur,
-  patella, meniscus or fibula voxels, and its top runs through the joint space, not through femur. Which side is
+  patella, meniscus or fibula voxels, its top runs through the joint space, not through femur, and its sides reach the
+  bone's outer surface: where the label stops short of the cortex, `iioc.py` stops after the tracing, and fixing the labels
+  then makes a new `tibia-grid` that the tracing is redone on. Which side is
   medial: the fibula is lateral. On a view of the aligned grid that shows the fibula beside the tibia (an axial
   slice just below the plateau), find which way along U is medial on this knee, and record it before you name a
   compartment. `tibia_frame.py`'s sign rule assumes one knee and one scan orientation and has no flip, so where +U
