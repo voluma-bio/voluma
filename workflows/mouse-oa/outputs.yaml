@@ -41,8 +41,8 @@
 
 - id: tibia-grid
   kind: base
-  name: Aligned tibia grid
-  description: the tibia resampled onto the oriented grid; the regions and surfaces below sit on it
+  name: Tibia long-axis grid
+  description: the tibia resampled onto a grid with its long axis vertical (zero angle to the grid's y in coronal and sagittal), the lab's convention; the regions and surfaces below sit on it
   from: scan
   planes: { XY: axial, XZ: coronal, YZ: sagittal }
   expect:
