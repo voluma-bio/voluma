@@ -284,6 +284,17 @@
     - Points a–d sit where /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md
       (femoral-geometry) puts them, each checked on a second view.
 
+- id: femur-frame
+  kind: file
+  name: Femur frame
+  description:
+    "femur-frame.json from femoral_frame.py: the femur's shaft and mediolateral axes; Align turns
+    the view to it"
+  mediaType: application/json
+  expect:
+    - W runs along the femur's shaft and U across the condyles, from the same femur label the
+      landmarks were checked on.
+
 - id: iioc-height-ruler
   kind: overlay
   name: IIOC height ruler

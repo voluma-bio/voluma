@@ -25,9 +25,12 @@ cannot be read (the labels or the field of view cut it off), is also raised as a
 the points.
 
 Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
-        distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml and si vectors, zyx) and checks;
-        `objects` holds dfl-ruler (a to b) and dfw-ruler (c to d), lines on the scan grid
-Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}, objects}
+        distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml and si vectors, zyx), checks
+        and frame_file; `objects` holds dfl-ruler (a to b) and dfw-ruler (c to d), lines on the scan grid
+        <out>/femur-frame.json  the femur's frame (schema in `microct-core/resources/frame.py`), the `femur-frame` output:
+        array axes (W, V, U) as in `tibia_frame.py`, W the label's shaft axis (toward the hip), U = ML, V = W x U, on a box
+        covering the femur label. Only an orientation: no volume is resampled onto it
+Prints: one JSON line {out, frame_file, values: {id: {value, unit, definition, kind}}, objects}
 Example: python femoral_frame.py --spec protocol.json --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --frame orient/frame.json --out femoral/
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -41,6 +44,7 @@ import sidecar
 from scipy import ndimage as ndi
 
 NAMES = ('a', 'b', 'c', 'd')
+FRAME_PAD_MM = 0.1  # margin around the femur label in femur-frame.json's box
 DFL_ID, DFW_ID, RATIO_ID = 'distal-femoral-length-dfl', 'distal-femoral-width-dfw', 'width-length-ratio'
 MAX_OFF_BONE_MM = 0.05  # a landmark further than this from femur bone fails the check
 MIN_LENGTH_OVER_WIDTH = 0.4  # DFL / DFW below this fails. One scan (n=1): OA6-1RK reference 0.71, the end-on pick that was wrong 0.27
@@ -128,6 +132,28 @@ def off_bone_mm(point, femur, vox):
     return float(dt[tuple(np.clip(c - lo, 0, np.array(box.shape) - 1))]) * vox
 
 
+def make_femur_frame(grid, femur, shaft, ml):
+    """The femur's frame on the scan grid: array axes (W, V, U) with W = `shaft`, U = `ml` (`femur_axes`' zyx unit vectors,
+    perpendicular by construction), V = W x U, built in xyz and reversed as `tibia_frame.py` does so the basis is
+    right-handed, on a box covering the femur label's voxels (every 2nd) plus FRAME_PAD_MM. W is the shaft, not SI: b toward
+    a also runs from the back of the condyles to the front (44 degrees off the shaft on OA6-2RK), and the tibia grid's W is
+    its shaft too."""
+    w, u = shaft[::-1], ml[::-1]
+    basis = np.column_stack([u, np.cross(w, u), w])  # columns U, V, W in scan xyz
+    R = basis[::-1, ::-1].T  # frame axis i (W, V, U) as a scan (z, y, x) vector
+    sp = np.array(grid['spacing_zyx_mm'], float)
+    local = np.argwhere(femur[::2, ::2, ::2]) * 2 @ R.T  # frame coordinates of the voxels, origin at scan voxel 0
+    pad = round(FRAME_PAD_MM / sp[0])
+    low = np.floor(local.min(axis=0)) - pad
+    shape = np.ceil(local.max(axis=0)) + pad + 1 - low
+    return fr.make(
+        grid['grid_id'], sp, parent_affine_xyz=grid['affine_xyz_to_world_mm'], R_zyx=R, origin_zyx=low @ R, shape=shape,
+        axes="orientation only, no volume is resampled onto it: array axes (W, V, U), +W along the femur's shaft from the "
+        "joint toward the hip, U the condyles' mediolateral axis (sign arbitrary: not named medial or lateral), V = W x U; "
+        'the box covers the femur label',
+    )
+
+
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the points each distance joins, their definitions and ruler ids")
@@ -165,7 +191,7 @@ def main():
         sidecar.fail(f'DFL {dfl:.3f} mm is under {MIN_LENGTH_OVER_WIDTH} of DFW {dfw:.3f} mm: a and b were probably placed on an '
                      'end-on view of the joint face, so a-b runs across the notch. Render a view along the shaft '
                      '(regions-and-landmarks) and re-place a and b on it')
-    _, ml, checks['femur_length_mm'] = femur_axes(femur, sp, np.mean(list(pm.values()), axis=0))
+    shaft, ml, checks['femur_length_mm'] = femur_axes(femur, sp, np.mean(list(pm.values()), axis=0))
     if checks['femur_length_mm'] < MIN_FEMUR_MM:
         sidecar.fail(f"the femur label runs only {checks['femur_length_mm']:.2f} mm along its shaft (at least {MIN_FEMUR_MM}): "
                      "too little shaft is labelled or in the field of view to find the femur's axes, so the labels or the scan "
@@ -226,14 +252,17 @@ def main():
     if (centroid - (pm['c'] + pm['d']) / 2) @ si <= 0:
         sidecar.fail('SI (b toward a) points away from the femoral bulk: a is not the groove end nearer the shaft, or the '
                      'points are on the wrong view. Re-place a and b; do not explain this away')
+    femur_frame = make_femur_frame(grid, femur, shaft, ml)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    fr.save(femur_frame, out / 'femur-frame.json')
     sidecar.emit_values(
         out / 'femoral.json',
         values,
         meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks,
               'inputs': {a.spec: sidecar.sha256_file(a.spec), a.frame: sidecar.sha256_file(a.frame)}},
         objects=placed,
+        frame_file=str(out / 'femur-frame.json'),
     )
 
 
