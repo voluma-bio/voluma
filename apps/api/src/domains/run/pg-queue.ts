@@ -350,7 +350,7 @@ export function pgRunQueue(
         message: `Not a selectable output of this workflow: ${bad.join(", ")}.`,
       });
     if (starts.runs.length === 0) return;
-    const credentials = starts.keys ? "visitor" : "voluma";
+    const credentials = starts.keys ? "own" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
     if (credentials !== "voluma") {
       const [{ open } = { open: 0 }] = await tx

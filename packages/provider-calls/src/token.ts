@@ -24,8 +24,8 @@ export type TokenClaims = {
   /** The starter's own keys: when present they are the only keys this token can spend. */
   ownKeys?: Partial<Record<Provider, string>>;
   /**
-   * The old name of `ownKeys`, still what a minted token carries so a gateway from before the
-   * rename reads it. Step 2 of the `visitor` → `own` rename mints `ownKeys`; step 3 deletes this.
+   * The old name of `ownKeys`. No longer minted; tokens minted before step 2 of the
+   * `visitor` → `own` rename can still be live, so the gateway reads it until step 3 deletes this.
    */
   visitorKeys?: Partial<Record<Provider, string>>;
 };
@@ -54,7 +54,7 @@ export function mintGatewayToken(
     sandbox: claims.sandbox,
     providers: claims.providers,
     exp: Math.floor(Date.now() / 1000) + claims.lifetimeSeconds + MARGIN_SECONDS,
-    ...(claims.ownKeys && { visitorKeys: claims.ownKeys }),
+    ...(claims.ownKeys && { ownKeys: claims.ownKeys }),
   };
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", secret.key, iv);
