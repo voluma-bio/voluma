@@ -95,6 +95,7 @@ call does in code's words, what it changes and what it makes out of date, by cat
 `answerApproval`; then the answer, and only the outcome's word: `approval.settled`'s text is
 written for main). `conversation()` (contracts)
 gives the items. While the run is live and the last word was yours, "main is on it".
+A finished own-key run holds no key, so `RunAlert` shows a key form (`ReopenKeys`) until this browser has one saved, and every message and answer to such a run carries it (`keysToReopen`).
 
 **Editing a mark is a correction, and nothing reaches main until Send.** A new mark, a moved one
 (Navigate: drag an end of your point, line or angle in a slice; a click on an end picks the mark),

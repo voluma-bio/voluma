@@ -232,6 +232,7 @@ function userPrincipal(user: User, labId: string): Extract<Principal, { account:
     email: user.email,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
     labId,
+    volumaKey: true,
   };
 }
 
@@ -245,15 +246,16 @@ function guestPrincipal(
     account: "visitor",
     name: null,
     labId: guest.organizationId,
+    volumaKey: false,
   };
 }
 
 /** What `/me` and the sign-in routes tell the browser about a user. */
 function meOf(user: Extract<Principal, { kind: "user" }>): Me {
-  const { userId, name, labId } = user;
+  const { userId, name, labId, volumaKey } = user;
   return user.account === "member"
-    ? { kind: "member", userId, email: user.email, name, labId }
-    : { kind: "visitor", userId, name, labId };
+    ? { kind: "member", userId, email: user.email, name, labId, volumaKey }
+    : { kind: "visitor", userId, name, labId, volumaKey };
 }
 
 function setCookies(c: Context, cookies: string[]) {

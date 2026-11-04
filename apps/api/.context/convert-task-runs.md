@@ -8,8 +8,8 @@ migrations; the converter that generated the first is deleted.
   every database: `reply` → `agent.message`, `person.message` and `thread.started` lose their task
   fields, the task-only event types are deleted, `harness` becomes `agents`, and a pinned
   `workflows/workflow-mouse-oa` is renamed `workflows/mouse-oa`.
-- `drizzle/0028_convert_task_runs_again.sql`: that tail again, for task runs that ended between
-  #529's deploy and the deletion's. Idempotent. Its `when` is later than 0027's, which is later than 0026's.
+- `drizzle/0030_convert_task_runs_again.sql`: that tail again, for task runs that ended between
+  #529's deploy and the deletion's. Idempotent. Its `when` is later than every migration on main when it was written.
 - What the per-run conversion mapped and left out: the conversion report in
   `.github/pr-assets/jimyao-convert-task-runs/conversion-report.md`. A version's folder is the task's
   own folder in R2, so no object moved.

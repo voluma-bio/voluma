@@ -128,11 +128,14 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
   });
 
   app.post("/runs/:runId/messages", async (c) => {
-    const { id, snapshot, markIds, ...rest } = await parseJson(c, sendRunMessageRequestSchema);
+    const { id, snapshot, markIds, keys, ...rest } = await parseJson(
+      c,
+      sendRunMessageRequestSchema,
+    );
     const { runId } = c.req.param();
     const user = c.var.user;
     const reader = readerOf(user);
-    const caller = callerOf(user);
+    const caller = callerOf(user, keys);
 
     let png: Uint8Array | undefined;
     if (snapshot) {
@@ -158,9 +161,9 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
   });
 
   app.post("/runs/:runId/approvals/:requestId", async (c) => {
-    const body = await parseJson(c, answerApprovalRequestSchema);
+    const { keys, ...body } = await parseJson(c, answerApprovalRequestSchema);
     const { runId, requestId } = c.req.param();
-    await messages.answer(readerOf(c.var.user), callerOf(c.var.user), runId, requestId, body);
+    await messages.answer(readerOf(c.var.user), callerOf(c.var.user, keys), runId, requestId, body);
     return c.json({});
   });
 

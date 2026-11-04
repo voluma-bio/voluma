@@ -11,10 +11,11 @@
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID to let anyone in as a guest (the repo .env).
+ * RUN_KEY_SECRET (at least 32 characters): seals an own-key run's keys in the database while the run lives (domains/run/run-keys.ts).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
  * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
  * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
- * and RUN_LIMITS_OWN_KEY_ACTIVE (runs on callers' own keys, queued or running, over every account); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -36,7 +37,6 @@ import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
 import type { KeyLimits, Limits } from "./domains/run/admission";
-import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
@@ -45,6 +45,7 @@ import { pgRunRecords } from "./domains/run/pg-run-records";
 import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
 import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
+import { keySealer } from "./domains/run/run-keys";
 import { modelOverride } from "./domains/run/run-models";
 import { createUser } from "./domains/user";
 import { pgUserSettings } from "./domains/user/pg-settings";
@@ -85,17 +86,19 @@ const db = drizzle(client, { casing: "snake_case" });
 // The organizations that get Voluma's key, and what each may run on it: only these, never an
 // organization that merely exists. Members sign in to them; the guest organization (auth.ts) is
 // separate and has no key, and unset means the sign-in wall.
+// The order is the queue priority: judges are claimed before the lab (`Limits`).
 const keyOrganizations = [
-  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
     ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, limits: keyLimitsFromEnv("JUDGES") }]
     : []),
+  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
 ];
 const guestOrganizationId = process.env.GUEST_ORGANIZATION_ID || null;
 // An org missing from `voluma` is no longer configured: its queued Voluma-key runs fail and its running ones stop.
+const appRunning = countFromEnv("RUN_LIMITS_APP_RUNNING", 2);
 const limits: Limits = {
   voluma: new Map(keyOrganizations.map((org) => [org.id, org.limits])),
-  ownKeyActive: limitNumber("RUN_LIMITS_OWN_KEY_ACTIVE"),
+  appRunning,
 };
 
 const auth = createAuth({
@@ -113,7 +116,7 @@ const auth = createAuth({
 
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
 const draining = new AbortController();
-const results = resultsLoader();
+const results = resultsLoader([...limits.voluma.keys()]);
 const reads = pgRunReads(db, results);
 const studies = pgStudyReads(db, results);
 const notifier = createNotifier();
@@ -122,10 +125,12 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const outputs = Object.fromEntries(
   Object.values(catalog).map((w) => [w.id, readOutputCatalog(REPO_ROOT, w.path)]),
 );
+const runKeySecret = required("RUN_KEY_SECRET");
+if (runKeySecret.length < 32) throw new Error("RUN_KEY_SECRET must be at least 32 characters");
 const queue = pgRunQueue(
   db,
   limits,
-  new KeyVault(),
+  keySealer(runKeySecret),
   notifier,
   // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
   (id) => {
@@ -171,8 +176,8 @@ app.get("/health", (c) => c.text("ok"));
 // A storage directory's signed URLs carry their own authorization, and uploads pass the body limit.
 if (storageDirectory)
   app.all(`${DIRECTORY_STORE_MOUNT}/*`, (c) => storageDirectory.serve(c.req.raw));
-// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
-// vault and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
+// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the sealed
+// keys and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
 // 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
 // history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });

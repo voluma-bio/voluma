@@ -59,7 +59,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `studies.ts` (create, list, get), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
-  recovery) and the key vault. Every run is an agent-loop run: `runs.harness` is still written (`agents`) and the claim's `harnesses` still accepted, both ignored, until no old runner or API is live ([.context/TODO.md](.context/TODO.md)). `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
+  recovery) and an own-key run's sealed keys. Every run is an agent-loop run: `runs.harness` is still written (`agents`) and the claim's `harnesses` still accepted, both ignored, until no old runner or API is live ([.context/TODO.md](.context/TODO.md)). `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per limit.
 - **Every run belongs to a study** (`studies`, `study_members`; `runs.study_id` is not null), and
@@ -106,13 +106,13 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
   claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its threads
   cancelled, the open ones and those that finished inside the correction (`cancelEnds`, fed row columns and the raw payload of thread rows read in JS: it runs inside the claim, so it never refuses).
-- **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
-  under the lock. Never store, log or return them, and log no body on a route that takes
-  them. A transition holds the keys before the write that makes the run claimable commits;
-  cancel, failure and the claim drop or hand them out; the claim moves any queued visitor
-  run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
-  runs per org (429), and `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
-  `/api/run/ingest/*`, the trusted runner;).
+- **An own-key run's keys live sealed in `runs.sealed_keys`** (`run-keys.ts`, AES-256-GCM under
+  `RUN_KEY_SECRET`) for the run's life. `pg-queue.ts` seals them at start and resume, `corrections.ts`
+  at a reopen (the request brings them: a finished run's were nulled), the claim opens them, and
+  every path that ends a run nulls them. Never log or return them (except in the claim), and log no
+  body on a route that takes them. A claim that cannot open them moves the run to `awaiting-keys`.
+  `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
+  `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
 - Operator CLIs (seed, archive, export and import a run, `r2:put`, `upload:scan`) live in
   `src/ops/`, not in a domain.
 - **Limits come from env** (`RUN_LIMITS_*`, read in `index.ts`; they guard Voluma's key, `admission.ts`); the workflow catalog

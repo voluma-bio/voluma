@@ -17,8 +17,10 @@ export async function readDump(db: PostgresJsDatabase, runId: string) {
 }
 
 async function readRows(db: PostgresJsDatabase, runId: string) {
-  const [run] = await db.select().from(runs).where(eq(runs.id, runId));
-  if (!run) throw new Error(`run ${runId} not found`);
+  const [row] = await db.select().from(runs).where(eq(runs.id, runId));
+  if (!row) throw new Error(`run ${runId} not found`);
+  // The sealed keys of a live run stay out of the dump.
+  const { sealedKeys: _sealedKeys, ...run } = row;
   const [input] = await db.select().from(inputs).where(eq(inputs.id, run.inputId));
   const [study] = await db.select().from(studies).where(eq(studies.id, run.studyId));
   const members = await db.select().from(studyMembers).where(eq(studyMembers.studyId, run.studyId));

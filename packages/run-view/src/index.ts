@@ -8,7 +8,7 @@
 export { ApprovalCard, type ApprovalCardProps, approvalWords } from "./approval-card";
 export { Markdown } from "./chat/markdown";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
-export { KeysForm, loadKeys, RunKeyLine } from "./keys";
+export { KeysForm, keysToReopen, loadKeys, RunKeyLine } from "./keys";
 export {
   inViewOf,
   itemsOfVersion,

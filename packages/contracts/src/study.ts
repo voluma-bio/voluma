@@ -14,7 +14,7 @@
  *   GET  /api/run/studies/:id  → 200 `studyDetailSchema` (404 when absent or unreadable)
  *
  * Creating a study stores it, its inputs and one `queued` run for each `start` input in one
- * transaction under the queue's lock. A refusal (a limit, a vault that is full) refuses the
+ * transaction under the queue's lock. A refusal (a limit, 20 unfinished own-key runs) refuses the
  * whole call: no study is left behind. The inputs not in `start` wait with no run
  * ("not started"); `POST /api/run/runs` (`startRunRequestSchema`) starts them later, one at
  * a time. The stored input row is the confirmed one: nothing runs until the researcher

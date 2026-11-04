@@ -164,6 +164,11 @@ const children = [
         ...process.env,
         DATABASE_URL: databaseUrl.href,
         VOLUMA_API_TOKEN: env.apiToken,
+        // Seals own-key runs' keys in this worktree's own database; staging sets a real one.
+        RUN_KEY_SECRET:
+          process.env.RUN_KEY_SECRET ||
+          dotenv.RUN_KEY_SECRET ||
+          "pnpm-dev-secret-for-own-key-runs-only",
         APP_URL: appUrl,
         PORT: String(apiPort),
         HOST: "127.0.0.1",

@@ -44,14 +44,14 @@
  * from the function the send uses, so a client never copies the rules.
  *
  * Refusals. 400: invalid body; 404: unknown or unreadable run, or an output or To check item the
- * run does not have; 403: a read-only example run, not the run's `startedBy`, or a `visitor` run
- * (its keys are not kept, so a reopened run could not be resumed), or a guest on a run made with
- * Voluma's keys; 409: the run did not end `completed` (a failed or cancelled run's threads were
- * ended or cut: it is rerun, not reopened), or was made on an older version of its workflow than
- * the study's current one (the pinned paths differ: the runner could not load its files, so it is
- * rerun); admission's refusal (`run.ts` Limits: the org's limits apply to a reopen as to a start);
- * 413: over the body or snapshot limit; 415: the snapshot is not a PNG; 503: no file storage for
- * the snapshot.
+ * run does not have; 403: a read-only example run, not the run's `startedBy`, a reopen of a
+ * `visitor` run sent without `keys` (a run's keys are wiped when it ends), or of a run made with
+ * Voluma's key by an account that no longer has it; 409: the run did not end `completed` (a failed
+ * or cancelled run's threads were ended or cut: it is rerun, not reopened), or was made on an older
+ * version of its workflow than the study's current one (the pinned paths differ: the runner could
+ * not load its files, so it is rerun); admission's refusal (`run.ts` Limits: the org's limits apply
+ * to a reopen as to a start); 413: over the body or snapshot limit; 415: the snapshot is not a PNG;
+ * 503: no file storage for the snapshot.
  *
  * Spend. A correction's spend accrues on the same run and is recorded and shown; there is no cap.
  */
@@ -61,7 +61,7 @@ import { userIdSchema } from "./auth";
 import { positionZyx } from "./output";
 import { outputRefSchema, viewSchema } from "./output-catalog";
 import { voxelBoxSchema, voxelIndexSchema } from "./review";
-import { runStateSchema } from "./run";
+import { runStateSchema, visitorKeysSchema } from "./run";
 
 /** A view snapshot PNG, at most this many bytes after decoding. */
 export const MAX_MESSAGE_SNAPSHOT_BYTES = 2 * 1024 * 1024;
@@ -194,6 +194,8 @@ export const sendRunMessageRequestSchema = messageRules(
         data: z.base64().max(Math.ceil(MAX_MESSAGE_SNAPSHOT_BYTES / 3) * 4),
       })
       .optional(),
+    /** The caller's own keys: required to reopen a finished own-key run (its keys were wiped when it ended), ignored otherwise. */
+    keys: visitorKeysSchema.optional(),
   }),
 );
 export type SendRunMessageRequest = z.infer<typeof sendRunMessageRequestSchema>;
@@ -216,6 +218,8 @@ export type SendRunMessageResponse = z.infer<typeof sendRunMessageResponseSchema
 export const answerApprovalRequestSchema = z.object({
   answer: z.enum(["yes", "no"]),
   text: z.string().max(MAX_TEXT).optional(),
+  /** As on `sendRunMessageRequestSchema`: needed when the answer reopens a finished own-key run. */
+  keys: visitorKeysSchema.optional(),
 });
 export type AnswerApprovalRequest = z.infer<typeof answerApprovalRequestSchema>;
 export const answerApprovalResponseSchema = z.object({});
