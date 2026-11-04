@@ -1,4 +1,4 @@
-import type { ToolResult } from "../../tools/tool";
+import type { ToolResult } from "./tool";
 
 /** A call the rules turn down; its message is the tool error the agent reads. */
 export class Refusal extends Error {}

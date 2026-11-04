@@ -76,9 +76,9 @@ function valuesOf({ results }: RunResult) {
   return values;
 }
 
-/** A completed run's review in brief (`runReviewBriefSchema`). */
-function reviewOf({ run, results }: RunResult): StudyRunSummary["review"] {
-  return completed(run) ? { needsYou: results.outputs.toCheck } : null;
+/** A completed run's open To check items (`toCheckSchema`). */
+function toCheckOf({ run, results }: RunResult): StudyRunSummary["toCheck"] {
+  return completed(run) ? results.outputs.toCheck : null;
 }
 
 /** The newest run's final outputs' status; empty without a run. */
@@ -118,7 +118,7 @@ async function summarize(
           inputName: result.run.input.name,
           state: result.run.state,
           ...(result.run.outputs && { outputs: result.run.outputs }),
-          review: reviewOf(result),
+          toCheck: toCheckOf(result),
           waiting: await waitingOf(tx, study.workflowId, result, canAnswer),
           example: result.run.example,
         }),
@@ -213,7 +213,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 } satisfies StudyMember,
                 input: toInput(input),
                 runs: runsOf.get(member.inputId) ?? [],
-                review: newestRun ? reviewOf(newestRun) : null,
+                toCheck: newestRun ? toCheckOf(newestRun) : null,
                 waiting: waiting.get(member.inputId) ?? 0,
                 outputStatus: outputStatusOf(newestRun),
                 resultRunId: result?.run.id ?? null,

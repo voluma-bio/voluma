@@ -6,7 +6,7 @@
  * words come only from its skill, `outputs.yaml` and the notes it is handed.
  */
 import type { AgentDefinition, Skill, WorkflowDefinition } from "@voluma/workflow/definition";
-import type { ThreadLayout } from "../layout";
+import type { ThreadLayout } from "./layout";
 
 /** The paths every agent reads; the layout (`layout.ts`) and the run files writer make them true. */
 const FINAL_OUTPUTS = "/run/final-outputs.yaml";
@@ -20,8 +20,7 @@ export function systemPromptOf({
   definition: WorkflowDefinition;
   layout: ThreadLayout;
 }): string {
-  const role = definition.agents[layout.role];
-  if (!role) throw new Error(`${layout.name} runs on ${layout.role}, which is not a role file`);
+  const role = definition.agents[layout.place];
   const skills = `${skillList(definition, role)}\n\n${toolIndex(definition, role)}`;
   return [role.body, definition.words, definition.environment, layout.description, skills].join(
     "\n\n",

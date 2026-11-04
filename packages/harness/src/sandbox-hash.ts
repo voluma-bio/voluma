@@ -1,4 +1,4 @@
-import type { Sandbox } from "../ports/sandbox";
+import type { Sandbox } from "./ports/sandbox";
 import { Refusal } from "./tools/refusal";
 
 /** The sha256 of a file where the sandbox has it mounted: files are hashed in place, never moved through the host. */

@@ -47,10 +47,9 @@ import {
 import type { Volume } from "@voluma/contracts/review";
 import { toWorld } from "@voluma/contracts/ruler";
 import { z } from "zod";
-import { FileNotFound, FileRefused } from "../../ports/publish";
-import type { Tool, ToolContext } from "../../tools/tool";
 import { briefOf } from "../deliveries";
 import { reportOutputId } from "../effects";
+import { FileNotFound, FileRefused } from "../ports/bucket";
 import {
   answerOf,
   type Caller,
@@ -63,6 +62,7 @@ import {
   resolvedId,
 } from "./output-shared";
 import { Refusal, result } from "./refusal";
+import type { Tool, ToolContext } from "./tool";
 
 const inputSchema = z.object({
   id: outputRefSchema.describe(
@@ -152,7 +152,7 @@ async function pointsOf(
   fileKey: string,
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  const text = await deps.publish.read(fileKey, { signal }).catch((error: unknown) => {
+  const text = await deps.bucket.readText(fileKey, { signal }).catch((error: unknown) => {
     if (error instanceof FileRefused) throw new Refusal(error.message);
     throw error;
   });
@@ -203,7 +203,7 @@ async function detailFromSidecar(
 ): Promise<Record<string, unknown>> {
   // A sidecar over the read limit is as good as missing.
   const readOrMissing = (k: string) =>
-    deps.publish.read(k, { signal }).catch((error: unknown) => {
+    deps.bucket.readText(k, { signal }).catch((error: unknown) => {
       if (error instanceof FileRefused) return undefined;
       throw error;
     });
@@ -416,7 +416,7 @@ export function reportOutput(
   deps: OutputToolDeps,
   expected?: Readonly<Record<string, string>>,
 ): Tool<typeof inputSchema> {
-  const { recorder, publish, runId, section } = deps;
+  const { recorder, bucket, runId, section } = deps;
   const keyOf = (ctx: ToolContext, path: string) =>
     deps.layoutOf(ctx.threadId).keyOf(path, "read").slice(runPrefix(runId).length);
   return {
@@ -454,12 +454,12 @@ export function reportOutput(
           ];
           for (const name of moved) {
             const key = layout.keyOf(`${layout.dir}/${name.replace(/^evidence\//, "")}`, "write");
-            await deps.publish.write(
+            await deps.bucket.writeText(
               `${key}.removed.txt`,
               `${name.split("/").pop()} was removed from this folder to save storage.\n` +
                 `Its published copy is ${OUTPUTS_MOUNT}/${p.path}/${name} (output ${p.outputId}, version ${p.version}).\n`,
             );
-            await deps.publish.remove(key);
+            await deps.bucket.remove(key);
           }
         };
         const done = stored();
@@ -472,7 +472,7 @@ export function reportOutput(
         const publishFile = async (named: string, folder: "" | "evidence/") => {
           const path = layout.resolve(named);
           const rel = inOwnFolder(layout.dir, path, "The file");
-          const sha256 = await publish
+          const sha256 = await bucket
             .copy(
               layout.keyOf(path, "read"),
               `${versionPrefix(runId, input.id, ctx.toolCallId)}${folder}${rel}`,

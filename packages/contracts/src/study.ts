@@ -24,8 +24,7 @@
  * created it or it is the seeded example. A study's runs are the ones `GET /runs` would
  * show the caller, so they see only the runs they started in an example study.
  *
- * `needsYou` is the open To check items a person can answer, what every screen calls To check
- * (`OutputsFold.toCheck`). `values` come from each input's **newest completed run** only
+ * `toCheck` is the open To check items a person can answer (`OutputsFold.toCheck`). `values` come from each input's **newest completed run** only
  * (`resultRunId`): every final value's latest number, its UCUM unit written as people write it
  * (`unitAsWritten`), keyed by output id. `outputStatus` is each final output's status in the
  * newest run, whatever its state, so the study shows where a live or stopped run is.
@@ -79,10 +78,8 @@ export const studySchema = z.object({
 });
 export type Study = z.infer<typeof studySchema>;
 
-/** A completed run's review in brief: the open To check items on its final outputs and what they rest on (`OutputsFold.toCheck`). Null for a run that has not completed. */
-export const runReviewBriefSchema = z
-  .object({ needsYou: z.number().int().nonnegative() })
-  .nullable();
+/** A completed run's open To check items on its final outputs and what they rest on (`OutputsFold.toCheck`). Null for a run that has not completed. */
+export const toCheckSchema = z.number().int().nonnegative().nullable();
 
 /** As `OutputStatus` (`output-fold.ts`): a final output's status in a run. */
 export const outputStatusSchema = z.enum([
@@ -109,7 +106,7 @@ export const studyRunSummarySchema = z.object({
   state: runStateSchema,
   /** As `runSchema.outputs`: a live run's final outputs in, of all of them. */
   outputs: runOutputsInSchema,
-  review: runReviewBriefSchema,
+  toCheck: toCheckSchema,
   waiting: waitingSchema,
   example: z.boolean(),
 });
@@ -139,8 +136,8 @@ export const studyInputDetailSchema = z.object({
   input: inputSchema,
   /** Newest first; empty: "not started". */
   runs: z.array(runSchema),
-  /** The newest run's review in brief (`runReviewBriefSchema`). */
-  review: runReviewBriefSchema,
+  /** The newest run's open To check items (`toCheckSchema`). */
+  toCheck: toCheckSchema,
   /** The newest run's `waiting` (`studyRunSummarySchema`); 0 without a run. */
   waiting: waitingSchema,
   /** Final output id → its status in the newest run; empty before main lists its outputs. */

@@ -121,7 +121,8 @@ const unclaimed = setTimeout(() => {
 const events: RunEvent[] = [];
 const progress = (e: RunEvent) => {
   if (e.type === "tool.call") say(`  tool ${e.payload.name}`);
-  else if (e.type === "thread.started") say(`thread started: ${e.payload.kind} ${e.payload.name}`);
+  else if (e.type === "thread.started")
+    say(`thread started: ${e.payload.role ?? "root"} ${e.payload.name}`);
   else if (e.type === "thread.ended") say(`thread ended: ${e.payload.status}`);
   else if (e.type === "agent.message")
     say(`  ${e.payload.from} -> ${e.payload.to}: ${e.payload.text.slice(0, 100)}`);

@@ -44,8 +44,10 @@ and `review` (an older runner requires all three), the claim's `harnesses`, and 
 `first.payload.harness ?? "tasks"`), together with the `runs.harness` column. The API's TODO
 (`apps/api/.context/TODO.md`) lists the rest.
 
-## Drop `thread.started.kind` (later step)
+## Drop `thread.started.kind` (step 2)
 
-`kind` repeats `role` now that only `main` and `worker` exist (the root writes `supervisor`). A stored
-event field, so two steps: make it optional and stop writing it, then, once no stored event or live
-runner needs it, delete it. Along with it, `ThreadBase.role` and `ThreadLayout.role` duplicate `place`.
+`kind` repeats `role` now that only `main` and `worker` exist (the root writes `supervisor`). Step 1
+(done): the field is optional and nothing reads it, but `loop.ts` and `supervise-run.ts` still write
+it, because an API built before step 1 requires it and would refuse the thread's start. Step 2, once
+step 1 is live on the API and no runner built before it is: stop writing it, then delete the field
+from `threadStarted` (`src/events.ts`). Stored events that carry it parse without it (zod strips it).

@@ -17,8 +17,8 @@ import {
   givenApprovals,
 } from "@voluma/contracts/agents";
 import { outputsFold } from "@voluma/contracts/output-fold";
-import type { Recorder } from "../recorder";
-import { SandboxUnavailableError, type ToolResult } from "../tools/tool";
+import type { Recorder } from "./recorder";
+import { SandboxUnavailableError, type ToolResult } from "./tools/tool";
 
 /** An approved call, to be run as it was stored. */
 export type ApprovedCall = Pick<

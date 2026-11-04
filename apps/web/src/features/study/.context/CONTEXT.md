@@ -81,7 +81,7 @@ shown as its input and linked straight to its page (`/studies/:id/inputs/:inputI
   derive everything from one `StudyDetail` in `study/study-model.ts` (pure; its header states the
   far-from-group rule, the unit rule and the bar). Nothing on them judges or changes a result:
   every row, cell and dot opens the input review (Compare's cells on their measurement, `?output=`).
-- **To check means needs you.** `needsYou` in the study read's `review` (the newest completed
+- **To check means needs you.** `toCheck` in the study read (the newest completed
   run's open To check items, each once: a value that only rests on one is not counted; it keeps its
   own status and says "rests on a To check") is what every "N to check" reads: a sample's status
   and "Next sample that needs you" (`needsYouOf`).

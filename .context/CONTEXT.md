@@ -36,7 +36,7 @@ Dependencies point down: apps → feature code → packages. `contracts` and
 ## The agent runtime
 
 The harness has one run loop over one shell (`loop-shell.ts`: waking the loop, starting
-threads, stopping them, the root's end): the **agent loop** (`agents/loop.ts`: main and up to 4
+threads, stopping them, the root's end): the **agent loop** (`loop.ts`: main and up to 4
 named workers, messages, published output versions). It is described in
 `packages/harness/.context/CONTEXT.md`; its roles are in `workflows/core/agents/`.
 `runs.harness` and the claim's `harnesses` field remain only for the deploy overlap
@@ -137,7 +137,7 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   (a position in the list) never passes an unseen event; a read that runs out of retries stops the
   claim like a failed write, and the next claim resumes. An API from before this answers 204 and
   no `lastSeq`; the runner then numbers events as it did.
-- **The run loop** (`agents/loop.ts`) is code around the main thread, with no state of its own: each step is a function of `agentLog(events)` and which threads run in this process. A run ends when the root has a completed `thread.ended`; then every thread without an end is stopped (stops are appended first, so the holder check refuses a stopped thread's next write at once). A thread that throws or is refused before it starts, a fatal provider error (a retryable one resumes its thread once first), or an error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness builds exactly the tools a role's file names (`agents/tools/registry.ts`); prompts are `agents/prompts.ts`.
+- **The run loop** (`loop.ts`) is code around the main thread, with no state of its own: each step is a function of `agentLog(events)` and which threads run in this process. A run ends when the root has a completed `thread.ended`; then every thread without an end is stopped (stops are appended first, so the holder check refuses a stopped thread's next write at once). A thread that throws or is refused before it starts, a fatal provider error (a retryable one resumes its thread once first), or an error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness builds exactly the tools a role's file names (`tools/registry.ts`); prompts are `prompts.ts`.
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
   `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
   way whether the run is fresh or recovered: read the run's stored events (paged) and every

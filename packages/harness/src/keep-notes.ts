@@ -7,11 +7,10 @@
  * the kept plan back where main's prompts point, before the thread's sandbox is built.
  */
 import { notesKey, workPrefix } from "@voluma/contracts/r2";
-import type { Publish } from "../ports/publish";
-import { FileNotFound, FileRefused } from "../ports/publish";
+import { FileNotFound, FileRefused, type RunBucket } from "./ports/bucket";
 
 export async function keepNotes(
-  publish: Publish,
+  bucket: RunBucket,
   runId: string,
   agent: { name: string; role: string },
   signal?: AbortSignal,
@@ -20,7 +19,7 @@ export async function keepNotes(
   const folder = main ? "main" : agent.name;
   const file = main ? "plan.md" : "NOTES.md";
   try {
-    await publish.copy(`${workPrefix(runId)}${folder}/${file}`, notesKey(runId, folder, file), {
+    await bucket.copy(`${workPrefix(runId)}${folder}/${file}`, notesKey(runId, folder, file), {
       signal,
     });
   } catch (e) {
@@ -29,20 +28,20 @@ export async function keepNotes(
 }
 
 export async function restoreMainPlan(
-  publish: Publish,
+  bucket: RunBucket,
   runId: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const work = `${workPrefix(runId)}main/plan.md`;
   try {
-    if ((await publish.read(work, { signal })) !== undefined) return;
+    if ((await bucket.readText(work, { signal })) !== undefined) return;
   } catch (e) {
     // A plan over `read`'s 1 MiB is there: nothing to restore.
     if (e instanceof FileRefused) return;
     throw e;
   }
   try {
-    await publish.copy(notesKey(runId, "main", "plan.md"), work, { signal });
+    await bucket.copy(notesKey(runId, "main", "plan.md"), work, { signal });
   } catch (e) {
     if (!(e instanceof FileNotFound)) throw e;
   }

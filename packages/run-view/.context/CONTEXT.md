@@ -48,7 +48,7 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
 - **A run's status** (`runStatus`, `liveStatus`: a word and a `StatusMark` state) and the
   formatters (`formatUsd`, `formatDuration`, `plural`) are `@voluma/run-view`, shared with the study pages;
   `use-now.ts` is the clock. A completed run with open To check items reads "N to check"
-  (`review.needsYou`, the study reads' brief), else "Checked"; a running one with its final
+  (`toCheck`, the study reads' count), else "Checked"; a running one with its final
   outputs listed reads "Running · N of M in". A run's cost is `runCost` (model calls plus gateway
   calls), the one sum Run details, study spend and `/new` use. How long a run worked is `runWork`
   (`run-status.tsx`): its first claim to its end plus each correction's reopen to its end, never

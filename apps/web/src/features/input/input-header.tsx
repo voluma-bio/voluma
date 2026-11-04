@@ -71,7 +71,7 @@ function where(run: Run, waitingOnYou: boolean): { status?: Status; text: string
     };
   if (state.status === "running") return { status: "running", text: "Running" };
   if (state.status === "ended" && state.outcome === "completed") return { text: "Finished" };
-  const { label, status } = runStatus({ state, review: null });
+  const { label, status } = runStatus({ state, toCheck: null });
   return { status, text: label };
 }
 

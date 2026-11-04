@@ -132,7 +132,7 @@ const notifier = createNotifier();
 // Each bundled workflow's catalog, from this checkout: the outputs a start may select.
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const outputs = Object.fromEntries(
-  Object.values(catalog).map((w) => [w.id, readOutputCatalog(REPO_ROOT, w.path)]),
+  Object.keys(catalog).map((path) => [path, readOutputCatalog(REPO_ROOT, path)]),
 );
 const runKeySecret = required("RUN_KEY_SECRET");
 if (runKeySecret.length < 32) throw new Error("RUN_KEY_SECRET must be at least 32 characters");
@@ -147,7 +147,7 @@ const queue = pgRunQueue(
     return (
       workflow && {
         pins: [{ repo: "voluma-bio/voluma", path: workflow.path }],
-        outputs: outputs[id] ?? [],
+        outputs: outputs[workflow.path] ?? [],
       }
     );
   },
