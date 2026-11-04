@@ -6,7 +6,7 @@
  * between grid cells, so a swap, a layout change or full screen keeps its camera, zoom and loaded
  * data. The tool bar is docked under the panes: the caller's tools on the left; how far the
  * planes are turned (or, on the grid's axes, the grid's name), Align, Turn, Reset, the window,
- * the 1/2/4 layout and Save view on the right.
+ * the 1/2/4 layout and Save view on the right; tools, Planes and Contrast are icons named by their tooltips.
  *
  * The three planes turn together (`frame.ts`): tilted by hand from the dots at their crosshair
  * lines' ends, spun by turning one pane's image in place (Alt-drag or `,` `.` in it, or Turn's
@@ -825,10 +825,9 @@ export function QuadViewer({
           side="top"
           className="w-80"
           trigger={
-            <Button size="sm" variant="ghost">
+            <IconButton size="sm" label="Planes">
               <Rotate3d aria-hidden />
-              Planes
-            </Button>
+            </IconButton>
           }
         >
           <div className="grid gap-3 text-xs">
@@ -906,10 +905,9 @@ export function QuadViewer({
             side="top"
             className="w-auto"
             trigger={
-              <Button size="sm" variant="ghost">
+              <IconButton size="sm" label="Contrast">
                 <SunMedium aria-hidden />
-                Contrast
-              </Button>
+              </IconButton>
             }
           >
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
