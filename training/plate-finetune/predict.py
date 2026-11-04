@@ -1,12 +1,13 @@
 """Predict a mask on sections of a scan with a trained checkpoint: the IIOC region (prompt "epiphysis") or the plate band
 ("growth plate"), whichever the checkpoint was trained on.
 
-  python predict.py --scan OA8-19L --ckpt runs/band-s0/ckpt-bestval.pt --text "growth plate" --out preds/band-s0 \
-      --sections-from data/region
+  python predict.py --scan OA8-19L --ckpt runs/band-s0/ckpt-bestval.pt --text "growth plate" --threshold 0.3 \
+      --out preds/band-s0 --sections-from data/region
 
 Writes <out>/<scan>.npz: V (the predicted sections) and mask[n, W, U] bool on the scan's grid, the union of the detector's instances
-above --threshold (none: an empty section). --sections-from takes the labelled sections of the scan from an export (its heldout or
-val labels); without it every section is predicted.
+scoring above --threshold (none: an empty section). The band recipe uses 0.3: at 0.5 a band seed returns nothing on about one
+section in twenty, at 0.3 on none of the six scored scans (L33). The region recipe uses 0.5. --sections-from takes the labelled
+sections of the scan from an export (its heldout or val labels); without it every section is predicted.
 """
 import argparse
 import json
@@ -49,7 +50,7 @@ def main():
     ap.add_argument("--ckpt", required=True, type=Path)
     ap.add_argument("--text", required=True, help="the prompt the checkpoint was trained on: epiphysis (region) or growth plate (band)")
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--threshold", type=float, default=0.5)
+    ap.add_argument("--threshold", type=float, default=0.5, help="instance score to keep: 0.3 for the band recipe, 0.5 for region")
     ap.add_argument("--sections-from", type=Path, help="an export: predict only the scan's labelled sections")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)

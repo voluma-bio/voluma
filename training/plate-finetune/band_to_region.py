@@ -4,9 +4,12 @@
 
 Per section: the band mask's connected pieces, each piece's skeleton reduced to its longest geodesic path, its ends continued
 along their last stretch to the cortex (at most EXT_MAX voxels); pieces that do not overlap in U, longest first, joined left to
-right into one polyline. The region is labels.label_section on that line, the rule that built the region labels. A perfect band
-(the traced one) scores the label floor, ~11 µm, through this step. Writes <out>/<scan>.npz (V, mask: the region) and
-<out>/<scan>-lines.json ({V: [[w, u], ...]}); a section with no line has an empty region.
+right into one polyline (the skeleton line). With --cut midline (the default) each point of that line then moves to the midpoint
+of the band's two faces in its column, where the faces exist and the midpoint is within MID_MAX voxels; the faces are the band's
+vertical run nearest the skeleton line in each column (band_faces). The region is labels.label_section on the line, the rule that
+built the region labels. A perfect band (the traced one) scores the label floor, ~11 µm, through the skeleton line. Writes
+<out>/<scan>.npz (V, mask: the region) and <out>/<scan>-lines.json ({V: [[w, u], ...]}, the line the region was cut on); a
+section with no line has an empty region.
 """
 import argparse
 import json
@@ -24,6 +27,7 @@ import scans
 
 MIN_PIECE = 12     # voxels of path: shorter pieces are noise
 EXT_MAX = 10       # voxels an end is continued along its direction to reach the cortex
+MID_MAX = 4        # voxels: a line point moves to the faces' midpoint only when it is this close
 
 
 def skeleton_path(comp):
@@ -107,10 +111,45 @@ def line_of(band, env):
     return np.vstack(keep) if keep else None
 
 
+def line_rows(p, n_u):
+    """Polyline (n, 2) [w, u] -> W per U column, NaN off the line; the median W where the path crosses a column more than once."""
+    w = np.full(n_u, np.nan)
+    d = np.concatenate([np.linspace(a, b, max(int(np.ceil(np.abs(b - a).max())), 1), endpoint=False) for a, b in zip(p[:-1], p[1:])])
+    u = np.clip(np.round(d[:, 1]).astype(int), 0, n_u - 1)
+    for c in np.unique(u):
+        w[c] = np.median(d[u == c, 0])
+    return w
+
+
+def band_faces(band, line):
+    """Per U column the line crosses, the band's vertical run nearest the line: its top (proximal) and bottom (distal) W, NaN elsewhere."""
+    lw = line_rows(line, band.shape[1])
+    top, bot = np.full(band.shape[1], np.nan), np.full(band.shape[1], np.nan)
+    for u in np.flatnonzero(~np.isnan(lw)):
+        rows = np.flatnonzero(band[:, u])
+        if not len(rows):
+            continue
+        runs = np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1)
+        r = min(runs, key=lambda r: abs((r[0] + r[-1]) / 2 - lw[u]))
+        top[u], bot[u] = r[0], r[-1]
+    return top, bot
+
+
+def midline(line, top, bot):
+    """The line with each point's W replaced by the faces' midpoint in its column, where that is within MID_MAX voxels of it."""
+    p = line.copy()
+    for k, (w, u) in enumerate(line):
+        c = int(round(u))
+        if 0 <= c < len(top) and not np.isnan(top[c]) and abs((top[c] + bot[c]) / 2 - w) <= MID_MAX:
+            p[k, 0] = (top[c] + bot[c]) / 2
+    return p
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred", required=True, type=Path, help="predict.py output of a band model")
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--cut", choices=("midline", "skeleton"), default="midline", help="cut on the faces' midline or on the skeleton line")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     for f in sorted(a.pred.glob("*.npz")):
@@ -122,6 +161,8 @@ def main():
         for i, v in enumerate(int(v) for v in z["V"]):
             p = line_of(z["mask"][i], cutline.envelope(tibia[:, v, :])) if z["mask"][i].any() else None
             if p is not None and len(p) > 1:
+                if a.cut == "midline":
+                    p = midline(p, *band_faces(z["mask"][i], p))
                 region[i] = labels.label_section(v, p, [], nv.get(v, ()), tibia, pieces).region
                 lines[v] = p.tolist()
         np.savez_compressed(a.out / f"{scan}.npz", V=z["V"], mask=region)
