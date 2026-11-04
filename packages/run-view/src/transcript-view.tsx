@@ -84,6 +84,13 @@ function RowView({ row, links }: { row: Row; links?: AgentLinks }) {
           </div>
         </ProcessDisclosure>
       );
+    case "said":
+      return (
+        <div className="grid gap-1 border-l-2 border-primary pl-3">
+          <p className="text-meta text-muted-foreground">To the researcher</p>
+          <Markdown text={row.text} className="text-ui" />
+        </div>
+      );
     case "brief":
       return (
         <ProcessDisclosure label={row.label}>

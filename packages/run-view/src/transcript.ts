@@ -103,6 +103,8 @@ export type Step =
 
 export type Row =
   | { kind: "prose"; id: string; text: string }
+  /** What main told the researcher (its `message` call to them): shown, as in the conversation. */
+  | { kind: "said"; id: string; text: string }
   | { kind: "process"; id: string; steps: Step[]; digest: string }
   /** What the thread was told: its system prompt, its brief, a message from someone. */
   | { kind: "brief"; id: string; label: string; text: string }
@@ -260,7 +262,14 @@ export function threadRows(events: readonly RunEvent[], ids: readonly string[], 
           status: "running",
         };
         tools.set(step.id, step);
-        b.step(step);
+        const input = e.payload.input as { to?: unknown; text?: unknown } | undefined;
+        if (
+          e.payload.name === "message" &&
+          input?.to === "researcher" &&
+          typeof input.text === "string"
+        )
+          b.row({ kind: "said", id: step.id, text: input.text });
+        else b.step(step);
         break;
       }
       case "tool.result": {
