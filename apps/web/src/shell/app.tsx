@@ -17,7 +17,7 @@ const router = createBrowserRouter([
     children: [
       ...studyRoutes,
       ...inputRoutes,
-      // The old Settings page: the theme and account now live in the rail's Settings.
+      // The old Settings page opens the rail's Settings dropdown.
       { path: "settings", element: <Navigate to="/" replace state={{ openSettings: true }} /> },
       { path: "*", element: <NotFound /> },
     ],

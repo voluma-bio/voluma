@@ -12,26 +12,52 @@ export type PageHeadProps = {
   count?: ReactNode;
   /** Facts about the data shown (its scope, its groups), never about the screen. */
   subtitle?: ReactNode;
+  /** A compact title/facts row for a sample workspace; wraps when space runs out. */
+  inline?: boolean;
   actions?: ReactNode;
   className?: string;
 };
 
-export function PageHead({ title, count, subtitle, actions, className }: PageHeadProps) {
+export function PageHead({
+  title,
+  count,
+  subtitle,
+  inline = false,
+  actions,
+  className,
+}: PageHeadProps) {
   return (
     <header
       className={cx(
-        "flex flex-wrap items-start gap-x-6 gap-y-3 border-b border-border bg-card px-6 pt-4 pb-3.5",
+        "flex shrink-0 flex-wrap border-b border-border bg-card px-6",
+        inline ? "items-center gap-x-4 gap-y-1 py-2" : "items-start gap-x-6 gap-y-3 pt-4 pb-3.5",
         className,
       )}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2.5">
-          <h1 className="m-0 min-w-0 truncate text-xl font-semibold">{title}</h1>
+      <div
+        className={cx(
+          "min-w-0 flex-[1_1_16rem]",
+          inline && "flex flex-wrap items-center gap-x-4 gap-y-1",
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <h1
+            className={cx(
+              "m-0 min-w-0 break-words font-semibold",
+              inline ? "text-base" : "text-xl",
+            )}
+          >
+            {title}
+          </h1>
           {count}
         </div>
-        {subtitle && <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>}
+        {subtitle && (
+          <div className={cx("min-w-0 text-sm text-muted-foreground", !inline && "mt-0.5")}>
+            {subtitle}
+          </div>
+        )}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
     </header>
   );
 }

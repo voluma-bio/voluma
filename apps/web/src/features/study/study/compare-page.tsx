@@ -7,13 +7,13 @@
  */
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
 import { inputHref, inputStatus, kneeOf } from "@voluma/run-view";
-import { Button, Count, cx, INPUT_WORD, StatusGlyph, StatusMark } from "@voluma/ui";
+import { Button, Count, cx, INPUT_WORD, PageHead, StatusGlyph, StatusMark } from "@voluma/ui";
 import { Download } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { headlinesOf, type Measurement, measurementsOf, unitOf } from "../workflow-measurements";
 import { SEGMENT_LOOK } from "./sample-bar";
-import { useStudy } from "./study-layout";
+import { StudyNextAction, useStudy } from "./study-layout";
 import {
   digitsFor,
   farFromGroup,
@@ -45,6 +45,10 @@ export function ComparePage() {
   const finished = detail.inputs.filter((s) => s.resultRunId !== null).length;
   return (
     <div className="min-w-0 flex-1 overflow-y-auto">
+      <PageHead
+        title={`Compare · ${detail.study.name}`}
+        actions={<StudyNextAction detail={detail} />}
+      />
       {plotted.length > 0 ? (
         <section aria-label="Headline measurements" className="border-b border-border">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] gap-x-8 gap-y-4 px-6 pt-4 pb-3">

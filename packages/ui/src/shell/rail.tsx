@@ -1,26 +1,22 @@
-/**
- * The rail: the app's places in a 44 px column at the far left of every screen, under the header
- * line (Studies and Workflows at the top, Settings at the foot). Places are icons only: each is
- * named by its tooltip and its accessible name. The place you are in is pressed, with a bar at the
- * rail's edge. Sign in and Settings use the same icon-only buttons.
- */
-import type { ComponentProps, ReactElement, ReactNode } from "react";
+/** The single global navigation: a labelled vertical rail, with account controls at its foot. */
+import type { ComponentProps, ReactNode } from "react";
 import { cx } from "../cx";
-import { Tooltip } from "../tooltip";
 
 export type RailProps = {
-  /** The places (`RailLink`). */
   children: ReactNode;
-  /** At the foot: a guest's Sign in, then Settings (`RailButton`s). */
+  /** The non-interactive brand mark at the top of the sidebar. */
+  brand: ReactNode;
+  /** Settings and Account controls at the foot. */
   end?: ReactNode;
 };
 
-export function Rail({ children, end }: RailProps) {
+export function Rail({ children, brand, end }: RailProps) {
   return (
     <nav
-      aria-label="App"
-      className="relative z-20 flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted py-2"
+      aria-label="Global navigation"
+      className="relative z-20 flex w-20 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted py-2"
     >
+      <div className="mb-1 grid min-h-14 w-full shrink-0 place-items-center">{brand}</div>
       {children}
       <span className="flex-1" />
       {end}
@@ -28,16 +24,6 @@ export function Rail({ children, end }: RailProps) {
   );
 }
 
-const itemClass = (active: boolean) =>
-  cx(
-    "relative grid size-8 shrink-0 cursor-pointer place-items-center rounded-md outline-none [&_svg]:size-[18px]",
-    "focus-visible:ring-2 focus-visible:ring-ring",
-    active
-      ? "bg-secondary text-foreground before:absolute before:top-1.5 before:bottom-1.5 before:-left-1.5 before:w-0.5 before:rounded-r-sm before:bg-foreground"
-      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-  );
-
-/** Props to spread on your router's link: they carry the item's look and name. */
 export type RailLinkRenderProps = {
   className: string;
   children: ReactNode;
@@ -48,45 +34,55 @@ export type RailLinkRenderProps = {
 export type RailLinkProps = {
   label: string;
   icon: ReactNode;
-  /** This place is the one shown. */
   active?: boolean;
-  /** A URL, or your router's link rendered with the props given. */
+  /** A URL, or your router's native link rendered with the props given. */
   to: string | ((props: RailLinkRenderProps) => ReactNode);
 };
 
-/** A place on the rail. */
+const itemClassName =
+  "relative flex min-h-14 w-18 shrink-0 cursor-pointer flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5";
+const idleClassName = "text-muted-foreground hover:bg-accent hover:text-foreground";
+
 export function RailLink({ label, icon, active = false, to }: RailLinkProps) {
   const props: RailLinkRenderProps = {
-    className: itemClass(active),
-    children: icon,
+    className: cx(
+      itemClassName,
+      active
+        ? "bg-secondary text-foreground before:absolute before:top-1.5 before:bottom-1.5 before:-left-1 before:w-0.5 before:rounded-r-sm before:bg-foreground"
+        : idleClassName,
+    ),
+    children: (
+      <>
+        <span aria-hidden>{icon}</span>
+        <span>{label}</span>
+      </>
+    ),
     "aria-label": label,
     "aria-current": active ? "page" : undefined,
   };
-  return (
-    <Tooltip label={label} side="right">
-      {typeof to === "string" ? <a href={to} {...props} /> : (to(props) as ReactElement)}
-    </Tooltip>
-  );
+  return typeof to === "string" ? <a href={to} {...props} /> : to(props);
 }
 
-export type RailButtonProps = Omit<ComponentProps<"button">, "children" | "aria-label"> & {
+export type RailButtonProps = Omit<ComponentProps<"button">, "children"> & {
   label: string;
   icon: ReactNode;
-  active?: boolean;
 };
 
-/** A rail item that acts in place: Settings' popover trigger, a guest's Sign in. */
-export function RailButton({ label, icon, active = false, className, ...props }: RailButtonProps) {
+/** A named action in the rail, sharing the links' size, label and focus treatment. */
+export function RailButton({ label, icon, className, ...props }: RailButtonProps) {
   return (
-    <Tooltip label={label} side="right">
-      <button
-        type="button"
-        aria-label={label}
-        className={cx(itemClass(active), className)}
-        {...props}
-      >
-        {icon}
-      </button>
-    </Tooltip>
+    <button
+      type="button"
+      className={cx(
+        itemClassName,
+        idleClassName,
+        "aria-expanded:bg-secondary aria-expanded:text-foreground",
+        className,
+      )}
+      {...props}
+    >
+      <span aria-hidden>{icon}</span>
+      <span>{label}</span>
+    </button>
   );
 }

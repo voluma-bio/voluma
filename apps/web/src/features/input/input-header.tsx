@@ -1,6 +1,6 @@
 /**
- * What the header line says in the input review: the study and the input, its group, where the run
- * stands, and Run details: what the researcher may ask (how long it took, its workflow and models,
+ * The input review's breadcrumb and separate page heading: input identity, group, run status,
+ * and Run details: what the researcher may ask (how long it took, its workflow and models,
  * its cost, Stop while it goes), then what someone fixing a run needs (times, ids, commits, keys, failures,
  * gateway requests). Below the header,
  * over the views: the run's own problems (it waits for its starter's keys, it failed) and a lost
@@ -26,10 +26,13 @@ import {
   useNow,
 } from "@voluma/run-view";
 import {
+  Breadcrumb,
   Button,
   type FactSection,
   FactSections,
   IconButton,
+  INPUT_WORD,
+  PageHead,
   Popover,
   ShellHeading,
   type Status,
@@ -52,11 +55,11 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) =>
   workflowById(study?.study.workflowId ?? "")?.name ?? workflowName(run.workflows[0]?.path);
 
 /**
- * Where the run stands in a few words: "Finished", "Running", "In queue: the system is busy, place
+ * Where the run stands in a few words: "Run finished", "Running", "In queue: the system is busy, place
  * 2 in line" (also a run that lost its runner and waits for another); otherwise the word every
  * list uses (`runStatus`). How far it got is in Final outputs; how long it took is in Run details.
  */
-function where(run: Run, waitingOnYou: boolean): { status?: Status; text: string } {
+function where(run: Run, waitingOnYou: boolean): { status: Status; text: string; detail?: string } {
   const { state } = run;
   // Main holds a call for your yes: until you answer, the run waits on you, going or ended.
   if (
@@ -67,10 +70,12 @@ function where(run: Run, waitingOnYou: boolean): { status?: Status; text: string
   if (state.status === "queued")
     return {
       status: "waiting",
-      text: `In queue: the system is busy, place ${state.position} in line`,
+      text: "In queue",
+      detail: `The system is busy, place ${state.position} in line.`,
     };
   if (state.status === "running") return { status: "running", text: "Running" };
-  if (state.status === "ended" && state.outcome === "completed") return { text: "Finished" };
+  if (state.status === "ended" && state.outcome === "completed")
+    return { status: "done", text: "Run finished" };
   const { label, status } = runStatus({ state, review: null });
   return { status, text: label };
 }
@@ -79,39 +84,65 @@ export function InputHeading({
   run,
   study,
   waitingOnYou,
+  toCheck,
 }: {
   run: Run;
   study: StudyDetail | undefined;
   /** The run's main holds a call for your yes: the run waits on you. */
   waitingOnYou: boolean;
+  toCheck: number;
 }) {
   const { title, group } = inputTitle(run, study);
   const now = where(run, waitingOnYou);
+  const newest = study?.inputs.find((s) => s.member.inputId === run.input.id)?.runs[0];
+  const earlier = newest && newest.id !== run.id;
+  return (
+    <>
+      <InputBreadcrumb study={study} title={title} />
+      <PageHead
+        inline
+        title={title}
+        subtitle={
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {group && <span>Group: {group}</span>}
+            {earlier && <span className="font-medium text-foreground">Earlier run</span>}
+            <StatusMark status={now.status} label={now.text} />
+            {toCheck > 0 && <StatusMark status="check" label={`${toCheck} to check`} />}
+            {now.detail && <span>{now.detail}</span>}
+          </div>
+        }
+        actions={<RunDetails run={run} workflow={workflowLabel(run, study)} />}
+      />
+    </>
+  );
+}
+
+/** Also used while identity is loading or unavailable, so the Studies parent never disappears. */
+export function InputBreadcrumb({
+  study,
+  title = INPUT_WORD.One,
+}: {
+  study?: StudyDetail;
+  title?: string;
+}) {
   return (
     <ShellHeading>
-      <nav aria-label="Where you are" className="flex min-w-0 items-center gap-2 text-sm">
-        {(!study || study.inputs.length > 1) && (
-          <>
-            <Link
-              to={study ? `/studies/${study.study.id}` : "/"}
-              className="truncate text-muted-foreground hover:text-foreground"
-            >
-              {study ? study.study.name : "Studies"}
-            </Link>
-            <span aria-hidden className="text-fg-subtle">
-              /
-            </span>
-          </>
-        )}
-        <h1 className="truncate font-semibold">{title}</h1>
-      </nav>
-      {group && <span className="shrink-0 text-sm text-muted-foreground">{group}</span>}
-      {now.status ? (
-        <StatusMark status={now.status} label={now.text} className="shrink-0" />
-      ) : (
-        <span className="shrink-0 text-sm text-muted-foreground">{now.text}</span>
-      )}
-      <RunDetails run={run} workflow={workflowLabel(run, study)} />
+      <Breadcrumb
+        trail={[
+          { label: "Studies", to: (props) => <Link to="/" {...props} /> },
+          ...(study
+            ? [
+                {
+                  label: study.study.name,
+                  to: (props: { className: string; children: ReactNode }) => (
+                    <Link to={`/studies/${study.study.id}`} {...props} />
+                  ),
+                },
+              ]
+            : []),
+        ]}
+        current={title}
+      />
     </ShellHeading>
   );
 }
@@ -175,6 +206,7 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
     // Live, the sum includes earlier work: a correction adds to the run's total.
     [live ? "Worked so far" : "Took", work ? formatDuration(work.seconds) : "Not started"],
     ["Workflow", workflow],
+    ["Source file", run.input.name],
     ...(models.length
       ? [
           [

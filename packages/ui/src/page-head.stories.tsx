@@ -3,6 +3,7 @@ import { Box as Cube, Download } from "lucide-react";
 import { Button } from "./button";
 import { Count } from "./count";
 import { PageHead } from "./page-head";
+import { StatusMark } from "./status-mark";
 
 /**
  * **What:** the head of a page in the main area: title, a Count when the page is a list, facts
@@ -47,4 +48,39 @@ export const WithCount: Story = {
 /** No actions, no facts: the title alone. */
 export const TitleOnly: Story = {
   args: { title: "Workflows", subtitle: undefined, actions: undefined },
+};
+export const RunFinished: Story = {
+  args: {
+    inline: true,
+    title: "OA6-1RK",
+    subtitle: (
+      <div className="flex flex-wrap items-center gap-4">
+        <span>Group: DMM</span>
+        <StatusMark status="done" label="Run finished" />
+        <StatusMark status="check" label="5 to check" />
+      </div>
+    ),
+    actions: <Button size="sm">Run details</Button>,
+  },
+};
+export const Queued: Story = {
+  args: {
+    inline: true,
+    title: "OA6-1RK",
+    subtitle: (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <StatusMark status="waiting" label="In queue" />
+        <span>The system is busy, place 12 in line.</span>
+      </div>
+    ),
+    actions: <Button size="sm">Run details</Button>,
+  },
+};
+
+export const LongSample: Story = {
+  ...RunFinished,
+  args: {
+    ...RunFinished.args,
+    title: "OA6-1RK — longitudinal osteoarthritis follow-up, right knee",
+  },
 };

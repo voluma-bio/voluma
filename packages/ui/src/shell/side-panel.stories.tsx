@@ -5,7 +5,7 @@ import { SampleTree } from "../sample-tree";
 import { INPUT_WORD } from "../words";
 import { AppShell } from "./shell";
 import { SidePanel } from "./side-panel";
-import { StoryBrand, StoryRail } from "./story-rail";
+import { StoryRail } from "./story-rail";
 
 /**
  * **What:** a screen's side panel, one per side: tabs (the left side) or a title with tools (the
@@ -28,7 +28,7 @@ type Story = StoryObj<typeof meta>;
 function Page({ theme, waiting }: { theme: "light" | "dark"; waiting?: boolean }) {
   const [tab, setTab] = useState(waiting ? "samples" : "conversation");
   return (
-    <AppShell theme={theme} brand={<StoryBrand />} rail={<StoryRail />}>
+    <AppShell theme={theme} rail={<StoryRail />}>
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"

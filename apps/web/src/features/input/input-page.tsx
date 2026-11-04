@@ -7,10 +7,11 @@ import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { runQuery, studyQuery } from "@voluma/api-client/query";
 import type { RunRead } from "@voluma/contracts/run";
-import { RunStoreProvider } from "@voluma/run-view";
+import { inputLabel, RunStoreProvider } from "@voluma/run-view";
 import { Button, ErrorState, INPUT_WORD, LoadingState } from "@voluma/ui";
 import { useCallback, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
+import { InputBreadcrumb } from "./input-header";
 import { OutputsReview } from "./outputs-review";
 import { useRunStream } from "./use-run-stream";
 
@@ -21,6 +22,8 @@ function Unavailable({ query }: { query: UseQueryResult<unknown> }) {
   if (query.isPending)
     return (
       <div className={page}>
+        <InputBreadcrumb />
+        <h1 className="mb-4 text-xl font-semibold">{INPUT_WORD.One}</h1>
         <LoadingState label={`Loading the ${INPUT_WORD.one}`} rows={4} />
       </div>
     );
@@ -28,6 +31,8 @@ function Unavailable({ query }: { query: UseQueryResult<unknown> }) {
   const missing = query.error instanceof ApiError && query.error.status === 404;
   return (
     <div className={page}>
+      <InputBreadcrumb />
+      <h1 className="mb-4 text-xl font-semibold">{INPUT_WORD.One}</h1>
       <ErrorState
         title={
           missing ? `This ${INPUT_WORD.one} isn't here` : `Couldn't load the ${INPUT_WORD.one}`
@@ -63,6 +68,13 @@ export function InputPage() {
   if (!entry || !runId || !entry.runs.some((r) => r.id === runId))
     return (
       <div className="mx-auto w-full max-w-2xl px-6 py-8">
+        <InputBreadcrumb
+          study={study.data}
+          title={entry ? inputLabel(entry.member) : INPUT_WORD.One}
+        />
+        <h1 className="mb-4 text-xl font-semibold">
+          {entry ? inputLabel(entry.member) : INPUT_WORD.One}
+        </h1>
         <ErrorState title={`This ${INPUT_WORD.one} isn't here`}>
           {entry && !runId
             ? "It has no run yet."
