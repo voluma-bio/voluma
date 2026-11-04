@@ -87,8 +87,8 @@ or ends joined to another big bone through bone) is redone the same way, never r
 and the steps that read that bone fail on it. Redo the request with a `subVolume` around the bone, negative points on
 the neighbour it ran into, `otherFrames` on the slices where it ran away, and `direction` toward the bone's own end. Or
 keep the tracks that are right and split the merged mass: `classic_segment.py --within <label>` with seeds from each
-bone's core (`segmentation-check`). When neither works, keep the best labels and raise a To check item naming where
-the bone is in question.
+bone's core (`segmentation-check`). Two bones that still touch after the redo are cut apart, `classic_segment.py
+--within A,B`, and the cut is passed to `finish_labels.py --cut` (`segmentation-check`, section 6).
 
 Do not claim a voxel-exact number from one call: keep the call's counts, prompts and labels as evidence, and when a
 measurement must be stable, call twice and report the spread. A third rerun on one problem is a To check item.

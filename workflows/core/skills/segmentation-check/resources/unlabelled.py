@@ -188,8 +188,10 @@ def find(hu_path, labels, sp, threshold_hu, expected, out_path, min_mm3=0.01, ri
                            f'structure (a tight segment_sam box with negative points on the {name.get(b, b)}) or write your own cleanup '
                            f'and show it on a crop sheet; then run this again. Label {s} must end apart from label {b}; a threshold '
                            f'candidate is never its label by itself')
-                flags[f'joined:{s}-{b}'] = (found + fix + '. If the CT shows no gap between them at threshold there, keep the '
-                                            'labels and raise a To check item naming the patch')
+                # never accepted (finish_labels.py); a recorded cut passes it (finish_labels.py --cut)
+                flags[f'joined:{s}-{b}'] = (found + fix + f'. Where they still touch, cut them apart at the narrowest bone '
+                                            f'between them: classic_segment.py --within {s},{b}, '
+                                            f'then finish_labels.py --cut <that output>; this flag is never accepted')
         fused = []
         for c in cands:
             over = {b: t for b, t in c['fused_to'].items() if b in bigs and t['largest_patch_mm2'] > contact_mm2}
