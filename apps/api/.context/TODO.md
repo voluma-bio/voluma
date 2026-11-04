@@ -10,9 +10,21 @@
   guests cost nothing to mint, so clearing cookies gives 50 GB more. After the demo: a combined cap
   on the guest organization's total, or a per-IP limit on minting guests.
 - **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
-  (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event, because
-  its R2 snapshot is the task loop's. Delete that lookup once the deletion PR's snapshot fallback
-  is live and the 7 old `.snapshot-done` markers are deleted ([convert-task-runs.md](convert-task-runs.md)).
+  (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event. The
+  snapshot is no longer the blocker (the old `.snapshot-done` markers are gone, so a reopen re-cuts it,
+  and the pin check passes: 0026 renamed the pin). The log is. Lifting only the refusal, on a local
+  copy of ce5a0f21 (2026-11-04), gave a failed correction: `pinOf` (`packages/harness/src/supervise-run.ts`)
+  throws "made by an older version", because the root `thread.started` has no `sandboxImage` and its id
+  is `<runId>.supervisor`, not `threadIdOf(runId, ROOT_NAME)`. With `pinOf` also relaxed, the claim
+  minted a second root, re-wrote the opening `outputs.changed` (keyed to the new root), pinged every
+  task-loop worker as idle (they ended `completed`, never `closed`) and resumed them (they failed only
+  on a model mismatch), and started main with the new-run brief, not a review handover: there is
+  no earlier main to hand over from. So lift the refusal only together with: closing the task
+  threads (`thread.ended` `closed`, a migration for converted runs); taking the root from the stored
+  root `thread.started`, not deriving it, in `superviseRun`, `pinOf` and the loop's `${root}:outputs`;
+  no image pin for a root that recorded none; and a review main that starts with a handover when no
+  main came before it (`startMain`/`handoverOf` in `packages/harness/src/loop.ts`, `NO_SUMMARY`).
+  Check it with a local reopen of `import:run --from r2:dev/runs/ce5a0f21-c948-4e20-a03f-04ff7f0e707b`.
 - **Reconcile abandoned provider calls before archiving their runs.** Archive now refuses
   calls without a completed settlement (`duration_ms IS NULL`), including swept `cut` rows.
   Late settlement is preserved; genuinely settled unknown-cost calls remain archivable.

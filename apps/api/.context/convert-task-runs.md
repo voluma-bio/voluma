@@ -14,6 +14,7 @@ migrations; the converter that generated the first is deleted.
   `.github/pr-assets/jimyao-convert-task-runs/conversion-report.md`. A version's folder is the task's
   own folder in R2, so no object moved.
 
-A converted run's R2 workflow snapshot is the task loop's, with no `outputs.yaml`.
+A converted run's log is still a task-loop log underneath: its root is `<runId>.supervisor` with no
+sandbox image, its task threads ended `completed` (idle to the agent loop), and it has no main.
 `messageRefusal` (`domains/run/corrections.ts`) refuses a run holding its `convert:<runId>:outputs`
-event; see [TODO.md](TODO.md) for when that goes.
+event; [TODO.md](TODO.md) lists what reopening one needs.
