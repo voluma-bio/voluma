@@ -197,11 +197,14 @@ def refuse_off_tibia(ann, key, tib, spec_path, vox):
 
 
 def refuse_gaps(ann, key, tib, spec_path, vox):
-    """Refuse a face that leaves bone at plate level untraced. "Bone at plate level" is the tibia within the spec's `max_gap_um`
-    (entry plate-faces) of the curve's W at that column. On each traced section, neighbouring points are at most that far apart
-    over the section's bone (a span over columns without bone does not count: the notch between the condyles) and the first and last
-    point are within it of the bone's ends (past the end points, bone is any tibia within the section's own W band). Across V, traced sections are at most that far apart over the rows where the tibia exists
-    at plate level, and the first and last one are within it of those rows' ends. The stop names each stretch."""
+    """Refuse a face that leaves the plate untraced, at the spec's `max_gap_um` (entry plate-faces). On each traced section,
+    neighbouring points are at most that far apart over columns where the tibia lies both above and below the line between them,
+    each within it (the plate sits between the epiphysis and the metaphysis, and the mask often leaves it out; a line across empty
+    space between two pieces of bone has bone on one side at most), and the first and last point are within it of the tibia's
+    outline: the plate runs out to the cortex, so a face that stops inside the bone is short. Across V, traced sections are at
+    most that far apart over the rows where the tibia is within it of the traced surface, and past the first and last section
+    the tibia's outline goes on at most that far in V at their points (the median over the section). The stop names each
+    stretch."""
     gap = sidecar.protocol(spec_path, 'plate-faces', 'max_gap_um')['max_gap_um'] / 1000 / vox
     um = vox * 1000
     cum = np.concatenate([np.zeros((1, *tib.shape[1:]), np.uint16), np.cumsum(tib, axis=0, dtype=np.uint16)])  # tibia voxels above each W, per (V, U)
@@ -212,6 +215,42 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
         u = np.arange(tib.shape[2])
         return cum[hi, v, u] > cum[lo, v, u]
 
+    def depth_um(v, w, u):
+        """How far point (W `w`, U `u`) on section v lies inside the tibia's outline, in um: 0 on or outside it. The outline is
+        the section's tibia mask with its holes (marrow spaces) filled, closed along the shaft end of the grid (high W), where the
+        crop cuts the bone and its marrow."""
+        sec = tib[:, v, :].copy()
+        sec[-1] = True
+        inside = ndi.binary_fill_holes(sec)
+        wi, ui = int(np.rint(w)), int(np.rint(u))
+        if not (0 <= wi < inside.shape[0] and 0 <= ui < inside.shape[1]) or not inside[wi, ui]:
+            return 0.0
+        return float(ndi.distance_transform_edt(inside)[wi, ui]) * um
+
+    def run_um(v, pts, step):
+        """Median over the section's points of how far the tibia's outline goes on from section v in V (`step` -1 or +1) at the
+        point's W and U, in um. The outline is each sagittal plane's tibia mask with holes filled, closed along the shaft end."""
+        runs = []
+        for w, u in pts:
+            wi, ui = int(np.rint(w)), int(np.rint(u))
+            if not (0 <= wi < tib.shape[0] and 0 <= ui < tib.shape[2]):
+                continue
+            sag = tib[:, :, ui].copy()
+            sag[-1] = True
+            row = ndi.binary_fill_holes(sag)[wi]
+            line = row[v + 1 :] if step > 0 else row[:v][::-1]
+            runs.append(len(line) if line.all() else int(np.argmin(line)))
+        return float(np.median(runs)) * um if runs else 0.0
+
+    def sandwiched(v, w):
+        """Bool over U: tibia on section v both above and below W `w` (per U), each within the gap. The plate lies between the
+        epiphysis and the metaphysis and is often left out of the mask; a curve crossing empty space between two pieces of bone
+        has bone on at most one side."""
+        u = np.arange(tib.shape[2])
+        wi = np.clip(np.rint(w), 0, tib.shape[0]).astype(int)
+        lo, hi = np.clip(np.floor(w - gap), 0, tib.shape[0]).astype(int), np.clip(np.floor(w + gap) + 1, 0, tib.shape[0]).astype(int)
+        return (cum[wi, v, u] > cum[lo, v, u]) & (cum[hi, v, u] > cum[wi, v, u])
+
     def count_between(mask, a, b):
         """Columns of `mask` strictly between positions a and b."""
         lo, hi = int(np.floor(a)) + 1, int(np.ceil(b))
@@ -221,24 +260,15 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
     for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
         v = int(k)
         pts = np.array(sorted(pts, key=lambda p: p[1]), float)
-        bone = near_tibia(v, np.interp(np.arange(tib.shape[2]), pts[:, 1], pts[:, 0]))
-        # past the end points the curve has no height: any tibia in the section's own W band counts
-        lo, hi = int(max(np.floor(pts[:, 0].min() - gap), 0)), int(np.floor(pts[:, 0].max() + gap)) + 1
-        outside = np.arange(tib.shape[2])
-        outside = (outside < pts[0, 1]) | (outside > pts[-1, 1])
-        bone[outside] = tib[lo:hi, v, :].any(axis=0)[outside]
-        cols = np.flatnonzero(bone)
-        if not len(cols):
-            continue
+        bone = sandwiched(v, np.interp(np.arange(tib.shape[2]), pts[:, 1], pts[:, 0]))
         us = pts[:, 1]
         for a, b in pairwise(us):
             n = count_between(bone, a, b)
             if n > gap:
                 problems.append(f'V={v}: U={a:g}..{b:g} has {n} bone columns between two points')
-        if us[0] - cols[0] > gap:
-            problems.append(f'V={v}: the first point is at U={us[0]:g}, bone starts at U={cols[0]}')
-        if cols[-1] - us[-1] > gap:
-            problems.append(f'V={v}: the last point is at U={us[-1]:g}, bone ends at U={cols[-1]}')
+        for which, (w, u) in (('first', pts[0]), ('last', pts[-1])):
+            if (d := depth_um(v, w, u)) > gap * um:
+                problems.append(f'V={v}: the {which} point (W={w:g}, U={u:g}) is {d:.0f} um inside the tibia')
     levels = sorted(int(k) for k in ann[key]['slices'])
     H, *_ = surface_from_curves(ann[key], tib.shape)  # callers have run traced_surface, so the spec is valid
     rows = np.array([near_tibia(v, H[v]).any() for v in range(tib.shape[1])])
@@ -248,10 +278,10 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
             n = count_between(rows, a, b)
             if n > gap:
                 problems.append(f'sections V={a} and V={b} have {n} rows with bone at plate level between them')
-        if levels[0] - where[0] > gap:
-            problems.append(f'the first traced section is V={levels[0]}, the plate starts at V={where[0]}')
-        if where[-1] - levels[-1] > gap:
-            problems.append(f'the last traced section is V={levels[-1]}, the plate ends at V={where[-1]}')
+    for which, v, step in (('first', levels[0], -1), ('last', levels[-1], 1)):
+        pts = np.array(ann[key]['slices'][str(v)], float)
+        if (d := run_um(v, pts, step)) > gap * um:
+            problems.append(f'the {which} traced section, V={v}, has the tibia going on {d:.0f} um past it in V at its points (median)')
     if problems:
         shown = '; '.join(problems[:6]) + (f'; and {len(problems) - 6} more' if len(problems) > 6 else '')
         sidecar.fail(f'"{key}" leaves bone at plate level untraced at more than {gap * um:.0f} um spacing (points on a section, sections in V, '

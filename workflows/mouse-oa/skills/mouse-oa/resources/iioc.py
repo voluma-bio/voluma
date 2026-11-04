@@ -13,9 +13,11 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections; a point more than
                           `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused, naming the section, and so
-                          is a face that leaves bone at plate level untraced: over a section's bone, points more than `max_gap_um` of the spec (entry
-                          plate-faces) apart or the first or last point more than that short of the bone's ends; over the rows with tibia at plate
-                          level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count;
+                          is a face that leaves the plate untraced: on a section, points more than `max_gap_um` of the spec (entry
+                          plate-faces) apart where the tibia lies above and below the line between them (a span across empty space between
+                          two pieces of bone does not count), or the first or last point more than that inside the tibia's outline (the
+                          face runs out to the cortex); in V, sections more than that apart over the rows with tibia at plate level, or the
+                          tibia going on more than that past the first or last section at its points;
                           and so is a face that jumps between neighbouring traced sections: a median W change, over the U columns both cover on the
                           tibia's footprint (when they share at least `jump_overlap_um`), of more than `max_jump_um` plus the sections' distance apart
   plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
