@@ -87,6 +87,54 @@ def load_ranges(path):
     return {e['id']: e for e in json.loads(Path(path).read_text())['labels']} if path else {}
 
 
+# The joint-end cap check of mouse-oa's tibia_frame.py (CAP_MM, CAP_GAP, cap_solidity there), run at intake so swapped labels
+# are caught before the tibial step: a label anatomy.json marks `joint_cap: notched` (a femur: the intercondylar notch makes
+# its cap's footprint U-shaped) must have the less solid cap of the pair facing it across the joint (`joint_cap: solid`).
+CAP_MM = 0.63
+CAP_GAP = 0.05
+
+
+def largest_piece(m):
+    pieces, n = ndi.label(m)
+    return pieces == 1 + int(np.argmax(np.bincount(pieces.ravel())[1:])) if n else m
+
+
+def cap_solidity(m, low_end, cap_vox):
+    """Area over convex-hull area of the cap of mask `m` within `cap_vox` slices of its low or high end, projected along z."""
+    from skimage.morphology import convex_hull_image
+
+    zs = np.flatnonzero(m.any(axis=(1, 2)))
+    z0, z1 = zs[0], zs[-1]
+    lo, hi = (z0, z0 + cap_vox) if low_end else (max(z1 - cap_vox + 1, z0), z1 + 1)
+    foot = m[lo:hi].any(axis=0)
+    return float(foot.sum() / max(convex_hull_image(foot).sum(), 1))
+
+
+def swap_check(labels, sp, expected):
+    """{key: sentence} for a notched/solid pair whose caps read the other way round; the solidities go in `caps`."""
+    notched = [lv for lv, e in expected.items() if e.get('joint_cap') == 'notched']
+    solid = [lv for lv, e in expected.items() if e.get('joint_cap') == 'solid']
+    flags, caps = {}, {}
+    for n in notched:
+        for s in solid:
+            mn, ms = labels == n, labels == s
+            if not mn.any() or not ms.any():
+                continue
+            mn, ms = largest_piece(mn), largest_piece(ms)
+            zn, zs = (float(np.flatnonzero(m.any(axis=(1, 2))).mean()) for m in (mn, ms))
+            cap = round(CAP_MM / sp[0])
+            cn, cs = cap_solidity(mn, zs < zn, cap), cap_solidity(ms, zn < zs, cap)
+            caps[f'{n}-{s}'] = {str(n): round(cn, 3), str(s): round(cs, 3)}
+            if cn > cs + CAP_GAP:
+                nn, ns = expected[n]['name'], expected[s]['name']
+                flags[f'swapped:{n}-{s}'] = (
+                    f'{n} {nn} has the solid joint end of a {ns} and {s} {ns} the notched one of a {nn} (cap solidity {cn:.3f} '
+                    f'against {cs:.3f}): the two labels are swapped. Swap them (relabel.py --swap {n},{s}), check the 3D sheet, '
+                    'then run this again; never accepted')
+            del mn, ms
+    return flags, caps
+
+
 def check(labels, sp, expected, far_factor=10, min_piece_mm3=0.01):
     """The per-label table, the flags ({key: sentence}) and the unsupported ids; `expected` is anatomy.json's labels by id."""
     table, flags, unsupported = {}, {}, []
@@ -117,6 +165,12 @@ def check(labels, sp, expected, far_factor=10, min_piece_mm3=0.01):
     for lv, e in expected.items():
         if lv not in table:
             flags[f'absent:{lv}'] = f'{lv} {e["name"]}: expected but absent'
+    swapped, caps = swap_check(labels, sp, expected)
+    flags.update(swapped)
+    for pair, c in caps.items():
+        for lv in c:
+            if int(lv) in table:
+                table[int(lv)]['joint_cap_solidity'] = c[lv]
     unknown = [lv for lv in ids if expected and lv not in expected]
     if unknown:
         flags['unknown'] = f'labels {unknown} are not in the ranges file'

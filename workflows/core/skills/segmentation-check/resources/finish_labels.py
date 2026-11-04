@@ -60,6 +60,7 @@ def drop_specks(labels, vox, min_piece_mm3):
 NEVER_ACCEPTED = {
     'joined:': 'separate the two. Redo the track (sam-segmentation, "When a track fails"); where they still touch, cut them '
                'apart (classic_segment.py --within A,B) and pass the cut with --cut',
+    'swapped:': 'the two labels are each other\'s bone: swap them (relabel.py --swap A,B)',
     'fused:': 'it is bone no label holds, touching a big bone: give it its label (relabel.py --pieces, segmentation-check '
               'section 1), and its id shifts between passes',
 }
