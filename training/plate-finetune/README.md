@@ -40,6 +40,14 @@ through the same line extraction scores about 11 µm.
 Band rows: threshold 0.3, and the per-seed row uses the midline cut. These band numbers come from L33, which fixed the
 threshold, the vote and the midline cut on the validation scans before it scored the test scans. Each test scan was scored once
 by L33; the face rule below was changed after that.
+
+### OA8-19L: what each method draws
+
+<figure>
+<img src="figures/oa8-19l-cut-comparison.webp" alt="Five representative coronal sections of OA8-19L, with the expert growth-plate cut line and the lines from untrained SAM 3.1, Muse Spark, an Opus agent, and the released model.">
+<figcaption><strong>Figure:</strong> representative sections from the expert-checked OA8-19L test scan. Gold is Dr. Yao's corrected line in every panel; the coloured line is the method's cut. Untrained SAM 3.1 uses the same “growth plate” text prompt, returns nothing on all 14 sections (0 Dice), and is shown honestly as “nothing found”; its empty-section distance is 1050 µm under the scoring convention. The best Muse Spark variant on this scan is text-only. Distances are the <a href="#current-scores">cut-line distance, median per section</a>, in µm. Means over all 14 expert sections: expert 0.0, untrained SAM 3.1 1050.0, Muse Spark (text) 82.1, Opus agent trace 15.2, and released model 16.4.</figcaption>
+</figure>
+
 Caveats:
 - The midline here uses the band's own faces, not the faces snapped on the band probability that L33 chose on validation. We
   revisited that choice after the test scans were scored. The plain faces' midline also scores better on validation (33.9 vs

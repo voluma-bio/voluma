@@ -61,3 +61,4 @@
 - Runs published before the grid-affine change (732a2eea's scan has no `detail.affine`) get an
   identity affine in `outputBlocks`: their marks and rulers read "mm" that are voxels. The scale bar
   hides there (`GridScene.measured`); the mark measures don't yet.
+- Open the panes on the run's Joint frame (intake's `frame`, already in Align) instead of the scan's axes, so Axial/Coronal/Sagittal are anatomical from the start; tibia outputs would open on `tibia-grid`. Skipped Nov 4 (Jimmy: "doesn't matter as much atm"): the holder keeps OA6-1RK nearly upright. Revisit for a crooked scan or if the expert asks.
