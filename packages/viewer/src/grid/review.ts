@@ -103,14 +103,13 @@ export function reviewGrid({
   const scanGrid = revision.volumes.find((v) => v.kind === "image")?.gridId;
   // A check's `volumeId` is a labels volume (a disagreement mask) it points into.
   const focusVolume = focus?.volumeId ? volumes.get(focus.volumeId) : undefined;
-  // A check that names something within the anatomy (a label, a mask, a place) singles it out:
-  // the rest of the labels dim. One that names a whole labels volume is about all of it.
+  // A check that names something within the anatomy (a label, a mask, an annotation, a place)
+  // singles it out: the rest of the labels dim. One naming a whole labels volume is about all of
+  // it, and the scan, a surface or an unknown id single nothing out.
+  const singling = new Set([...revision.structures, ...revision.annotations].map((b) => b.id));
   const singled =
     !!focus &&
-    (!!focus.volumeId ||
-      !!focus.point ||
-      !!focus.box ||
-      focus.on.some((id) => volumes.get(id)?.kind !== "labels"));
+    (!!focus.volumeId || !!focus.point || !!focus.box || focus.on.some((id) => singling.has(id)));
   const gridId =
     mostCommon([...(focus?.on ?? []).map(gridOf), focusVolume?.gridId]) ??
     mostCommon(named.map(gridOf)) ??

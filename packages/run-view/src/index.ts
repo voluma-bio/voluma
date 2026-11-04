@@ -15,6 +15,7 @@ export { KeysForm, keysToReopen, loadKeys, RunKeyLine } from "./keys";
 export {
   inViewOf,
   itemsOfVersion,
+  OUTPUT_STATUS,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
@@ -23,10 +24,10 @@ export {
   outputName,
   outputsReview,
   reviewAssetsOf,
+  rowStatus,
   rowsToCheck,
   shownOf,
   undrawn,
-  waitsOn,
 } from "./outputs-model";
 export {
   type ChainLink,

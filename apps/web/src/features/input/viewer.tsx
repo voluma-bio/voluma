@@ -31,7 +31,15 @@ import {
   type VoxelBox,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { gridKeyOf, type ShownGrid, TOOLS, type YourMark } from "./marking";
 
 export function SceneViewer({
@@ -48,6 +56,7 @@ export function SceneViewer({
   onJumped,
   onMark,
   onShown,
+  heading,
   quad,
 }: {
   runId: string;
@@ -74,6 +83,8 @@ export function SceneViewer({
   ) => string | undefined;
   /** The mounted output and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
+  /** What the panes show, over the top-left pane of the shown viewer. */
+  heading?: ReactNode;
   /** The four panes' layout, which holds across grids, and each grid's planes by the image's id. */
   quad: {
     layout: QuadLayout;
@@ -265,16 +276,19 @@ export function SceneViewer({
   return (
     <>
       {grid.state !== "ready" && (
-        <div className="grid h-full place-content-center p-6">
-          {grid.state === "failed" ? (
-            <ErrorState title={grid.message} />
-          ) : (
-            <div role="status">
-              <EmptyState title={grid.state === "preparing" ? "Preparing the views" : "No views"}>
-                {grid.message}
-              </EmptyState>
-            </div>
-          )}
+        <div className="flex h-full flex-col">
+          {heading && <div className="flex shrink-0 p-2">{heading}</div>}
+          <div className="grid min-h-0 flex-1 place-content-center p-6">
+            {grid.state === "failed" ? (
+              <ErrorState title={grid.message} />
+            ) : (
+              <div role="status">
+                <EmptyState title={grid.state === "preparing" ? "Preparing the views" : "No views"}>
+                  {grid.message}
+                </EmptyState>
+              </div>
+            )}
+          </div>
         </div>
       )}
       {slots.map((k) => {
@@ -289,6 +303,7 @@ export function SceneViewer({
               onLayout={quad.onLayout}
               focus={k.focus}
               notes={k.notes}
+              heading={on ? heading : undefined}
               tool={on ? tool : null}
               marks={shown.get(k.key) ?? NO_MARKS}
               onMark={on ? (mark, plane) => onMark(mark, k.imageId, k.key, plane) : undefined}

@@ -209,6 +209,7 @@ export function QuadViewer({
   onLayout,
   focus,
   notes = [],
+  heading,
   children,
   tool = null,
   marks,
@@ -239,6 +240,8 @@ export function QuadViewer({
   focus?: { at: Zyx; box?: VoxelBox };
   /** What the viewer should say it doesn't show. */
   notes?: string[];
+  /** What the views show, laid over the top-left pane's corner (clear of its own buttons). */
+  heading?: ReactNode;
   /** The tools, on the left of the docked bar. */
   children?: ReactNode;
   tool?: MarkTool | null;
@@ -596,6 +599,8 @@ export function QuadViewer({
   );
   const cutsOf = (normals: readonly { axis: Axis; normal: Vec3 }[]) =>
     normals.map((c) => ({ ...c, token: planeToken(c.axis) }));
+  // The pane in the top-left corner: the one filling the views, else slot 0.
+  const corner = layout.full ?? layout.views[0];
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background" aria-label="Views">
@@ -730,6 +735,11 @@ export function QuadViewer({
               }}
             >
               {pane}
+              {heading && view === corner && (
+                <div className="absolute top-2 left-2 z-30 flex max-w-[calc(100%-3rem)]">
+                  {heading}
+                </div>
+              )}
               <div
                 aria-hidden
                 className={cx("pointer-events-none absolute inset-0 z-10 inset-ring-1", look.ring)}

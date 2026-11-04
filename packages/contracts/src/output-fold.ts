@@ -109,7 +109,8 @@ export interface OutputsFold {
    * The open To check items a person can answer, as `itemKey`s: those on the latest version of each
    * final or undeclared output and of everything it was made from. The one source every screen
    * counts To check from for an agent-loop run (the output panel and its filter, the Samples tree,
-   * the study row, the heading); a value that only rests on an open item has its own status.
+   * the study row, the heading). A value that only rests on an open item isn't counted for it; the
+   * input review shows it waiting on that check (`rowStatus`, run-view).
    */
   openItems: Set<string>;
   /** `openItems.size`. */
