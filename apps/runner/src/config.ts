@@ -9,10 +9,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { isIPv4 } from "node:net";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { modelRefSchema } from "@voluma/contracts/ids";
 import { parseTokenSecrets } from "@voluma/provider-calls/token";
-import { THINKING_LEVELS } from "@voluma/workflow/definition";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");

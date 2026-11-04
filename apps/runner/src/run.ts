@@ -389,7 +389,7 @@ async function claimBody(
       const chosen = runModel();
       // Without a run model, a role's model is its file's alias. A run on its own key sends that key
       // and the scan to Standard-mode Meta models only, whichever way the model was picked
-      // (forced, alias or the run's), so a run that gets another fails here and says which.
+      // (the run's or the role file's alias), so a run that gets another fails here and says which.
       const roleModel = ({ name, model: alias }: AgentDefinition) => {
         const model = chosen ?? ctx.aliases[alias];
         if (!model) {
@@ -398,7 +398,7 @@ async function claimBody(
           );
           throw new Error(roleModelUnset(alias));
         }
-        if (visitor && !ownKeyMayUse(model)) {
+        if (visitor && !ownKeyMayUse(`${model.provider}/${model.id}`)) {
           log(
             `the model ${model.provider}/${model.id} cannot take a run's own Meta key (not a Standard-mode Meta model)`,
           );

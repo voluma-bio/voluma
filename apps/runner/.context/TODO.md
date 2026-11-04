@@ -17,3 +17,5 @@ From the skillset move (`workflows/` in this repo):
 - **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message) but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.
 
 - **Every Meta request hashes every inline image** (`meta-images.ts`, `fileIdFor`): about 54 ms of event-loop time per 40 images of 1 MiB, plus short-lived copies. Cache the hash per image if it ever competes with the lease timers.
+
+- **Delete the `RUNNER_MODEL` / `RUNNER_THINKING` boot refusal in `config.ts`** about a week after #540 merges, once every host has dropped both variables.

@@ -203,8 +203,8 @@ An agent in its own worktree tries a workflow change on the real system like thi
    tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
    `gateway https://…trycloudflare.com` line before starting the runner.
 2. `pnpm --filter @voluma/runner start`, with `RUN_MODEL_OVERRIDE=deepseek/deepseek-flash` in `.env` for the local API (it records that model on every Voluma-key run, so the runner just reads `run.model`; a guest's own-key run keeps its pick, since a Meta key can't call DeepSeek, so plumbing runs are a member's) and thinking picked at `/new`. The runner refuses to boot with `RUNNER_MODEL` or `RUNNER_THINKING` set. Agents run plumbing checks on `deepseek/deepseek-flash` with thinking `low` (`high` when a check needs more from it, such as overthinking), checks of how well the model works on `meta/muse-spark-1.3-contributor`, never `deepseek/deepseek-v4-pro`, never wonder, and never a run on staging (Jimmy). Meta SAM is the only Meta call here, about $0.10 each.
-3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
-   (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
+3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …] [--thinking low|medium|high] [--model <provider/id>]`
+   (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan (`--thinking` and `--model` go in the start body; plumbing checks pass `--thinking low`, since the default medium rounds up to high on deepseek-flash),
    follows the run's event stream until it ends and prints its outcome, the outputs reported (`outputsFold`), cost and the run page. Exit 1 when the run failed or was cancelled, 2 when the script itself broke
    (no `pnpm dev`, sign-in or API errors), 3 when no runner claimed the run in 3 minutes. Edits to `workflows/` are read from
    the checkout when a run starts, so edit, then try-run again.
