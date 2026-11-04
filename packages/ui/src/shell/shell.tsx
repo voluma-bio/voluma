@@ -110,6 +110,13 @@ export function AppShell({
   );
 }
 
+/** Whether `side` is folded to its strip. */
+export function useFolded(side: ShellSide): boolean {
+  const shell = useContext(ShellContext);
+  if (!shell) throw new Error("useFolded must be used inside AppShell");
+  return shell.folded[side];
+}
+
 /** Whether Full view is on (both sides folded), and a way for the screen to turn it on or off. */
 export function useFullView(): [boolean, (full: boolean) => void] {
   const shell = useContext(ShellContext);

@@ -77,7 +77,7 @@ about (as `trail` unless it is the value) and frames the panes on its region; it
 so Back returns to the item before. Reports and items are `version-report.tsx`.
 
 The centre has no bar of its own: a chip (`SceneChip`) names the output in view, its value and its
-status (the waiting one a button to the checks), with the saved views menu. On the panes it sits in
+status (the waiting one a button to the checks), with the saved views menu, only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
 the top-left pane's corner (`QuadViewer`'s `heading`), under the viewer's notes, which stay in the
 flow above the panes; over a file, a list, an empty centre or a grid still preparing it sits above,
 in the flow. The whole run gets a bar with the way back. Delete mark and Undo delete

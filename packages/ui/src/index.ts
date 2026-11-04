@@ -73,6 +73,7 @@ export {
   AppShell,
   ShellHeading,
   type ShellSide,
+  useFolded,
   useFoldWhile,
   useFullView,
 } from "./shell/shell";

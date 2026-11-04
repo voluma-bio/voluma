@@ -53,6 +53,7 @@ import {
   SidePanel,
   StatusGlyph,
   StatusMark,
+  useFolded,
   useFoldWhile,
   useFullView,
 } from "@voluma/ui";
@@ -390,6 +391,7 @@ export function OutputsReview({
   // leaving Full view (Escape, opening a panel) puts the panes back. The page keeps only which
   // view fills; whether it shows is the shell's.
   const [shellFull, setShellFull] = useFullView();
+  const outputsFolded = useFolded("right");
   const [arranged, setArranged] = useState<QuadLayout>(QUAD_START);
   const [fill, setFill] = useState<QuadLayout["full"]>(null);
   // Forgotten once Full view is left, so entering it later need not fill a pane.
@@ -460,7 +462,8 @@ export function OutputsReview({
   }, [select]);
 
   // What the centre shows, its value and status: over the panes' top-left corner, else above.
-  const heading = (
+  // Only with Final outputs folded: open, its selected row already says this (Jimmy, Nov 4).
+  const heading = outputsFolded && (
     <SceneChip
       live={live}
       root={selected}
