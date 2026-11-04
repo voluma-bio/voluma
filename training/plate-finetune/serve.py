@@ -3,7 +3,8 @@
   uv run --group release modal deploy serve.py                         # app "plate-serve"
   PLATE_SERVE_APP=plate-serve-dev uv run --group release modal deploy serve.py
 
-Runs don't call it yet (.context/TODO.md). README "Serving on Modal" has the request, the response and the costs.
+Runs call it through the gateway (`segment_plate`, mouse-oa's `plate_model.py`), so its request and response are runner-facing:
+a change a live run would trip over in a deploy overlap ships expand then contract (root AGENTS.md, "Contract changes"). README "Serving on Modal" has the request, the response and the costs.
 
 Input, the training convention (scans.py): the tibia grid's HU volume and its tibia mask, axes (W, V, U), 10.5 µm voxels; a
 coronal section is vol[:, V, :] (rows W, low W = the joint side, columns U). Either the request body is an .npz with `hu` (any
