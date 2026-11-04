@@ -764,7 +764,7 @@ export function QuadViewer({
           <span
             className="truncate text-xs text-muted-foreground"
             role="status"
-            title={lie ? undefined : "The planes lie on this grid's axes"}
+            title={lie ?? "The planes lie on this grid's axes"}
           >
             {lie ?? gridName}
           </span>
