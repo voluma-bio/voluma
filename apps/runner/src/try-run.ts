@@ -2,7 +2,7 @@
  * The agent test loop's last step: start a run on the local API (`pnpm dev`), wait for it to
  * end, and print what it produced.
  *   pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>]
- *       [--outputs <id,id>] [--notes <text>]
+ *       [--outputs <id,id>] [--notes <text>] [--thinking low|medium|high] [--model <provider/id>]
  * A runner must be running (`pnpm --filter @voluma/runner start`) to claim the run. It signs in
  * with the WORKOS_TEST_EMAIL and WORKOS_TEST_PASSWORD of the repo .env, as `upload:scan` does,
  * on the API and origin `.dev/env.json` names; the scan defaults to the lab's reference scan.
@@ -43,6 +43,8 @@ const { values } = parseArgs({
     workflow: { type: "string", default: "mouse-oa" },
     outputs: { type: "string" },
     notes: { type: "string" },
+    thinking: { type: "string" },
+    model: { type: "string" },
   },
 });
 const workflow = workflowById(values.workflow);
@@ -103,6 +105,8 @@ const study = studyDetailSchema.parse(
         start: [input.id],
         ...(outputs && { selectedOutputs: outputs }),
         ...(values.notes && { notes: values.notes }),
+        ...(values.thinking && { thinking: values.thinking }),
+        ...(values.model && { model: values.model }),
       },
     })
   ).json(),

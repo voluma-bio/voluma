@@ -19,6 +19,7 @@ import { referenceInputId } from "@voluma/contracts/r2";
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -140,7 +141,7 @@ export const runs = pgTable(
     selectedOutputs: json(),
     notes: text(),
     inputId: text().notNull(),
-    credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
+    credentials: text({ enum: ["voluma", "own"] }).notNull(),
     /** An own-key run's keys, sealed (run-keys.ts) while the run lives; null for a Voluma-key run and once the run ends. */
     sealedKeys: text(),
     /** The model every role of the run uses (`runSchema.model`); null for runs made before the choice existed. */
@@ -153,6 +154,7 @@ export const runs = pgTable(
     createdAt: timestamptz().notNull().defaultNow(),
     state: text({ enum: ["queued", "running", "awaiting-keys", "ended"] }).notNull(),
     startedAt: timestamptz(),
+    /** Read nowhere (TODO: drop the column). */
     awaitingSince: timestamptz(),
     /** The last claim, for the claim's rotation between own-key starters (`queueOrder`). */
     claimedAt: timestamptz(),
@@ -185,5 +187,6 @@ export const runs = pgTable(
     index("runs_active_state").on(t.state).where(sql`${t.state} IN ('queued', 'running')`),
     index("runs_sealed_keys").on(t.id).where(sql`${t.sealedKeys} IS NOT NULL`),
     index("runs_study").on(t.studyId),
+    check("runs_ended_no_keys", sql`${t.state} <> 'ended' OR ${t.sealedKeys} IS NULL`),
   ],
 );

@@ -1,22 +1,23 @@
 /**
- * A user's own keys (`VisitorKeys`): asked on Run on new inputs, when a run is waiting for them,
+ * A user's own keys (`OwnKeys`): asked on Run on new inputs, when a run is waiting for them,
  * and to reopen a finished own-key run. They stay in this browser's localStorage, under the user's
  * id so another user of the browser never sees them; the server seals them in the database only
  * while the run lives.
  */
-import { type VisitorKeys, visitorKeysSchema } from "@voluma/contracts/run";
+import { type OwnKeys, ownKeysSchema, type Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
 
+// The name keeps "visitor" on purpose: renaming the key drops every user's saved keys.
 const storageKey = (userId: string) => `voluma.visitor-keys.${userId}`;
 
 /** The keys this user saved in this browser; stored text that doesn't parse is dropped. */
-export function loadKeys(userId: string): VisitorKeys | undefined {
+export function loadKeys(userId: string): OwnKeys | undefined {
   const raw = localStorage.getItem(storageKey(userId));
   if (!raw) return undefined;
   try {
     const stored = JSON.parse(raw);
-    const parsed = visitorKeysSchema.safeParse(stored);
+    const parsed = ownKeysSchema.safeParse(stored);
     if (parsed.success) {
       // Keys saved when a guest also gave a Modal token: keep only the Meta key.
       if ("modal" in stored) saveKeys(userId, parsed.data);
@@ -33,14 +34,14 @@ export function loadKeys(userId: string): VisitorKeys | undefined {
  */
 export function keysToReopen(
   userId: string,
-  run: { credentials: "voluma" | "visitor"; state: { status: string } },
-): VisitorKeys | undefined {
-  return run.credentials === "visitor" && run.state.status === "ended"
+  run: { credentials: Run["credentials"]; state: { status: string } },
+): OwnKeys | undefined {
+  return run.credentials !== "voluma" && run.state.status === "ended"
     ? loadKeys(userId)
     : undefined;
 }
 
-const saveKeys = (userId: string, keys: VisitorKeys) =>
+const saveKeys = (userId: string, keys: OwnKeys) =>
   localStorage.setItem(storageKey(userId), JSON.stringify(keys));
 
 const forgetKeys = (userId: string) => localStorage.removeItem(storageKey(userId));
@@ -58,7 +59,7 @@ export function KeysForm({
   userId: string;
   submitLabel: string;
   busy?: boolean;
-  onSubmit: (keys: VisitorKeys) => void;
+  onSubmit: (keys: OwnKeys) => void;
 }) {
   const saved = loadKeys(userId);
   const [metaApiKey, setMeta] = useState(saved?.metaApiKey ?? "");
@@ -104,8 +105,8 @@ export function RunKeyLine({
   userId: string;
   /** Whether the account has Voluma's key; without it the form is required. */
   volumaKey: boolean;
-  keys: VisitorKeys | undefined;
-  onChange: (keys: VisitorKeys | undefined) => void;
+  keys: OwnKeys | undefined;
+  onChange: (keys: OwnKeys | undefined) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const link = "text-primary-text underline";

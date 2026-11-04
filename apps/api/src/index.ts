@@ -13,8 +13,8 @@
  * GUEST_ORGANIZATION_ID to let anyone in as a guest (the repo .env).
  * RUN_KEY_SECRET (at least 32 characters): seals an own-key run's keys in the database while the run lives (domains/run/run-keys.ts).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
- * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
- * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
+ * Run limits that guard Voluma's key: RUN_LIMITS_LAB_SPEND_USD and RUN_LIMITS_JUDGES_SPEND_USD
+ * (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
  * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member, UPLOAD_LIMIT_PER_USER_GB (50) total stored per person (defaults below). Fails at startup if the database is unreachable or not migrated.
@@ -36,7 +36,7 @@ import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
-import type { KeyLimits, Limits } from "./domains/run/admission";
+import { type Limits, mayUseVolumaKey } from "./domains/run/admission";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
@@ -65,11 +65,8 @@ function limitNumber(name: string): number {
   return value;
 }
 
-/** What an organization with Voluma's key may run (`admission.ts`), every number from `RUN_LIMITS_<ORG>_*` so it can change without a deploy. */
-const keyLimitsFromEnv = (org: "LAB" | "JUDGES"): KeyLimits => ({
-  concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
-  spendUsd: limitNumber(`RUN_LIMITS_${org}_SPEND_USD`),
-});
+/** An organization's model spend cap (`admission.ts`), from `RUN_LIMITS_<ORG>_SPEND_USD` so it can change without a deploy. */
+const spendLimitFromEnv = (org: "LAB" | "JUDGES") => limitNumber(`RUN_LIMITS_${org}_SPEND_USD`);
 
 /** A positive whole number from env, or `fallback` when unset. */
 function countFromEnv(name: string, fallback: number): number {
@@ -98,15 +95,15 @@ const db = drizzle(client, { casing: "snake_case" });
 // The order is the queue priority: judges are claimed before the lab (`Limits`).
 const keyOrganizations = [
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
-    ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, limits: keyLimitsFromEnv("JUDGES") }]
+    ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, spendUsd: spendLimitFromEnv("JUDGES") }]
     : []),
-  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
+  { id: required("WORKOS_LAB_ORGANIZATION_ID"), spendUsd: spendLimitFromEnv("LAB") },
 ];
 const guestOrganizationId = process.env.GUEST_ORGANIZATION_ID || null;
 // An org missing from `voluma` is no longer configured: its queued Voluma-key runs fail and its running ones stop.
 const appRunning = countFromEnv("RUN_LIMITS_APP_RUNNING", 2);
 const limits: Limits = {
-  voluma: new Map(keyOrganizations.map((org) => [org.id, org.limits])),
+  voluma: new Map(keyOrganizations.map((org) => [org.id, org.spendUsd])),
   appRunning,
 };
 
@@ -117,6 +114,7 @@ const auth = createAuth({
   // Who may sign in (auth.ts). No domain reads an organization id.
   organizations: keyOrganizations.map(({ id }) => id),
   // Guests (auth.ts): a request with no credential is a guest in this organization.
+  mayUseVolumaKey: (labId) => mayUseVolumaKey(limits, labId),
   guest: guestOrganizationId ? { organizationId: guestOrganizationId } : null,
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),

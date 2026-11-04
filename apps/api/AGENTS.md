@@ -58,7 +58,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 
 - `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `studies.ts` (create, list, get), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
-  `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
+  `pg-queue.ts` owns every state change of a run (start, cancel, claim, lease,
   recovery) and an own-key run's sealed keys. Every run is an agent-loop run: `runs.harness` is still written (`agents`) and the claim's `harnesses` still accepted, both ignored, until no old runner or API is live ([.context/TODO.md](.context/TODO.md)). `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per limit.
@@ -67,9 +67,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
   it. `queue.createStudy` inserts the study, its inputs and the runs to start in one
   transaction under the lock: any refusal throws an `HTTPException` (status and text, where it is decided) and rolls the whole call back, and
-  `startRuns` reads the counts once and raises them for each run it inserts. Every browser
-  write (start, create, cancel, resume) goes through `attempt`: a refusal rolls it back and reaches the
-  client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
+  `startRuns` admits the call once (its runs share an org and a kind of key). Every browser
+  write (start, create, cancel) goes through `attempt`: a refusal rolls it back and reaches the
+  client (`onError` answers `{error}`), and `attempt` drops the own keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run, and readable from every organization (`readableRuns`/`readableStudies` test `example` before the org); `import:run` restores
   a dump's original study, study members and inputs, refusing conflicting shared rows. Only legacy dumps
@@ -106,10 +106,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
   claim or heartbeat, a user's cancel) ends it with outcome `completed`. `cancelReviewWorkers` ends the workers and the root for that claim as `cancelled`, the open ones and those that finished inside the correction (`cancelEnds`, fed row columns and the raw payload of thread rows read in JS: it runs inside the claim, so it never refuses); main stays cut off, so the researcher's next message resumes it. Nothing writes `correction.ended` any more; readers keep it for the stored events of older runs.
 - **An own-key run's keys live sealed in `runs.sealed_keys`** (`run-keys.ts`, AES-256-GCM under
-  `RUN_KEY_SECRET`) for the run's life. `pg-queue.ts` seals them at start and resume, `corrections.ts`
+  `RUN_KEY_SECRET`) for the run's life. `pg-queue.ts` seals them at start, `corrections.ts`
   at a reopen (the request brings them: a finished run's were nulled), the claim opens them, and
-  every path that ends a run nulls them. Never log or return them (except in the claim), and log no
-  body on a route that takes them. A claim that cannot open them moves the run to `awaiting-keys`.
+  `markEnded` (`pg-queue.ts`) nulls them on every path that ends a run, and a CHECK on `runs` makes that a rule. Never log or return them (except in the claim), and log no
+  body on a route that takes them. A claim that cannot open them (the secret changed) fails the run.
   `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
   `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
 - Operator CLIs (seed, archive, export and import a run, `r2:put`, `upload:scan`) live in

@@ -1,11 +1,14 @@
 # TODO
 
+- **Finish deleting `awaiting-keys` (step 2, after the PR that removed it is live).** Delete the
+  `stuck` sweep in `sweep` (`domains/run/pg-queue.ts`) and the `awaiting-keys` case in `toRun`
+  (`pg-runs.ts`); drop `"awaiting-keys"` from the `runs.state` enum and drop the `awaiting_since`
+  column in `schema.ts`, with a migration. Step 1 left both so an API built before it, live in a
+  deploy overlap, cannot strand a run.
 - **A new guest cookie is a fresh upload cap: accepted until after the Nov 4 demo (Jimmy, 3 Nov).**
   The per-person cap (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and
   guests cost nothing to mint, so clearing cookies gives 50 GB more. After the demo: a combined cap
   on the guest organization's total, or a per-IP limit on minting guests.
-- **Constrain sealed keys after #533 is live.** Add `CHECK (state <> 'ended' OR sealed_keys IS NULL)`
-  on `runs`; before that, the old code's end writes would fail during the deploy overlap.
 - **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
   (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event, because
   its R2 snapshot is the task loop's. Delete that lookup once the deletion PR's snapshot fallback
@@ -51,7 +54,7 @@
 - **The example on Studies.** Its sample counts as Done (#454), but its progress mark and the Samples tree's glyph are still amber To check, which nobody can act on. A neutral "Example" mark would read better.
 - **Example studies hold only reference inputs.** Reading a study reads every input in it. `seed:example` and `import:run` should assert that an example study has only the reference input.
 - **Mark and view caps count characters.** `MAX_MARK_BYTES` and `MAX_VIEW_BYTES` (`runs.ts`) measure `JSON.stringify(...).length`, so a note of multi-byte characters can be up to 3× the cap; `browserLimit` (256 KB) still bounds the request. Measure UTF-8 bytes.
-- **Delete `readOldDump` in `src/ops/import-run.ts`** once no run dump written before the
+- **Delete `readOldDump` in `src/ops/import-run.ts`** once no run dump written before `credentials: "visitor"` became `"own"` or the
   `studyMembers` key remains (those have `studyScans` for the study rows and `studyInputs` for
   the input rows, e.g. `r2:dev/runs/732a2eea…`).
 - **Delete the `scans` alias** in `createStudyRequestSchema` (`packages/contracts/src/study.ts`)

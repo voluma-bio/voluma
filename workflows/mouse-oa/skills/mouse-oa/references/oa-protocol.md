@@ -92,7 +92,7 @@ schema is `regions-and-landmarks`'):
   never replaces the points. Retrace a stretch that is wrong but not flagged the same way. Retracing is required; a To check item naming the stretch is in addition, never instead (`examples/README.md`, iioc:
   eroded plate). The marked ranges and their share of the plate are in `iioc.json`: report them. A growth-plate line or path the researcher drew
   on a coronal section of the tibia grid goes into that section's curve of the face it corrects: the face your brief names, or the
-  face output the mark was drawn on (`marks_to_grid.py --curve --into annotations.json --key growth_plate_curves` for
+  face output the mark was drawn on (`marks_to_grid.py --curve --drawn-on <the image the delivery names> --into annotations.json --key growth_plate_curves` for
   the proximal face, `growth_plate_distal_curves` for the distal; `regions-and-landmarks`). A mark drawn on anything else
   names no face, and a correction can sit nearer the other face than its own: with no face named, or the brief and the mark
   naming different faces, apply nothing and report that, so the researcher is asked. Retrace the sections beside it to meet it. Where part of the tibia label is really femur or fibula

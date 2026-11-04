@@ -2,28 +2,25 @@
  * The rail: the app's places in a 44 px column at the far left of every screen, under the header
  * line (Studies and Workflows at the top, Settings at the foot). Places are icons only: each is
  * named by its tooltip and its accessible name. The place you are in is pressed, with a bar at the
- * rail's edge. A primary `RailButton` (a guest's Sign in) shows its label under the icon.
+ * rail's edge. Sign in and Settings use the same icon-only buttons.
  */
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { cx } from "../cx";
 import { Tooltip } from "../tooltip";
 
 export type RailProps = {
-  /** The mark at the top, linking home. */
-  home: ReactNode;
   /** The places (`RailLink`). */
   children: ReactNode;
   /** At the foot: a guest's Sign in, then Settings (`RailButton`s). */
   end?: ReactNode;
 };
 
-export function Rail({ home, children, end }: RailProps) {
+export function Rail({ children, end }: RailProps) {
   return (
     <nav
       aria-label="App"
       className="relative z-20 flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted py-2"
     >
-      <div className="mb-2.5 grid size-6 place-items-center">{home}</div>
       {children}
       <span className="flex-1" />
       {end}
@@ -76,34 +73,10 @@ export type RailButtonProps = Omit<ComponentProps<"button">, "children" | "aria-
   label: string;
   icon: ReactNode;
   active?: boolean;
-  /** Primary: filled, with the label shown under the icon, for the one action the rail asks for. */
-  variant?: "default" | "primary";
 };
 
 /** A rail item that acts in place: Settings' popover trigger, a guest's Sign in. */
-export function RailButton({
-  label,
-  icon,
-  active = false,
-  variant = "default",
-  className,
-  ...props
-}: RailButtonProps) {
-  if (variant === "primary")
-    return (
-      <button
-        type="button"
-        className={cx(
-          "mb-1 grid w-10 shrink-0 cursor-pointer place-items-center gap-0.5 rounded-md bg-primary px-0.5 py-1.5 text-primary-foreground outline-none hover:bg-primary-strong [&_svg]:size-4",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted",
-          className,
-        )}
-        {...props}
-      >
-        {icon}
-        <span className="text-[11px] font-medium leading-none whitespace-nowrap">{label}</span>
-      </button>
-    );
+export function RailButton({ label, icon, active = false, className, ...props }: RailButtonProps) {
   return (
     <Tooltip label={label} side="right">
       <button

@@ -21,8 +21,7 @@ function activityOf(events: readonly RunEvent[]): string | undefined {
 }
 
 export function RunNews({ events, state }: { events: readonly RunEvent[]; state: RunState }) {
-  // Queued or held for keys: not running yet.
-  const waiting = state.status === "queued" || state.status === "awaiting-keys";
+  const waiting = state.status === "queued";
   const last = events.at(-1)?.createdAt;
   const activity = useMemo(() => activityOf(events), [events]);
   return (

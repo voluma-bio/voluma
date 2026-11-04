@@ -17,7 +17,6 @@ import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
 import { startTelemetry } from "./telemetry.ts";
-import { assertThinking } from "./thinking.ts";
 
 /**
  * How long a shutdown waits for runs to report before it exits anyway: Render kills the process
@@ -40,10 +39,6 @@ const resolve = (ref: { provider: string; id: string }) => {
 const aliases = Object.fromEntries(
   Object.entries(config.models).map(([alias, ref]) => [alias, resolve(ref)]),
 );
-
-// Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
-// would run silently at another. Every alias is checked, named by a role file or not.
-assertThinking(config.thinking, Object.values(aliases), "RUNNER_THINKING");
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
@@ -76,7 +71,7 @@ const aliasList = Object.entries(config.models)
   .join(", ");
 const gatewayNote = config.gateway?.url ?? "off: segment_sam not offered";
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), models ${aliasList}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}, gateway ${gatewayNote}`,
+  `${runnerId} up: ${config.concurrency} slot(s), models ${aliasList}, api ${config.api.baseUrl}, gateway ${gatewayNote}`,
 );
 // After startup: a failure above must still kill the process, not be logged and survived.
 startTelemetry(log);
