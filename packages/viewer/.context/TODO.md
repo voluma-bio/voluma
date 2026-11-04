@@ -40,3 +40,16 @@
 - 3D pane (#567): the overlay row around the status chip and reset button catches drags that start over it;
   dispose the Arcball gizmo geometry `setTbRadius` replaces on each resize. Ask the expert whether a dial
   turned back to 0° should count as on the grid (today the bar says "Turned 0.0°" until Reset).
+- Untilted panes could read through the tilted path (#568 review): with a grid-axis basis, `sampling`
+  and `onLevel` already land on level voxel centres (the first `reslice.test.ts` case shows it at
+  every level). That deletes `slice`, `compose`'s `lookup`, `readPlane` and the worker's `plane()`,
+  and the second coarse/fine policy in `SlicePane` (the 80 ms race against the under-layer), and
+  gives untilted level-0 panes the view window too. Worth doing before more lands on `SlicePane`.
+- The 3D pane's mesh-depth pipeline has no case left (#568 review): the volume draws only when
+  `scene.meshes` is empty, and annotations are a separate scene, so the render target, copy pass,
+  depth texture and the shader's stop-at-mesh-depth (`Grid3D.tsx`, `volume.ts`) combine nothing.
+  Delete them (the renderer's own antialias covers the four-sample target), or say why they stay.
+- The chunk cache (768 MiB) covers three tilted level-0 panes with uint8 labels up to about an
+  855³ scan at 30° (710 MB, computed with `crossed`). A bigger scan, or wider labels, thrashes
+  again: each crosshair move re-fetches the other panes' chunks. Then budget the fine request per
+  pane (shrink the window toward the view) rather than coarsen fit zoom.

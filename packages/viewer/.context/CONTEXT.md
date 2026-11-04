@@ -12,9 +12,10 @@ volumes share `gridId`, and a block on another grid is listed under the viewer (
 not shown here"), never resampled onto this one. One exception: a grid with no labels of its own
 (the aligned tibia grid) shows the scan grid's context label meshes in 3D, moved rigidly through
 the two volumes' affines (`GridMesh.placement`, a matrix applied to the geometry; no slice overlay).
-It does so only when the two affines differ: the harness publishes spacing-only affines today
-(`report-output.ts` `detailFromSidecar`), which gives every grid the scan's affine and no pose,
-so until that carries `affine_xyz_to_world_mm` nothing is borrowed (`packages/harness/.context/TODO.md`).
+It does so only when both affines carry a pose (an origin or a rotation): a spacing-only diagonal,
+a resampled grid's included, places nothing correctly. The harness publishes spacing-only affines
+today (`report-output.ts` `detailFromSidecar`), so until that carries `affine_xyz_to_world_mm`
+(#570) nothing is borrowed (`packages/harness/.context/TODO.md`).
 
 - **Which grid.** The grid most of the focused item's `on` blocks and `volumeId` sit on; else the
   grid most of the output's shown blocks sit on; else the scan's grid, the first image volume's. The grid's image is
@@ -70,7 +71,7 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   least one device pixel at its zoom; the coarse picture shows meanwhile unless the finer one lands
   within 80 ms. Overlays load at the image level's scale (nearest: a label never blends).
 - **Worker.** One module worker reads every plane, and reslices tilted ones (`readSlice`). Decoded 64³ chunks share one LRU cache
-  (384 MiB); fetches wait for 12 slots, newest first, and a chunk no live request still wants is
+  (768 MiB: three panes' level-0 planes and labels, about 410 MB tilted on OA6-1RK); fetches wait for 12 slots, newest first, and a chunk no live request still wants is
   never fetched. A 404 chunk is the fill value (zarr v2 omits empty chunks).
 - **Interaction.** Left drag sets the crosshair; wheel, arrows and Page Up/Down step slices;
   Ctrl/⌘ + wheel zooms at the pointer; Shift, middle or right drag pans; zoom is relative to the
@@ -114,11 +115,13 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
 - **Where a pane lies.** Each slice pane has a basis in the grid's mm, (z, y, x): `right`, `down`,
   `normal` (`frame.ts`). On the grid's axes a pane reads whole slices from zarr as above. Tilted,
   each picture is resliced in the worker (`reslice.ts`) from only the chunks the plane crosses:
-  the image trilinear, overlays nearest, at their own level and offset, samples one level voxel
-  apart (at most 1024 a side). Two layers: the coarsest level over the grid's whole outline, at
-  once, and over it the zoom's level (`levelFor`, as untilted) in a window of the view grown by
-  half its size each way. Panning or zooming out to within an eighth of a view of the window's
-  edge loads a new window; the coarse layer shows meanwhile. A new depth or turn reloads both,
+  the image trilinear, overlays nearest, at their own level and offset. Two layers: the coarsest
+  level over the grid's whole outline (at most 1024 samples a side), at once, and over it the
+  zoom's level (`levelFor` in device pixels, as untilted) in a window around the view, always
+  sampled one level voxel apart (`windowAround`): the view grown by half its size each way, capped
+  at 1024 samples a side but never under a quarter of the view each way. Panning or zooming out to
+  within an eighth of a view of the window's edge loads a new window; the coarse layer shows
+  meanwhile. A failed coarse picture is the pane's error only when the fine one fails too. A new depth or turn reloads both,
   from the chunk cache when it can. Its counter is primed (′) on the nearest axis and steps
   the grid's finest spacing along its normal; marks within half a step of the plane count as on it.
 - **Turning by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
