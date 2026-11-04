@@ -4,7 +4,7 @@ A mark arrives in mm, (x, y, z), as your delivery prints it: "drawn on tibia-gri
 `--world` takes that line as it is: it reads the bracketed triples after whichever of " at " and " to " comes last (a moved
 mark, "from (...) to (...) mm", gives its new place), so numbers in the tag, the version or the length are not read as points.
 The review's mm are not the scan's world mm: they are voxel index (x, y, z) times spacing on the image the mark was drawn on, from
-that image's voxel 0, unrotated (the review places every image so; `packages/harness/src/agents/tools/report-output.ts`
+that image's voxel 0, unrotated (the review places every image so; `packages/harness/src/tools/report-output.ts`
 `detailFromSidecar`). So `--drawn-on` is the header of that image, the output the delivery names after "drawn on" (its sidecar,
 the `.json` beside its `.npy`, from `/run/outputs.yaml`): its spacing turns the mm into that image's voxels. `--grid` is the
 header of the grid you work on: the scan's `hu.json`, or a frame's `frame.json` (an aligned stack such as the tibia's

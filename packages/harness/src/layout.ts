@@ -38,10 +38,8 @@ const RUN = "/run";
 const WORK = "/work";
 
 export interface ThreadLayout {
-  /** What the thread is in the run. */
+  /** What the thread is in the run, and so the role file it runs on: the key of the definition's `agents`. */
   place: "worker" | "main";
-  /** The role file it runs on: the key of the definition's `agents`. */
-  role: string;
   /** The thread's name (`AgentRecord.name`): the sandbox's name. */
   name: string;
   /** What the thread's sandbox mounts. */
@@ -209,7 +207,6 @@ export function runLayout({ runId, inputPrefix, skills }: RunLayoutOptions): Run
         path.startsWith("/") ? path : `${dir}/${path.replace(/^(\.\/)+/, "")}`;
       return {
         place: role,
-        role,
         name,
         mounts,
         own,

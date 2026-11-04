@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { FileNotFound, type Files } from "../../ports/files";
+import { FileNotFound, type RunBucket } from "../../ports/bucket";
 import type { History } from "../../ports/history";
 import { withImageRefs } from "./image-refs";
 
 function world() {
   const objects = new Map<string, Buffer>();
   const reads: string[] = [];
-  const files: Files = {
+  const files: Pick<RunBucket, "read" | "write"> = {
     async *read(key) {
       reads.push(key);
       const b = objects.get(key);
@@ -15,9 +15,6 @@ function world() {
     },
     async write(key, bytes) {
       objects.set(key, Buffer.from(bytes));
-    },
-    async list() {
-      return [];
     },
   };
   const rows: string[] = [];

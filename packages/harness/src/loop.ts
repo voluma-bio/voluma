@@ -31,16 +31,9 @@ import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal } from "@voluma/contracts/output-fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "@voluma/contracts/thread-records";
-import type { Interrupted } from "../adapters/pi/history-repair";
-import type { BashRuntime } from "../bash-runtime";
-import { failureKind, mainFailureAction, type ProviderError } from "../failure-policy";
-import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "../loop-config";
-import { loopShell, RUNTIME, type Section, type Step } from "../loop-shell";
-import type { Recorder } from "../recorder";
-import { threadIdOf } from "../thread-id";
-import type { ThreadSpec, Threads } from "../threads";
-import type { Tool, ToolResult } from "../tools/tool";
+import type { Interrupted } from "./adapters/pi/history-repair";
 import { type ApprovedCall, approvalJobs } from "./approval-jobs";
+import type { BashRuntime } from "./bash-runtime";
 import {
   activityReminder,
   agentList,
@@ -68,11 +61,18 @@ import {
   returnedId,
   startedId,
 } from "./effects";
+import { failureKind, mainFailureAction, type ProviderError } from "./failure-policy";
+import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "./loop-config";
+import { loopShell, RUNTIME, type Section, type Step } from "./loop-shell";
 import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "./messages";
 import { skillMarker } from "./prompts";
+import type { Recorder } from "./recorder";
 import type { RunFiles } from "./run-files";
+import { threadIdOf } from "./thread-id";
+import type { ThreadSpec, Threads } from "./threads";
 import type { AgentsApi } from "./tools/coordination";
 import { heldText } from "./tools/gate";
+import type { Tool, ToolResult } from "./tools/tool";
 
 /** Workers open at once (X). */
 const WORKER_LIMIT = 4;

@@ -10,11 +10,11 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { z } from "zod";
-import type { ThreadLayout } from "../../layout";
-import type { Files } from "../../ports/files";
-import { downscale, MAX_BYTES, MAX_SIDE } from "../../tools/image-fit";
-import { readWhole } from "../../tools/read-whole";
-import type { Tool, ToolResult } from "../../tools/tool";
+import type { ThreadLayout } from "../layout";
+import type { RunBucket } from "../ports/bucket";
+import { downscale, MAX_BYTES, MAX_SIDE } from "./image-fit";
+import { readWhole } from "./read-whole";
+import type { Tool, ToolResult } from "./tool";
 
 const MAX_PATHS = 4;
 const MAX_LINES = 2000;
@@ -152,11 +152,11 @@ async function piecesOf(
 
 export function readTool({
   layout,
-  files,
+  bucket,
   hasSandbox,
 }: {
   layout: ThreadLayout;
-  files: Files;
+  bucket: RunBucket;
   /** A role with bash can also read its sandbox's own files (`/tmp`). */
   hasSandbox: boolean;
 }): Tool<typeof inputSchema> {
@@ -174,7 +174,7 @@ export function readTool({
         throw new Error("offset reads on in one file: give one path with it");
       const read = (path: string) =>
         readWhole(
-          { layout, files, sandbox: hasSandbox ? ctx.sandbox : undefined },
+          { layout, bucket, sandbox: hasSandbox ? ctx.sandbox : undefined },
           path,
           MAX_READ_BYTES,
           ctx.signal,

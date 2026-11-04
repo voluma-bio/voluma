@@ -13,7 +13,7 @@
  * A failed image read is retried once with jittered backoff. The S3 client already retries 5xx
  * and throttling; this layer covers what it gives up on or cannot see: a stream that breaks
  * mid-body, or stalls past `READ_TIMEOUT_MS`. Any error but `FileNotFound` (the one
- * classification the Files port makes) is retried; after the last attempt the image becomes a
+ * classification the RunBucket port makes) is retried; after the last attempt the image becomes a
  * note for this load only (nothing is stored, so a later resume that can read it sends the
  * image again). The note differs from the image, so the provider's prompt cache misses from that
  * message on, now and once more when the file reads again; a failed history load would stop the
@@ -21,7 +21,7 @@
  */
 import { createHash } from "node:crypto";
 import { historyImageKey } from "@voluma/contracts/r2";
-import { FileNotFound, type Files } from "../../ports/files";
+import { FileNotFound, type RunBucket } from "../../ports/bucket";
 import type { History } from "../../ports/history";
 import { readRow } from "./compaction";
 
@@ -46,7 +46,7 @@ const GONE_NOTE = "[the images are no longer shown; call read again to see them]
 /** `nameOf` is a thread's name (`AgentRecord.name`): the folder its images are written under. */
 export function withImageRefs(
   history: History,
-  files: Files,
+  bucket: Pick<RunBucket, "read" | "write">,
   runId: string,
   nameOf: (threadId: string) => string,
 ): History {
@@ -67,7 +67,7 @@ export function withImageRefs(
       chunks = [];
       let size = 0;
       try {
-        for await (const chunk of files.read(key, AbortSignal.timeout(READ_TIMEOUT_MS))) {
+        for await (const chunk of bucket.read(key, AbortSignal.timeout(READ_TIMEOUT_MS))) {
           size += chunk.length;
           if (size > MAX_IMAGE_BYTES) return note("its file exceeds the image size limit");
           chunks.push(chunk);
@@ -134,7 +134,7 @@ export function withImageRefs(
           const bytes = Buffer.from(b.data as string, "base64");
           const sha256 = createHash("sha256").update(bytes).digest("hex");
           const key = historyImageKey(runId, name, sha256);
-          await files.write(key, bytes, signal);
+          await bucket.write(key, bytes, signal);
           return { type: "imageRef", key, sha256, mimeType: b.mimeType };
         }),
       );

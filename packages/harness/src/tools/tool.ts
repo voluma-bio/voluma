@@ -57,7 +57,7 @@ export interface Tool<S extends z.ZodType = z.ZodType> {
   prepare?(args: unknown): unknown;
   /**
    * Agent loop: the tool changes results. While the run is reviewing, main's call is held for the
-   * researcher (`agents/tools/gate.ts`). `preflight` throws a `Refusal` for a call the tool would
+   * researcher (`tools/gate.ts`). `preflight` throws a `Refusal` for a call the tool would
    * refuse, so nothing is held that could not run; `files` names the files the call publishes
    * (sandbox path, and its key relative to the run), whose hashes the request binds. `outputs`
    * names the outputs the call acts on, which the request stores (a decline leaves them to the

@@ -5,7 +5,7 @@
  * the files that are in its folder, never with the store's own error.
  */
 import type { ThreadLayout } from "../layout";
-import { FileNotFound, type Files } from "../ports/files";
+import { FileNotFound, type RunBucket } from "../ports/bucket";
 import type { Sandbox } from "../ports/sandbox";
 
 const LISTED = 20;
@@ -24,12 +24,12 @@ function missing(path: string, names: string[]) {
 
 /** The file's bytes; throws a message for the model when it is missing, unreadable or over `maxBytes`. */
 export async function readWhole(
-  deps: { layout: ThreadLayout; files: Files; sandbox?: () => Promise<Sandbox> },
+  deps: { layout: ThreadLayout; bucket: RunBucket; sandbox?: () => Promise<Sandbox> },
   named: string,
   maxBytes: number,
   signal: AbortSignal,
 ): Promise<Buffer> {
-  const { layout, files } = deps;
+  const { layout, bucket } = deps;
   const path = layout.resolve(named);
   if (!layout.mounted(path)) {
     if (deps.sandbox) return readInSandbox(await deps.sandbox(), path, maxBytes, signal);
@@ -45,14 +45,14 @@ export async function readWhole(
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
-    for await (const chunk of files.read(key, signal)) {
+    for await (const chunk of bucket.read(key, signal)) {
       size += chunk.length;
       if (size > maxBytes) throw new Error(`${path} is over ${maxBytes} bytes`);
       chunks.push(chunk);
     }
   } catch (error) {
     if (error instanceof FileNotFound) {
-      const names = await files.list(key.slice(0, key.lastIndexOf("/") + 1), FETCHED, signal);
+      const names = await bucket.list(key.slice(0, key.lastIndexOf("/") + 1), FETCHED, signal);
       const dir = path.slice(0, path.lastIndexOf("/") + 1);
       const readable = names.filter((name) => {
         try {
