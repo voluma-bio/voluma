@@ -39,7 +39,12 @@ async function appendPersonEvent(
   runId: string,
   event: {
     id: string;
-    type: "person.message" | "run.reopened" | "approval.given" | "approval.declined";
+    type:
+      | "person.message"
+      | "run.reopened"
+      | "correction.ended"
+      | "approval.given"
+      | "approval.declined";
     payload: unknown;
   },
 ) {

@@ -201,7 +201,8 @@ const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, 
  * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
  * person's message, `messages.ts`) is never left worse than `completed`: only its workers and the
  * root end, and main stays cut off (`cancelReviewWorkers`); the run ends `completed` with its
- * earlier results, and `correction.ended` records how the request ended. `set` adds columns to the update (a recovery's lease reset).
+ * earlier results, still records `error`, and `correction.ended` says how the request ended. `set`
+ * adds columns to the update (a recovery's lease reset).
  */
 async function endUnfinished(
   tx: Tx,
