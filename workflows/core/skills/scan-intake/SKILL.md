@@ -34,9 +34,10 @@ description: >
   your folder from it before the cleanup below. The cleaned scan is the next version, and nothing is made from the first.
 - **Clean up the scan.** The field can hold the sample holder, padding and debris beside the specimen; every later
   step, and the researcher's 3D view, reads `hu.npy`. Set what is not the specimen to air (-1000 HU) in `hu.npy`,
-  keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar
-  (`sidecar.py --like hu.json`). A piece that may be bone of the leg stays, with a To check item asking what it is:
-  bone wrongly removed is lost to every step after you.
+  keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar:
+  `clean_scan.py` does both and prints what it removed. Look at the cleaned scan's slices before you go on. A piece
+  that may be bone of the leg stays (`--keep`), with a To check item asking what it is: bone wrongly removed is lost
+  to every step after you.
 - **Choose this scan's display window and segmentation threshold** on the cleaned scan, before anything builds a
   mask. Scans differ in density and contrast; the workflow's anatomy reference gives the values of the scan it was
   written on, with that scan's soft-tissue and bone peaks. Find this scan's two peaks on the histogram of the
