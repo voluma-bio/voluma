@@ -8,7 +8,7 @@
   oblique aligned grids (OA7-5L, OA7-6L, OA7-8L, OA8-1R: shaft leaving the grid, plateau sloping steeply across coronal
   sections, no clean plate level). Their tibia labels came from a quick threshold-and-erosion split
   (`~/experiments/plate-data/scans/TIBIA-MASK.md`), not from segmentation, and OA7-8L's took femur pieces, so the cause may be
-  the label rather than the shaft-axis fit. The fit now follows the shaft inside the crop (`--axis-mm`), which may already fix them. Next: rerun
+  the label rather than the shaft-axis fit. The fit now follows the shaft over `--axis-mm` from the joint end, which may already fix them. Next: rerun
   `tibia_frame.py` on one of them with a checked tibia label and check both QC sheets. Notes per scan: `~/experiments/plate-data/scans/_skipped/<scan>/SKIPPED.md`.
 - **Each region mask is saved twice.** `iioc.py`, `tibial_trabecular.py` and `metaphysis_roi.py` write the full-grid array later
   scripts read (`iioc-tissue.npy`, `iioc-trab-tissue.npy`, `roi3-tissue.npy`, `cortex.npy`) and a cropped copy that is the mask object
