@@ -76,7 +76,7 @@ def check_bone(labels, mask, label, other, joint_end, vox):
     s, so = cap_solidity(mask, facing_low, cap), cap_solidity(oth, not facing_low, cap)
     if s < so - CAP_GAP:
         sidecar.fail(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap '
-                     f'solidity {s:.3f} against {so:.3f}), so the two bones\' labels look swapped in bone-labels: tell main, '
+                     f'solidity {s:.3f} against {so:.3f}), so the two bones\' labels look swapped in bone-labels, or a piece of another bone is merged into one of them: tell main, '
                      'with the 3D sheet, so the labels are corrected before any tibial step')
     if (joint_end == 'low') != facing_low:
         sidecar.fail(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {"low" if facing_low else "high"} '
