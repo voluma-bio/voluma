@@ -16,6 +16,7 @@ export function ActivityRow({
   Icon,
   quietIcon = false,
   title,
+  subtitle,
   status,
   expand,
   children,
@@ -25,6 +26,8 @@ export function ActivityRow({
   /** Keep the rail but draw no chip: reasoning recedes next to the actions around it. */
   quietIcon?: boolean;
   title?: ReactNode;
+  /** A quieter line under the title, in the text column. */
+  subtitle?: string;
   status?: ActivityRowStatus;
   /** Called on open, not on render. */
   expand?: () => ReactNode;
@@ -114,6 +117,7 @@ export function ActivityRow({
             />
           )}
         </div>
+        {subtitle && <p className="truncate text-meta text-muted-foreground">{subtitle}</p>}
         {expand && (
           <div
             id={panelId}

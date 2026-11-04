@@ -7,14 +7,18 @@
 import { outputFileUrl } from "@voluma/api-client";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { OutputVersion } from "@voluma/contracts/output-fold";
-import { ItemToCheck, Markdown, type OutputItem, ROLE_WORD, versionWords } from "@voluma/run-view";
+import {
+  clockOf,
+  ItemToCheck,
+  Markdown,
+  type OutputItem,
+  ROLE_WORD,
+  versionWords,
+} from "@voluma/run-view";
 import { Button } from "@voluma/ui";
 import { Crosshair } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-
-export const clockOf = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
 export type Accepting = {
   /** Accept on an item; absent while no decision can be taken (`readOnly` says why). */

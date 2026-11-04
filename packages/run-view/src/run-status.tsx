@@ -141,6 +141,10 @@ export function runStatus({ state, review }: Pick<StatusFacts, "state" | "review
 
 const MINUTE = 60_000;
 
+/** The time of day, as "14:03" or "2:03 PM" by the browser's locale. */
+export const clockOf = (iso: string) =>
+  new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
 /** "just now", "4 min ago", "3 h ago", "yesterday", "31 Oct" (with the year when not this one). */
 export function whenText(iso: string, now: number): string {
   const then = new Date(iso);

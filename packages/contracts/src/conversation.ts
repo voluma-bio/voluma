@@ -1,8 +1,8 @@
 /**
- * The chat between a researcher and a run's main agent (`messages.ts`), read from the run's events:
- * the person's messages, the agent's replies (`agent.message` to the researcher), how each
- * correction ended (`corrections.ts`), and the calls main held for the researcher's yes
- * (`approval.requested`) with their answer and how each settled. A correction's end is the only sign in the chat that the AI
+ * The researcher's side of the chat with a run's main agent (`messages.ts`), read from the run's
+ * events: the person's messages, how each correction ended (`corrections.ts`), and the calls main
+ * held for the researcher's yes (`approval.requested`) with their answer and how each settled.
+ * Main's own words are its thread (`threadRows` in `@voluma/run-view`). A correction's end is the only sign in the chat that the AI
  * stopped working: its last reply is often "Redoing it now", and the outcome is in the root
  * thread's closing summary.
  */
@@ -25,14 +25,6 @@ export type ConversationItem =
       output?: string;
       /** The To check item the message answers. */
       toCheck?: AcceptToCheckRequest;
-    }
-  | {
-      from: "agent";
-      /** The `agent.message` event id. */
-      id: string;
-      seq: number;
-      at: string;
-      text: string;
     }
   | {
       /** A correction ended: the AI is no longer working on the person's message. */
@@ -68,8 +60,8 @@ export type ConversationItem =
     };
 
 /**
- * The person's messages, the agent's replies, the corrections' ends and the held calls, in log
- * order (a held call where it was asked).
+ * The person's messages, the corrections' ends and the held calls, in log order (a held call
+ * where it was asked).
  */
 export function conversation(events: readonly RunEvent[]): ConversationItem[] {
   const items: ConversationItem[] = [];
@@ -116,8 +108,6 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
       const request = approvals.get(e.id);
       // Its text is written for main, not the researcher.
       if (request) request.settled = { outcome: e.payload.outcome, at: e.createdAt };
-    } else if (e.type === "agent.message" && e.payload.to === "researcher") {
-      items.push({ from: "agent", id: e.id, seq: e.seq, at: e.createdAt, text: e.payload.text });
     }
   }
   for (const span of corrections(events)) {

@@ -1,27 +1,36 @@
 /**
- * The conversation with an agent-loop run's main AI, the only place anything changes on the run
- * (review.md, "The conversation"): main's messages, yours with the marks they carried, the calls
- * main holds for your yes (`ApprovalCard`), and the views you saved, in log order. Under it the
- * box: your words, the mark changes waiting for them (each chip goes to its mark; x undoes the
- * change), and whether a picture of the panes goes too. Main gets each mark with its change and
- * positions; the placeholder prompts for your words, while the chips show the attached marks.
- * The message itself is `useMainMessage`.
+ * The Conversation tab: main's whole thread (`AgentThread`: its prose and replies, the workers it
+ * starts and the outputs it reports, its other tool calls folded under its status lines, its
+ * instructions and the run's news collapsed), with what only the researcher's
+ * side holds put in by log position: your messages with the marks they carried (and what main got
+ * with them), the calls main holds for your yes (`ApprovalCard`), and a request that didn't
+ * finish. The live line follows the run: waiting in the queue, else main's newest status line
+ * while it works, else a call you approved while its job runs, else nothing.
+ * Under it the box: your words, the mark changes waiting for them (each chip goes to its mark; x
+ * undoes the change), and whether a picture of the panes goes too. Main gets each mark with its
+ * change and positions; the placeholder prompts for your words, while the chips show the
+ * attached marks. The message itself is `useMainMessage`.
  */
+
+import { agentLog, givenApprovals } from "@voluma/contracts/agents";
 import type { ConversationItem } from "@voluma/contracts/conversation";
+import type { RunEvent } from "@voluma/contracts/events";
+import type { RunRead } from "@voluma/contracts/run";
 import {
+  type AgentEntry,
   type AgentLinks,
+  AgentThread,
   ApprovalCard,
   approvalWords,
-  Markdown,
+  clockOf,
   plainError,
+  type Slot,
 } from "@voluma/run-view";
-import { Button, Chip, cx, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
-import { Bookmark, Send, X } from "lucide-react";
-import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
+import { Button, Chip, cx, IconButton, TextAreaField } from "@voluma/ui";
+import { Send, X } from "lucide-react";
+import { type ReactNode, useEffect, useId, useMemo, useRef } from "react";
 import type { MarkChange } from "./marking";
-import type { SavedView } from "./saved-views";
 import type { useAnswers, useMainMessage } from "./use-main-message";
-import { clockOf } from "./version-report";
 
 const CHANGE_WORD: Record<MarkChange["change"], string | undefined> = {
   place: undefined,
@@ -61,9 +70,10 @@ function MarkChangeChip({
 }
 
 export function MainConversation({
+  events,
+  main,
   conversation,
-  views,
-  live,
+  state,
   nameOf,
   agents,
   checkTitle,
@@ -73,13 +83,15 @@ export function MainConversation({
   onMark,
   onDiscard,
 }: {
+  events: readonly RunEvent[];
+  /** Main's entry (`agentEntries`), once it has started. */
+  main: AgentEntry | undefined;
   /** The run's `conversation()`. */
   conversation: readonly ConversationItem[];
-  views: readonly SavedView[];
-  /** The run is queued or running: main is at work on what it was sent. */
-  live: boolean;
+  /** Where the run stands: queued, running or ended. */
+  state: RunRead["state"];
   nameOf: (id: string) => string;
-  /** The agents main's replies can name in code to open their thread. */
+  /** The workers main's replies can name in code to open their thread. */
   agents: AgentLinks;
   /** A To check item's title, by its place. */
   checkTitle: (item: { output: string; version: number; item: number }) => string | undefined;
@@ -91,27 +103,91 @@ export function MainConversation({
   /** Undoes a waiting change. */
   onDiscard: (id: string) => void;
 }) {
-  const items = useMemo(() => {
-    // A finished request's reply is the answer; only one that didn't finish gets a line of its own.
-    const said = conversation
-      .filter((m) => m.from !== "outcome" || m.status !== "completed")
-      .map((m) => ({ ...m, kind: "said" as const }));
-    return [...said, ...views.map((v) => ({ ...v, kind: "view" as const }))].sort(
-      (a, b) => a.seq - b.seq,
-    );
-  }, [conversation, views]);
-  // Main is at work while the run goes and the last word was yours: a message, or a yes or no.
-  const last = [...items].reverse().find((m) => m.kind === "said");
-  const working =
-    live &&
-    last?.kind === "said" &&
-    (last.from === "person" || (last.from === "approval" && !!last.answer && !last.settled));
+  // The thread shows main's replies; the page adds what the thread doesn't hold. A finished
+  // request's reply is the answer; only one that didn't finish gets a line of its own.
+  const { slots, byId } = useMemo(() => {
+    const own = conversation.filter((m) => m.from !== "outcome" || m.status !== "completed");
+    return {
+      slots: own.map((m): Slot => ({ id: m.id, seq: m.seq, person: m.from === "person" })),
+      byId: new Map(own.map((m) => [m.id, m])),
+    };
+  }, [conversation]);
+  // The live line says only what is true of the run: in the queue nothing works yet; while it
+  // runs, main is at work only when it is. A call you approved runs as a job outside any thread,
+  // with main idle until it settles.
+  const live = state.status !== "ended";
+  const working = state.status === "running" && main?.state === "working";
+  const approved = givenApprovals(agentLog(events).approvals).length > 0;
+  const line =
+    state.status === "queued"
+      ? { text: `Waiting to start · place ${state.position} in line`, quiet: true }
+      : state.status === "running" && !working && approved
+        ? { text: "Doing what you approved" }
+        : undefined;
 
-  const log = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = log.current;
-    if (el && items.length > 0) el.scrollTop = el.scrollHeight;
-  }, [items.length]);
+  const slot = (id: string): ReactNode => {
+    const m = byId.get(id);
+    if (!m) return null;
+    switch (m.from) {
+      case "person":
+        return (
+          <div className="grid gap-1">
+            <p className="flex items-baseline gap-2 text-meta">
+              <span className="font-semibold">You</span>
+              <span className="text-muted-foreground">{clockOf(m.at)}</span>
+            </p>
+            <div className="grid gap-1.5 rounded-lg bg-muted px-3 py-2">
+              {m.text && <p className="text-ui whitespace-pre-wrap">{m.text}</p>}
+              {(m.attached.length > 0 || m.toCheck || m.output) && (
+                <p className="flex flex-wrap items-center gap-1 text-meta text-muted-foreground">
+                  {m.toCheck && (
+                    <span className="w-full">
+                      About {checkTitle(m.toCheck) ?? `a To check of ${nameOf(m.toCheck.output)}`}
+                    </span>
+                  )}
+                  {m.output && <span>looking at {nameOf(m.output)}</span>}
+                  {m.attached.map((a) => {
+                    const markId = typeof a.mark.id === "string" ? a.mark.id : undefined;
+                    return (
+                      <MarkChangeChip
+                        key={`${markId ?? a.mark.tag}-${a.change}`}
+                        tag={a.mark.tag}
+                        change={a.change}
+                        onShow={markId && a.change !== "delete" ? () => onMark(markId) : undefined}
+                      />
+                    );
+                  })}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      case "outcome":
+        return (
+          <p className="text-meta text-muted-foreground [overflow-wrap:anywhere]">
+            {m.status === "cancelled"
+              ? "You stopped this request. Results are unchanged."
+              : `Your request didn't finish${m.text ? `: ${plainError(m.text).replace(/[.!?]$/, "")}` : ""}. Results are unchanged.`}
+          </p>
+        );
+      case "approval":
+        return (
+          <ApprovalCard
+            {...approvalWords(m.tool)}
+            summary={m.summary}
+            changes={m.outputs?.map(nameOf)}
+            outOfDate={m.outOfDate?.map(nameOf)}
+            answer={m.answer && { ...m.answer, time: clockOf(m.answer.at) }}
+            settled={m.settled?.outcome}
+            onAnswer={answers.answer && ((yes, words) => answers.answer?.(m.id, yes, words))}
+            pending={answers.pending?.requestId === m.id ? answers.pending.answer : undefined}
+            readOnly={answers.readOnly}
+            error={answers.error?.requestId === m.id ? answers.error.text : undefined}
+          />
+        );
+    }
+  };
+
   const form = useRef<HTMLFormElement>(null);
   // "Tell the AI what's wrong" puts you in the box.
   useEffect(() => {
@@ -136,91 +212,21 @@ export function MainConversation({
 
   return (
     <div className="flex h-full flex-col">
-      <div ref={log} role="log" className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {items.length === 0 ? (
-          <EmptyState title="No messages yet">
-            {live ? "The AI writes here when it has something for you." : undefined}
-          </EmptyState>
-        ) : (
-          <ol className="grid gap-4">
-            {items.map((m) =>
-              m.kind === "view" ? (
-                <li key={m.id} className="flex gap-2 text-xs text-muted-foreground">
-                  <Bookmark aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-                  <span>
-                    You saved {m.title.toLowerCase()} of {nameOf(m.output)}
-                    {m.words && `, ${m.words.charAt(0).toLowerCase()}${m.words.slice(1)}`}.
-                  </span>
-                </li>
-              ) : m.from === "person" ? (
-                <li key={m.id} className="grid gap-1">
-                  <Said who="You" at={m.at} />
-                  <div className="grid gap-1.5 rounded-lg bg-muted px-3 py-2">
-                    {m.text && <p className="text-sm whitespace-pre-wrap">{m.text}</p>}
-                    {(m.attached.length > 0 || m.toCheck || m.output) && (
-                      <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                        {m.toCheck && (
-                          <span className="w-full">
-                            About{" "}
-                            {checkTitle(m.toCheck) ?? `a To check of ${nameOf(m.toCheck.output)}`}
-                          </span>
-                        )}
-                        {m.output && <span>looking at {nameOf(m.output)}</span>}
-                        {m.attached.map((a) => {
-                          const id = typeof a.mark.id === "string" ? a.mark.id : undefined;
-                          return (
-                            <MarkChangeChip
-                              key={`${id ?? a.mark.tag}-${a.change}`}
-                              tag={a.mark.tag}
-                              change={a.change}
-                              onShow={id && a.change !== "delete" ? () => onMark(id) : undefined}
-                            />
-                          );
-                        })}
-                      </p>
-                    )}
-                  </div>
-                </li>
-              ) : m.from === "outcome" ? (
-                <li key={m.id} className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                  {m.status === "cancelled"
-                    ? "You stopped this request. Results are unchanged."
-                    : `Your request didn't finish${m.text ? `: ${plainError(m.text).replace(/[.!?]$/, "")}` : ""}. Results are unchanged.`}
-                </li>
-              ) : m.from === "agent" ? (
-                <li key={m.id} className="grid gap-1">
-                  <Said who="The AI" at={m.at} />
-                  <Markdown text={m.text} className="text-sm" agents={agents} />
-                </li>
-              ) : (
-                <li key={m.id}>
-                  <ApprovalCard
-                    {...approvalWords(m.tool)}
-                    summary={m.summary}
-                    changes={m.outputs?.map(nameOf)}
-                    outOfDate={m.outOfDate?.map(nameOf)}
-                    answer={m.answer && { ...m.answer, time: clockOf(m.answer.at) }}
-                    settled={m.settled?.outcome}
-                    onAnswer={
-                      answers.answer && ((yes, words) => answers.answer?.(m.id, yes, words))
-                    }
-                    pending={
-                      answers.pending?.requestId === m.id ? answers.pending.answer : undefined
-                    }
-                    readOnly={answers.readOnly}
-                    error={answers.error?.requestId === m.id ? answers.error.text : undefined}
-                  />
-                </li>
-              ),
-            )}
-            {working && (
-              <li>
-                <StatusMark status="running" label="The AI is on it" />
-              </li>
-            )}
-          </ol>
-        )}
-      </div>
+      <AgentThread
+        className="flex-1 px-3 py-3"
+        events={events}
+        ids={main?.ids ?? []}
+        working={working}
+        line={line}
+        live={live}
+        links={agents}
+        slots={slots}
+        slot={slot}
+        nameOf={nameOf}
+        conversation
+        opensAtEnd
+        empty={live ? "The AI hasn't started yet." : "The AI wrote nothing."}
+      />
       <form
         ref={form}
         className="grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-border p-3"
@@ -344,15 +350,5 @@ export function MainConversation({
         )}
       </form>
     </div>
-  );
-}
-
-/** Who wrote, and when. */
-function Said({ who, at }: { who: string; at: string }) {
-  return (
-    <p className="flex items-baseline gap-2 text-xs">
-      <span className="font-semibold">{who}</span>
-      <span className="text-muted-foreground">{clockOf(at)}</span>
-    </p>
   );
 }

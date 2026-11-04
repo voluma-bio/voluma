@@ -1,7 +1,10 @@
 /**
- * One agent's rows (`transcript.ts`) as a thread: prose stays visible; reasoning and runs of tool
- * calls fold closed under a short label, their bodies built on first open; a working thread ends
- * in a live line naming the call it is in.
+ * One agent's rows (`transcript.ts`) as a thread: its words stay visible (in the Conversation each
+ * turn's first words carry "The AI" and the time), and so do the calls that change results; reasoning and other runs of tool calls fold closed under a short label, their
+ * bodies built on first open; what the agent was told folds quieter still. A working thread ends
+ * in a live line: the call it is in, or (the Conversation) its newest status line in words. A
+ * screen's own rows (`slot` rows) render as it says, with what main got with your message under
+ * yours.
  */
 import {
   Activity,
@@ -22,6 +25,7 @@ import { ActivityRow } from "./chat/activity-row";
 import { Markdown } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
 import { plainError } from "./run-error";
+import { clockOf } from "./run-status";
 import type { Row, Step, ToolStep } from "./transcript";
 
 /** The agents a name in the thread can open: the names that are agents, and what opening one does. */
@@ -33,13 +37,20 @@ const SHOWN_CHARS = 8000;
 export function TranscriptView({
   rows,
   links,
+  slot,
   live,
   empty,
 }: {
   rows: Row[];
   links?: AgentLinks;
-  /** While the thread works: what it is doing now, for the live line at the end ("" when it names nothing). */
-  live?: string | null;
+  /** Renders a `slot` row by its id. */
+  slot?: (id: string) => ReactNode;
+  /**
+   * While the thread works: what it is doing now, for the live line at the end ("" when it names
+   * nothing); `words` when it is a sentence, not a call's title; `quiet` when nothing works yet
+   * (no pulse).
+   */
+  live?: { text: string; words?: boolean; quiet?: boolean } | null;
   empty: string;
 }) {
   return (
@@ -50,19 +61,32 @@ export function TranscriptView({
         <ol className="grid gap-3">
           {rows.map((row) => (
             <li key={row.id} className="min-w-0">
-              <RowView row={row} links={links} />
+              {row.kind === "slot" ? (
+                <>
+                  {slot?.(row.id)}
+                  {row.got !== undefined && (
+                    <div className="mt-1">
+                      <Told label="What the AI got with your message" text={row.got} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <RowView row={row} links={links} />
+              )}
             </li>
           ))}
         </ol>
       )}
-      {live !== undefined && live !== null && (
+      {live && (
         <p className="mt-3 flex min-w-0 items-center gap-2 text-meta text-muted-foreground">
           <span
-            className="size-2 shrink-0 rounded-full bg-info motion-safe:animate-pulse"
+            className={`size-2 shrink-0 rounded-full ${
+              live.quiet ? "bg-muted-foreground" : "bg-info motion-safe:animate-pulse"
+            }`}
             aria-hidden
           />
-          <span className="min-w-0 truncate font-mono">
-            {live || <span className="sr-only">Working</span>}
+          <span className={`min-w-0 truncate ${live.words ? "text-ui" : "font-mono"}`}>
+            {live.text || <span className="sr-only">Working</span>}
           </span>
         </p>
       )}
@@ -70,13 +94,23 @@ export function TranscriptView({
   );
 }
 
-function RowView({ row, links }: { row: Row; links?: AgentLinks }) {
+function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: AgentLinks }) {
   switch (row.kind) {
     case "prose":
-      return <Markdown text={row.text} className="text-ui" />;
+      return row.head ? (
+        <div className="grid gap-1">
+          <p className="flex items-baseline gap-2 text-meta">
+            <span className="font-semibold">The AI</span>
+            <span className="text-muted-foreground">{clockOf(row.at)}</span>
+          </p>
+          <Markdown text={row.text} className="text-ui" agents={links} />
+        </div>
+      ) : (
+        <Markdown text={row.text} className="text-ui" agents={links} />
+      );
     case "process":
       return (
-        <ProcessDisclosure label={row.digest}>
+        <ProcessDisclosure label={row.label}>
           <div className="space-y-1">
             {row.steps.map((s) => (
               <StepView key={s.id} step={s} links={links} />
@@ -84,27 +118,10 @@ function RowView({ row, links }: { row: Row; links?: AgentLinks }) {
           </div>
         </ProcessDisclosure>
       );
-    case "said":
-      return (
-        <div className="grid gap-1 border-l-2 border-primary pl-3">
-          <p className="text-meta text-muted-foreground">To the researcher</p>
-          <Markdown text={row.text} className="text-ui" />
-        </div>
-      );
+    case "step":
+      return <StepView step={row.step} links={links} />;
     case "brief":
-      return (
-        <ProcessDisclosure label={row.label}>
-          <Markdown text={row.text} className="rounded-lg bg-muted px-3 py-2 text-ui" />
-        </ProcessDisclosure>
-      );
-    case "divider":
-      return (
-        <p className="flex items-center gap-3 text-meta text-muted-foreground">
-          <span className="h-px flex-1 bg-border" aria-hidden />
-          <span className="font-mono">{row.text} starts</span>
-          <span className="h-px flex-1 bg-border" aria-hidden />
-        </p>
-      );
+      return <Told label={row.label} text={row.text} />;
     case "failure":
       return (
         <p
@@ -115,6 +132,27 @@ function RowView({ row, links }: { row: Row; links?: AgentLinks }) {
         </p>
       );
   }
+}
+
+/** What a thread was handed, folded quieter than its own steps. */
+function Told({ label, text }: { label: string; text: string }) {
+  return (
+    <ProcessDisclosure label={label} quiet>
+      <Markdown text={text} className="rounded-lg bg-muted px-3 py-2 text-ui" />
+    </ProcessDisclosure>
+  );
+}
+
+/** The first line of a worker's brief: what it is for. */
+function firstLine(input: unknown): string | undefined {
+  const brief = (input as { brief?: unknown } | undefined)?.brief;
+  if (typeof brief !== "string") return undefined;
+  return (
+    brief
+      .split("\n")
+      .map((l) => l.replace(/^[#>*\-\s]+/, "").trim())
+      .find(Boolean) ?? undefined
+  );
 }
 
 const TOOL_ICON: Record<string, LucideIcon> = {
@@ -167,6 +205,7 @@ function StepView({ step, links }: { step: Step; links?: AgentLinks }) {
               )}
             </span>
           }
+          subtitle={step.name === "start_worker" ? firstLine(step.input) : undefined}
           status={step.status}
           expand={() => <ToolBody step={step} />}
         />
