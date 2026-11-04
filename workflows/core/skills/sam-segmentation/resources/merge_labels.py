@@ -14,7 +14,8 @@ winning gave a leaking small piece 0.3 mm3 of OA6-1RK's patella (`.context/evide
 contested voxel is counted in the output by big label and by where it went, and `big_lost` totals what each big label
 gave away against its size, so a leak shows: a small label with a large contested count against its volume, or a big
 label that lost much, is a To check item. A big label with no own voxels is lost whole to the small side, which
-`big_lost` shows. Refused: a temp or final label that is also a label in `--big`, a label in `--small` that `--map`
+`big_lost` shows. Refused: a small temp label holding more than `--max-big-share` of a big label's voxels (that track followed
+the bone: SAM's tibia-sized "small structure" on OA6-2RK held 83% of the tibia, and merged it would have split the tibia midway), a temp or final label that is also a label in `--big`, a label in `--small` that `--map`
 does not mention, volumes of different shape or grid id.
 
 Writes: <out>  the merged labels (.npy, the grid of --big), with its sidecar (the map)
@@ -27,12 +28,18 @@ import numpy as np
 import sidecar
 from scipy import ndimage
 
+# OA6-2RK rehearsal (4df02afe), bone-clipped tracks on the scan grid: real small structures hold at most 4.3% of any big bone;
+# the two tracks that followed a bone held 83% of the tibia and 77% of the fibula
+MAX_BIG_SHARE = 0.10
+
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
     ap.add_argument('--big', type=sidecar.existing, required=True, help='scan-grid labels of the big bones (clipped)')
     ap.add_argument('--small', type=sidecar.existing, required=True, help='scan-grid labels of the small request (trimmed, mapped back)')
     ap.add_argument('--map', nargs='+', required=True, metavar='temp:final', help='temporary label : label it goes back to (0 drops it)')
     ap.add_argument('--out', required=True, help='merged labels .npy to write')
+    ap.add_argument('--max-big-share', type=float, default=MAX_BIG_SHARE,
+                    help='a small temp label holding more than this share of a big label\'s voxels is refused')
     a = ap.parse_args()
     try:
         mapping = {int(t): int(f) for t, f in (m.split(':') for m in a.map)}
@@ -58,6 +65,17 @@ if __name__ == '__main__':
         sidecar.fail(f'{a.small} holds labels {stray} that --map does not mention: map each to its final label (or to 0 to drop it)')
     spacing = g_big['spacing_zyx_mm']
     claiming = [t for t, label in mapping.items() if label > 0]
+    sizes = dict(zip(big_ids.tolist(), big_sizes.tolist()))
+    followed = []
+    for temp in sorted(t for t in claiming if t in present):
+        ids, counts = np.unique(big[small == temp], return_counts=True)
+        followed += [(temp, int(b), int(n)) for b, n in zip(ids, counts) if b > 0 and n > a.max_big_share * sizes[int(b)]]
+    if followed:
+        drop = ' '.join(f'{t}:0' for t in sorted({t for t, _, _ in followed}))
+        said = '; '.join(f'temp {t} holds {n} of big label {b}\'s {sizes[b]} voxels ({n / sizes[b]:.0%})' for t, b, n in followed)
+        sidecar.fail(f'{said}: a small-structure track that holds more than {a.max_big_share:.0%} of a big bone followed that bone, not '
+                     f'a small structure. Drop each ({drop} in --map) and prompt the structure again (sam-segmentation); the bone '
+                     'the big track missed is then unlabelled bone fused to it, for segmentation-check')
     boxes = ndimage.find_objects(small)
     out = big.copy()
     report = {temp: {'final': label, 'voxels': int((small == temp).sum()), 'contested': {}} for temp, label in mapping.items()}
@@ -96,7 +114,6 @@ if __name__ == '__main__':
                 n_temp = v == temp
                 if n_temp.any():
                     report[temp]['contested'][int(big_label)] = {'to_small': int((n_temp & to_small).sum()), 'to_big': int((n_temp & ~to_small).sum())}
-    sizes = dict(zip(big_ids.tolist(), big_sizes.tolist()))
     big_lost = {b: {'voxels': v, 'of': sizes[b]} for b, v in sorted(lost.items())}
     vox = float(np.prod(spacing))
     np.save(a.out, out)

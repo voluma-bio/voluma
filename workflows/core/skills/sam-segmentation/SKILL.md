@@ -63,7 +63,9 @@ workflow's anatomy reference: which structures to prompt, how they group, and wh
   when you report it.
 - **Map back and merge** (`to_scan.py`, `merge_labels.py`): a voxel both requests claim goes to the nearer
   side's own voxels, and the merge reports each piece's contested voxels by big label and where they went, and what each big
-  label lost (`big_lost`); a piece with a large contested count, or a big label that lost much, is a To check item. Clip once more: that is `labels.npy`.
+  label lost (`big_lost`); a piece with a large contested count, or a big label that lost much, is a To check item. It
+  refuses a small track holding more than a tenth of a big bone: that track followed the bone. Drop it, prompt the
+  structure again, and give the bone the big track missed to that bone (`segmentation-check`). Clip once more: that is `labels.npy`.
 
 Do not claim a voxel-exact number from one call: keep the call's counts, prompts and labels as evidence, and when a
 measurement must be stable, call twice and report the spread. A third rerun on one problem is a To check item.
