@@ -153,6 +153,7 @@ export const runs = pgTable(
     createdAt: timestamptz().notNull().defaultNow(),
     state: text({ enum: ["queued", "running", "awaiting-keys", "ended"] }).notNull(),
     startedAt: timestamptz(),
+    /** Read nowhere (TODO: drop the column). */
     awaitingSince: timestamptz(),
     /** The last claim, for the claim's rotation between own-key starters (`queueOrder`). */
     claimedAt: timestamptz(),

@@ -22,9 +22,6 @@
  *                                  server writes `correction.ended {cancelled}`
  *   POST /api/review/runs/:id/messages (`messages.ts`) reopens a run that ended `completed`,
  *                                  moving it to `queued` for one claim
- *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runReadSchema`
- *                                  (409 unless the run is `awaiting-keys`; 403 unless
- *                                  the caller is its `startedBy`; 429: see Limits)
  *   GET  /api/run/inputs           → 200 `listInputsResponseSchema`, newest first: inputs a
  *                                  run can start on (an upload only once completed)
  *   POST /api/run/inputs           body `createUploadRequestSchema` → 200
@@ -121,10 +118,8 @@
  * redacted before it is stored or logged. A deploy or a runner restart does not lose them: the
  * run is claimed again with the sealed copy. Reopening a finished `visitor` run (a message or
  * an approval answer) therefore needs `keys` in that request, which are sealed again. Only a
- * run whose sealed keys are missing or cannot be opened (a rotated secret) moves to
- * `awaiting-keys` and resumes when the browser resends them (`/keys`). After 24 h in
- * `awaiting-keys` it ends `failed` with an `error`. `/keys` moves the run `awaiting-keys` →
- * `queued`, where a claim picks it up. A `visitor` run's model calls use the visitor's
+ * run whose sealed keys cannot be opened (the API's `RUN_KEY_SECRET` was changed) ends
+ * `failed` at its next claim, with an `error` telling its starter to start it again. A `visitor` run's model calls use the visitor's
  * own account, so its outputs are untrusted: never seed an example from one.
  *
  * Limits: each org has its own, given to the run domain by the API's
@@ -187,11 +182,6 @@ export const runStateSchema = z.discriminatedUnion("status", [
   }),
   /** The first claim's time: a re-claim after a recovery keeps it. */
   z.object({ status: z.literal("running"), startedAt: z.iso.datetime() }),
-  /**
-   * A `visitor` run whose sealed keys are missing or unreadable; it resumes when
-   * they're resent. `startedAt` is null if it was never claimed.
-   */
-  z.object({ status: z.literal("awaiting-keys"), startedAt: z.iso.datetime().nullable() }),
   z.object({
     status: z.literal("ended"),
     outcome: z.enum(["completed", "failed", "cancelled"]),
@@ -351,8 +341,6 @@ export type RunModelsResponse = z.infer<typeof runModelsResponseSchema>;
 
 export const listRunsResponseSchema = z.object({ runs: z.array(runSchema) });
 export const listInputsResponseSchema = z.object({ inputs: z.array(inputSchema) });
-export const resendKeysRequestSchema = z.object({ keys: visitorKeysSchema });
-export type ResendKeysRequest = z.infer<typeof resendKeysRequestSchema>;
 
 /** The object store's limit on one PUT (R2: 5 GB); a larger file can't be uploaded. */
 export const MAX_UPLOAD_FILE_BYTES = 5_000_000_000;

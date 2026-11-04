@@ -37,7 +37,6 @@ import {
   inputSchema,
   listInputsResponseSchema,
   listRunsResponseSchema,
-  type ResendKeysRequest,
   type Run,
   type RunModelsResponse,
   type RunRead,
@@ -261,15 +260,6 @@ export async function cancelRun(id: string): Promise<RunRead> {
   return read(
     runReadSchema,
     await request(`/run/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
-  );
-}
-
-/** Resends a visitor run's keys after the runner lost them (state `awaiting-keys`). */
-export async function resendKeys(id: string, keys: VisitorKeys): Promise<RunRead> {
-  const body: ResendKeysRequest = { keys };
-  return read(
-    runReadSchema,
-    await request(`/run/runs/${encodeURIComponent(id)}/keys`, { method: "POST", body }),
   );
 }
 

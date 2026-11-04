@@ -27,7 +27,7 @@ export type Limits = {
 
 export type Refusal = "no-key" | "spend";
 
-/** One message per refusal: the API's answer when a start, resume or reopen is refused. */
+/** One message per refusal: the API's answer when a start or reopen is refused. */
 export const refusalMessage: Record<Refusal, string> = {
   "no-key": "This account has no access to Voluma's keys. Add your own keys.",
   spend: "This organization has used its model budget for runs.",

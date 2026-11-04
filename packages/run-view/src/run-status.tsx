@@ -129,8 +129,6 @@ export function runStatus({ state, review }: Pick<StatusFacts, "state" | "review
       return { label: "Waiting", status: "waiting" };
     case "running":
       return { label: "Running", status: "running" };
-    case "awaiting-keys":
-      return { label: "Needs your keys", status: "paused" };
     case "ended":
       if (state.outcome === "completed")
         return review?.needsYou

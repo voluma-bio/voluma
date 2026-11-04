@@ -141,7 +141,7 @@ export type MessageTarget = {
   workflows: WorkflowPin[];
   /** The study's workflow when the caller already holds it, which spares the lookup. */
   studyWorkflowId?: string;
-  /** The queue state: `queued`, `running`, `awaiting-keys` or `ended`. */
+  /** The queue state: `queued`, `running` or `ended`. */
   state: string;
   outcome: string | null;
 };

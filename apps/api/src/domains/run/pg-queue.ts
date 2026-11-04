@@ -1,6 +1,6 @@
 /**
  * Postgres adapter for the run queue: every state change of a run, and the sealed keys
- * (run-keys.ts) of an own-key run that go with it. Each transition (start, resume, cancel, claim,
+ * (run-keys.ts) of an own-key run that go with it. Each transition (start, cancel, claim,
  * heartbeat, report) runs in one transaction, judged by the database's `now()`; no API
  * process's clock or memory decides a lease. Which transitions take the queue lock, and why
  * heartbeat and report don't: `apps/api/AGENTS.md`. Keys are sealed in the same transaction that makes a run
@@ -60,7 +60,7 @@ import { DEFAULT_THINKING, modelChoices, pickModel } from "./run-models";
 import { events, inputs, runs, studies, studyMembers } from "./schema";
 
 /**
- * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
+ * Serializes the transactions that admit or start work: claim, start, cancel, message,
  * import/archive. A heartbeat and a report take only the run's own locks (`lockRun`: event lock, then the
  * row), so a slow claim never delays an acknowledgement. They can skip this lock because they
  * only take a run off `running`, which lowers the counts a claim reads; the one write
@@ -70,8 +70,9 @@ export const QUEUE_LOCK = 0x76_6f_6c_71;
 
 /** Own-key runs that may be unfinished at once over every account; each holds a sealed key in its row. */
 const MAX_OWN_KEY_RUNS = 100;
-/** How long an own-key run whose keys are gone waits for them. */
-const KEYS_WAIT = sql`interval '24 hours'`;
+
+/** The error of an own-key run whose sealed keys cannot be opened: only a changed `RUN_KEY_SECRET` does that. */
+const KEYS_LOST = "Voluma's key secret changed; start the run again.";
 
 const leaseUntil = sql`now() + make_interval(secs => ${LEASE_SECONDS})`;
 
@@ -187,10 +188,10 @@ async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason:
 
 async function sweep(tx: Tx) {
   await recover(tx, sql`lease_expires_at <= now()`, "lease-expired");
-  await tx.execute(sql`
-    UPDATE runs SET state = 'ended', outcome = 'failed', ended_at = now(), sealed_keys = NULL,
-      error = 'The keys were not resent within 24 hours.'
-    WHERE state = 'awaiting-keys' AND awaiting_since <= now() - ${KEYS_WAIT}`);
+  // Shim, delete with the `awaiting-keys` state (apps/api/.context/TODO.md): an API built before
+  // that state was deleted, still live in a deploy overlap, may leave a run there.
+  const stuck = await tx.select({ id: runs.id }).from(runs).where(eq(runs.state, "awaiting-keys"));
+  for (const { id } of stuck) await fail(tx, id, KEYS_LOST);
   // Self-healing: an end path that missed the column (an old API during a deploy overlap) still
   // leaves no key behind.
   await tx.execute(
@@ -559,25 +560,9 @@ export function pgRunQueue(
     },
 
     /**
-     * `awaiting-keys` → `queued`, for the run's own starter, sealing the new keys.
-     */
-    resume: (reader: Reader, runId: string, keys: VisitorKeys) =>
-      locked(async (tx) => {
-        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), orgs);
-        if (!run) throw new HTTPException(404, { message: "not found" });
-        if (run.state.status !== "awaiting-keys")
-          throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        await tx
-          .update(runs)
-          .set({ state: "queued", awaitingSince: null, sealedKeys: sealer.seal(runId, keys) })
-          .where(eq(runs.id, runId));
-        return { run: await loadRun(tx, runId, orgs) };
-      }),
-
-    /**
      * One transaction: sweep expired leases, then take the first queued run in `queueOrder` that
      * the slot caps and the org's limits allow, with its keys if it is an own-key run. An own-key run whose sealed keys
-     * cannot be opened goes to `awaiting-keys` instead.
+     * cannot be opened ends `failed` instead.
      */
     claim: (runnerId: string) =>
       locked(async (tx): Promise<Claimed | null> => {
@@ -610,14 +595,10 @@ export function pgRunQueue(
               continue;
             }
           }
-          // An own-key run whose sealed keys are gone or unreadable (a rotated secret) waits for the user to resend them.
           const keys =
             run.credentials === "visitor" ? sealer.open(run.id, run.sealedKeys) : undefined;
           if (run.credentials === "visitor" && !keys) {
-            await tx
-              .update(runs)
-              .set({ state: "awaiting-keys", awaitingSince: sql`now()` })
-              .where(eq(runs.id, run.id));
+            await fail(tx, run.id, KEYS_LOST);
             continue;
           }
           const leaseToken = randomBytes(24).toString("hex");

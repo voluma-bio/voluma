@@ -119,12 +119,12 @@ function toRun({ run, input, position, calls }: Row, results: Results): Run {
   const startedAt = iso(run.startedAt);
   const state = ((): Run["state"] => {
     switch (run.state) {
+      // `awaiting-keys` is a shim for a run an older API left there; the claim's sweep ends it.
       case "queued":
+      case "awaiting-keys":
         return { status: "queued", position: position ?? 1 };
       case "running":
         return { status: "running", startedAt: startedAt as string };
-      case "awaiting-keys":
-        return { status: "awaiting-keys", startedAt };
       case "ended":
         return {
           status: "ended",
