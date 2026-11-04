@@ -10,8 +10,8 @@
  *
  * The URL keeps `output` (the value picked in Final outputs), `trail` (an output it rests on,
  * near or further back, whose report is open and which the panes show), `item` (the To check
- * item whose place the panes frame; showing one is a history entry) and `centre` (`run` for the
- * whole run, `agents`). Over the panes, a chip names what they show and its status. An `output`
+ * item whose place the panes frame; showing one is a history entry), `centre` (`run` for the
+ * whole run) and `agent` (the Agents tab's open thread). Over the panes, a chip names what they show and its status. An `output`
  * that is not a final value opens under the first final value resting on it. The panes' layout
  * is page state: it holds while another output, on another grid, is shown.
  */
@@ -419,8 +419,9 @@ export function OutputsReview({
     centre,
     trailOpen,
     shellFull,
+    value: selected?.id,
   });
-  keys.current = { layout, centre, trailOpen, shellFull };
+  keys.current = { layout, centre, trailOpen, shellFull, value: selected?.id };
   const workspace = useRef<HTMLDivElement>(null);
   const centreOpener = useRef<HTMLElement | null>(null);
   const skipNavigationFocus = useRef(false);
@@ -453,7 +454,7 @@ export function OutputsReview({
         if (!k.centre && !k.trailOpen) return;
         event.preventDefault();
         if (k.centre) select({ centre: null });
-        else if (k.trailOpen) select({ trail: null, item: null });
+        else if (k.trailOpen) select({ output: k.value, trail: null, item: null });
         requestAnimationFrame(() => centreOpener.current?.focus());
       }
     };
@@ -471,7 +472,8 @@ export function OutputsReview({
       soFar={!!soFar}
       inView={inView}
       trailOpen={!!trailOpen}
-      onBack={() => select({ trail: null, item: null })}
+      // Pins the value: with no `output` in the URL the default may itself open a trail.
+      onBack={() => select({ output: selected?.id, trail: null, item: null })}
       nameOf={nameOf}
       onWaitsOn={(id) => select({ trail: id, item: null, centre: null })}
       views={inView ? views.of(inView.id) : []}
@@ -631,7 +633,8 @@ export function OutputsReview({
               id: "agents",
               label: "Agents",
               icon: <Bot />,
-              content: (
+              // Built only while open: a thread rebuilds on every event of a live run.
+              content: leftTab === "agents" && (
                 <RunAgents
                   events={events}
                   agents={agents}
@@ -694,7 +697,7 @@ export function OutputsReview({
           )}
           {centre && <CentreBar onBack={() => select({ centre: null })} />}
           <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
-            {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
+            {/* The panes stay mounted under the whole run, so coming back is instant. */}
             <div className="flex h-full flex-col [&[hidden]]:hidden" hidden={!!centre}>
               {!overPanes && <div className="flex shrink-0 p-2">{heading}</div>}
               <div className="min-h-0 flex-1">{panes}</div>

@@ -7,7 +7,7 @@
  */
 
 export { AgentThread } from "./agent-thread";
-export { type AgentEntry, agentEntries, defaultAgent } from "./agent-threads";
+export { type AgentEntry, agentEntries } from "./agent-threads";
 export { ApprovalCard, type ApprovalCardProps, approvalWords } from "./approval-card";
 export { Markdown } from "./chat/markdown";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
