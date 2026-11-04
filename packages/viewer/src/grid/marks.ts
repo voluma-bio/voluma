@@ -51,7 +51,7 @@ export type MarkLayer = {
   layers(picture: HTMLCanvasElement, paint: () => void): HTMLCanvasElement[];
   /**
    * A gesture begins with this pointer, captured on the pane unless `capture` is false (a 3D
-   * click leaves the pointer to the orbit controls).
+   * click leaves the pointer to the camera controls).
    */
   start(event: PointerEvent, capture?: boolean): void;
   /** Lets the pointer go and keeps the draft: a mark made by clicks, between clicks. */
@@ -173,7 +173,7 @@ export function useMarkLayer(
       layer.draw();
     });
     observer.observe(element);
-    // Only the pane's own capture: the orbit controls capture on the canvas inside it.
+    // Only the pane's own capture: the 3D pane captures on the canvas inside it.
     const lost = (event: PointerEvent) => {
       if (event.target === element && layer.owns(event)) layer.cancel();
     };
