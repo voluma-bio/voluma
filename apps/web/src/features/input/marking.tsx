@@ -96,21 +96,35 @@ export function gridKeyOf(image: Volume): string | undefined {
 /** A marking tool and the letter of the tags it makes (not a command key). */
 type Tool = {
   value: MarkTool | "navigate";
-  /** Its name and how to use it: the icon's tooltip on the bar. */
+  /** Its name: the icon's accessible name, and its tooltip with `hint`. */
   label: string;
+  /** How to use it ("click two points"). */
+  hint: string;
   letter?: string;
   icon: ReactNode;
 };
 
 /** The marking tools, every one an icon on the viewer's bar. */
 export const TOOLS: Tool[] = [
-  { value: "navigate", label: "Navigate: drag to move the crosshair", icon: <Hand /> },
-  { value: "point", label: "Point: click to place", letter: "P", icon: <Crosshair /> },
-  { value: "line", label: "Ruler: click two points", letter: "R", icon: <Ruler /> },
-  { value: "angle", label: "Angle: click three points", letter: "A", icon: <Angle /> },
-  { value: "outline", label: "Outline: draw around a region", letter: "O", icon: <Lasso /> },
-  { value: "path", label: "Freehand line: draw", letter: "L", icon: <Spline /> },
-  { value: "probe", label: "Probe: click to read the image value", letter: "P", icon: <Pipette /> },
+  { value: "navigate", label: "Navigate", hint: "drag to move the crosshair", icon: <Hand /> },
+  { value: "point", label: "Point", hint: "click to place", letter: "P", icon: <Crosshair /> },
+  { value: "line", label: "Ruler", hint: "click two points", letter: "R", icon: <Ruler /> },
+  { value: "angle", label: "Angle", hint: "click three points", letter: "A", icon: <Angle /> },
+  {
+    value: "outline",
+    label: "Outline",
+    hint: "draw around a region",
+    letter: "O",
+    icon: <Lasso />,
+  },
+  { value: "path", label: "Freehand line", hint: "draw", letter: "L", icon: <Spline /> },
+  {
+    value: "probe",
+    label: "Probe",
+    hint: "click to read the image value",
+    letter: "P",
+    icon: <Pipette />,
+  },
 ];
 
 const kindOf = (mark: GridMark): MarkTool =>

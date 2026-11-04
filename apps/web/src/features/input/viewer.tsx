@@ -380,7 +380,7 @@ function ToolBar({
   return (
     <SegmentedControl
       label="Marking tool"
-      options={TOOLS.map((t) => ({ value: t.value, label: t.label, icon: t.icon }))}
+      options={TOOLS}
       value={tool ?? "navigate"}
       onValueChange={(v) => onTool(v === "navigate" ? null : v)}
     />

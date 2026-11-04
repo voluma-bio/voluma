@@ -583,8 +583,10 @@ export function SlicePane({
 
   // Load the plane through the crosshair at the level the zoom needs: untilted, a whole slice of
   // the level; tilted, the plane resliced from the level's chunks it crosses, over the coarsest
-  // level's picture of the whole outline. Untilted, the coarsest level shows meanwhile, unless the
-  // finer one arrives almost as soon (it does from the worker's cache).
+  // level's picture of the whole outline. Untilted, a pane's first picture is two levels coarser,
+  // drawn before the fine chunks are asked for; a new slice shows the coarsest level meanwhile
+  // unless the finer one arrives almost as soon (it does from the worker's cache); a new zoom keeps
+  // the picture it has.
   useEffect(() => {
     if (!contrast) return;
     const abort = new AbortController();
@@ -919,28 +921,11 @@ export function SlicePane({
         className={cx(CHIP, "pointer-events-auto top-2 left-2 flex items-baseline tabular-nums")}
         title={whole ? undefined : "Counted along the scan's nearest axis"}
       >
-        {/* Typed and copied like text; Enter (or leaving it) goes to the slice. */}
-        <input
-          key={at}
-          aria-label="Go to slice"
-          inputMode="numeric"
-          defaultValue={at + 1}
-          size={String(count).length}
-          onPointerDown={(event) => event.stopPropagation()}
-          onFocus={(event) => event.target.select()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              event.currentTarget.value = String(at + 1);
-              event.currentTarget.blur();
-            }
-          }}
-          onBlur={(event) => {
-            const n = Number.parseInt(event.target.value, 10);
-            if (Number.isNaN(n) || n - 1 === at) event.target.value = String(at + 1);
-            else goTo(Math.min(Math.max(n, 1), count) - 1);
-          }}
-          className="w-auto rounded-sm bg-transparent text-right outline-none hover:bg-viewer-well focus:bg-viewer-well"
+        <SliceNumber
+          at={at}
+          count={count}
+          onGo={goTo}
+          onDone={() => host.current?.focus({ preventScroll: true })}
         />
         {!whole && "′"}&nbsp;/ {count}
       </span>
@@ -1014,4 +999,50 @@ function useStable<T>(value: T): T {
   const ref = useRef(value);
   if (JSON.stringify(ref.current) !== JSON.stringify(value)) ref.current = value;
   return ref.current;
+}
+
+/**
+ * The slice number as a field: typed and copied like text. Enter (or leaving it) goes to the slice
+ * and Escape drops the draft; either way it then shows the slice the pane is on, so a jump the pane
+ * can't make (past an end, or out of the volume on a turned pane) never stays on screen.
+ */
+function SliceNumber({
+  at,
+  count,
+  onGo,
+  onDone,
+}: {
+  at: number;
+  count: number;
+  onGo: (slice: number) => void;
+  /** After Enter or Escape: focus goes back to the pane, so the arrows step again. */
+  onDone: () => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  // Leaving the field commits, so Escape drops the draft before handing focus back.
+  const dropped = useRef(false);
+  const commit = () => {
+    const n = Number.parseInt(draft ?? "", 10);
+    setDraft(null);
+    if (dropped.current) dropped.current = false;
+    else if (!Number.isNaN(n) && n - 1 !== at) onGo(Math.min(Math.max(n, 1), count) - 1);
+  };
+  return (
+    <input
+      aria-label="Go to slice"
+      inputMode="numeric"
+      value={draft ?? String(at + 1)}
+      size={String(count).length}
+      onChange={(event) => setDraft(event.target.value)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onFocus={(event) => event.target.select()}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") dropped.current = true;
+        else if (event.key !== "Enter") return;
+        onDone();
+      }}
+      onBlur={commit}
+      className="w-auto rounded-sm bg-transparent text-right outline-none hover:bg-viewer-well focus:bg-viewer-well"
+    />
+  );
 }
