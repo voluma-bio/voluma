@@ -210,7 +210,7 @@ export function useRunMarks({
       const body = placeMarkRequestSchema.safeParse({ ...t.mark, id });
       const logged = body.success && asLogged(body.data, latest.current.me);
       if (!body.success || !logged)
-        return setError(`Couldn't put ${t.mark.tag} back as main last saw it.`);
+        return setError(`Couldn't put ${t.mark.tag} back as the AI last saw it.`);
       write(id, logged, () => placeMark(latest.current.run.id, body.data));
     },
     [write, erase],

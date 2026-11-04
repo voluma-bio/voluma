@@ -54,9 +54,12 @@ effect catches up.
 
 ## The outputs review
 
-`outputs-review.tsx` lays out the shell's two `SidePanel`s around the centre. Left: Conversation (default; badged with the
-calls main still holds, `openApprovals`) and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree`
-over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`); a value resting on one keeps its own status and says "rests on a To check") and
+`outputs-review.tsx` lays out the shell's two `SidePanel`s around the centre. Left: Conversation (badged with the
+calls main still holds, `openApprovals`), Labels (`segmentation-panel.tsx`: what each colour in the views is, from the
+shown grid's `legend`, with each structure's volume from a value measured on it alone in mm³, and the page's `LabelDisplay`)
+and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). Until you pick a
+tab, the side opens on Conversation once it has something to read or send (a message, a saved view, a mark waiting)
+and on Labels before that, so an empty conversation never takes the column. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`); a value resting on one keeps its own status and says "rests on a To check") and
 Whole run. The value picked opens in place under its row: its version line and Report, its open
 To check items (with those of what it rests on), and Rests on (direct links, ordered measured
 on, beside, made from, drawn on) with Further back (the rest of `trailOf`, nearest first, each
@@ -87,7 +90,7 @@ from the shell, so leaving Full view by any means gives the panes back. The whol
 outputs while it is up and unfolds it after (the shell's `useFoldWhile`); unfolding the strip
 during it leaves it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
-whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate
+whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`); Navigate, Point and Ruler are named on the bar and the rest sit under More tools (`viewer.tsx`): Navigate
 (V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Line, drawn freehand (D: an open path, tag L), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
 (`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
@@ -122,7 +125,7 @@ freezes them from the log; if one failed, nothing is sent.
 A message carries the words, the waiting marks by id (`markIds`; the API freezes them), the output
 in view (`output`), the panes' view as Save view keeps it (`view`, dropped over `MAX_VIEW_BYTES`), a
 PNG of the panes when "With <output>, as you see it" is on (`QuadViewerHandle.snapshot` through
-`SceneHandle`), and the To check item it answers (`toCheck`, set by "Tell main what's wrong" on an
+`SceneHandle`), and the To check item it answers (`toCheck`, set by "Tell the AI what's wrong" on an
 item). It sends through `message-send.ts` (`useIdempotentSend`): a retry keeps the id
 and the exact request; refusals show the API's words. A message or an
 answer to an ended run reopens it: the page reconnects the stream and reads the run again.

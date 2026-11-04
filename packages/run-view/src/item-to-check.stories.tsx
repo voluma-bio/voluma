@@ -4,8 +4,8 @@ import { Crosshair } from "lucide-react";
 import { ItemToCheck } from "./item-to-check";
 
 /**
- * **What:** one To check item waiting for your decision: the output it is on, what to look at,
- * and Looks right. **Why:** the decision lives in one place; other places refer to the item
+ * **What:** one To check item waiting for your decision: what the AI asks you to check, what to
+ * look at, and Looks right with what it commits to. **Why:** the decision lives in one place; other places refer to the item
  * instead of drawing it again. **Where:** the input review's output report.
  *
  * Sample data (stories only).
@@ -15,7 +15,7 @@ const meta = {
   component: ItemToCheck,
   decorators: [(Story) => <div className="w-[368px]">{Story()}</div>],
   args: {
-    context: "Medial meniscus/osteophyte volume",
+    context: "The AI asks you to check this result",
     title:
       "The osteophyte merges with the medial femoral condyle; the label edge is the AI's best call.",
     state: "open",
@@ -35,11 +35,11 @@ export const ReadOnly: Story = {
 /** On an output this one rests on, with the page's own action after the decision. */
 export const OnAnInput: Story = {
   args: {
-    context: "On Bone labels, which this rests on",
+    context: "The AI asks you to check Bone labels, which this rests on",
     title: "Label 9's pieces may belong to the lateral meniscus.",
     actions: (
       <>
-        <Button size="sm">Tell main what's wrong</Button>
+        <Button size="sm">Tell the AI what's wrong</Button>
         <Button variant="ghost" size="sm">
           <Crosshair aria-hidden />
           Show

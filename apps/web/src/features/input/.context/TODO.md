@@ -41,3 +41,13 @@
   newest run from the study query, which polls while a run is live. When a "run again" action
   exists, a new run remounts the page and drops the selection and unsent marks: resolve the newest
   run once on mount and offer "A newer run started" instead.
+
+## Review readable (jimyao/review-readable)
+
+- The Labels tab is called "Labels", not "Segmentation": three tabs with "Segmentation" don't fit the
+  left side's 300 px default. Tab icons hide between 260 and 340 px so three labels fit.
+- At about 1100 px wide the centre is ~360 px: the viewer's bar wraps to three rows and the scene
+  bar's output name truncates to nothing. Either shrink Planes and Contrast to icons there or let
+  the centre fall back to the page scroll earlier.
+- "Agents" in the scene bar and the Agents view still use worker names: a debugging view, left as is.
+- The item card's "Show" and the scene bar are the "Show" framing work's (another PR).

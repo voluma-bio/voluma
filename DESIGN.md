@@ -64,17 +64,26 @@ where it is used.
 - **One selection drives the Final outputs panel and all four panes.** Selecting an output
   anywhere moves all of them; the planes' orientation stays as the researcher left it.
 - **Four equal panes**, or one or two. Each pane can go full screen. A chip on each pane picks
-  what it shows: 3D, a slice named by the grid's axes (XY, YZ, XZ), or GP, the plane along the
-  growth plate. The whole-run graph shows in place of the panes when the researcher asks for it.
+  what it shows: 3D, a slice, or the plane along the growth plate. A slice is named by its
+  anatomical plane (Axial, Coronal, Sagittal) where the grid's catalog entry says which it is,
+  else by the grid's axes (XY, YZ, XZ), which the chip's menu also shows. The slice number sits
+  small in the pane's corner; a scale bar shows only where the run published the grid's
+  geometry. The whole-run graph shows in place of the panes when the researcher asks for it.
+- **The viewer's bar names what a reviewer uses**: Navigate, Point and Ruler, Planes, Contrast
+  and Save view in words; the measuring tools under More tools; the 1, 2 and 4 pane layouts as
+  icons with tooltips.
 - **Up front is what the researcher reviews.** Statuses, values, To check, the AI's
   words, QC images and the viewer's controls show. How long something took, tries, counts, cost,
   tokens and ids sit behind an info button (`InfoButton`) or Run details, with the numbers someone
   fixing a run needs after the researcher's.
 - **Labels show only for the selection.** Everything else stays unlabelled.
 - **Every output shows the run's segmentation as context**: its labels on the output's grid in
-  their label colours (`--label-*`), ivory (`--bone`) with the Labels toggle off. What the output
+  their label colours (`--label-*`), ivory (`--bone`) with "Colour each structure" off. What the output
   itself shows (its region, mask or surface) is drawn over them in `--output`: filled stronger and
-  outlined on the slices, opaque in 3D with the context bones see-through. An output that is the
+  outlined on the slices, opaque in 3D with the context bones see-through. The left side's Labels
+  tab says which colour is which structure, by name, with its volume where the run measured one,
+  and a recoloured structure says why and shows its usual colour. There the researcher sets the
+  opacity of all and each, hides one, and draws the slices filled or as outlines only. An output that is the
   labels as a whole shows them opaque in their own colours. 3D shows meshes only; the raw image
   is volume-rendered only when there are none (the scan before segmentation).
 - **Plane colours follow the anatomy on every grid**: coronal red, sagittal green, axial blue

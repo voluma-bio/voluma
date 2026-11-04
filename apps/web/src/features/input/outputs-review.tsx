@@ -52,6 +52,9 @@ import {
 } from "@voluma/ui";
 import {
   type GridPlanes,
+  LABELS_START,
+  type LabelDisplay,
+  type LegendEntry,
   type MarkEdit,
   type MarkPlane,
   type PlaneFit,
@@ -64,6 +67,7 @@ import {
   Bookmark,
   ChevronDown,
   ChevronLeft,
+  Layers,
   ListTree,
   MessageSquare,
   Sigma,
@@ -82,6 +86,7 @@ import { useRunMarks } from "./run-marks";
 import { RunNews } from "./run-news";
 import { Samples } from "./samples-tab";
 import { type SavedView, savedViews, useSavedViews } from "./saved-views";
+import { SegmentationPanel, structureVolumes } from "./segmentation-panel";
 import { useAnswers, useMainMessage } from "./use-main-message";
 import type { Accepting } from "./version-report";
 import type { SceneHandle } from "./viewer";
@@ -226,8 +231,11 @@ export function OutputsReview({
 
   const [onlyToCheck, setOnlyToCheck] = useState(false);
   const toCheck = review.open.size;
-  const [leftTab, setLeftTab] = useState("conversation");
   const said = useMemo(() => conversation(events), [events]);
+  const [pickedTab, setLeftTab] = useState<string>();
+  const [display, setDisplay] = useState<LabelDisplay>(LABELS_START);
+  const [legend, setLegend] = useState<LegendEntry[]>();
+  const volumes = useMemo(() => structureVolumes(review.rows.values()), [review.rows]);
   const runMarks = useRunMarks({
     run,
     me: me.userId,
@@ -264,6 +272,13 @@ export function OutputsReview({
     jumpTo({ at: at as unknown as Zyx, gridKey, output: inViewId });
   }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
   const allViews = useMemo(() => savedViews(events), [events]);
+  // The left side opens on the conversation once there is something to read or send in it (a
+  // message, a saved view, a mark waiting), else on Segmentation, until you pick a tab.
+  const leftTab =
+    pickedTab ??
+    (said.length > 0 || allViews.length > 0 || store.changes.length > 0
+      ? "conversation"
+      : "segmentation");
   const views = useSavedViews(run, allViews, reopen);
   const scene = useRef<SceneHandle>(null);
   const sent = useCallback(() => {
@@ -438,6 +453,8 @@ export function OutputsReview({
         nameOf={nameOf}
         focus={trailOpen ? undefined : focus}
         marking={marking}
+        display={display}
+        onLegend={setLegend}
         quad={{
           layout,
           onLayout,
@@ -468,7 +485,7 @@ export function OutputsReview({
               label: "Conversation",
               icon: <MessageSquare />,
               badge: waiting || undefined,
-              badgeLabel: "main is waiting on you",
+              badgeLabel: "The AI is waiting on you",
               content: (
                 <MainConversation
                   conversation={said}
@@ -486,6 +503,20 @@ export function OutputsReview({
                   markError={runMarks.error}
                   onMark={marking.select}
                   onDiscard={store.discard}
+                />
+              ),
+            },
+            {
+              id: "segmentation",
+              label: "Labels",
+              icon: <Layers />,
+              content: (
+                <SegmentationPanel
+                  legend={legend}
+                  display={display}
+                  onDisplay={setDisplay}
+                  volumes={volumes}
+                  inView={inView?.name}
                 />
               ),
             },
@@ -726,6 +757,8 @@ function OutputScene({
   nameOf,
   focus,
   marking,
+  display,
+  onLegend,
   quad,
 }: {
   runId: string;
@@ -736,6 +769,8 @@ function OutputScene({
   nameOf: (id: string) => string;
   focus: OutputItem["focus"];
   marking: ReturnType<typeof useMarking>;
+  display: LabelDisplay;
+  onLegend: (legend: LegendEntry[] | undefined) => void;
   quad: NonNullable<React.ComponentProps<typeof SceneViewer>["quad"]>;
 }) {
   const missing = undrawn(blocks, shown);
@@ -773,6 +808,8 @@ function OutputScene({
               marking.add(mark, volumeId, gridKey, subject, plane)
             }
             onShown={marking.setShown}
+            display={display}
+            onLegend={onLegend}
             quad={quad}
           />
         </Suspense>

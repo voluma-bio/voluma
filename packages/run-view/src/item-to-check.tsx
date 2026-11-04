@@ -1,14 +1,15 @@
 /**
- * One To check item waiting for a person's decision: where it is (its output, or the output it
- * rests on), what to look at, and Looks right. The decision lives here only: other places refer to
- * the item, never draw it again. Data comes in as props; the input review's output report shows it.
+ * One To check item waiting for a person's decision: what the AI asks (which output to check, its
+ * own or one it rests on, and what to look at), Looks right with what it commits to, and the
+ * page's other actions. The decision lives here only: other places refer to the item, never draw
+ * it again. Data comes in as props; the input review's output report shows it.
  */
 import { Button, cx, StatusGlyph, StatusMark } from "@voluma/ui";
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type ItemToCheckProps = {
-  /** Where it is, named above the title: its output, or the output it rests on. */
+  /** What is asked, above the title: "The AI asks you to check Bone labels, …". */
   context: string;
   /** What to look at; none when `context` says it. */
   title?: string;
@@ -64,6 +65,11 @@ export function ItemToCheck({
         )}
         {actions}
       </div>
+      {state === "open" && onAccept && (
+        <p className="text-xs text-muted-foreground">
+          Looks right closes this check and keeps the result as it is.
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

@@ -17,7 +17,15 @@ import type {
 } from "@voluma/contracts/review";
 import { toVoxel } from "@voluma/contracts/ruler";
 import { readLevel } from "./planes";
-import type { GridAnnotation, GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
+import type {
+  GridAnnotation,
+  GridMesh,
+  GridScene,
+  Overlay,
+  OverlayStyle,
+  ZarrSource,
+  Zyx,
+} from "./scene";
 
 /** How much of a context label mesh shows over the subject's own meshes inside it. */
 const CONTEXT_OPACITY = 0.3;
@@ -41,7 +49,46 @@ export type ReviewGrid =
       focusLabels?: FocusLabels;
       /** What the subject names that isn't drawn here, and why. */
       notes: string[];
+      /** What each colour drawn is, in the order drawn: the Segmentation panel lists it. */
+      legend: LegendEntry[];
     };
+
+/** How the run's labels and the subject's regions are drawn, as the Segmentation panel sets it. */
+export type LabelDisplay = {
+  /** Each label in its own colour; off, every context label in `--bone`. */
+  colours: boolean;
+  /** Of every structure's blend, 0 to 1. */
+  opacity: number;
+  /** On the slices: filled, or only each region's edge. 3D always shows surfaces. */
+  style: "fill" | "outline";
+  /** Each structure's own opacity by block id, 0 to 1; absent is 1. */
+  structures: Readonly<Record<string, number>>;
+  /** Block ids hidden, whatever their opacity. */
+  hidden: readonly string[];
+};
+
+export const LABELS_START: LabelDisplay = {
+  colours: true,
+  opacity: 1,
+  style: "fill",
+  structures: {},
+  hidden: [],
+};
+
+/**
+ * One structure drawn on the grid and its colour: `label` is context in its label colour (or
+ * `--bone`), `output` the subject's own region in `--output`, `check` the focused check's in
+ * `--check-outline`. `usual` is a label's own colour when the subject or a check recolours it.
+ */
+export type LegendEntry = {
+  id: string;
+  name: string;
+  color: string;
+  as: "label" | "output" | "check";
+  usual?: string;
+  /** Drawn only in 3D: context borrowed from another grid. */
+  only3d?: true;
+};
 
 /** The blocks a grid is drawn from, built from output versions (`outputBlocks`, run-view). */
 export type Blocks = {
@@ -56,8 +103,7 @@ type Input = {
   /** The block ids the subject shows, before the focused check's. */
   shown: readonly string[];
   assets: Record<string, ReviewAssets>;
-  /** Label colours on the context labels; off draws them `--bone`. */
-  labels: boolean;
+  display: LabelDisplay;
   focus?: Focus;
   /** The URL prefix (ending in "/") of a file's converted assets. */
   assetBase(sha256: string): string;
@@ -69,7 +115,7 @@ export function reviewGrid({
   revision,
   shown,
   assets,
-  labels: showLabels,
+  display,
   focus,
   assetBase,
   token,
@@ -118,14 +164,34 @@ export function reviewGrid({
   const focused = new Set(focus?.on ?? []);
   const focusedLabel = (volume: Volume, label: number) =>
     volume === focusVolume && (focus?.label === undefined || focus.label === label);
-  const check = { color: token("--check-outline"), opacity: 1, outline: true };
-  // What the subject itself shows, over the context: in `--output`, outlined in slices.
+  // How much of a structure shows: the panel's overall opacity times its own, 0 when hidden.
+  const amount = (id: string) =>
+    display.hidden.includes(id) ? 0 : display.opacity * (display.structures[id] ?? 1);
+  const strong: OverlayStyle = display.style === "outline" ? "outline" : "highlight";
+  const legend: LegendEntry[] = [];
+  const labelColor = (label: number) => token(`--label-${((label - 1) % 12) + 1}`);
+  const check = (id: string) => ({
+    color: token("--check-outline"),
+    opacity: amount(id),
+    style: strong,
+    as: "check" as const,
+  });
+  // What the subject itself shows, over the context: in `--output`, highlighted in slices.
   const own = (id: string) =>
-    focused.has(id) ? check : { ...check, color: token("--output"), own: true as const };
-  const contextLook = (label: number) => ({
-    color: token(showLabels ? `--label-${((label - 1) % 12) + 1}` : "--bone"),
-    opacity: 1,
-    outline: false,
+    focused.has(id)
+      ? check(id)
+      : {
+          color: token("--output"),
+          opacity: amount(id),
+          style: strong,
+          own: true as const,
+          as: "output" as const,
+        };
+  const contextLook = (label: number, id: string) => ({
+    color: display.colours ? labelColor(label) : token("--bone"),
+    opacity: amount(id),
+    style: display.style as OverlayStyle,
+    as: "label" as const,
   });
   const overlays: Overlay[] = [];
   const meshes: GridMesh[] = [];
@@ -215,10 +281,14 @@ export function reviewGrid({
     if (!a) continue;
     // Another grid's context: its meshes moved onto this grid, no slice overlay.
     if (placed && volume === context) {
+      for (const l of labels) {
+        const look = contextLook(l.label, l.id);
+        legend.push({ id: l.id, name: l.name, color: look.color, as: "label", only3d: true });
+      }
       for (const m of a.meshes) {
         const l = labels.find((x) => x.label === m.label);
         if (!l) continue;
-        const drawn = mesh(sha256, m, l.name, [0, 0, 0], contextLook(l.label), placed);
+        const drawn = mesh(sha256, m, l.name, [0, 0, 0], contextLook(l.label, l.id), placed);
         contextMeshes.add(drawn);
         meshes.push(drawn);
       }
@@ -235,12 +305,22 @@ export function reviewGrid({
       labels.map((l) => [
         l.label,
         focusedLabel(volume, l.label)
-          ? check
+          ? check(l.id)
           : !whole && (named.includes(l.id) || focused.has(l.id))
             ? own(l.id)
-            : contextLook(l.label),
+            : contextLook(l.label, l.id),
       ]),
     );
+    for (const l of labels) {
+      const look = looks.get(l.label)!;
+      legend.push({
+        id: l.id,
+        name: l.name,
+        color: look.color,
+        as: look.as,
+        ...(look.as !== "label" && display.colours && { usual: labelColor(l.label) }),
+      });
+    }
     if (looks.size)
       overlays.push({
         id: volume.id,
@@ -249,15 +329,15 @@ export function reviewGrid({
         levels: a.levels,
         offsetZyx: [0, 0, 0],
         color: Object.fromEntries([...looks].map(([label, look]) => [label, look.color])),
-        opacity: 1,
-        outline: Object.fromEntries([...looks].map(([label, look]) => [label, look.outline])),
+        opacity: Object.fromEntries([...looks].map(([label, look]) => [label, look.opacity])),
+        style: Object.fromEntries([...looks].map(([label, look]) => [label, look.style])),
       });
     for (const m of a.meshes) {
       const look = m.label === undefined ? undefined : looks.get(m.label);
       const l = labels.find((x) => x.label === m.label);
       if (!look || !l) continue;
       const drawn = mesh(sha256, m, l.name, [0, 0, 0], look);
-      if (!look.outline && !whole) contextMeshes.add(drawn);
+      if (look.as === "label" && !whole) contextMeshes.add(drawn);
       meshes.push(drawn);
     }
   }
@@ -267,6 +347,7 @@ export function reviewGrid({
     const a = ready(mask.sha256, s.name);
     if (!a) continue;
     const look = own(s.id);
+    legend.push({ id: s.id, name: s.name, color: look.color, as: look.as });
     overlays.push({
       id: s.id,
       name: s.name,
@@ -275,7 +356,7 @@ export function reviewGrid({
       offsetZyx,
       color: look.color,
       opacity: look.opacity,
-      outline: look.outline,
+      style: look.style,
     });
     meshes.push(...a.meshes.map((m) => mesh(mask.sha256, m, s.name, offsetZyx, look)));
   }
@@ -291,16 +372,17 @@ export function reviewGrid({
           focus?.label === undefined
             ? Array.from({ length: 65535 }, (_, n) => n + 1)
             : [focus.label];
-        const outline = token("--check-outline");
+        const look = check(focusVolume.id);
+        legend.push({ id: focusVolume.id, name: focusVolume.name, color: look.color, as: "check" });
         overlays.push({
           id: focusVolume.id,
           name: focusVolume.name,
           base: assetBase(sha256),
           levels: a.levels,
           offsetZyx: [0, 0, 0],
-          color: Object.fromEntries(values.map((v) => [v, outline])),
-          opacity: 1,
-          outline: true,
+          color: Object.fromEntries(values.map((v) => [v, look.color])),
+          opacity: look.opacity,
+          style: look.style,
         });
         focusLabels ??= {
           source: { base: assetBase(sha256), levels: a.levels },
@@ -318,6 +400,7 @@ export function reviewGrid({
     }
     const look = own(s.id);
     const a = ready(s.heights.sha256, s.name);
+    if (a) legend.push({ id: s.id, name: s.name, color: look.color, as: look.as });
     if (a)
       meshes.push(
         ...a.meshes.map((m) => ({
@@ -340,13 +423,13 @@ export function reviewGrid({
       points: (a.kind === "point" ? [a.position] : [a.a, a.b]).map(
         (p) => toVoxel(image.affine, p) as unknown as Zyx,
       ),
-      color: focused.has(a.id) ? check.color : token("--ruler"),
+      color: token(focused.has(a.id) ? "--check-outline" : "--ruler"),
       opacity: 1,
     });
   }
 
   if (meshes.some((m) => !contextMeshes.has(m)))
-    for (const m of contextMeshes) m.opacity = CONTEXT_OPACITY;
+    for (const m of contextMeshes) m.opacity *= CONTEXT_OPACITY;
 
   return {
     state: "ready",
@@ -356,6 +439,7 @@ export function reviewGrid({
     scene: {
       shapeZyx: image.shapeZyx,
       spacingZyx: spacingZyx(image),
+      measured: !unposedIdentity(image),
       image: { base: assetBase(image.data.sha256), levels: imageAssets.levels },
       imageUnit: image.unit,
       overlays,
@@ -364,6 +448,7 @@ export function reviewGrid({
     },
     focus: focus && focusPoint(focus, revision, image, gridId === scanGrid),
     focusLabels,
+    legend,
     notes: [
       notes.preparing.length && `Still preparing: ${notes.preparing.join(", ")}.`,
       notes.failed.length && `Couldn't prepare: ${notes.failed.join(", ")}.`,
@@ -488,6 +573,10 @@ function placement(from: Volume, to: Volume): number[][] {
     [0, 0, 0, 1],
   ];
 }
+
+/** An identity affine: what a run that published no geometry for the volume gets. */
+const unposedIdentity = (v: Volume) =>
+  v.affine.every((row, r) => row.every((n, c) => n === (r === c ? 1 : 0)));
 
 /** Whether a volume's affine carries a pose: an origin, or a rotation off the grid's axes. */
 const posed = (v: Volume) =>

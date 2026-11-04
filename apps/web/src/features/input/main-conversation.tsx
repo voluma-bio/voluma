@@ -119,7 +119,7 @@ export function MainConversation({
     if (el && items.length > 0) el.scrollTop = el.scrollHeight;
   }, [items.length]);
   const form = useRef<HTMLFormElement>(null);
-  // "Tell main what's wrong" puts you in the box.
+  // "Tell the AI what's wrong" puts you in the box.
   useEffect(() => {
     if (message.about) form.current?.querySelector("textarea")?.focus();
   }, [message.about]);
@@ -195,13 +195,13 @@ export function MainConversation({
                 </li>
               ) : m.from === "agent" ? (
                 <li key={m.id} className="grid gap-1">
-                  <Said who="main" at={m.at} />
+                  <Said who="The AI" at={m.at} />
                   <Markdown text={m.text} className="text-sm" agents={agents} />
                 </li>
               ) : (
                 <li key={m.id}>
                   <ApprovalCard
-                    {...approvalWords(m.tool, m.args)}
+                    {...approvalWords(m.tool)}
                     summary={m.summary}
                     changes={m.outputs?.map(nameOf)}
                     outOfDate={m.outOfDate?.map(nameOf)}
@@ -221,7 +221,7 @@ export function MainConversation({
             )}
             {working && (
               <li>
-                <StatusMark status="running" label="main is on it" />
+                <StatusMark status="running" label="The AI is on it" />
               </li>
             )}
           </ol>
@@ -257,7 +257,7 @@ export function MainConversation({
           </div>
         )}
         <TextAreaField
-          label="Message to main"
+          label="Message to the AI"
           hideLabel
           placeholder={
             attached.length > 0

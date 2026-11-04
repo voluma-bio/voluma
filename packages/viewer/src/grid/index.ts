@@ -13,6 +13,9 @@ export {
 } from "./QuadViewer";
 export {
   type Blocks,
+  LABELS_START,
+  type LabelDisplay,
+  type LegendEntry,
   labelsMiddle,
   type ReviewGrid,
   reviewGrid,
@@ -26,6 +29,7 @@ export type {
   MarkEdit,
   MarkTool,
   Overlay,
+  OverlayStyle,
   PaneView,
   ProbeValue,
   ShownMark,

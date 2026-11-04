@@ -1,7 +1,7 @@
 /**
  * One version of an output, as Final outputs shows it: the line naming it (version, who made it,
- * when), its report (the worker's own words, the images it was checked on, what it was made
- * from), and To check items with Accept, Tell main what's wrong, and Show. The data comes from the output fold and
+ * when), its report (the AI's own words, the images it was checked on, what it was made
+ * from), and To check items with Looks right, Tell the AI what's wrong, and Show. The data comes from the output fold and
  * `versionWords` (`@voluma/run-view`).
  */
 import { outputFileUrl } from "@voluma/api-client";
@@ -23,17 +23,20 @@ export type Accepting = {
   /** The item being saved. */
   pending?: string;
   error?: { key: string; text: string };
-  /** Tell main what's wrong: starts a message that answers the item. */
+  /** Tell the AI what's wrong: starts a message that answers the item. */
   tell?: (item: OutputItem) => void;
 };
 
-/** `v1 roi3-worker 19:05`, then what follows it on the line (a Report toggle). */
+/**
+ * `Version 1, 19:05`, then what follows it on the line (a Report toggle). Which agent made it is
+ * for someone fixing the run: the Agents view and the line's tooltip say it.
+ */
 export function VersionLine({ v, children }: { v: OutputVersion; children?: ReactNode }) {
   return (
     <p className="m-0 flex flex-wrap items-baseline gap-x-2 text-muted-foreground text-xs">
-      <span className="rounded-sm bg-muted px-1 font-mono">v{v.version}</span>
-      <span className="font-mono text-foreground">{v.by}</span>
-      <span>{clockOf(v.at)}</span>
+      <span title={`Made by ${v.by}`}>
+        Version {v.version}, {clockOf(v.at)}
+      </span>
       {children}
     </p>
   );
@@ -62,7 +65,11 @@ export function Items({
       {items.map((i) => (
         <ItemToCheck
           key={i.key}
-          context={i.output === own ? "Review item" : `Check ${nameOf(i.output)}`}
+          context={
+            i.output === own
+              ? "The AI asks you to check this result"
+              : `The AI asks you to check ${nameOf(i.output)}, which this rests on`
+          }
           title={i.title}
           state={i.resolved ? "accepted" : "open"}
           onAccept={accepting.accept && (() => accepting.accept?.(i))}
@@ -74,7 +81,7 @@ export function Items({
             <>
               {accepting.tell && !i.resolved && (
                 <Button size="sm" onClick={() => accepting.tell?.(i)}>
-                  Tell main what's wrong
+                  Tell the AI what's wrong
                 </Button>
               )}
               {i.focus && (

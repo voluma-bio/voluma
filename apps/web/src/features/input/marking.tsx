@@ -97,21 +97,58 @@ export function gridKeyOf(image: Volume): string | undefined {
 /** A marking tool: the keys that pick it (the first shown), and the letter of the tags it makes. */
 type Tool = {
   value: MarkTool | "navigate";
+  /** Its full name, in tooltips and menus. */
   label: string;
+  /** Its name on the bar. */
+  short: string;
   keys: string[];
   letter?: string;
   icon?: ReactNode;
 };
 
-/** The marking tools (mockup C's tool bar), icons with their names in the tooltips. */
+/** The marking tools on the viewer's bar (`viewer.tsx` names some and puts the rest in a menu). */
 export const TOOLS: Tool[] = [
-  { value: "navigate", label: "Navigate", keys: ["v", "Escape"], icon: <Crosshair /> },
-  { value: "point", label: "Point, with a note", keys: ["p"], letter: "P", icon: <MapPin /> },
-  { value: "line", label: "Ruler", keys: ["l"], letter: "R", icon: <Ruler /> },
-  { value: "angle", label: "Angle", keys: ["a"], letter: "A", icon: <Angle /> },
-  { value: "outline", label: "Outline", keys: ["o"], letter: "O", icon: <Lasso /> },
-  { value: "path", label: "Line, drawn freehand", keys: ["d"], letter: "L", icon: <Spline /> },
-  { value: "probe", label: "Probe", keys: ["i"], letter: "P", icon: <Pipette /> },
+  {
+    value: "navigate",
+    label: "Navigate",
+    short: "Navigate",
+    keys: ["v", "Escape"],
+    icon: <Crosshair />,
+  },
+  {
+    value: "point",
+    label: "Point, with a note",
+    short: "Point",
+    keys: ["p"],
+    letter: "P",
+    icon: <MapPin />,
+  },
+  { value: "line", label: "Ruler", short: "Ruler", keys: ["l"], letter: "R", icon: <Ruler /> },
+  { value: "angle", label: "Angle", short: "Angle", keys: ["a"], letter: "A", icon: <Angle /> },
+  {
+    value: "outline",
+    label: "Outline",
+    short: "Outline",
+    keys: ["o"],
+    letter: "O",
+    icon: <Lasso />,
+  },
+  {
+    value: "path",
+    label: "Line, drawn freehand",
+    short: "Freehand",
+    keys: ["d"],
+    letter: "L",
+    icon: <Spline />,
+  },
+  {
+    value: "probe",
+    label: "Probe the image value",
+    short: "Probe",
+    keys: ["i"],
+    letter: "P",
+    icon: <Pipette />,
+  },
 ];
 
 const kindOf = (mark: GridMark): MarkTool =>

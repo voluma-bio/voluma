@@ -22,10 +22,10 @@ carry spacing-only affines and borrow nothing.
   its `image` volume with `.npy` data; spacing is the norms of its affine's columns.
 - **What is drawn.** Context first: the labels volume on the grid that the most label structures
   point into (the run's bone labels), every label as one overlay in `--label-n` (`--bone` with
-  Labels off), its meshes at 0.3 opacity when the output has meshes of its own. Then the named
+  colours off), its meshes at 0.3 of their opacity when the output has meshes of its own. Then the named
   structures on the grid (a named labels volume brings all its structures and is then drawn
-  opaque in its own colours, the output as a whole) in `--output`, outlined on slices (a pixel
-  whose 4-neighbour differs is opaque, `compose.ts`): a label of a labels volume, a
+  opaque in its own colours, the output as a whole) in `--output`, highlighted on slices (filled
+  stronger, and a pixel whose 4-neighbour differs is opaque: `OverlayStyle`, `compose.ts`): a label of a labels volume, a
   cropped mask as an overlay at its `offsetZyx`, each with its meshes; named surfaces as meshes
   and their triangle intersections with each slice. Named rulers and points map from world mm
   through the image's affine into source voxels. Rulers use `--ruler`, with endpoints in 3D and
@@ -36,15 +36,20 @@ carry spacing-only affines and borrow nothing.
 - **Assets.** From the run's `assets.ready`/`assets.failed` events by the file's sha256
   (`reviewAssetsOf`, run-view): absent is "Preparing…", `failed` is its error. For the image that
   replaces the viewer; for an overlay it is a note under the heading.
-- **Display.** The Labels toggle (on by default) changes the context's colours
-  without moving the camera or crosshair. A new scene on the same grid redraws in place.
+- **Display.** `LabelDisplay`, the caller's (the input review's Labels tab): colours on or off,
+  an overall opacity, each structure's opacity and whether it is hidden (by block id; mesh opacity
+  follows, 0 hides), and Fill or Outline, where outline draws only edge pixels on the slices
+  (highlighted regions too). None of it moves the camera or crosshair. A new scene on the same
+  grid redraws in place. `reviewGrid` returns the `legend`: each structure drawn, its colour,
+  and whether it is context, the output's own, or the check's, with its usual colour when
+  recoloured.
 - **Focus.** A To check item's focused blocks are drawn in `--check-outline`; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
   drawn even when no structure brings it. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they
   are scan voxels); else the middle of its cropped masks; else of its annotations (world mm through
   the grid's own affine, a projection on each orthogonal column); else, for labels, the middle of
   their bounding box on the coarsest labels level that has them, up to about 32 M voxels
-  (`labelsMiddle`). Surfaces give no point. Each item selection moves the crosshair once; the
-  Labels toggle never does.
+  (`labelsMiddle`). Surfaces give no point. Each item selection moves the crosshair once; a
+  display change never does.
 
 ## The viewer: one analysis grid from converted review assets
 
@@ -62,8 +67,12 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
     └─► Grid3D ── readLevel (whole level) ──► volume rendering; meshes fetched once each
 ```
 
-- **Panes.** `QuadViewer` names planes by the grid's axes (XY holds z, XZ y, YZ x) and colours them by the anatomy the caller gives per grid
-  (`planes`, from the base's catalog entry); without it they are uncoloured. Its views stay
+- **Panes.** A plane is the grid's XY (holds z), XZ (y) or YZ (x); `QuadViewer` names and colours
+  each by the anatomy the caller gives per grid (`planes`, from the base's catalog entry:
+  "Axial"), and without it names it by its axes, uncoloured. The fitted plane is named by its
+  target ("Growth plate"). The slice counter is a quiet corner number; the scale bar (the longest
+  round length under 100 px) shows only when the grid is `measured` (the run published its
+  affine; else its spacing is one per voxel). Its views stay
   mounted and move between CSS grid cells, so a chip swap, a layout change or full screen never
   remounts a pane; the layout is the caller's, the seams the viewer's.
   Rows run down, so z runs down in every slice pane and in 3D's opening view (`camera.up` = −z;
@@ -109,7 +118,7 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   encodes never reread live panes. Tries 1600, 1200, 800, 560, then 400 pixels wide (never above
   the screen's pixel ratio, skipping duplicate widths); null if none fits or any shown pane is
   loading, refining or failed. The caller freezes its marks and grid identity at invocation.
-- **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
+- **Window.** From the coarsest level, 1st to 99.9th percentile; editable under Contrast ("Black at", "White at").
 - **3D.** The meshes; the image is volume-rendered only when the scene has none (the scan before
   segmentation, not loaded otherwise), no slice planes: the coarsest level at once, then the
   finest level of at most 16 M voxels (`volume.ts`), as an 8-bit 3D texture between the window
@@ -137,12 +146,14 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   normal), as in DataViewer or Amira, so the tibia's shaft can be stood upright in the coronal and
   then the sagittal view: Alt + left drag in the pane, a dial about the crosshair; `,` / `.` turn the
   pane under the pointer (else the focused one) 1° anticlockwise / clockwise, 0.1° with Shift (not
-  `[` `]`: `]` folds the shell's right side); or the tool bar's Turn the planes popover, ±1° and
+  `[` `]`: `]` folds the shell's right side); or the tool bar's Planes popover, ±1° and
   ±5° per plane. Every turn keeps each pane a rotation of its grid pane, never a mirror. How far
   the planes are turned (`offGrid`) is the largest turn taking a grid pane onto its pane, so a pane
   spun in its own plane counts; the words ("Turned 3.6°") and Reset follow the panes' own on-grid
   test, so a pane a hair off the grid says "Turned 0.0°" rather than hiding behind the grid's
-  name. On the grid's axes the tool bar names the grid (`gridName`, "Tibia long-axis grid"), and Align lists the grid itself first ("Along the tibia long-axis grid", marked Measured on), which does what Reset does.
+  name. Planes (one popover: where the planes lie, Align, Turn, and Reset) names the grid on its
+  axes (`gridName`: "Along the tibia long-axis grid"), and Reset says where it goes back to; the
+  bar itself says only how far the planes are turned, when they are.
 - **Align.** Targets come from the caller (`planeTargets`, `targets.ts`), after the shown grid
   itself: the frames tasks oriented for, then a plane fitted (least squares, `fitNormal`) through
   the vertices of every published surface whose catalog entry has `fitsPlane` (mouse-oa: both
