@@ -36,7 +36,7 @@ import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
-import type { KeyLimits, Limits } from "./domains/run/admission";
+import type { Limits } from "./domains/run/admission";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
@@ -65,10 +65,8 @@ function limitNumber(name: string): number {
   return value;
 }
 
-/** What an organization with Voluma's key may run (`admission.ts`), every number from `RUN_LIMITS_<ORG>_*` so it can change without a deploy. */
-const keyLimitsFromEnv = (org: "LAB" | "JUDGES"): KeyLimits => ({
-  spendUsd: limitNumber(`RUN_LIMITS_${org}_SPEND_USD`),
-});
+/** An organization's model spend cap (`admission.ts`), from `RUN_LIMITS_<ORG>_SPEND_USD` so it can change without a deploy. */
+const spendLimitFromEnv = (org: "LAB" | "JUDGES") => limitNumber(`RUN_LIMITS_${org}_SPEND_USD`);
 
 /** A positive whole number from env, or `fallback` when unset. */
 function countFromEnv(name: string, fallback: number): number {
@@ -97,15 +95,15 @@ const db = drizzle(client, { casing: "snake_case" });
 // The order is the queue priority: judges are claimed before the lab (`Limits`).
 const keyOrganizations = [
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
-    ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, limits: keyLimitsFromEnv("JUDGES") }]
+    ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, spendUsd: spendLimitFromEnv("JUDGES") }]
     : []),
-  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
+  { id: required("WORKOS_LAB_ORGANIZATION_ID"), spendUsd: spendLimitFromEnv("LAB") },
 ];
 const guestOrganizationId = process.env.GUEST_ORGANIZATION_ID || null;
 // An org missing from `voluma` is no longer configured: its queued Voluma-key runs fail and its running ones stop.
 const appRunning = countFromEnv("RUN_LIMITS_APP_RUNNING", 2);
 const limits: Limits = {
-  voluma: new Map(keyOrganizations.map((org) => [org.id, org.limits])),
+  voluma: new Map(keyOrganizations.map((org) => [org.id, org.spendUsd])),
   appRunning,
 };
 

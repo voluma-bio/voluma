@@ -200,7 +200,7 @@ const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, 
  * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
  * person's message, `messages.ts`) is never left worse than `completed`: only its workers and the
  * root end, and main stays cut off (`cancelReviewWorkers`); the run ends `completed` with its
- * earlier results. `set` adds columns to the update (a recovery's lease reset).
+ * earlier results, and still records `error`. `set` adds columns to the update (a recovery's lease reset).
  */
 async function endUnfinished(
   tx: Tx,
@@ -213,13 +213,7 @@ async function endUnfinished(
   const correcting = reopenId !== null;
   if (correcting) await cancelReviewWorkers(tx, runId, status === "cancelled");
   else if (status === "cancelled") await cancelOpenThreads(tx, runId);
-  await markEnded(
-    tx,
-    runId,
-    correcting ? "completed" : status,
-    correcting ? undefined : error,
-    set,
-  );
+  await markEnded(tx, runId, correcting ? "completed" : status, error, set);
 }
 
 /** The one write that ends a run: its outcome, and its sealed keys forgotten. */
@@ -375,7 +369,7 @@ export function pgRunQueue(
             "Too many runs on people's own keys are waiting or running. Try again in a few minutes.",
         });
     }
-    const refused = admit("start", limits, reader.labId, await spentUsd(tx, reader.labId), {
+    const refused = admit(limits, reader.labId, await spentUsd(tx, reader.labId), {
       credentials,
     });
     if (refused) throw limitRefusal(refused);
@@ -584,7 +578,7 @@ export function pgRunQueue(
           if (run.credentials !== "visitor") {
             // A run that started is never refused on spend (`admit`), so its sum isn't read.
             const used = run.startedAt === null ? await spentUsd(tx, run.labId) : 0;
-            const refused = admit("claim", limits, run.labId, used, {
+            const refused = admit(limits, run.labId, used, {
               credentials: "voluma",
               started: run.startedAt !== null,
             });

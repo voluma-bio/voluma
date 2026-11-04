@@ -271,7 +271,7 @@ export async function decideMessage(
   const reopening = run.state === "ended";
   const sealedKeys = reopening ? reopenKeys(o.sealer, caller, run) : null;
   if (reopening) {
-    const refused = admit("reopen", o.limits, reader.labId, await spentUsd(tx, reader.labId), run);
+    const refused = admit(o.limits, reader.labId, await spentUsd(tx, reader.labId), run);
     if (refused === "no-key")
       throw new HTTPException(403, {
         message:

@@ -165,19 +165,22 @@ export const ownKeyBusy = sql`EXISTS (
  * The order the claim serves queued runs in, and so their places in line (the claim also takes
  * only a run the app cap and the own-key slot allow, so group 3 below is never taken before the
  * slot frees):
- *   0. a run that already started (released at a deploy, lease expired, reopened), so work in
- *      progress finishes before new work begins;
+ *   0. a run that already started (released at a deploy, lease expired, reopened) unless it is an
+ *      own-key run while the slot is taken (group 3), so work in progress finishes before new
+ *      work begins;
  *   1. an own-key run, while the own-key slot is free, so a backlog of Voluma-key runs can't starve
  *      a guest; its starters take turns (the starter claimed longest ago first, never claimed: first);
  *   2. Voluma-key runs, by organization priority (`orgs`, first served first; an org not listed
  *      last);
- *   3. an own-key run, while the slot is taken (the claim skips it, so this is only its place).
+ *   3. an own-key run, started or not, while the slot is taken (the claim skips it, so this is
+ *      only its place).
  * Then oldest first.
  */
 export const queueOrder = (orgs: readonly string[]): SQL[] => [
   sql`(CASE
+    WHEN ${runs.credentials} = 'visitor' AND ${ownKeyBusy} THEN 3
     WHEN ${runs.startedAt} IS NOT NULL THEN 0
-    WHEN ${runs.credentials} = 'visitor' THEN (CASE WHEN ${ownKeyBusy} THEN 3 ELSE 1 END)
+    WHEN ${runs.credentials} = 'visitor' THEN 1
     ELSE 2 END)`,
   sql`(CASE WHEN ${runs.startedAt} IS NULL AND ${runs.credentials} = 'visitor' THEN coalesce(
     (SELECT max(o.claimed_at) FROM runs o

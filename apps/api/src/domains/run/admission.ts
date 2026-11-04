@@ -7,21 +7,16 @@ import type { Run } from "@voluma/contracts/run";
 import { sql } from "drizzle-orm";
 import type { Tx } from "./pg-runs";
 
-/** An unset limit is `Infinity`, so every comparison below needs no unset case. */
-export type KeyLimits = {
-  /** Dollars of model spend the org's runs on Voluma's keys may total (`spentUsd`). */
-  spendUsd: number;
-};
-
 /**
  * What guards Voluma's key and the runner slots (index.ts). `voluma` has an entry for each
- * pre-created organization that may run on it, each counted on its own; its order is the queue
+ * pre-created organization that may run on it, each counted on its own: the dollars of model spend
+ * its runs on Voluma's keys may total (`spentUsd`; unset is `Infinity`). Its order is the queue
  * priority (first is served first). `appRunning` caps runs `running` over every account and
  * organization, enforced by the claim, of which at most one is on a caller's own keys. A run over
  * a cap waits `queued`; nothing is refused for it.
  */
 export type Limits = {
-  voluma: ReadonlyMap<string, KeyLimits>;
+  voluma: ReadonlyMap<string, number>;
   appRunning: number;
 };
 
@@ -49,27 +44,24 @@ export async function spentUsd(tx: Tx, labId: string): Promise<number> {
   return row?.spent ?? 0;
 }
 
-/** Whether the org is configured to run on Voluma's keys; `admit` refuses `no-key` by the same map, and the heartbeat and `Me.volumaKey` ask this. */
+/** Whether the org is configured to run on Voluma's keys: the one place that reads the org map for it. */
 export const mayUseVolumaKey = (limits: Limits, labId: string) => limits.voluma.has(labId);
 
 /**
- * Why `run` may not go on at `stage`, or null. An own-key run is never refused (it costs
- * Voluma only runner time, which the claim's slot caps queue). A reopen
- * (a correction) of a `voluma` run (a reopen of an own-key run carries its own keys) is judged by the spend
- * limit. A claim refuses on spend only a run that never started (one start request can queue
- * many runs under the limit); a run that started keeps going after a deploy or a reopen, so a
- * live run is never refused.
+ * Why `run` may not go on, or null. An own-key run is never refused (it costs Voluma only runner
+ * time, which the claim's slot caps queue). A start or a reopen (a correction) of a `voluma` run is
+ * judged by the spend limit. A claim passes `started` for a run that already started: it keeps
+ * going after a deploy or a reopen, so a live run is never refused on spend, while a claim of a
+ * run that never started is (one start request can queue many runs under the limit).
  */
 export function admit(
-  stage: "start" | "reopen" | "claim",
   limits: Limits,
   labId: string,
   spent: number,
   run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
   if (run.credentials === "visitor") return null;
-  const org = limits.voluma.get(labId);
-  if (!org) return "no-key";
-  if (!(stage === "claim" && run.started) && spent >= org.spendUsd) return "spend";
+  if (!mayUseVolumaKey(limits, labId)) return "no-key";
+  if (!run.started && spent >= (limits.voluma.get(labId) ?? 0)) return "spend";
   return null;
 }
