@@ -49,7 +49,9 @@ import { cancelOpenThreads, cancelReviewWorkers, lockRun } from "./pg-event-log"
 import {
   loadRun,
   loadRuns,
+  ownKeyBusy,
   type Queryable,
+  queueOrder,
   readableInputs,
   readableRuns,
   readableStudies,
@@ -297,6 +299,9 @@ export function pgRunQueue(
   /** `DEFAULT_RUN_HARNESS`: the loop of a run whose start names none. */
   defaultHarness: Harness,
 ) {
+  /** The organizations in queue priority order (`Limits`). */
+  const orgs = [...limits.voluma.keys()];
+
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
@@ -360,7 +365,7 @@ export function pgRunQueue(
     const credentials = starts.keys ? "visitor" : "voluma";
     const model = pickModel(modelOverride, credentials, starts.model);
     const harness = starts.harness ?? defaultHarness;
-    const used = await usage(tx, reader.labId, credentials);
+    const used = await usage(tx, reader.labId);
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limits, reader.labId, used, { credentials });
       if (refused) throw limitRefusal(refused);
@@ -380,7 +385,6 @@ export function pgRunQueue(
         harness,
         state: "queued",
       });
-      if (credentials === "visitor") used.ownKeyActive++;
     }
   };
 
@@ -420,7 +424,7 @@ export function pgRunQueue(
           ...request,
           runs: [{ id: request.id, inputId: request.inputId }],
         });
-        return { run: await loadRun(tx, request.id) };
+        return { run: await loadRun(tx, request.id, orgs) };
       }),
 
     /**
@@ -471,7 +475,7 @@ export function pgRunQueue(
      */
     async cancel(reader: Reader, runId: string) {
       await locked(async (tx) => {
-        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
+        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), orgs);
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
         // A report may end the run under its own locks: take them and judge the state they leave.
@@ -481,7 +485,7 @@ export function pgRunQueue(
       notifier.notify(runId);
       // After the commit, so a reply that cannot be read cannot roll the cancel back.
       return {
-        run: await db.transaction((tx) => loadRun(tx, runId), {
+        run: await db.transaction((tx) => loadRun(tx, runId, orgs), {
           isolationLevel: "repeatable read",
         }),
       };
@@ -539,41 +543,38 @@ export function pgRunQueue(
     },
 
     /**
-     * `awaiting-keys` → `queued`, for the run's own starter, sealing the new keys. The run
-     * stays as it was when the own-key cap is reached.
+     * `awaiting-keys` → `queued`, for the run's own starter, sealing the new keys.
      */
     resume: (reader: Reader, runId: string, keys: VisitorKeys) =>
       locked(async (tx) => {
-        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
+        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), orgs);
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.state.status !== "awaiting-keys")
           throw new HTTPException(409, { message: "The run is not waiting for keys." });
-        const refused = admit(
-          "resume",
-          limits,
-          reader.labId,
-          await usage(tx, reader.labId, run.credentials),
-          run,
-        );
+        const refused = admit("resume", limits, reader.labId, await usage(tx, reader.labId), run);
         if (refused) throw limitRefusal(refused);
         await tx
           .update(runs)
           .set({ state: "queued", awaitingSince: null, sealedKeys: sealer.seal(runId, keys) })
           .where(eq(runs.id, runId));
-        return { run: await loadRun(tx, runId) };
+        return { run: await loadRun(tx, runId, orgs) };
       }),
 
     /**
-     * One transaction: sweep expired leases, then take the oldest queued run of the org served
-     * longest ago that the limits allow and whose loop the runner lists (a run's `harness`, null:
-     * `tasks`), with its keys if it is an own-key run. An own-key run whose sealed keys cannot be
-     * opened goes to `awaiting-keys` instead.
+     * One transaction: sweep expired leases, then take the first queued run in `queueOrder` that
+     * the slot caps and the org's limits allow and whose loop the runner lists (a run's `harness`,
+     * null: `tasks`), with its keys if it is an own-key run. An own-key run whose sealed keys
+     * cannot be opened goes to `awaiting-keys` instead.
      */
     claim: (runnerId: string, harnesses: readonly Harness[]) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
-        // Round-robin by org: the org claimed longest ago goes first (never claimed: first),
-        // and within an org the oldest run, so one org's backlog can't starve another.
+        // The slot caps (`Limits`): counted under the lock, from every runner process, so a
+        // deploy overlap of two runners can't take more than the app's total.
+        const [counts] = await tx.execute<{ running: number; ownKeyBusy: boolean }>(sql`
+          SELECT count(*)::int AS running, ${ownKeyBusy} AS "ownKeyBusy"
+          FROM runs WHERE state = 'running' AND NOT example`);
+        if (!counts || counts.running >= limits.appRunning) return null;
         const queued = await tx
           .select()
           .from(runs)
@@ -583,16 +584,14 @@ export function pgRunQueue(
               inArray(sql`coalesce(${runs.harness}, 'tasks')`, [...harnesses]),
             ),
           )
-          .orderBy(
-            sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
-            asc(runs.createdAt),
-            asc(runs.id),
-          );
+          .orderBy(...queueOrder(orgs));
         // Failing or skipping a run changes none of these counts, so read each org's once.
         const usages = new Map<string, Usage>();
         for (const run of queued) {
-          if (run.credentials === "voluma") {
-            const used = usages.get(run.labId) ?? (await usage(tx, run.labId, "voluma"));
+          if (run.credentials === "visitor") {
+            if (counts.ownKeyBusy) continue;
+          } else {
+            const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
             usages.set(run.labId, used);
             const refused = admit("claim", limits, run.labId, used, {
               credentials: "voluma",
@@ -632,7 +631,7 @@ export function pgRunQueue(
             .from(studies)
             .where(eq(studies.id, run.studyId));
           return {
-            run: await loadRun(tx, run.id),
+            run: await loadRun(tx, run.id, orgs),
             leaseToken,
             budgetUsd: study?.budgetUsd ?? null,
             ...(keys && { keys }),

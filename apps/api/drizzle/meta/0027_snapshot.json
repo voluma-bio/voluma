@@ -1,5 +1,5 @@
 {
-  "id": "c9945750-e2fb-49f6-b40e-33ee3c42e0d0",
+  "id": "e4e8aed6-09b7-401b-ba09-d58df1d7b88f",
   "prevId": "2f5fd744-f1e7-4b60-96e8-dd11d30f4481",
   "version": "7",
   "dialect": "postgresql",
@@ -288,12 +288,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "sealed_keys": {
-          "name": "sealed_keys",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "model": {
           "name": "model",
           "type": "text",
@@ -473,6 +467,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runs_active_state": {
+          "name": "runs_active_state",
+          "columns": [
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"runs\".\"state\" IN ('queued', 'running')",
           "concurrently": false,
           "method": "btree",
           "with": {}

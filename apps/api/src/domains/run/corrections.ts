@@ -253,7 +253,7 @@ export async function decideMessage(
     .select({ id: events.id })
     .from(events)
     .where(and(eq(events.runId, runId), eq(events.id, eventId)));
-  const stateNow = async () => (await loadRun(tx, runId)).state;
+  const stateNow = async () => (await loadRun(tx, runId, [...o.limits.voluma.keys()])).state;
   // A message already stored is answered even though the run is busy answering it.
   if (again && refusal?.status !== 403)
     return { eventId, state: await stateNow(), duplicate: true };
@@ -295,13 +295,7 @@ export async function decideMessage(
   const reopening = run.state === "ended";
   const sealedKeys = reopening ? reopenKeys(o.sealer, caller, run) : null;
   if (reopening) {
-    const refused = admit(
-      "reopen",
-      o.limits,
-      reader.labId,
-      await usage(tx, reader.labId, run.credentials),
-      run,
-    );
+    const refused = admit("reopen", o.limits, reader.labId, await usage(tx, reader.labId), run);
     if (refused === "no-key")
       throw new HTTPException(403, {
         message:

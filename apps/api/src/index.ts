@@ -16,7 +16,7 @@
  * DEFAULT_RUN_HARNESS (tasks|agents, default agents): the loop of a run whose start names none.
  * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
  * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
- * and RUN_LIMITS_OWN_KEY_ACTIVE (runs on callers' own keys, queued or running, over every account); unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -89,17 +89,19 @@ const db = drizzle(client, { casing: "snake_case" });
 // The organizations that get Voluma's key, and what each may run on it: only these, never an
 // organization that merely exists. Members sign in to them; the guest organization (auth.ts) is
 // separate and has no key, and unset means the sign-in wall.
+// The order is the queue priority: judges are claimed before the lab (`Limits`).
 const keyOrganizations = [
-  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
   ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
     ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, limits: keyLimitsFromEnv("JUDGES") }]
     : []),
+  { id: required("WORKOS_LAB_ORGANIZATION_ID"), limits: keyLimitsFromEnv("LAB") },
 ];
 const guestOrganizationId = process.env.GUEST_ORGANIZATION_ID || null;
 // An org missing from `voluma` is no longer configured: its queued Voluma-key runs fail and its running ones stop.
+const appRunning = countFromEnv("RUN_LIMITS_APP_RUNNING", 2);
 const limits: Limits = {
   voluma: new Map(keyOrganizations.map((org) => [org.id, org.limits])),
-  ownKeyActive: limitNumber("RUN_LIMITS_OWN_KEY_ACTIVE"),
+  appRunning,
 };
 
 const auth = createAuth({
@@ -117,7 +119,7 @@ const auth = createAuth({
 
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
 const draining = new AbortController();
-const results = resultsLoader();
+const results = resultsLoader([...limits.voluma.keys()]);
 const reads = pgRunReads(db, results);
 const studies = pgStudyReads(db, results);
 const notifier = createNotifier();

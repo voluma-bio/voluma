@@ -61,8 +61,8 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
 type Progress = { done: number; total: number };
 
 /**
- * Where the run stands in a few words: "Finished", "Running, 4 of 9 tasks done", "Waiting, place
- * 2 in line" (also a run that lost its runner and waits for another); otherwise the word every
+ * Where the run stands in a few words: "Finished", "Running, 4 of 9 tasks done", "In queue: the
+ * system is busy, place 2 in line" (also a run that lost its runner and waits for another); otherwise the word every
  * list uses (`runStatus`). How long it took is in Run details.
  */
 function where(
@@ -78,7 +78,10 @@ function where(
   )
     return { status: "check", text: "Waiting on you" };
   if (state.status === "queued")
-    return { status: "waiting", text: `Waiting, place ${state.position} in line` };
+    return {
+      status: "waiting",
+      text: `In queue: the system is busy, place ${state.position} in line`,
+    };
   if (state.status === "running")
     return {
       status: "running",
