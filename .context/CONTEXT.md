@@ -195,7 +195,7 @@ cookie that is refused is cleared and answered 401, never turned into a guest: t
 re-loads, and lands on a guest or the sign-in screen. `/me` returns `kind: "visitor"`. Unset
 means the sign-in wall, and a guest cookie is ignored. `createAuth` throws when the guest
 organization is a member organization. There is no per-visitor mint limit: the spend limit is per
-org, the upload cap per person, the run slots app-wide. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
+org, the upload cap and the 20 unfinished own-key runs per person, the run slots app-wide. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
 share, run by run, so it is for signed-in members; public examples are seeded into the Demo
 organization instead, and every organization reads them (`readableRuns`: `example` rows need no
 org match, so the Judges see them too). They share the Demo workspace
