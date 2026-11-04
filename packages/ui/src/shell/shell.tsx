@@ -24,7 +24,8 @@ export type ShellSide = "left" | "right";
 type ShellState = {
   /** Which sides are folded: a `SidePanel` shows as its strip. */
   folded: Record<ShellSide, boolean>;
-  fold(side: ShellSide | "both", folded: boolean): void;
+  /** Apply a fold and return its previous state, including changes queued by another screen. */
+  fold(side: ShellSide | "both", folded: boolean): boolean;
 };
 
 export const ShellContext = createContext<ShellState | null>(null);
@@ -42,21 +43,25 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [folded, setFolded] = useState<Record<ShellSide, boolean>>({ left: false, right: false });
+  const latestFolded = useRef(folded);
   const fullOpener = useRef<HTMLElement | null>(null);
   const fold = useCallback((side: ShellSide | "both", value: boolean) => {
     if (side === "both") {
       if (value) fullOpener.current = document.activeElement as HTMLElement;
       else requestAnimationFrame(() => fullOpener.current?.focus());
     }
-    setFolded((f) =>
+    const f = latestFolded.current;
+    const next =
       side === "both"
         ? f.left === value && f.right === value
           ? f
           : { left: value, right: value }
         : f[side] === value
           ? f
-          : { ...f, [side]: value },
-    );
+          : { ...f, [side]: value };
+    latestFolded.current = next;
+    setFolded(next);
+    return side === "both" ? f.left && f.right : f[side];
   }, []);
   const full = folded.left && folded.right;
   const [heading, setHeading] = useState<HTMLElement | null>(null);
@@ -138,15 +143,11 @@ export function useFoldWhile(side: ShellSide, active: boolean, restoreOnExit = f
   // Whether this hook folded the side, so only it unfolds it; and the fold as last rendered.
   const mine = useRef(false);
   const was = useRef(folded);
-  const latest = useRef(folded);
-  latest.current = folded;
   useEffect(() => {
     if (!active) return;
-    const enteredFolded = latest.current;
-    if (!enteredFolded) {
-      mine.current = true;
-      fold(side, true);
-    }
+    // The outgoing screen restores in cleanup before this effect; render-time state is stale.
+    const enteredFolded = fold(side, true);
+    mine.current = !enteredFolded;
     return () => {
       if (restoreOnExit) fold(side, enteredFolded);
       else if (mine.current) fold(side, false);
