@@ -49,17 +49,16 @@ import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { holdLevel } from "./planes";
-import {
-  type AssetLevel,
-  capturePane,
-  type GridMark,
-  type GridMesh,
-  type GridScene,
-  type MarkTool,
-  type PaneHandle,
-  type PaneStatus,
-  type ShownMark,
-  type Zyx,
+import type {
+  AssetLevel,
+  GridMark,
+  GridMesh,
+  GridScene,
+  MarkTool,
+  PaneHandle,
+  PaneStatus,
+  ShownMark,
+  Zyx,
 } from "./scene";
 import { tokenColor } from "./token-color";
 import { volumeBytes, volumeLevel, volumeMesh, volumeSteps } from "./volume";
@@ -255,7 +254,6 @@ export function Grid3D({
       },
     });
     handle.current = {
-      capture: () => ({ ...capturePane(renderer.domElement, draw), view: now() }),
       view: now,
       layers: () => layer.layers(renderer.domElement, draw),
       show(saved) {

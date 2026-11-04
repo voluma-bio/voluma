@@ -44,7 +44,6 @@ import { holdLevel, type Plane, readPlane } from "./planes";
 import { type Level3, resample, sampling, samplingCorners, valueAt, voxelAt } from "./reslice";
 import {
   type Axis,
-  capturePane,
   type GridMark,
   type GridScene,
   levelFor,
@@ -332,7 +331,6 @@ export function SlicePane({
       return { zoom: v.zoom / v.fit, center: [v.center[0], v.center[1]] };
     };
     handle.current = {
-      capture: () => ({ ...capturePane(renderer.domElement, paint), view: now() }),
       view: now,
       layers: () => layer.layers(renderer.domElement, paint),
       show(saved: PaneView) {
