@@ -30,43 +30,59 @@ import objects
 import sidecar
 import viewlib as vl
 from envelope import close_and_fill
+from scipy import ndimage as ndi
 
 SUBSAMPLE = 2  # epiphysis points for the PCA are taken every 2nd voxel
 CAP_MM = 0.63  # how far from its joint end a bone's cap reaches, for the femur/tibia check
 CAP_GAP = 0.05  # cap solidities closer than this cannot tell the two bones apart
 
 
+def largest_piece(m):
+    """The largest 6-connected piece of mask `m`: a fragment or stray voxel under the same label does not move the bone's ends."""
+    zs, ys, xs = (np.flatnonzero(m.any(axis=ax)) for ax in ((1, 2), (0, 2), (0, 1)))
+    box = np.s_[zs[0] : zs[-1] + 1, ys[0] : ys[-1] + 1, xs[0] : xs[-1] + 1]
+    pieces, n = ndi.label(m[box])
+    out = np.zeros_like(m)
+    if n:
+        out[box] = pieces == 1 + int(np.argmax(np.bincount(pieces.ravel())[1:]))
+    return out
+
+
 def cap_solidity(m, low_end, cap_vox):
     """Area over convex-hull area of the cap of mask `m` within `cap_vox` slices of its low or high end, projected along z.
-    The femur's cap holds the intercondylar notch, open toward the joint, so its footprint is U-shaped; the tibial plateau's
-    is a solid blob. On ten lab scans the femur's cap gave 0.51 to 0.80 and the tibia's 0.83 to 0.95, the smallest gap 0.12."""
+    The femur's cap holds the intercondylar notch, open toward the joint, so its footprint is U-shaped; the tibial plateau's is a solid blob. On ten lab scans the femur's cap gave 0.51 to 0.80 and the
+    tibia's 0.83 to 0.95, the smallest gap 0.12."""
     from skimage.morphology import convex_hull_image
 
     zs = np.flatnonzero(m.any(axis=(1, 2)))
-    lo, hi = (zs[0], zs[0] + cap_vox) if low_end else (max(zs[-1] - cap_vox + 1, zs[0]), zs[-1] + 1)
+    z0, z1 = zs[0], zs[-1]
+    lo, hi = (z0, z0 + cap_vox) if low_end else (max(z1 - cap_vox + 1, z0), z1 + 1)
     foot = m[lo:hi].any(axis=0)
     return float(foot.sum() / max(convex_hull_image(foot).sum(), 1))
 
 
-def check_bone(labels, label, other, joint_end, vox):
-    """Refuse a `label` that is not the tibia across the joint from `other` (the femur), or a --joint-end on the wrong side.
-    Returns the diagnostics for the result record."""
-    mask, oth = labels == label, labels == other
+def check_bone(labels, mask, label, other, joint_end, vox):
+    """Refuse a `label` that is not the tibia across the joint from `other` (the femur), then a --joint-end on the wrong
+    side. Returns the diagnostics for the result record."""
+    if label == other:
+        sidecar.fail(f'--label and --femur-label are both {label}: pass the tibia\'s label as --label (2 in outputs.yaml)')
+    oth = labels == other
     if not oth.any():
         return {'tibia_check': f'not made: label {other} (the femur) is empty, so nothing to compare against; check the QC'}
+    mask, oth = largest_piece(mask), largest_piece(oth)
     zc, zo = (float(np.flatnonzero(m.any(axis=(1, 2))).mean()) for m in (mask, oth))
     facing_low = zo < zc  # the end of this bone that faces the femur
-    if (joint_end == 'low') != facing_low:
-        sidecar.fail(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {"low" if facing_low else "high"} '
-                     f'end of scan z for label {label} on this scan; pass --joint-end {"low" if facing_low else "high"}')
     cap = round(CAP_MM / vox)
     s, so = cap_solidity(mask, facing_low, cap), cap_solidity(oth, not facing_low, cap)
     if s < so - CAP_GAP:
-        sidecar.fail(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap solidity '
-                     f'{s:.3f} against {so:.3f}): the femur and tibia labels look swapped. Look at both on the 3D sheet and give each '
-                     'bone its label (relabel.py) before you build the frame')
+        sidecar.fail(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap '
+                     f'solidity {s:.3f} against {so:.3f}), so the two bones\' labels look swapped in bone-labels: tell main, '
+                     'with the 3D sheet, so the labels are corrected before any tibial step')
+    if (joint_end == 'low') != facing_low:
+        sidecar.fail(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {"low" if facing_low else "high"} '
+                     f'end of scan z for label {label} on this scan, so pass --joint-end {"low" if facing_low else "high"}')
     verdict = 'tibia' if s > so + CAP_GAP else 'unclear: the caps are too alike to tell the bones apart; check the QC montage for the plateau'
-    return {'tibia_check': verdict, 'cap_solidity': {str(label): round(s, 3), str(other): round(so, 3)}}
+    return {'tibia_check': verdict, 'cap_solidity': {'tibia_label': round(s, 3), 'femur_label': round(so, 3)}}
 
 
 def zrange(frac, lo, hi, joint_end):
@@ -163,7 +179,7 @@ def main():
     mask = labels == a.label
     if not mask.any():
         sidecar.fail(f'label {a.label} is empty in {a.labels}')
-    check = check_bone(labels, a.label, a.femur_label, a.joint_end, sp[0])
+    check = check_bone(labels, mask, a.label, a.femur_label, a.joint_end, sp[0])
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)
