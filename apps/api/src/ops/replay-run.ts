@@ -39,6 +39,7 @@ const { values } = parseArgs({
     "target-seconds": { type: "string" },
     speed: { type: "string" },
     replace: { type: "boolean" },
+    ended: { type: "boolean" },
   },
 });
 
@@ -218,9 +219,24 @@ async function play() {
     });
     inserted += batch.length;
     if (inserted === batch.length || inserted % 200 === 0 || i === log.length) {
-      const last = batch[batch.length - 1]!;
-      console.log(`  inserted ${inserted}/${log.length} seq ${last.seq} ${last.type}`);
+      const last = batch[batch.length - 1];
+      if (last) console.log(`  inserted ${inserted}/${log.length} seq ${last.seq} ${last.type}`);
     }
+  }
+  if (values.ended) {
+    const endedAt = new Date(log[log.length - 1]?.createdAt ?? Date.now());
+    await db
+      .update(runs)
+      .set({
+        state: "ended",
+        outcome: "completed",
+        endedAt,
+        leaseHolder: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+      })
+      .where(eq(runs.id, map.localRunId));
+    console.log(`marked ended completed at ${endedAt.toISOString()}`);
   }
   await client.end();
   const wall = Date.now() - wall0;
@@ -235,7 +251,7 @@ async function play() {
         wallMs: wall,
         targetMs,
         from,
-        ended: false,
+        ended: Boolean(values.ended),
       },
       null,
       2,

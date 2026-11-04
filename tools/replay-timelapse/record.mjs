@@ -127,6 +127,7 @@ const play = spawn(
     "@voluma/api",
     "replay:run",
     "--play",
+    "--ended",
     "--from",
     eventsPath,
     "--target-seconds",
@@ -165,10 +166,13 @@ const patella = page.getByText(/Patella volume/i).first();
 if (await patella.count()) await patella.click();
 await page.waitForTimeout(1500);
 await page.screenshot({ path: resolve(outDir, "shots/05-values.png") });
-await page.screenshot({ path: resolve(outDir, "shots/06-final-outputs.png") });
 
 await playDone.catch((err) => console.error("play failed", err));
-await waitUntil(cues.endMs, 3000);
+await waitUntil(cues.endMs, 2500);
+const femur = page.getByText(/Distal femoral length/i).first();
+if (await femur.count()) await femur.click();
+await page.waitForTimeout(1500);
+await page.screenshot({ path: resolve(outDir, "shots/06-final-outputs.png") });
 await page.screenshot({ path: resolve(outDir, "shots/07-end.png") });
 await page.waitForTimeout(2000);
 
