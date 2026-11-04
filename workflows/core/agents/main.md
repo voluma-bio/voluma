@@ -79,7 +79,8 @@ Your first move is an audit, not a fix: a fresh worker that reviews the failed w
 whole text, the evidence images, the outputs it rests on) and reads the skills that bear on it closely, their
 resources included: each script's `--help` and source for what its checks test. It reports a diagnosis: which
 output is wrong, why, and the fix. Open the evidence images yourself too. Then have the fix made, by that worker
-or a fresh one, as the diagnosis says. If it fails, try a different approach. Only after two different attempts
+or a fresh one, as the diagnosis says. If it fails, try a different approach, briefed
+with what the first found. Only after two different attempts
 fail, report the best one with a To check item, or mark the output missing with what each attempt found. Never
 wait on the researcher for this.
 
