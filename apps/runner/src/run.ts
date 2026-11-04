@@ -6,7 +6,7 @@
  * (`lease.ts`) and stops at once on any of: the server ending the run, a lost lease, a
  * self-stop, or the service shutting down. Then it reports.
  *
- * A visitor run uses the claim's Meta key for the model, held in this function's
+ * An own-key run uses the claim's Meta key for the model, held in this function's
  * scope only. Everything that leaves the process goes through the run's `redact`: the
  * run client (`runClient`) redacts what it sends, the console line is redacted before it is
  * clipped. The function never rejects: every failure after `redact` exists is caught and
@@ -37,6 +37,7 @@ import { resolve } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
+import { ownKeyMayUse } from "@voluma/contracts/run";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { AGENT_TOOL_NAMES } from "@voluma/harness/agents/tools/registry";
@@ -55,7 +56,7 @@ import {
 import type { ObjectStore } from "@voluma/object-store";
 import type { AgentDefinition } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
-import { type Config, isVisitorSafe, providerKey } from "./config.ts";
+import { type Config, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaImages } from "./meta-images.ts";
@@ -79,7 +80,7 @@ const roleModelUnset = (alias: string) =>
 /** What the researcher reads when a run's chosen model cannot be used by this runner. */
 const runModelUnavailable = (model: string) =>
   `this run's AI (${model}) is not set up on this server; whoever runs Voluma sets it up`;
-const runModelNotForVisitors = (model: string) =>
+const runModelNotForOwnKey = (model: string) =>
   `${model} cannot run on your own key; start the run again with a model that can, or with Voluma's key`;
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
@@ -162,11 +163,11 @@ async function claimBody(
   const { run, leaseToken, keys, budgetUsd } = claim;
   const runId = run.id;
   const claimId = randomUUID();
-  const visitor = keys !== undefined;
-  /** The key for a provider: a visitor's Meta key is good for Meta alone. */
+  const own = keys !== undefined;
+  /** The key for a provider: an own Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
-    visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
-  const redact: Redact = redactor([...config.secrets, ...(visitor ? [keys.metaApiKey] : [])]);
+    own ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
+  const redact: Redact = redactor([...config.secrets, ...(own ? [keys.metaApiKey] : [])]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
   /** The report keeps only `errorText`; the stack shows where an error came from. */
   const logStack = (e: unknown) => log(e instanceof Error && e.stack ? e.stack : String(e));
@@ -243,7 +244,7 @@ async function claimBody(
         void events?.pull(seq).catch((e) => log(`pull failed, will retry: ${errorText(e)}`)),
       log,
     });
-    log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
+    log(`claimed (${own ? "own" : "voluma"} key)`);
 
     // Metered from the start of creation (the sweep included) to destroy: a conservative upper bound.
     const modal = claimSandboxes(config, config.modal, claimId);
@@ -371,11 +372,10 @@ async function claimBody(
           knownTools: AGENT_TOOL_NAMES,
         }),
       );
-      // The model every role uses: `RUNNER_MODEL` (a plumbing check) over the run's own model
-      // (`run.model`, chosen by the API) over the role file's alias. A run without one predates
-      // the choice.
+      // The model every role uses: the run's own (`run.model`, chosen by the API) over the role
+      // file's alias. A run without one predates the choice.
       const runModel = (): Model<Api> | undefined => {
-        if (!run.model || config.modelForced) return undefined;
+        if (!run.model) return undefined;
         const [provider = "", ...id] = run.model.split("/");
         const model = models.getModel(provider, id.join("/"));
         if (!model || !keyFor(provider)) {
@@ -389,7 +389,7 @@ async function claimBody(
       const chosen = runModel();
       // Without a run model, a role's model is its file's alias. A run on its own key sends that key
       // and the scan to Standard-mode Meta models only, whichever way the model was picked
-      // (forced, alias or the run's), so a run that gets another fails here and says which.
+      // (the run's or the role file's alias), so a run that gets another fails here and says which.
       const roleModel = ({ name, model: alias }: AgentDefinition) => {
         const model = chosen ?? ctx.aliases[alias];
         if (!model) {
@@ -398,24 +398,20 @@ async function claimBody(
           );
           throw new Error(roleModelUnset(alias));
         }
-        if (visitor && !isVisitorSafe({ provider: model.provider, id: model.id })) {
+        if (own && !ownKeyMayUse(`${model.provider}/${model.id}`)) {
           log(
             `the model ${model.provider}/${model.id} cannot take a run's own Meta key (not a Standard-mode Meta model)`,
           );
-          throw new Error(runModelNotForVisitors(`${model.provider}/${model.id}`));
+          throw new Error(runModelNotForOwnKey(`${model.provider}/${model.id}`));
         }
         return model;
       };
-      // The level every role uses: the run's own (`run.thinking`, picked at /new) unless the runner
-      // forces its model (`RUNNER_MODEL`), where `RUNNER_THINKING` wins when set; else the role
-      // file's, else the runner's, else none is sent ("off"). A run's or forced model gets the
-      // nearest level it supports (DeepSeek Flash has no `medium`).
-      // A visitor's run thinks like anyone's: only whose key it uses differs.
+      // The level every role uses: the run's own (`run.thinking`, picked at /new), else the role
+      // file's, else none is sent ("off"), at the nearest level the model supports (DeepSeek
+      // Flash has no `medium`).
+      // An own-key run thinks like anyone's: only whose key it uses differs.
       const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
-        const wanted = config.modelForced
-          ? (config.thinking ?? run.thinking ?? thinking)
-          : (run.thinking ?? thinking ?? config.thinking);
-        const level = nearestThinking(wanted, model);
+        const level = nearestThinking(run.thinking ?? thinking, model);
         assertThinking(level, [model], `the ${name} role's`);
         return level ?? "off";
       };
@@ -436,14 +432,14 @@ async function claimBody(
       // A thread keeps the model it started on (the log records it).
       const threadModel = (fallback: Model<Api>, recorded: string | undefined) => {
         if (recorded) {
-          // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only. Any other
+          // Only a model this run uses (each already passed the own-key rule in `roleModel`). Any other
           // thread (a run made on another model, reopened for a correction) gets the role's model:
           // its stored history was written by another, so it is refused as unresumable and the run
           // loop starts the work again (`agents/loop.ts`), instead of the run failing.
           const [provider = "", ...id] = recorded.split("/");
-          const allowed = visitor
-            ? isVisitorSafe({ provider, id: id.join("/") })
-            : [...setups.values()].some(({ model: m }) => `${m.provider}/${m.id}` === recorded);
+          const allowed = [...setups.values()].some(
+            ({ model: m }) => `${m.provider}/${m.id}` === recorded,
+          );
           return (allowed && models.getModel(provider, id.join("/"))) || fallback;
         }
         return fallback;
@@ -487,7 +483,7 @@ async function claimBody(
         ? (sandbox) =>
             sandboxGateway(
               config,
-              { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
+              { runId, leaseToken, ownMetaKey: keys?.metaApiKey },
               sandbox,
               redact,
             )

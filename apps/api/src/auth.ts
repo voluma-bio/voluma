@@ -68,6 +68,8 @@ export interface AuthConfig {
   organizations: string[];
   /** Who a request with no credential is, or null for a sign-in wall. Guests belong to `organizationId`. */
   guest: { organizationId: string } | null;
+  /** Whether an organization's accounts run on Voluma's key (`Me.volumaKey`); index.ts answers from the run limits' org map. */
+  mayUseVolumaKey: (labId: string) => boolean;
   /** Where the browser reaches the app (no trailing slash). Never taken from `Host`. */
   appUrl: string;
   /** The runner's bearer token. */
@@ -232,7 +234,6 @@ function userPrincipal(user: User, labId: string): Extract<Principal, { account:
     email: user.email,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
     labId,
-    volumaKey: true,
   };
 }
 
@@ -246,13 +247,16 @@ function guestPrincipal(
     account: "visitor",
     name: null,
     labId: guest.organizationId,
-    volumaKey: false,
   };
 }
 
 /** What `/me` and the sign-in routes tell the browser about a user. */
-function meOf(user: Extract<Principal, { kind: "user" }>): Me {
-  const { userId, name, labId, volumaKey } = user;
+function meOf(
+  user: Extract<Principal, { kind: "user" }>,
+  mayUseVolumaKey: AuthConfig["mayUseVolumaKey"],
+): Me {
+  const { userId, name, labId } = user;
+  const volumaKey = mayUseVolumaKey(labId);
   return user.account === "member"
     ? { kind: "member", userId, email: user.email, name, labId, volumaKey }
     : { kind: "visitor", userId, name, labId, volumaKey };
@@ -646,7 +650,7 @@ export function createAuth(config: AuthConfig) {
       }),
     );
     setCookies(c, cookies);
-    return c.json(meOf(userPrincipal(auth.user, auth.organizationId)));
+    return c.json(meOf(userPrincipal(auth.user, auth.organizationId), config.mayUseVolumaKey));
   });
 
   sessionRoutes.post("/logout", async (c) => {
@@ -672,12 +676,12 @@ export function createAuth(config: AuthConfig) {
     const cookies: string[] = [];
     const id = (await guestIdFromCookie(c)) ?? (await mintGuest(cookies));
     setCookies(c, cookies);
-    return c.json(meOf(guestPrincipal(id, config.guest)));
+    return c.json(meOf(guestPrincipal(id, config.guest), config.mayUseVolumaKey));
   });
 
   const userRoutes = new Hono<UserEnv>().use(requireUser);
 
-  userRoutes.get("/me", (c) => c.json(meOf(c.var.user)));
+  userRoutes.get("/me", (c) => c.json(meOf(c.var.user, config.mayUseVolumaKey)));
 
   return {
     guards: [bearer, csrf] as const,

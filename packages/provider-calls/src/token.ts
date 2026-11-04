@@ -21,7 +21,12 @@ export type TokenClaims = {
   providers: Provider[];
   /** Unix seconds. */
   exp: number;
-  /** A visitor's own keys: when present they are the only keys this token can spend. */
+  /** The starter's own keys: when present they are the only keys this token can spend. */
+  ownKeys?: Partial<Record<Provider, string>>;
+  /**
+   * The old name of `ownKeys`, still what a minted token carries so a gateway from before the
+   * rename reads it. Step 2 of the `visitor` → `own` rename mints `ownKeys`; step 3 deletes this.
+   */
   visitorKeys?: Partial<Record<Provider, string>>;
 };
 
@@ -39,7 +44,7 @@ export function mintGatewayToken(
     sandbox: string;
     providers: Provider[];
     lifetimeSeconds: number;
-    visitorKeys?: Partial<Record<Provider, string>>;
+    ownKeys?: Partial<Record<Provider, string>>;
   },
   secret: TokenSecret,
 ): string {
@@ -49,7 +54,7 @@ export function mintGatewayToken(
     sandbox: claims.sandbox,
     providers: claims.providers,
     exp: Math.floor(Date.now() / 1000) + claims.lifetimeSeconds + MARGIN_SECONDS,
-    ...(claims.visitorKeys && { visitorKeys: claims.visitorKeys }),
+    ...(claims.ownKeys && { visitorKeys: claims.ownKeys }),
   };
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", secret.key, iv);

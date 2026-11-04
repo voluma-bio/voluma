@@ -7,18 +7,20 @@
  * (`RUN_MODEL_OVERRIDE`, read in `index.ts`): every run on Voluma's keys gets it whatever was
  * picked; own-key runs keep their pick, since their Meta key can't call DeepSeek.
  */
-import { type RunThinking, runThinkingSchema } from "@voluma/contracts/run";
+import { ownKeyMayUse, type Run, type RunThinking, runThinkingSchema } from "@voluma/contracts/run";
 import { HTTPException } from "hono/http-exception";
 
-const WONDER = { model: "meta/muse-wonder-1.0", label: "Muse Wonder 1.0", needsVolumaKey: false };
-const SPARK = { model: "meta/muse-spark-1.3", label: "Muse Spark 1.3", needsVolumaKey: false };
+const WONDER = { model: "meta/muse-wonder-1.0", label: "Muse Wonder 1.0" };
+const SPARK = { model: "meta/muse-spark-1.3", label: "Muse Spark 1.3" };
 const CONTRIBUTOR = {
   model: "meta/muse-spark-1.3-contributor",
   label: "Muse Spark 1.3 Contributor",
   note: "Meta may train on what it is sent, the scan included.",
-  needsVolumaKey: true,
 };
-const CHOICES = [WONDER, SPARK, CONTRIBUTOR];
+const CHOICES = [WONDER, SPARK, CONTRIBUTOR].map((c) => ({
+  ...c,
+  needsVolumaKey: !ownKeyMayUse(c.model),
+}));
 const DEFAULT_MODEL = WONDER.model;
 
 /** The level in the role files (`workflows/core/roles`). Low, medium and high are ones every offered model takes or is mapped to. */
@@ -51,7 +53,7 @@ export function modelChoices(override: string | null) {
 /** The model for a new run: the debug override, else the pick, else the default. 400 for a pick the run's key can't take. */
 export function pickModel(
   override: string | null,
-  credentials: "voluma" | "visitor",
+  credentials: Run["credentials"],
   requested: string | undefined,
 ): string {
   if (credentials === "voluma" && override) return override;
@@ -61,7 +63,7 @@ export function pickModel(
     throw new HTTPException(400, {
       message: `${requested} is not a model you can pick here. Choose one of: ${CHOICES.map((c) => c.label).join(", ")}.`,
     });
-  if (choice.needsVolumaKey && credentials === "visitor")
+  if (choice.needsVolumaKey && credentials !== "voluma")
     throw new HTTPException(400, {
       message: `${choice.label} runs only on Voluma's key, not your own. Choose another model or use Voluma's key.`,
     });

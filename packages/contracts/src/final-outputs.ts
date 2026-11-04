@@ -12,8 +12,10 @@
 import { z } from "zod";
 import type { outputsChangedSchema } from "./agent-events";
 import {
+  groupBySection,
   labelMapOf,
   labelMapsOf,
+  OTHER_SECTION,
   type OutputCatalog,
   type OutputEntry,
   outputKindSchema,
@@ -72,7 +74,7 @@ export const finalOutputsSchema = z
   });
 export type FinalOutputs = z.infer<typeof finalOutputsSchema>;
 
-const OTHER = "Other";
+const OTHER = OTHER_SECTION;
 
 export const sectionsOf = (list: FinalOutputs | undefined) => list?.sections ?? [];
 
@@ -153,18 +155,26 @@ export function openingOutputs(
     : catalog.filter((e) => e.selectable);
 }
 
-/** The first change of a run, which sets its final outputs; undefined when there are none to list. */
+/**
+ * The first change of a run, which sets its final outputs in their catalog sections (those with
+ * none go in "Other"); undefined when there are none to list.
+ */
 export function openingChange(
   catalog: OutputCatalog,
   selected: readonly string[] | undefined,
 ): OutputsChange | undefined {
   const entries = openingOutputs(catalog, selected);
+  const sections = groupBySection(entries).flatMap((g) =>
+    g.title ? [{ title: g.title, outputs: g.entries.map((e) => e.id) }] : [],
+  );
   return entries.length === 0
     ? undefined
     : {
         by: "runner",
         reason: "The outputs the researcher chose for this run.",
-        add: entries,
+        // The opening `sections` is the run's one grouping; the catalog's field would go stale when main regroups.
+        add: entries.map(({ section: _section, ...entry }) => entry),
+        ...(sections.length > 0 && { sections }),
         labels: labelMapsOf(catalog),
       };
 }

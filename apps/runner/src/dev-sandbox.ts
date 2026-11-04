@@ -171,7 +171,7 @@ try {
       },
       sandboxGateway(
         config,
-        { runId: run.id, leaseToken, visitorMetaKey: claim.keys?.metaApiKey },
+        { runId: run.id, leaseToken, ownMetaKey: claim.keys?.metaApiKey },
         thread.name,
         redact,
       ),

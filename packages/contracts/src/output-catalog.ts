@@ -17,6 +17,10 @@
  * PyYAML reads a bare `on` key as `True`, and the loader refuses it.
  */
 import { z } from "zod";
+
+/** The heading of the outputs that name no section, wherever outputs are grouped. */
+export const OTHER_SECTION = "Other";
+
 import { segmentSchema } from "./ids";
 
 const nonEmpty = z.string().min(1);
@@ -68,6 +72,17 @@ const entryBase = {
   expect: z.array(nonEmpty).optional(),
   /** The researcher can pick it at the start of a run. */
   selectable: z.boolean().optional(),
+  /**
+   * The heading it is listed under where the outputs are grouped: the start screen's list and,
+   * from the run's opening change, its final outputs. Sections follow catalog order. Never
+   * `OTHER_SECTION`, the heading of the outputs that name none.
+   */
+  section: nonEmpty
+    .refine(
+      (s) => s !== OTHER_SECTION,
+      `"${OTHER_SECTION}" is the heading of outputs with no section`,
+    )
+    .optional(),
   /** How it opens in review: its presets, the first the default. */
   views: z.array(viewSchema).min(1).optional(),
 };
@@ -161,6 +176,24 @@ export const unselectable = (catalog: readonly OutputEntry[], selected: readonly
   const byId = new Map(catalog.map((e) => [e.id, e]));
   return selected.filter((id) => !byId.get(id)?.selectable);
 };
+
+/**
+ * `entries` grouped by `section`, in the order each section first appears; the entries without
+ * one come last, as one group with no title (the only group when no entry names a section).
+ */
+export function groupBySection<T extends { section?: string }>(
+  entries: readonly T[],
+): { title?: string; entries: T[] }[] {
+  const titled = new Map<string, T[]>();
+  const rest: T[] = [];
+  for (const e of entries)
+    if (e.section === undefined) rest.push(e);
+    else titled.set(e.section, [...(titled.get(e.section) ?? []), e]);
+  return [
+    ...[...titled].map(([title, group]) => ({ title, entries: group })),
+    ...(rest.length > 0 ? [{ entries: rest }] : []),
+  ];
+}
 
 /** The map whose version holds `id`'s voxels when the catalog lists `id` as a label overlay, else `id`. */
 export const labelMapOf = (catalog: readonly OutputEntry[], id: string): string => {

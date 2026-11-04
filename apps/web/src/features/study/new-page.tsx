@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, createStudy } from "@voluma/api-client";
 import { inputsQuery, runModelsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
-import type { Input, Run, RunThinking, VisitorKeys } from "@voluma/contracts/run";
+import type { Input, OwnKeys, Run, RunThinking } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
 import {
   formatDuration,
@@ -121,7 +121,7 @@ export function NewPage() {
   const [panel, setPanel] = useState<string>();
   const [studyName, setStudyName] = useState("");
   const [pilot, setPilot] = useState(true);
-  const [keys, setKeys] = useState<VisitorKeys | undefined>(() => loadKeys(me.userId));
+  const [keys, setKeys] = useState<OwnKeys | undefined>(() => loadKeys(me.userId));
   const [pickedModel, setPickedModel] = useState<string>();
   const [pickedThinking, setPickedThinking] = useState<RunThinking>();
   /** Start was pressed while scans were still uploading. */

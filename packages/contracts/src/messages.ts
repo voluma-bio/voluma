@@ -45,7 +45,7 @@
  *
  * Refusals. 400: invalid body; 404: unknown or unreadable run, or an output or To check item the
  * run does not have; 403: a read-only example run, not the run's `startedBy`, a reopen of a
- * `visitor` run sent without `keys` (a run's keys are wiped when it ends), or of a run made with
+ * own-key run sent without `keys` (a run's keys are wiped when it ends), or of a run made with
  * Voluma's key by an account that no longer has it; 409: the run did not end `completed` (a failed
  * or cancelled run's threads were ended or cut: it is rerun, not reopened), or was made on an older
  * version of its workflow than the study's current one (the pinned paths differ: the runner could
@@ -61,7 +61,7 @@ import { userIdSchema } from "./auth";
 import { positionZyx } from "./output";
 import { outputRefSchema, viewSchema } from "./output-catalog";
 import { voxelBoxSchema, voxelIndexSchema } from "./review";
-import { runStateSchema, visitorKeysSchema } from "./run";
+import { ownKeysSchema, runStateSchema } from "./run";
 
 /** A view snapshot PNG, at most this many bytes after decoding. */
 export const MAX_MESSAGE_SNAPSHOT_BYTES = 2 * 1024 * 1024;
@@ -195,7 +195,7 @@ export const sendRunMessageRequestSchema = messageRules(
       })
       .optional(),
     /** The caller's own keys: required to reopen a finished own-key run (its keys were wiped when it ended), ignored otherwise. */
-    keys: visitorKeysSchema.optional(),
+    keys: ownKeysSchema.optional(),
   }),
 );
 export type SendRunMessageRequest = z.infer<typeof sendRunMessageRequestSchema>;
@@ -219,7 +219,7 @@ export const answerApprovalRequestSchema = z.object({
   answer: z.enum(["yes", "no"]),
   text: z.string().max(MAX_TEXT).optional(),
   /** As on `sendRunMessageRequestSchema`: needed when the answer reopens a finished own-key run. */
-  keys: visitorKeysSchema.optional(),
+  keys: ownKeysSchema.optional(),
 });
 export type AnswerApprovalRequest = z.infer<typeof answerApprovalRequestSchema>;
 export const answerApprovalResponseSchema = z.object({});

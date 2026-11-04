@@ -9,7 +9,7 @@
  * (`study-<exampleId>`, `example: true`), replaced with it. The source's review assets, message snapshots (`scratch/person/`) and `outputs/` objects in R2 are copied
  * under the example's own prefix (the output route builds a key from the run being read, so an
  * example can't point at another run's files). Re-seeding the same `--id` replaces the
- * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: a visitor run's
+ * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: an own-key run's
  * outputs are untrusted (`@voluma/contracts/run`), and an example's input is shown to everyone.
  */
 import { parseArgs } from "node:util";
@@ -88,7 +88,7 @@ if (!src) throw new Error(`run ${source} not found`);
 if (src.run.state !== "ended" || src.run.outcome !== "completed") {
   throw new Error(`run ${source} has not completed`);
 }
-if (src.run.credentials !== "voluma") throw new Error("never seed an example from a visitor run");
+if (src.run.credentials !== "voluma") throw new Error("never seed an example from an own-key run");
 if (src.input.source !== "reference") throw new Error("an example reads the reference input");
 if (src.run.example) throw new Error(`run ${source} is itself an example`);
 

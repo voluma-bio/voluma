@@ -121,8 +121,12 @@ export type ReopenContext = {
  * The sealed keys a reopen stores. An own-key run's keys were wiped when it ended, so the request
  * brings them; a Voluma-key run holds none.
  */
-function reopenKeys(sealer: KeySealer, caller: Caller, run: { id: string; credentials: string }) {
-  if (run.credentials !== "visitor") return null;
+function reopenKeys(
+  sealer: KeySealer,
+  caller: Caller,
+  run: { id: string; credentials: Run["credentials"] },
+) {
+  if (run.credentials === "voluma") return null;
   if (!caller.keys)
     throw new HTTPException(403, {
       message:
@@ -137,7 +141,7 @@ export type MessageTarget = {
   startedBy: string;
   studyId: string;
   example: boolean;
-  credentials: "voluma" | "visitor";
+  credentials: Run["credentials"];
   workflows: WorkflowPin[];
   /** The study's workflow when the caller already holds it, which spares the lookup. */
   studyWorkflowId?: string;

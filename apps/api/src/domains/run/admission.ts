@@ -77,7 +77,7 @@ export function admit(
   u: Usage,
   run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
-  if (run.credentials === "visitor") return null;
+  if (run.credentials !== "voluma") return null;
   const org = limits.voluma.get(labId);
   if (!org) return "no-key";
   if (stage === "claim" && u.running >= org.concurrent) return "concurrent";

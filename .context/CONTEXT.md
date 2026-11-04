@@ -66,7 +66,7 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   There is no internet. The image is a public GHCR image pinned by digest (`SANDBOX_IMAGE` in
   `apps/runner/src/config.ts`), built by the "Sandbox image" workflow from
   `apps/runner/sandbox/Dockerfile`, which installs `workflows/core/requirements.txt`,
-  so every sandbox, a visitor's too, pulls the same one. Every command runs
+  so every sandbox, a guest's too, pulls the same one. Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.
@@ -149,8 +149,8 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   `LeaseLost` from events, history or heartbeat, or 120 s after the last acknowledged
   heartbeat was sent. One timer schedules the next heartbeat: 15 s after an answer, 2 s after a failure (each attempt cut at
   5 s), so the lease is renewed soon after the API answers again. SIGTERM stops every run, each reports `released`, and the process
-  exits. A `voluma` run uses our model key; a `visitor` run uses the claim's Meta key, in that run's scope
-  only. Every sandbox runs on our Modal token. A guest may start only `visitor` runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
+  exits. A `voluma` run uses our model key; an own-key run uses the claim's Meta key, in that run's scope
+  only. Every sandbox runs on our Modal token. A guest may start only own-key runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
   (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The event log holds no plan: the final outputs are the selected catalog entries of `outputs.yaml` (the catalog's `selectable` ones if none were sent), written as the run's opening `outputs.changed` (`openingOutputs`, `agents/wire.ts`) and changed by main with `change_outputs`; main's plan is a note it writes (`/work/main/plan.md`). Prompts are the role file plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash). Every role's tools are what its role file lists (`workflows/core/agents/`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL`. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
