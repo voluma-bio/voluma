@@ -1,11 +1,11 @@
 # Converting stored task-loop runs
 
 Step 1 of retiring the task loop (step 2: the deletion PR). Every run stored on staging when this was
-written was a task-loop run (24, none live). Migration `0025_convert_task_runs.sql` gives each the agent
+written was a task-loop run (24, none live). Migration `0026_convert_task_runs.sql` gives each the agent
 loop's events, so `OutputsReview` shows its outputs, values, 3D and conversation, and its stored events
 parse with an agent-loop-only `runEventSchema`.
 
-`pnpm --filter @voluma/api convert:task-runs --staging <url> --out drizzle/0025_convert_task_runs.sql --report <file>`
+`pnpm --filter @voluma/api convert:task-runs --staging <url> --out drizzle/0026_convert_task_runs.sql --report <file>`
 generated it (`--save <dir>` keeps the fetched streams, `--from <dir>` reads them back). The mapping is
 `src/ops/convert-task-run.ts`, a pure function over one run's events; the CLI around it fetches, checks R2
 (reads only: every named file `runs/<id>/outputs/<task>/<file>` must exist and match `evidence/<sha256>` in

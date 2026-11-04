@@ -1,5 +1,5 @@
 {
-  "id": "1446cdb3-19dc-40c7-b8b6-fa6c77a50e5d",
+  "id": "987a2ee7-07e9-493c-952d-5e5d900fd700",
   "prevId": "b21f3f48-5fb4-4dbc-a68a-2834b058bde9",
   "version": "7",
   "dialect": "postgresql",
@@ -110,8 +110,8 @@
       "uniqueConstraints": {
         "events_run_seq": {
           "name": "events_run_seq",
-          "columns": ["run_id", "seq"],
-          "nullsNotDistinct": false
+          "nullsNotDistinct": false,
+          "columns": ["run_id", "seq"]
         }
       },
       "policies": {},
@@ -294,6 +294,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "thinking": {
+          "name": "thinking",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "harness": {
           "name": "harness",
           "type": "text",
@@ -446,9 +452,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "runs_started_by": {
           "name": "runs_started_by",
@@ -461,9 +467,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "runs_study": {
           "name": "runs_study",
@@ -476,9 +482,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -561,9 +567,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -773,9 +779,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "provider_calls_open": {
           "name": "provider_calls_open",
@@ -794,9 +800,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -809,10 +815,10 @@
   },
   "enums": {},
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

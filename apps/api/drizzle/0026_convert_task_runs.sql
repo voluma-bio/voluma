@@ -612,7 +612,7 @@ ON CONFLICT DO NOTHING;
 
 -- Every database, whatever its runs hold. Task runs are those with no harness or "tasks"; only
 -- ended ones are touched, since a live task-loop run still needs its task events.
--- A payload holding   makes the jsonb casts and ->> below fail, which aborts the migration; the
+-- A payload holding \u0000 makes the jsonb casts and ->> below fail, which aborts the migration; the
 -- staging runs hold it only in tool.result, which no statement here reads.
 -- reply -> agent.message
 UPDATE "events"

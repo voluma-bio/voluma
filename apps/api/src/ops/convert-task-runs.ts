@@ -2,7 +2,7 @@
  * Operator script (step 1 of retiring the task loop): reads every stored task-loop run, converts
  * its outputs and To check items into the agent loop's events (`convert-task-run.ts`), checks
  * the files they name in R2 (reads only), and writes the migration that applies the result.
- *   pnpm --filter @voluma/api convert:task-runs --staging <url> --out drizzle/0025_convert_task_runs.sql --report <file.md> [--save <dir>]
+ *   pnpm --filter @voluma/api convert:task-runs --staging <url> --out drizzle/0026_convert_task_runs.sql --report <file.md> [--save <dir>]
  *   pnpm --filter @voluma/api convert:task-runs --from <dir> ...
  * `--staging` lists the runs with VOLUMA_DEBUG_TOKEN and reads each run's stored events from
  * `GET /api/run/runs/:id/stream` (leaving out its `event: live` frames); `--save` keeps what it
@@ -31,7 +31,7 @@ import { r2FromEnv } from "./r2-dir";
 const MIGRATION_TAIL = `
 -- Every database, whatever its runs hold. Task runs are those with no harness or "tasks"; only
 -- ended ones are touched, since a live task-loop run still needs its task events.
--- A payload holding \u0000 makes the jsonb casts and ->> below fail, which aborts the migration; the
+-- A payload holding \\u0000 makes the jsonb casts and ->> below fail, which aborts the migration; the
 -- staging runs hold it only in tool.result, which no statement here reads.
 -- reply -> agent.message
 UPDATE "events"

@@ -51,7 +51,6 @@ const ctx: RunnerContext = {
   config,
   models,
   aliases,
-  visitorModel: resolve(config.visitorModel),
   objects: r2Store(config.r2),
   log,
 };

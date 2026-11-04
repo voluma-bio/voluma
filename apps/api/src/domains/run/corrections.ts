@@ -162,8 +162,6 @@ export async function messageRefusal(
   run: MessageTarget,
 ): Promise<{ status: 403 | 409; message: string } | null> {
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
-  if (run.startedBy !== caller.userId)
-    return { status: 403, message: "Only the person who started the run can write to it." };
   if (run.credentials === "visitor")
     return {
       status: 403,
@@ -301,7 +299,8 @@ export async function decideMessage(
     const refused = admit(
       "reopen",
       o.limits,
-      await usage(tx, reader.labId, { userId, credentials: run.credentials }),
+      reader.labId,
+      await usage(tx, reader.labId, run.credentials),
       run,
     );
     if (refused) throw new HTTPException(409, { message: refusalMessage[refused] });
