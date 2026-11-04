@@ -163,12 +163,14 @@ export function reviewGrid({
     for (const [volume, n] of counts) if (!best || n > counts.get(best)!) best = volume;
     return best;
   };
-  // Another grid's labels are placed through the two affines. A run whose affines carry only the
-  // spacing (no rotation or origin) gives another grid the scan's very affine: its pose is unknown,
-  // and drawing the scan's labels there would put them in the wrong place, so nothing is borrowed.
+  // Another grid's labels are placed through the two affines, only when both carry a pose. An
+  // affine of the spacing alone (no rotation or origin) is what a run publishes when it lost the
+  // pose, a resampled grid's included: placing through it would draw the scan's labels in the
+  // wrong place, so nothing is borrowed.
   const scanContext = contextOn(scanGrid);
   const context =
-    contextOn(gridId) ?? (scanContext && !sameAffine(scanContext, image) ? scanContext : undefined);
+    contextOn(gridId) ??
+    (scanContext && posed(scanContext) && posed(image) ? scanContext : undefined);
   const placed = context && context.gridId !== gridId ? placement(context, image) : undefined;
 
   // Structures: a named labels volume brings every structure on it, and the context every label.
@@ -482,8 +484,9 @@ function placement(from: Volume, to: Volume): number[][] {
   ];
 }
 
-const sameAffine = (a: Volume, b: Volume) =>
-  a.affine.every((row, r) => row.every((n, c) => n === b.affine[r]![c]));
+/** Whether a volume's affine carries a pose: an origin, or a rotation off the grid's axes. */
+const posed = (v: Volume) =>
+  v.affine.slice(0, 3).some((row, r) => row.some((n, c) => c !== r && n !== 0));
 
 /** World mm to voxel (z, y, x): the affine's columns are orthogonal, so each is a projection. */
 export function voxelOf(volume: Volume, world: readonly number[]): number[] {
