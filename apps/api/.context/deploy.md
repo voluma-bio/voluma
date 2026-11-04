@@ -19,7 +19,7 @@ file, and Render applies it when the Blueprint syncs (not on a service deploy). 
 
 | Service | State |
 |---|---|
-| `voluma-api` | Web service, auto-deployed from `main`. `https://voluma-api.onrender.com` until a custom domain (`app.voluma.bio`) exists |
+| `voluma-api` | Web service, auto-deployed from `main`. Browser origin: `https://meta.voluma.bio`; Render address: `https://voluma-api.onrender.com` |
 | `voluma-gateway` | Web service: the provider gateway. Notes: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md) |
 | `voluma-runner` | Background worker, always on through the freeze (2026-11-04 6:00 PM PT) and judging, until about 2026-11-18 (its deploy.md). Claims runs over the private network (why not the public URL: runner deploy.md, `VOLUMA_API_URL`). Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
 
@@ -48,7 +48,7 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 | `DATABASE_URL` | Neon's direct (unpooled) connection string, `sslmode=require`; asked for when the Blueprint is created. The pooled host (`-pooler`) breaks prepared statements |
 | `VOLUMA_API_TOKEN` | random 32 bytes, hex. The runner reads it from here |
 | `VOLUMA_DEBUG_TOKEN` | optional; random 32 bytes, hex. Lets agents read every lab's runs (`GET /api/run/runs…`) and nothing else; unset turns it off |
-| `APP_URL` | the origin browsers use, no trailing slash: today the service's own `RENDER_EXTERNAL_URL` (self-reference in the yaml); with a custom domain, replace it with that origin as a literal. Must be https (the session cookie is then `Secure` and named `__Host-wos-session`). Builds the sign-in redirect and the `Origin` check |
+| `APP_URL` | `https://meta.voluma.bio` in `render.yaml`, no trailing slash. Must be https (the session cookie is then `Secure` and named `__Host-wos-session`). Builds the sign-in redirect and the `Origin` check; browser writes from the Render address are no longer accepted after cutover |
 | `WORKOS_CLIENT_ID`, `WORKOS_API_KEY` | WorkOS dashboard, API Keys (staging environment) |
 | `RUN_KEY_SECRET` | `generateValue` in `render.yaml` on `voluma-api` (or `openssl rand -base64 32` in the dashboard); at least 32 characters, the API fails to boot without it. Seals an own-key run's Meta key in `runs.sealed_keys` while the run lives. Rotating or losing it makes the sealed keys of live own-key runs unreadable: those runs wait in `awaiting-keys` for the browser to resend |
 | `WORKOS_COOKIE_PASSWORD` | `openssl rand -base64 32`; seals the session cookie |
@@ -65,7 +65,16 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 
 **The client address for WorkOS** is read from one header, `CLIENT_IP_HEADER` in `src/auth.ts`. It is `true-client-ip`: Render's edge overwrites it with the caller's address, and passes a client's own `x-real-ip` through unchanged (checked 2026-10-30 with forged headers).
 
-Staging URL: `https://voluma-api.onrender.com` (`srv-dbidaf3l550s73btnpg0`).
+Staging URL: `https://meta.voluma.bio` (`srv-dbidaf3l550s73btnpg0`).
+
+**Custom-domain cutover:** before applying `APP_URL`, allow
+`https://meta.voluma.bio/api/auth/callback` in WorkOS Redirects and
+`https://meta.voluma.bio/` in sign-out redirects. The domain already serves HTTPS
+(checked 2026-11-04); the live sign-in redirect still used the Render address at that
+check. Sync the Blueprint and apply the variable to the API, then verify sign-in,
+sign-out and a browser write on the custom domain. Sessions are host-only, so people
+using the Render address must open the custom domain and sign in again. The runner's
+private API address stays unchanged.
 
 **In the WorkOS dashboard (staging), for each deployed origin:** add
 `<APP_URL>/api/auth/callback` to Redirects (`http://localhost:*/api/auth/callback` is
