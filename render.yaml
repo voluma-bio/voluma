@@ -33,7 +33,7 @@ services:
     runtime: node
     region: virginia
     plan: 0.5c-512mb # $7 (the web build runs in the build container, not here)
-    numInstances: 1 # the key vault and stream notifier are in-process: never more than one
+    numInstances: 1 # the stream notifier is in-process: never more than one
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @voluma/web build
     preDeployCommand: pnpm --filter @voluma/api db:migrate
     # `exec` so node gets SIGTERM; from apps/api because that is where tsx resolves.
@@ -86,18 +86,14 @@ services:
         sync: false
       - key: R2_SECRET_ACCESS_KEY
         sync: false
-      # What guards Voluma's key (deploy.md); read at start; unset is no limit. CONCURRENT and
-      # SPEND_USD (dollars of model spend) are per organization that has the key; APP_RUNNING is
+      # What guards Voluma's key (deploy.md); read at start; unset is no limit. SPEND_USD
+      # (dollars of model spend) is per organization that has the key; APP_RUNNING is
       # the runs running at once over every account (the claim enforces it; one slot at most goes
       # to runs on callers' own keys). No daily limits: those slots and Modal's spend limit bound
       # sandbox spend. Guest sign-in: GUEST_ORGANIZATION_ID in the dashboard (deploy.md).
       # Total scan storage per person, GB, the same for every account (apps/api/.context/deploy.md).
       - key: UPLOAD_LIMIT_PER_USER_GB
         value: "50"
-      - key: RUN_LIMITS_LAB_CONCURRENT
-        value: "4"
-      - key: RUN_LIMITS_JUDGES_CONCURRENT
-        value: "2"
       - key: RUN_LIMITS_JUDGES_SPEND_USD
         value: "300"
       - key: RUN_LIMITS_APP_RUNNING

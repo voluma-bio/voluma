@@ -7,12 +7,7 @@
  * which seals them into the run's row; no handler logs a body.
  */
 import { randomUUID } from "node:crypto";
-import {
-  type Run,
-  type RunRead,
-  resendKeysRequestSchema,
-  startRunRequestSchema,
-} from "@voluma/contracts/run";
+import { type Run, type RunRead, startRunRequestSchema } from "@voluma/contracts/run";
 import { Hono } from "hono";
 import {
   type AppEnv,
@@ -74,13 +69,6 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   app.post("/runs/:id/cancel", requireUser, async (c) => {
     const result = await queue.cancel(readerOf(c.var.user), c.req.param("id"));
     return c.json(await readOf(c.var.user, result.run));
-  });
-
-  app.post("/runs/:id/keys", requireUser, async (c) => {
-    const { keys } = await parseJson(c, resendKeysRequestSchema);
-    const user = c.var.user;
-    const result = await queue.resume(readerOf(user), c.req.param("id"), keys);
-    return c.json(await readOf(user, result.run));
   });
 
   return app;
