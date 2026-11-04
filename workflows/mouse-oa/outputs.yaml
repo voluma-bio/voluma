@@ -165,6 +165,8 @@
     - ROI-1 runs from the growth plate's proximal face to the articular surface, as
       /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (iioc) describes, checked on a
       render with the tibia plateau up, as in the deck figure.
+    - "Its evidence cites qc-coronal.jpg from that iioc.py run, opened before reporting: green ROI-1 sits on the
+      orange face along the plate band, on every panel, not down in the metaphysis."
 
 - id: roi-iioc-trabecular
   kind: overlay
@@ -422,6 +424,10 @@
   expect: &a4
     - Measured along the shaft axis (the deck value), with the perpendicular height and the
       growth-plate plane residual beside it; which the lab means is open.
+    - "Its evidence cites qc-heights.jpg and qc-coronal.jpg from the iioc.py run it reports, both opened before
+      reporting. On each, the ruler starts at the growth plate's proximal face (the upper edge of the thin dark
+      plate band) and ends at the top of the articular bone. A face traced below the band, in the metaphysis, makes
+      every height and the TV too large (compartment heights near 0.5 mm on OA6-2RK, not 1 mm)."
 
 - id: iioc-height-medial-compartment
   kind: value

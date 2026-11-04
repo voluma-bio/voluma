@@ -17,6 +17,9 @@ you will use it: an input can be right elsewhere and wrong exactly in your part.
 others would also hit, send main what you saw and where, with the evidence. When it is only too coarse for your part, make your own and name it in what your
 output was made from.
 
+Read a script's whole output and its exit code: one that exits 2 wrote nothing, and `| tail` or `| head` hides that.
+Pass each argument the file its help names (a header's `hu.json`, not the scan's array).
+
 `report_output` each output you own as it is made, then `message` main. Message main too when you cannot
 make an output (only main marks one missing) or find something that changes the plan, and end your turn. A message to you arrives with your next
 tool result.
