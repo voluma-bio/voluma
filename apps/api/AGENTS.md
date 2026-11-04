@@ -104,8 +104,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   correction while `corrections(events).open` (`@voluma/contracts/corrections`: no
   `correction.ended` since the latest `run.reopened`), so its claims are corrections. A correction never ends a run worse than `completed`: every way the queue would
   fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
-  claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its threads
-  cancelled, the open ones and those that finished inside the correction (`cancelEnds`, fed row columns and the raw payload of thread rows read in JS: it runs inside the claim, so it never refuses).
+  claim or heartbeat, a user's cancel) ends it with outcome `completed`. `cancelReviewWorkers` ends the workers and the root for that claim as `cancelled`, the open ones and those that finished inside the correction (`cancelEnds`, fed row columns and the raw payload of thread rows read in JS: it runs inside the claim, so it never refuses); main stays cut off, so the researcher's next message resumes it. Nothing writes `correction.ended` any more; readers keep it for the stored events of older runs.
 - **An own-key run's keys live sealed in `runs.sealed_keys`** (`run-keys.ts`, AES-256-GCM under
   `RUN_KEY_SECRET`) for the run's life. `pg-queue.ts` seals them at start and resume, `corrections.ts`
   at a reopen (the request brings them: a finished run's were nulled), the claim opens them, and

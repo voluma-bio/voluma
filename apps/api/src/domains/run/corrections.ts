@@ -1,6 +1,6 @@
 /**
  * The server's side of corrections (`@voluma/contracts/messages`): judging a researcher's message
- * to a run, reopening a finished run for it, and recording how a correction ended. The queue
+ * to a run, and reopening a finished run for it. The queue
  * (pg-queue.ts) calls these inside its transactions (locks: `apps/api/AGENTS.md`).
  *
  * Lock order: `lockRun` (`pg-event-log.ts`).
@@ -39,12 +39,7 @@ async function appendPersonEvent(
   runId: string,
   event: {
     id: string;
-    type:
-      | "person.message"
-      | "run.reopened"
-      | "correction.ended"
-      | "approval.given"
-      | "approval.declined";
+    type: "person.message" | "run.reopened" | "approval.given" | "approval.declined";
     payload: unknown;
   },
 ) {
