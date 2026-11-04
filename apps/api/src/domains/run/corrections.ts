@@ -15,7 +15,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import type { MessageSent } from "../../ports";
-import { admit, type Limits, refusalMessage, usage } from "./admission";
+import { admit, type Limits, refusalMessage, spentUsd } from "./admission";
 import { freezeAttached } from "./agent-review";
 import { noLease } from "./lease";
 import { eventLock, insertEvent, lockRun } from "./pg-event-log";
@@ -271,7 +271,7 @@ export async function decideMessage(
   const reopening = run.state === "ended";
   const sealedKeys = reopening ? reopenKeys(o.sealer, caller, run) : null;
   if (reopening) {
-    const refused = admit("reopen", o.limits, reader.labId, await usage(tx, reader.labId), run);
+    const refused = admit("reopen", o.limits, reader.labId, await spentUsd(tx, reader.labId), run);
     if (refused === "no-key")
       throw new HTTPException(403, {
         message:

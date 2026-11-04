@@ -1,7 +1,7 @@
 /**
  * What an org may do (`@voluma/contracts/run`, Limits) and the one check that enforces
- * it. `usage` reads every count from one query; `admit` judges a run at a stage with them.
- * Examples are seeded, not work, so no count includes them.
+ * it. `spentUsd` reads the org's spend; `admit` judges a run at a stage with it.
+ * Examples are seeded, not work, so no spend includes them.
  */
 import type { Run } from "@voluma/contracts/run";
 import { sql } from "drizzle-orm";
@@ -9,9 +9,7 @@ import type { Tx } from "./pg-runs";
 
 /** An unset limit is `Infinity`, so every comparison below needs no unset case. */
 export type KeyLimits = {
-  /** `voluma` runs of the org running at once. */
-  concurrent: number;
-  /** Dollars of model spend the org's runs on Voluma's keys may total (`Usage.spentUsd`). */
+  /** Dollars of model spend the org's runs on Voluma's keys may total (`spentUsd`). */
   spendUsd: number;
 };
 
@@ -27,39 +25,28 @@ export type Limits = {
   appRunning: number;
 };
 
-export type Refusal = "concurrent" | "no-key" | "spend";
+export type Refusal = "no-key" | "spend";
 
 /** One message per refusal: the API's answer when a start, resume or reopen is refused. */
 export const refusalMessage: Record<Refusal, string> = {
-  concurrent: "The organization's runs-at-once limit was reached.",
   "no-key": "This account has no access to Voluma's keys. Add your own keys.",
   spend: "This organization has used its model budget for runs.",
 };
 
 /**
- * The same refusal as a run's stored error when a claim fails the run (a `concurrent` claim just
- * leaves it queued): a clause read after "The run stopped: ", as every run error is.
+ * The same refusal as a run's stored error when a claim fails the run: a clause read after "The run stopped: ", as every run error is.
  */
 export const refusalError: Record<Refusal, string> = {
-  concurrent: "the organization's runs-at-once limit was reached",
   "no-key": "this account can no longer use Voluma's keys",
   spend: "the organization had used its model budget for runs",
 };
 
-export type Usage = {
-  /** The org's `voluma` runs running now. */
-  running: number;
-  /** Model dollars spent by the org's runs on Voluma's keys, every run ever (the heartbeat adds to `runs.model_cost_usd`). */
-  spentUsd: number;
-};
-
-export async function usage(tx: Tx, labId: string): Promise<Usage> {
-  const [row] = await tx.execute<Usage>(sql`
-    SELECT
-      (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
-      (coalesce(sum(model_cost_usd) FILTER (WHERE credentials = 'voluma'), 0))::float8 AS "spentUsd"
-    FROM runs WHERE lab_id = ${labId} AND NOT example`);
-  return row as Usage;
+/** Model dollars spent by the org's runs on Voluma's keys, every run ever (the heartbeat adds to `runs.model_cost_usd`). */
+export async function spentUsd(tx: Tx, labId: string): Promise<number> {
+  const [row] = await tx.execute<{ spent: number }>(sql`
+    SELECT (coalesce(sum(model_cost_usd), 0))::float8 AS spent
+    FROM runs WHERE lab_id = ${labId} AND credentials = 'voluma' AND NOT example`);
+  return row?.spent ?? 0;
 }
 
 /**
@@ -74,13 +61,12 @@ export function admit(
   stage: "start" | "reopen" | "claim",
   limits: Limits,
   labId: string,
-  u: Usage,
+  spent: number,
   run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
   if (run.credentials === "visitor") return null;
   const org = limits.voluma.get(labId);
   if (!org) return "no-key";
-  if (stage === "claim" && u.running >= org.concurrent) return "concurrent";
-  if (!(stage === "claim" && run.started) && u.spentUsd >= org.spendUsd) return "spend";
+  if (!(stage === "claim" && run.started) && spent >= org.spendUsd) return "spend";
   return null;
 }

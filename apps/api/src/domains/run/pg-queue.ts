@@ -28,8 +28,7 @@ import {
   type Refusal,
   refusalError,
   refusalMessage,
-  type Usage,
-  usage,
+  spentUsd,
 } from "./admission";
 import { lateResearcherWrite } from "./agent-review";
 import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
@@ -63,7 +62,7 @@ import { events, inputs, runs, studies, studyMembers } from "./schema";
  * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
  * import/archive. A heartbeat and a report take only the run's own locks (`lockRun`: event lock, then the
  * row), so a slow claim never delays an acknowledgement. They can skip this lock because they
- * only take a run off `running`, which lowers the counts a claim reads (`usage`); the one write
+ * only take a run off `running`, which lowers the counts a claim reads; the one write
  * that raises them, `queued` → `running`, is the claim's, under this lock.
  */
 export const QUEUE_LOCK = 0x76_6f_6c_71;
@@ -384,7 +383,7 @@ export function pgRunQueue(
           message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
         });
     }
-    const refused = admit("start", limits, reader.labId, await usage(tx, reader.labId), {
+    const refused = admit("start", limits, reader.labId, await spentUsd(tx, reader.labId), {
       credentials,
     });
     if (refused) throw limitRefusal(refused);
@@ -598,19 +597,18 @@ export function pgRunQueue(
           .from(runs)
           .where(eq(runs.state, "queued"))
           .orderBy(...queueOrder(orgs));
-        // Failing or skipping a run changes none of these counts, so read each org's once.
-        const usages = new Map<string, Usage>();
+        // Failing or skipping a run changes no org's spend, so read each org's once.
+        const spent = new Map<string, number>();
         for (const run of queued) {
           if (run.credentials === "visitor") {
             if (counts.ownKeyBusy) continue;
           } else {
-            const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
-            usages.set(run.labId, used);
+            const used = spent.get(run.labId) ?? (await spentUsd(tx, run.labId));
+            spent.set(run.labId, used);
             const refused = admit("claim", limits, run.labId, used, {
               credentials: "voluma",
               started: run.startedAt !== null,
             });
-            if (refused === "concurrent") continue;
             if (refused) {
               await fail(tx, run.id, refusalError[refused]);
               continue;

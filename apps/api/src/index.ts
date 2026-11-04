@@ -13,8 +13,8 @@
  * GUEST_ORGANIZATION_ID to let anyone in as a guest (the repo .env).
  * RUN_KEY_SECRET (at least 32 characters): seals an own-key run's keys in the database while the run lives (domains/run/run-keys.ts).
  * RUN_MODEL_OVERRIDE (meta/muse-spark-1.3-contributor or deepseek/deepseek-flash, debug): every run on Voluma's keys uses it, whatever was picked; anything else fails startup.
- * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
- * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
+ * Run limits that guard Voluma's key: RUN_LIMITS_LAB_SPEND_USD and RUN_LIMITS_JUDGES_SPEND_USD
+ * (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
  * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member, UPLOAD_LIMIT_PER_USER_GB (50) total stored per person (defaults below). Fails at startup if the database is unreachable or not migrated.
@@ -67,7 +67,6 @@ function limitNumber(name: string): number {
 
 /** What an organization with Voluma's key may run (`admission.ts`), every number from `RUN_LIMITS_<ORG>_*` so it can change without a deploy. */
 const keyLimitsFromEnv = (org: "LAB" | "JUDGES"): KeyLimits => ({
-  concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
   spendUsd: limitNumber(`RUN_LIMITS_${org}_SPEND_USD`),
 });
 
