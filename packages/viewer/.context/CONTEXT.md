@@ -107,9 +107,19 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   nothing outlives the viewer. So a tilted pane is
   softer than an untilted one at high zoom. Its counter is primed (′) on the nearest axis and steps
   the grid's finest spacing along its normal; marks within half a step of the plane count as on it.
-- **Tilting by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
-  other two planes' lines; dragging one turns those two planes about this pane's normal (this pane
-  stays still).
+- **Turning by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
+  other two planes' lines; dragging one tilts those two planes about this pane's normal (this pane
+  stays still, `tilt`). Spinning turns the image of the pane you look at in place, about the
+  crosshair, and the other two planes follow (`spin`: all three panes turned about that pane's
+  normal), as in DataViewer or Amira, so the tibia's shaft can be stood upright in the coronal and
+  then the sagittal view: Alt + left drag in the pane, a dial about the crosshair; `,` / `.` turn the
+  pane under the pointer (else the focused one) 1° anticlockwise / clockwise, 0.1° with Shift (not
+  `[` `]`: `]` folds the shell's right side); or the tool bar's Turn the planes popover, ±1° and
+  ±5° per plane. Every turn keeps each pane a rotation of its grid pane, never a mirror. How far
+  the planes are turned (`offGrid`) is the largest turn taking a grid pane onto its pane, so a pane
+  spun in its own plane counts; the words ("Turned 3.6°") and Reset follow the panes' own on-grid
+  test, so a pane a hair off the grid says "Turned 0.0°" rather than hiding behind the grid's
+  name. On the grid's axes the tool bar names the grid (`gridName`, "Aligned tibia grid").
 - **Align.** Targets come from the caller (`planeTargets`, `targets.ts`): a plane fitted (least
   squares, `fitNormal`) through the vertices of every published surface whose catalog entry has
   `fitsPlane` (mouse-oa: both growth-plate faces, so "GP"), and every other image grid's axes.

@@ -6,7 +6,8 @@
  * browser from the level the 3D pane loads (`reslice.ts`), so it is softer. The gestures (moving
  * the crosshair, stepping, zooming, panning, marking) are `slice-gestures.ts`; `marks.ts` draws
  * the marks. With `onTilt`, the dots near both ends of the other planes' crosshair lines turn
- * those planes about this pane's normal; this pane stays still. Esc drops a mark being drawn.
+ * those planes about this pane's normal; this pane stays still. With `onSpin`, Alt-drag and `,` `.`
+ * turn this pane's image in place about the crosshair. Esc drops a mark being drawn.
  */
 import { cx } from "@voluma/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -88,6 +89,7 @@ export function SlicePane({
   marks,
   onMark,
   onTilt,
+  onSpin,
   onEdit,
   onPick,
   note,
@@ -114,6 +116,8 @@ export function SlicePane({
   onPick?(id: string): void;
   /** Turns the cut planes by `angle` radians about this pane's normal; absent, no handles. */
   onTilt?(angle: number): void;
+  /** Turns this pane's image by `angle` radians clockwise on screen; absent, it can't be turned. */
+  onSpin?(angle: number): void;
   /** A point waiting for its note: a field at the point, Enter keeps the text, Esc none. */
   note?: { at: Zyx; done(text: string | null): void };
   /** Set while the pane is mounted, for screenshots. */
@@ -184,6 +188,7 @@ export function SlicePane({
     marks,
     onMark,
     onTilt,
+    onSpin,
     toPane,
     fromPane,
     basis,
@@ -202,6 +207,7 @@ export function SlicePane({
     marks,
     onMark,
     onTilt,
+    onSpin,
     toPane,
     fromPane,
     basis,
@@ -800,11 +806,12 @@ export function SlicePane({
   return (
     <div
       ref={host}
+      data-slice-pane
       className={PANE}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the pane takes arrow keys to step slices.
       tabIndex={0}
       role="img"
-      aria-label={whole ? `Slice ${index + 1} of ${total}` : "Tilted slice"}
+      aria-label={whole ? `Slice ${index + 1} of ${total}` : "Turned slice"}
     >
       <span className={cx(CHIP, "bottom-2 left-2")}>
         {Math.round(point[counted]) + 1}
