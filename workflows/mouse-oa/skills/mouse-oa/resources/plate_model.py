@@ -1,4 +1,4 @@
-"""Propose the tibial growth plate's two faces with the fine-tuned plate model: the program the `segment_plate` tool runs.
+"""Propose the growth plate's two faces with the fine-tuned plate model: what the `segment_plate` tool runs.
 
 The model (`training/plate-finetune`, served on Modal as `plate-serve`) is SAM 3.1 fine-tuned to find the plate as a band on a
 coronal section of the tibia grid. Three checkpoints each draw the band; each band's faces are its first and last row W in every

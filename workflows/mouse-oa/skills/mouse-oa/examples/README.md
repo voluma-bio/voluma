@@ -29,7 +29,7 @@ furthest on the other side of the plateau. The heights (#7–9) run along the sh
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
 middle of the medial and the lateral compartment of the plateau.
 
-`segment_plate` (or `plate_faces.py` when it errors) proposes both faces of the growth plate for the iioc step, where it finds the plate (a part of the tibia: its V
+The proposal (`segment_plate`) gives both faces of the growth plate for the iioc step, where it finds the plate (a part of the tibia: its V
 range and each section's U span are in `plate-faces.json`), and the metaphyseal-roi step checks them again. The proposal is where the worker
 starts: the faces must follow the plate over the whole tibia at plate level, past each span end and on the sections with no span, out to the V
 ends. A worker checks its faces against these: each lies on the plate's two edges, a few voxels apart, on every section; every flagged
