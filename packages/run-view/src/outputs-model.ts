@@ -124,13 +124,14 @@ const strings = (x: unknown): string[] =>
   Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : [];
 
 function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): OutputRow {
-  // The bundled catalog's entry, else the run's own (its final list's, written from the catalog
-  // of the run's commit, or a worker's description of an output the workflow does not declare).
+  // The description is the run's own (its final list's, written from the catalog of the run's
+  // commit, or a worker's for an output the workflow does not declare), since it says how this
+  // run measured the number; the bundled catalog's only when the run has none.
   const entry = catalog.find((e) => e.id === state.id);
   const loose = state.entry;
   const value = entry?.kind === "value" ? entry : undefined;
   const description =
-    entry?.description ?? (typeof loose?.description === "string" ? loose.description : undefined);
+    (typeof loose?.description === "string" ? loose.description : undefined) ?? entry?.description;
   const latest = state.latest;
   const links = (role: string) =>
     latest?.madeFrom.filter((l) => l.role === role).map((l) => l.id) ?? [];
