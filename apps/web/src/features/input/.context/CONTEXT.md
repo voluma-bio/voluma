@@ -107,9 +107,9 @@ outputs while it is up and unfolds it after (the shell's `useFoldWhile`); showin
 changes its visibility, not the centre. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run, an open row, only within its focused workspace and never while typing elsewhere.
 Visible Whole run / Back to the views controls switch the centre. The panes stay mounted (hidden) under the
-whole run. The Agents tab's thread has a header (state, worked clock, outputs reported) over run-view's `AgentThread` (see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread in the Agents tab. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate, Point and Ruler named on
-the bar, and Angle, Outline, Freehand line (an open path, tag L) and Probe under More tools (`viewer.tsx`). These are
-labelled choices, with no command-key bindings. Point notes have no editor or display; old stored
+whole run. The Agents tab's thread has a header (state, worked clock, outputs reported) over run-view's `AgentThread` (see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread in the Agents tab. The docked bar's tools are `TOOLS` (`marking.tsx`), all on the bar as icons named in their
+tooltips (Jimmy, Nov 4): Navigate, Point, Ruler, Angle, Outline, Freehand line (an open path, tag L) and Probe (`viewer.tsx`).
+They have no command-key bindings. Point notes have no editor or display; old stored
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.
 Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
