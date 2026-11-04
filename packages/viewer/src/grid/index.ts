@@ -1,5 +1,5 @@
 /** The review's four-pane grid viewer, and the grid and scene an output is shown with. */
-export { markPoints, outlineAxis, probeText, worldOf } from "./marks";
+export { markPoints, outlineAxis, probeText } from "./marks";
 export {
   type GridPlanes,
   type MarkPlane,

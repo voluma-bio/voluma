@@ -443,6 +443,7 @@ export function OutputsReview({
           onLayout,
           planesOf,
           fits,
+          grids: blocks.grids,
           onNote: marking.note,
           onSave: views.save && ((state, grid) => views.save!(inView, state, grid)),
           restore: views.restore,

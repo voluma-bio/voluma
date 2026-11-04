@@ -112,7 +112,7 @@ export type GridPlanes = { XY: Anatomy; XZ: Anatomy; YZ: Anatomy };
 
 /**
  * Something the planes can be aligned to: a plane fitted through anatomical surfaces, which is
- * also a view of its own (`code`, "GP"), or another grid's axes.
+ * also a view of its own (`code`, "GP"), or another grid's or frame's axes.
  */
 export type PlaneTarget = {
   id: string;
@@ -120,6 +120,8 @@ export type PlaneTarget = {
   name: string;
   /** A fitted plane's view, named on its chip; none for a grid's axes. */
   code?: string;
+  /** Said beside the name: what made it ("intake"). */
+  tag?: string;
   /** Why it can't be had yet; then there is no `load`. */
   reason?: string;
   /** Its frame in this grid's mm, (z, y, x): a plane's normal, or a grid's z, y and x axes. */
@@ -762,7 +764,7 @@ export function QuadViewer({
           <span
             className="truncate text-xs text-muted-foreground"
             role="status"
-            title={lie ? undefined : "The planes lie on this grid's axes"}
+            title={lie ?? "The planes lie on this grid's axes"}
           >
             {lie ?? gridName}
           </span>
@@ -794,7 +796,9 @@ export function QuadViewer({
               >
                 <span className="flex items-baseline justify-between gap-3">
                   <span>Along {t.name}</span>
-                  {t.reason && <span className="text-xs text-fg-subtle">{t.reason}</span>}
+                  {(t.reason ?? t.tag) && (
+                    <span className="text-xs text-fg-subtle">{t.reason ?? t.tag}</span>
+                  )}
                 </span>
               </MenuItem>
             ))}

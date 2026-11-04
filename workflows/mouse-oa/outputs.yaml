@@ -19,7 +19,7 @@
 
 - id: frame
   kind: file
-  name: Orientation frame
+  name: Joint frame
   description:
     "frame.json from orient-joint: intake's rough orientation of the knee (the shaft axes,
     the bending plane and the keyframe the oriented stack is cut on)"
