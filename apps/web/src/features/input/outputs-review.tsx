@@ -23,6 +23,8 @@ import { conversation } from "@voluma/contracts/conversation";
 import { outputsFold } from "@voluma/contracts/output-fold";
 import type { RunRead } from "@voluma/contracts/run";
 import {
+  type AgentLinks,
+  agentEntries,
   inViewOf,
   isLive,
   type OutputItem,
@@ -149,6 +151,7 @@ export function OutputsReview({
       item?: string | null;
       trail?: string | null;
       centre?: Centre | null;
+      agent?: string | null;
     }) =>
       setParams(
         (prev) => {
@@ -198,6 +201,24 @@ export function OutputsReview({
   const centre: Centre | undefined =
     centreParam === "run" || centreParam === "agents" ? centreParam : undefined;
   const item = selected?.items.find((i) => i.key === params.get("item"));
+  // The agents a name can open: each agent's thread names (`main.2` opens main's thread).
+  const agents = useMemo(() => agentEntries(events, fold, live), [events, fold, live]);
+  // The links change only when the set of names does, and `open` reads the latest entries and
+  // `select`, so the conversation's replies don't re-render on every event of a live run.
+  const nameKey = agents.flatMap((a) => a.names).join("\n");
+  const latest = useRef({ agents, select });
+  latest.current = { agents, select };
+  const agentLinks = useMemo<AgentLinks>(
+    () => ({
+      names: new Set(nameKey ? nameKey.split("\n") : []),
+      open: (name) =>
+        latest.current.select({
+          centre: "agents",
+          agent: latest.current.agents.find((a) => a.names.includes(name))?.name ?? name,
+        }),
+    }),
+    [nameKey],
+  );
   // Show moves the crosshair once per press: a new object each time.
   const [picked, setPicked] = useState(0);
   const focusKey = item?.focus && JSON.stringify(item.focus);
@@ -453,6 +474,7 @@ export function OutputsReview({
                   views={allViews}
                   live={live}
                   nameOf={nameOf}
+                  agents={agentLinks}
                   checkTitle={(t) =>
                     fold.byId.get(t.output)?.versions.find((v) => v.version === t.version)?.toCheck[
                       t.item
@@ -499,7 +521,15 @@ export function OutputsReview({
               <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
             )}
             {centre === "agents" && (
-              <RunAgents events={events} fold={fold} live={live} nameOf={nameOf} />
+              <RunAgents
+                events={events}
+                agents={agents}
+                picked={params.get("agent")}
+                onPick={(name) => select({ agent: name })}
+                links={agentLinks}
+                live={live}
+                nameOf={nameOf}
+              />
             )}
           </div>
         </div>
