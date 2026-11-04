@@ -17,7 +17,8 @@
  * the queue's order (`queueOrder` in the API: a run that already started first; then an own-key
  * run while no other own-key run is running, its starters taking turns; then `voluma` runs by
  * organization priority; oldest first within each), skipping an own-key run while one is running
- * and taking nothing while the app already has `RUN_LIMITS_APP_RUNNING` runs running. It moves the run to
+ * taking nothing while the app already has `RUN_LIMITS_APP_RUNNING` runs running, and failing a
+ * never-started Voluma-key run its organization may no longer pay for (over its spend, or no key). It moves the run to
  * `running`, and takes the lease. A run's `startedAt` is its first claim's
  * time; a re-claim keeps it. Taking the
  * run is what starts it, so the runner reports no "running". `claim` answers

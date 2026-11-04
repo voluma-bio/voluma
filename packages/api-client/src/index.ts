@@ -221,7 +221,7 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on an input of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 403 `no-key` and 429: the limits (see `@voluma/contracts/run`). */
+/** Starts a run on an input of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own key; either way it waits for the runner to claim it. 403 `no-key` and 429: the limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return read(runSchema, await request("/run/runs", { method: "POST", body: req }));
 }

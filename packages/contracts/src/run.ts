@@ -315,7 +315,7 @@ export const startRunRequestSchema = z.object({
   /** As `runSchema.selectedOutputs`; an id that is not a selectable output of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
-  /** Present: the run uses these (`credentials: "own"`) and skips the org's runs-at-once count. Absent: an account without Voluma's key is refused (403). */
+  /** Present: the run uses these (`credentials: "own"`). Absent: an account without Voluma's key is refused (403). */
   keys: ownKeysSchema.optional(),
   /** One of `GET /run/models`; absent: its default. A choice the run's keys can't take is refused with 400. */
   model: modelRefSchema.optional(),
