@@ -166,7 +166,7 @@ outputs while it is up and unfolds it after (the shell's `useFoldWhile`); unfold
 during it leaves it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
 whole run and the agents. The docked bar's tools are `QUAD_TOOLS` (`marks-panel.tsx`): Navigate
-(V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
+(V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Line, drawn freehand (D: an open path, tag L), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
 (`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
 "Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
