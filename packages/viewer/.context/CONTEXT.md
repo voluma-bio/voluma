@@ -14,8 +14,12 @@ not shown here"), never resampled onto this one.
 - **Which grid.** The grid most of the focused item's `on` blocks and `volumeId` sit on; else the
   grid most of the output's shown blocks sit on; else the scan's grid, the first image volume's. The grid's image is
   its `image` volume with `.npy` data; spacing is the norms of its affine's columns.
-- **What is drawn.** The named structures on the grid (a named labels volume brings all its
-  structures): a labels volume as one ivory overlay (`--bone`, or `--label-n` with Labels on), a
+- **What is drawn.** Context first: the labels volume on the grid that the most label structures
+  point into (the run's bone labels), every label as one overlay in `--label-n` (`--bone` with
+  Labels off), its meshes at 0.3 opacity when the output has meshes of its own. Then the named
+  structures on the grid (a named labels volume brings all its structures and is then drawn
+  opaque in its own colours, the output as a whole) in `--output`, outlined on slices (a pixel
+  whose 4-neighbour differs is opaque, `compose.ts`): a label of a labels volume, a
   cropped mask as an overlay at its `offsetZyx`, each with its meshes; named surfaces as meshes
   and their triangle intersections with each slice. Named rulers and points map from world mm
   through the image's affine into source voxels. Rulers use `--ruler`, with endpoints in 3D and
@@ -26,7 +30,7 @@ not shown here"), never resampled onto this one.
 - **Assets.** From the run's `assets.ready`/`assets.failed` events by the file's sha256
   (`reviewAssetsOf`, run-view): absent is "Preparing…", `failed` is its error. For the image that
   replaces the viewer; for an overlay it is a note under the heading.
-- **Display.** Every shown block draws at full opacity. The Labels toggle changes bone colours
+- **Display.** The Labels toggle (on by default) changes the context's colours
   without moving the camera or crosshair. A new scene on the same grid redraws in place.
 - **Focus.** A To check item's focused blocks are drawn in `--check-outline`; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
   drawn even when no structure brings it. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they
@@ -92,7 +96,8 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   the screen's pixel ratio, skipping duplicate widths); null if none fits or any shown pane is
   loading, refining or failed. The caller freezes its marks and grid identity at invocation.
 - **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
-- **3D.** The image as a volume rendering, no slice planes: the coarsest level at once, then the
+- **3D.** The meshes; the image is volume-rendered only when the scene has none (the scan before
+  segmentation, not loaded otherwise), no slice planes: the coarsest level at once, then the
   finest level of at most 16 M voxels (`volume.ts`), as an 8-bit 3D texture between the window
   limits, ray-marched with gradient lighting in `--bone`. The meshes render first into a target
   with depth and each ray stops at it, so a structure inside the bone shows where it is.

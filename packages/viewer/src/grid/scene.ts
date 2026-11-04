@@ -58,6 +58,11 @@ export type Overlay = ZarrSource & {
   color: string | Readonly<Record<number, string>>;
   /** 0 to 1, of the overlay's full blend: one for the mask, or one per label value (default 1). */
   opacity: number | Readonly<Record<number, number>>;
+  /**
+   * The subject's own region, for every value or per label value: filled stronger, and a pixel
+   * whose 4-neighbour holds another value of this overlay is painted at full opacity.
+   */
+  outline?: boolean | Readonly<Record<number, boolean>>;
 };
 
 /** float32 vertices (x, y, z) in source voxels, then uint32 indices, little-endian. */

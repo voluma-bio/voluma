@@ -58,8 +58,12 @@ where it is used.
   tokens and ids sit behind an info button (`InfoButton`) or Run details, with the numbers someone
   fixing a run needs after the researcher's.
 - **Labels show only for the selection.** Everything else stays unlabelled.
-- **Bone renders ivory by default** (`--bone`); structure label colours
-  (`--label-*`) appear only with the Labels toggle.
+- **Every output shows the run's segmentation as context**: its labels on the output's grid in
+  their label colours (`--label-*`), ivory (`--bone`) with the Labels toggle off. What the output
+  itself shows (its region, mask or surface) is drawn over them in `--output`: filled stronger and
+  outlined on the slices, opaque in 3D with the context bones see-through. An output that is the
+  labels as a whole shows them opaque in their own colours. 3D shows meshes only; the raw image
+  is volume-rendered only when there are none (the scan before segmentation).
 - **Plane colours follow the anatomy on every grid**: coronal red, sagittal green, axial blue
   (`--plane-coronal`, `--plane-sagittal`, `--plane-axial`),
   whether the scan sits on its own grid or the tibia's. A tilted plane (GP) takes the colour of

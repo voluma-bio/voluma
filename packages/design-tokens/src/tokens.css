@@ -211,6 +211,9 @@
   /* The one exception to "status never in mesh colour": the region under check */
   --check-outline: oklch(0.83 0.145 78);
 
+  /* What the selected output itself shows (its region, mask, surface), over the context labels */
+  --output: oklch(0.66 0.24 33);
+
   /* Structure label colours. Clear of the axis colours, amber, ice and ivory. */
   --label-1: #c792ea;
   --label-2: #4fc1c9;

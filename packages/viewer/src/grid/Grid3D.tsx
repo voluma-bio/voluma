@@ -1,6 +1,6 @@
 /**
- * The grid viewer's 3D pane: the image as a volume rendering with the scene's meshes in it, in
- * the grid's own mm (voxel × spacing; the grid's rotation into the scan is not applied). Drag
+ * The grid viewer's 3D pane: the scene's meshes, or the image as a volume rendering when the
+ * scene has none (the scan before segmentation), in the grid's own mm (voxel × spacing; the grid's rotation into the scan is not applied). Drag
  * rotates, right drag pans, the wheel zooms; a click on a mesh moves the crosshair there. Loading
  * the volume or meshes never moves the camera.
  *
@@ -11,7 +11,7 @@
  * the anatomy (`marks.ts`).
  *
  * Each frame renders the meshes into a target with depth, copies it to the canvas, then
- * ray-marches the volume over it, stopping each ray at the meshes' depth (`volume.ts`).
+ * ray-marches the volume, if any, over it (`volume.ts`).
  */
 import { cx } from "@voluma/ui";
 import { useEffect, useRef, useState } from "react";
@@ -90,8 +90,10 @@ export function Grid3D({
     render(): void;
   } | null>(null);
   const [meshLoad, setMeshLoad] = useState<{ left: number; error?: string }>({ left: 0 });
+  // The raw image is drawn only under no meshes: with them its threshold surface hides them.
+  const volumeWanted = scene.meshes.length === 0;
   const [volumeLoad, setVolumeLoad] = useState<{ loading: boolean; error?: string }>({
-    loading: true,
+    loading: volumeWanted,
   });
   const latest = useRef(onPoint);
   latest.current = onPoint;
@@ -537,9 +539,14 @@ export function Grid3D({
 
   // The volume: the coarsest level at once, then the finest that fits (`volumeLevel`); the raw
   // values are kept so a contrast change only rebuilds the bytes. Keyed by the asset, not the
-  // object: Review rebuilds the scene on every display change.
+  // object: Review rebuilds the scene on every display change. Not loaded at all under meshes.
   const [levels, setLevels] = useState<{ k: number; values: ArrayLike<number> }[]>([]);
   useEffect(() => {
+    if (!volumeWanted) {
+      setLevels([]);
+      setVolumeLoad({ loading: false });
+      return;
+    }
     const abort = new AbortController();
     const { base, levels: all } = scene.image;
     const coarsest = all.length - 1;
@@ -566,7 +573,7 @@ export function Grid3D({
       abort.abort();
       for (const level of held) level.release();
     };
-  }, [scene.image.base]);
+  }, [scene.image.base, volumeWanted]);
   const shown = levels.reduce<(typeof levels)[number] | undefined>(
     (best, l) => (!best || l.k < best.k ? l : best),
     undefined,
@@ -605,7 +612,7 @@ export function Grid3D({
           : undefined)));
   // A missing surface is missing content; the finer volume only sharpens the coarsest one.
   const status: PaneStatus =
-    (!shown && !volumeLoad.error) || meshLoad.left > 0
+    (volumeWanted && !shown && !volumeLoad.error) || meshLoad.left > 0
       ? "loading"
       : volumeLoad.loading
         ? "refining"

@@ -666,7 +666,13 @@ export function SlicePane({
       const level = volumes.overlays.get(overlay.base);
       return level ? [{ overlay, values: resample(level, at, basis, s, true), level }] : [];
     });
-    draw(composeSampled(image, contrast, layers), at.cols, at.rows, samplingCorners(at), true);
+    draw(
+      composeSampled(image, at.cols, contrast, layers),
+      at.cols,
+      at.rows,
+      samplingCorners(at),
+      true,
+    );
     probe.current = (p) => {
       const value = valueAt(volumes.image, p);
       if (value === null) return null;

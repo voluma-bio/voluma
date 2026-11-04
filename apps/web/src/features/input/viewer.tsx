@@ -96,7 +96,7 @@ export function SceneViewer({
     ref?: Ref<SceneHandle>;
   };
 }) {
-  const [labels, setLabels] = useState(false);
+  const [labels, setLabels] = useState(true);
   const grid = useMemo(
     () =>
       reviewGrid({
