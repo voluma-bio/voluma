@@ -19,6 +19,10 @@ A protocol script writes a cropped object for the viewer and, beside it, the ful
 open your folder, so report every file the script's result record names with the output it belongs to, the output's
 own file first. A later step takes the output's files from `/run/outputs.yaml`.
 
+Every step after intake also needs `scan-settings`, this scan's display window and segmentation threshold: name it
+with the other inputs in each brief, and the worker passes its file to the scripts. A new `scan-settings` puts out of
+date the masks and labels built at its threshold and everything measured on them.
+
 When a check-first fails, ask whether the fault could make any other output wrong. If it could, the worker tells
 main what it saw and where, and main decides whether the input gets a new version: patella voxels in the tibia label
 also make the patella volume wrong, even though the femur is fine. If the input is right and this step needs it finer
@@ -48,9 +52,11 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 - **Check first:** the spacing the researcher stated against the header (a mismatch is a To check item). Before
   labelling, the keyframe cuts femur and tibia through the joint, with the joint space dark between them, and the
   femur sits where the orientation puts it; every piece the cleanup found is one you can find in the labels.
-- **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask), `frame` (the
-  rough orientation and its keyframe), `scan-notes` and `bone-pieces` (`scan-intake`, `orient-joint`); then
-  `bone-labels` (with the structures in it), `bone-threshold`, `disagreement`, and the label volumes #1–3 (protocol
+- **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask), then
+  `scan-settings` (this scan's display window and segmentation threshold: chosen next, before the orientation and
+  every mask, which take it), `frame` (the rough orientation and its keyframe), `scan-notes` and `bone-pieces`
+  (`scan-intake`, `orient-joint`); then
+  `bone-labels` (with the structures in it), `bone-threshold` (the segmentation threshold of `scan-settings`), `disagreement`, and the label volumes #1–3 (protocol
   step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason
   and the view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`,
   `anatomy.md` "Segmentation notes").

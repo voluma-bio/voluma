@@ -171,7 +171,7 @@ morphs smoothly; it is not an extrusion. Trace slices where the shape changes, a
             '--clearance-mm', type=float, default=0, help='mm: also drop voxels closer than this to the outer surface of the bone mask you pass (periosteum for a filled bone, not the inner surface of the cortex)'
         )
         q.add_argument('--hu', type=sidecar.existing, help='hu.npy: background for the check image, and the grid shape')
-        q.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help="check image display window in HU, or the workflow's anatomy.json (default: automatic)")
+        q.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help="check image display window in HU, or the scan's scan-settings.json (default: automatic)")
         q.add_argument('--out', required=True, help='output directory (created)')
     a = ap.parse_args()
 

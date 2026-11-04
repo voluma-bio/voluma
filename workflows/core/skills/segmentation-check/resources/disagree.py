@@ -16,7 +16,7 @@ Writes: <out>/disagreement.npy  uint16 region id by rank, on the grid of --label
         <out>/panel_<id>.jpg  the three-cut panel of each rendered region
         <out>/result.json  with --object-id: {objects: {<id>: the labels volume entry for report_output}}
 Prints: one JSON line {regions, disagreement, panels, result and objects (with --object-id), flagged_voxels, flagged_pct_of_classic_bone, regions_over_floor, regions_total, top}; top is the 8 largest regions
-Example: python disagree.py --hu hu.npy --labels labels.npy --classic classic.npy --threshold-hu 2500 --out disagree/
+Example: python disagree.py --hu hu.npy --labels labels.npy --classic classic.npy --threshold-hu scan-settings.json --out disagree/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
@@ -100,7 +100,7 @@ if __name__ == '__main__':
     ap.add_argument('--classic', type=sidecar.existing, required=True, help='the classic method\'s labels .npy (classic_segment.py), same grid')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--frame', type=sidecar.existing, help='frame.json from orient_joint.py: cut the panels along its slices')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: only voxels at or above it can disagree')
+    ap.add_argument('--threshold-hu', type=vl.sidecar.threshold_arg, required=True, help='only voxels at or above it can disagree: the scan\'s segmentation threshold: its scan-settings.json, or a number in HU')
     ap.add_argument('--ids', help='classic label ids that count, e.g. 1,2,3 (default: all)')
     ap.add_argument('--min-mm3', type=float, default=0.005, help='mm3: regions under this volume are not numbered')
     ap.add_argument('--render', type=int, default=6, help='number of largest regions to draw a panel for')

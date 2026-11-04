@@ -232,7 +232,7 @@ def main():
     ap.add_argument('--spec', type=sidecar.existing, default=str(HERE / 'protocol.json'),
                     help=f"the workflow's protocol.json: entries {SPEC_ID} and {SHARED_ID} (default: the one beside this script)")
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True,
-                    help='QC display window, as the other QC scripts take it: lo,hi in HU or the file that holds it. Only the QC sheets '
+                    help='QC display window: the scan\'s scan-settings.json (intake\'s), or lo,hi in HU. Only the QC sheets '
                          'use it; the model gets raw HU and applies its own training window')
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')

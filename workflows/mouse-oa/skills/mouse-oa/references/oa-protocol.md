@@ -23,8 +23,8 @@ the record says what was used (the spec's hash in `inputs`, and its numbers in `
 from `/workflow/workflows/mouse-oa/outputs.yaml` (`measure.py --outputs`), the one place the labels are declared. A region script
 reads the entry of its own region (`roi-iioc`, `roi-iioc-trabecular`, `roi-metaphyseal`); `morphometry.py` and `measure.py` take
 `--output <id>`, the region's id (or the slab's, or the values' own) whose entry they read. Change a protocol number there, once;
-prose here and in the examples names the quantity, not its value. Every QC image uses the workflow's display window: pass
-`--window /workflow/workflows/mouse-oa/skills/mouse-oa/references/anatomy.json` to `tibia_frame.py`, `iioc.py`,
+prose here and in the examples names the quantity, not its value. Every QC image uses the scan's display window: pass
+`--window <scan-settings.json>` (the `scan-settings` output's file) to `tibia_frame.py`, `iioc.py`,
 `tibial_trabecular.py`, `metaphysis_roi.py`, `morphometry.py trabecular` and `region_from_curves.py` (the first four require it).
 
 **Grid rule.** A volume is counted where the region is defined: a region traced on the aligned stack is counted on
@@ -36,7 +36,7 @@ on.
 
 | # | Do | Script | Look at |
 |---|---|---|---|
-| 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` | `tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
+| 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` (it refuses a femur passed as the tibia, and a `--joint-end` on the wrong side: fix the labels or the flag it names) | `tibia-frame-qc.jpg`: coronal sections, joint at top, the tibial plateau at the top of the outline (not the femoral condyles and the notch between them), the fibula beside the shaft, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
 | 2 | Propose the growth plate's two faces, check them, and trace the proximal face (annotation A) | `segment_plate` (`plate_faces.py` only when it is not in your tools or returns an error), `prune_plate.py` for strays, then you write `annotations.json` | `qc-plate-<n>.jpg`: every proposed section (the default), each framed on the U span the proposal covered, flagged stretches ticked red, suspect band pieces named in the title; `qc-prune-<n>.jpg` for what you pruned; then zoomed coronal sections of `tibia-hu.npy` with a pixel grid over each flagged or wrong stretch, and over each stretch you trace beyond the spans |
 | 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`; the later tibial steps read ROI-1 and its faces) | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc), and every `qc-faces-<n>.jpg`: the proximal face as delivered, on every traced section, which you open sheet by sheet before you report |
 | 4 | Trace the boundary under the subchondral plate (annotation B) | you | coronal sections with the ROI-1 outline |
