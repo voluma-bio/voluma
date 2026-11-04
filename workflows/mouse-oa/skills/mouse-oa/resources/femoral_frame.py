@@ -23,14 +23,15 @@ mislabelled). Both rulers fit the normal: the label's axis may be wrong, so leav
 re-place the points, unless a render of the scan, its image axes named as scan axes, shows the condyles along another
 direction; then leave them and raise a To check item. A femur label shorter than 4.5 mm along its shaft, whose axes
 cannot be read (the labels or the field of view cut it off), is also raised as a To check item, not answered by moving
-the points.
+the points. So is a DFW refusal where c and d already sit on the condyles' outermost points and a label voxel at an end of
+the width (printed) is on something fused to the femur label: a fabella, a piece of patella or meniscus, an osteophyte.
 
 Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
         distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml and si vectors, zyx), checks
         and frame_file; `objects` holds dfl-ruler (a to b) and dfw-ruler (c to d), lines on the scan grid
         <out>/femur-frame.json  the femur's frame (schema in `microct-core/resources/frame.py`), the `femur-frame` output:
         array axes (W, V, U) as in `tibia_frame.py`, W the label's shaft axis (toward the hip), U = ML, V = W x U, on a box
-        covering the femur label. Only an orientation: no volume is resampled onto it
+        covering the femur label, U signed so V points anterior (b toward a). Only an orientation: no volume is resampled onto it
 Prints: one JSON line {out, frame_file, values: {id: {value, unit, definition, kind}}, objects}
 Example: python femoral_frame.py --spec protocol.json --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --frame orient/frame.json --out femoral/
 Exits 2 with one sentence on bad input, before writing anything.
@@ -102,7 +103,8 @@ def main_axis(p):
 
 def femur_axes(femur, sp, distal_mm):
     """The femur's shaft axis (toward the hip), its mediolateral axis (sign arbitrary), zyx unit vectors in mm space, how
-    far the label runs along the shaft (mm), and the distal end's width along the mediolateral axis (mm). `distal_mm` is a point near the knee end (the landmarks' centroid). The
+    far the label runs along the shaft (mm), the distal end's width along the mediolateral axis (mm) and the two label
+    voxels at the ends of that width (scan zyx). `distal_mm` is a point near the knee end (the landmarks' centroid). The
     shaft, the length and the distal end come from the label's largest connected piece, so a stray fragment past the end
     does not move them. The mediolateral axis is the long axis of the cross-section of every femur voxel in the
     EPIPHYSIS_MM above that end: the condyles are wider side to side than front to back (standard deviation 0.875
@@ -127,8 +129,10 @@ def femur_axes(femur, sp, distal_mm):
     q = q - q.mean(axis=0)
     q = q - np.outer(q @ shaft, shaft)
     ml = np.linalg.eigh(q.T @ q)[1][:, -1]
-    span = p[window & main] @ ml  # the largest piece only: a stray speck off to the side would widen it
-    return shaft, ml, float(s[main].max() - end), float(span.max() - span.min())
+    side = window & main  # the largest piece only: a stray speck off to the side would widen it
+    span = p[side] @ ml
+    ends = [(idx[side][i] * 2).tolist() for i in (span.argmin(), span.argmax())]
+    return shaft, ml, float(s[main].max() - end), float(span.max() - span.min()), ends
 
 
 def off_bone_mm(point, femur, vox):
@@ -145,7 +149,7 @@ def off_bone_mm(point, femur, vox):
 
 def make_femur_frame(grid, femur, shaft, ml):
     """The femur's frame on the scan grid: array axes (W, V, U) with W = `shaft`, U = `ml` (`femur_axes`' zyx unit vectors,
-    perpendicular by construction), V = W x U, built in xyz and reversed as `tibia_frame.py` does so the basis is
+    perpendicular by construction, `ml` signed by the caller so V points anterior), V = W x U, built in xyz and reversed as `tibia_frame.py` does so the basis is
     right-handed, on a box covering the femur label's voxels (every 2nd) plus FRAME_PAD_MM. W is the shaft, not SI: b toward
     a also runs from the back of the condyles to the front (44 degrees off the shaft on OA6-2RK), and the tibia grid's W is
     its shaft too."""
@@ -160,8 +164,8 @@ def make_femur_frame(grid, femur, shaft, ml):
     return fr.make(
         grid['grid_id'], sp, parent_affine_xyz=grid['affine_xyz_to_world_mm'], R_zyx=R, origin_zyx=low @ R, shape=shape,
         axes="orientation only, no volume is resampled onto it: array axes (W, V, U), +W along the femur's shaft from the "
-        "joint toward the hip, U the condyles' mediolateral axis (sign arbitrary: not named medial or lateral), V = W x U; "
-        'the box covers the femur label',
+        "joint toward the hip, +V anterior (V = W x U), U the condyles' mediolateral axis, pointing to whichever side "
+        "makes V anterior (not named medial or lateral); the box covers the femur label",
     )
 
 
@@ -202,7 +206,7 @@ def main():
         sidecar.fail(f'DFL {dfl:.3f} mm is under {MIN_LENGTH_OVER_WIDTH} of DFW {dfw:.3f} mm: a and b were probably placed on an '
                      'end-on view of the joint face, so a-b runs across the notch. Render a view along the shaft '
                      '(regions-and-landmarks) and re-place a and b on it')
-    shaft, ml, checks['femur_length_mm'], ml_span = femur_axes(femur, sp, np.mean(list(pm.values()), axis=0))
+    shaft, ml, checks['femur_length_mm'], ml_span, span_ends = femur_axes(femur, sp, np.mean(list(pm.values()), axis=0))
     if checks['femur_length_mm'] < MIN_FEMUR_MM:
         sidecar.fail(f"the femur label runs only {checks['femur_length_mm']:.2f} mm along its shaft (at least {MIN_FEMUR_MM}): "
                      "too little shaft is labelled or in the field of view to find the femur's axes, so the labels or the scan "
@@ -256,13 +260,19 @@ def main():
         sidecar.fail(f'DFW {dfw:.3f} mm is under {MIN_WIDTH_OVER_SPAN} of the femur label\'s width across its distal end '
                      f'({ml_span:.3f} mm along the mediolateral axis): c and d go on the outer vertices of the condyles, the '
                      'most lateral and most medial points of the condyles on the front view at the level of the distal '
-                     'condyles, not on a ridge or face inside them. Re-place c and d')
+                     'condyles, not on a ridge or face inside them. Re-place c and d. The width runs between label voxels '
+                     f'{span_ends[0]} and {span_ends[1]} (scan z, y, x): look at both on a render. The label may be at fault, '
+                     'not the points: if c and d already sit on the outermost points of the condyles and one of those voxels '
+                     'is on something else fused to the femur label (a fabella, a piece of patella or meniscus, an '
+                     'osteophyte), leave the points and raise a To check item naming that voxel.')
     si_seed = pm['a'] - pm['b']
+    if np.cross(shaft[::-1], ml[::-1])[::-1] @ si_seed < 0:  # V = W x U in xyz; b toward a runs from back to front
+        ml = -ml
     si = unit(si_seed - (si_seed @ ml) * ml)
     frame = {
         'ml_vector_zyx': ml.tolist(),
         'si_vector_zyx': si.tolist(),
-        'note': "ml: the femur label's condylar long axis, sign arbitrary; si: b toward a, made perpendicular to ml (toward "
+        'note': "ml: the femur label's condylar long axis, signed so shaft x ml (xyz) points anterior; si: b toward a, made perpendicular to ml (toward "
         'the shaft)',
     }
     centroid = np.argwhere(femur[::4, ::4, ::4]).mean(axis=0) * 4 * sp
@@ -272,7 +282,6 @@ def main():
     femur_frame = make_femur_frame(grid, femur, shaft, ml)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    fr.save(femur_frame, out / 'femur-frame.json')
     sidecar.emit_values(
         out / 'femoral.json',
         values,
@@ -281,6 +290,7 @@ def main():
         objects=placed,
         frame_file=str(out / 'femur-frame.json'),
     )
+    fr.save(femur_frame, out / 'femur-frame.json')  # after emit_values, which can still exit 2
 
 
 if __name__ == '__main__':
