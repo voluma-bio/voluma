@@ -1,5 +1,5 @@
 /**
- * The input review's breadcrumb and separate page heading: input identity, group, run status,
+ * The input review's header line: the breadcrumb ending in the input, its group, run status,
  * and Run details: what the researcher may ask (how long it took, its workflow and models,
  * its cost, Stop while it goes), then what someone fixing a run needs (times, ids, commits, keys, failures,
  * gateway requests). Below the header,
@@ -32,7 +32,6 @@ import {
   FactSections,
   IconButton,
   INPUT_WORD,
-  PageHead,
   Popover,
   ShellHeading,
   type Status,
@@ -96,24 +95,19 @@ export function InputHeading({
   const now = where(run, waitingOnYou);
   const newest = study?.inputs.find((s) => s.member.inputId === run.input.id)?.runs[0];
   const earlier = newest && newest.id !== run.id;
+  // One line: the breadcrumb ends in this sample, then where its run stands, then Run details.
   return (
-    <>
-      <InputBreadcrumb study={study} title={title} />
-      <PageHead
-        inline
-        title={title}
-        subtitle={
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            {group && <span>Group: {group}</span>}
-            {earlier && <span className="font-medium text-foreground">Earlier run</span>}
-            <StatusMark status={now.status} label={now.text} />
-            {toCheck > 0 && <StatusMark status="check" label={`${toCheck} to check`} />}
-            {now.detail && <span>{now.detail}</span>}
-          </div>
-        }
-        actions={<RunDetails run={run} workflow={workflowLabel(run, study)} />}
-      />
-    </>
+    <InputBreadcrumb study={study} title={title}>
+      <h1 className="sr-only">{title}</h1>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {group && <span>Group: {group}</span>}
+        {earlier && <span className="font-medium text-foreground">Earlier run</span>}
+        <StatusMark status={now.status} label={now.text} />
+        {toCheck > 0 && <StatusMark status="check" label={`${toCheck} to check`} />}
+        {now.detail && <span>{now.detail}</span>}
+      </div>
+      <RunDetails run={run} workflow={workflowLabel(run, study)} />
+    </InputBreadcrumb>
   );
 }
 
@@ -121,9 +115,12 @@ export function InputHeading({
 export function InputBreadcrumb({
   study,
   title = INPUT_WORD.One,
+  children,
 }: {
   study?: StudyDetail;
   title?: string;
+  /** The rest of the header line after the breadcrumb. */
+  children?: ReactNode;
 }) {
   return (
     <ShellHeading>
@@ -143,6 +140,7 @@ export function InputBreadcrumb({
         ]}
         current={title}
       />
+      {children}
     </ShellHeading>
   );
 }
