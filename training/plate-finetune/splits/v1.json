@@ -1,0 +1,43 @@
+{
+  "about": "The split of the v1 training sets (L29): test scans OA8-19L (expert lines) and OA6-9RK (agent lines); validation scans never trained on; train every other traced lab scan. drop: sections whose labels were judged wrong by eye.",
+  "train": [
+    "OA6-14LK3",
+    "OA6-17LK9",
+    "OA6-1RK",
+    "OA6-2RK",
+    "OA7-1L",
+    "OA7-3R",
+    "OA7-4R",
+    "OA6-12RK",
+    "OA6-13-LK2",
+    "OA6-15LK4",
+    "OA6-16LK8",
+    "OA6-18LK10",
+    "OA6-4RK",
+    "OA6-7RK",
+    "OA6-8RK",
+    "OA7-1R",
+    "OA7-3L",
+    "OA7-4L",
+    "OA7-5R",
+    "OA7-6R",
+    "OA7-7L",
+    "OA7-7R",
+    "OA8-11R",
+    "OA8-14L",
+    "OA8-15L",
+    "OA8-20L",
+    "OA8-22L",
+    "OA8-23L",
+    "OA8-24L",
+    "OA8-3R",
+    "OA8-4R"
+  ],
+  "val": ["OA6-11RK", "OA7-2R", "OA8-21L", "OA6-5RK"],
+  "heldout": ["OA8-19L", "OA6-9RK"],
+  "drop": {
+    "OA7-4R": [246],
+    "OA8-11R": [40],
+    "OA7-2R": [296]
+  }
+}
