@@ -74,8 +74,12 @@ if __name__ == '__main__':
         drop = ' '.join(f'{t}:0' for t in sorted({t for t, _, _ in followed}))
         said = '; '.join(f'temp {t} holds {n} of big label {b}\'s {sizes[b]} voxels ({n / sizes[b]:.0%})' for t, b, n in followed)
         sidecar.fail(f'{said}: a small-structure track that holds more than {a.max_big_share:.0%} of a big bone followed that bone, not '
-                     f'a small structure. Drop each ({drop} in --map) and prompt the structure again (sam-segmentation); the bone '
-                     'the big track missed is then unlabelled bone fused to it, for segmentation-check')
+                     f'a small structure. Drop each ({drop} in --map) and redo that structure: a new segment_sam request with a tight box on '
+                     'the piece itself (snap_boxes.py), negative points on the big bone inside the box, and direction or otherFrames '
+                     'where it drifts; or write your own cleanup of the track (keep what lies across the joint space from the bone, '
+                     'drop what overlaps its label) and show it on a crop sheet. Never label the bare threshold candidate instead '
+                     '(sam-segmentation, "When a track fails"). The bone the big track missed is then unlabelled bone fused to it, '
+                     'for segmentation-check')
     boxes = ndimage.find_objects(small)
     out = big.copy()
     report = {temp: {'final': label, 'voxels': int((small == temp).sum()), 'contested': {}} for temp, label in mapping.items()}

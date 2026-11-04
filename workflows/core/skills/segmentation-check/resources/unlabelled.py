@@ -160,7 +160,9 @@ if __name__ == '__main__':
                         f'{c["largest_patch_voxels"]} voxels ({c["voxels"]} in all, tolerance {a.contact_voxels}) at {c["voxel_zyx"]}. '
                         f'The anatomy puts it across joint space from the {name.get(b, b)}, so one label holds the other\'s bone: '
                         f'open it there, give each bone\'s voxels to its own label (classic_segment.py --within {s} or --within {b} '
-                        f'with seeds; relabel.py for a piece apart) and run this again; label {s} must end apart from label {b}')
+                        f'with seeds; relabel.py for a piece apart), or redo the structure (a tight segment_sam box with negative points on the '
+                        f'{name.get(b, b)}) or write your own cleanup and show it on a crop sheet; then run this again. Label {s} must end '
+                        f'apart from label {b}; a threshold candidate is never its label by itself')
         bigs = {b for e in expected.values() for b in e.get('apart_from', [])}
         fused = [c for c in cands if bigs & set(c['fused_to'])]
         for c in fused:
@@ -168,7 +170,8 @@ if __name__ == '__main__':
             flags.append(f'candidate {c["id"]}, {c["volume_mm3"]} mm3 at {c["centre_zyx"]}, is bone no label covers joined through '
                          f'bone to a big bone (mm3 of it each label reaches first: {to}). Open it (render_crops.py --component-at): '
                          f'a big bone\'s own bone goes to that label (relabel.py --pieces {a.out} --at {",".join(map(str, c["centre_zyx"]))} '
-                         '--to <id>); while it is fused it is not a small structure to name; other anatomy stays unlabelled')
+                         '--to <id>); while it is fused it is not a small structure to name or label, even when a SAM track for that '
+                         'structure failed; other anatomy stays unlabelled')
         report = {'joined': joined, 'fused': [c['id'] for c in fused], 'flags': flags}
     np.save(a.out, out)
     sidecar.write(a.out, like=str(sidecar.sidecar_path(a.labels)), inputs=[a.hu, a.labels],

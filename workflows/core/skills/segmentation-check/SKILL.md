@@ -39,7 +39,7 @@ a bone's cortex passed both, with a strip of bone no label covers between it and
 
 | Flag | It means | The correction |
 |---|---|---|
-| `<label> is joined to <bone> through bone` | a small structure the anatomy puts across joint space (`apart_from`) shares bone with a big bone over a patch above the tolerance, directly or through bone no label covers: one label holds the other's bone | open the patch at the voxel given; give each bone's voxels to its own label (`classic_segment.py --within` with seeds, `relabel.py` for a piece apart), then run it again. A joint mineralization or sesamoid ends apart from the bone; no fused-osteophyte allowance |
+| `<label> is joined to <bone> through bone` | a small structure the anatomy puts across joint space (`apart_from`) shares bone with a big bone over a patch above the tolerance, directly or through bone no label covers: one label holds the other's bone | open the patch at the voxel given; give each bone's voxels to its own label (`classic_segment.py --within` with seeds, `relabel.py` for a piece apart), or redo the structure's SAM track (`sam-segmentation`, "When a track fails") or write your own cleanup and show it on a crop sheet; then run it again. A joint mineralization or sesamoid ends apart from the bone; no fused-osteophyte allowance |
 | `candidate <n> ... joined through bone to a big bone` | bone no label covers that a big bone reaches: the big label missed part of its own bone (or other anatomy touches it) | open it; the bone's own bone goes to that label (`relabel.py --pieces`); never name it a small structure while it is fused |
 
 The tolerance (`--contact-voxels`, 100) is partial volume closing a narrow joint gap: good labels measure at most 50
@@ -51,6 +51,8 @@ Small structures (sesamoids, ossicles, fragments) decide measurements, and one m
 A finished labels volume accounts for each candidate from `unlabelled.py` and each piece `label_stats.py` flags:
 seen on its crop sheet (`render_crops.py`), named from the anatomy table and labelled (`relabel.py`, or a
 small-structure SAM request, `sam-segmentation`), or left unlabelled with a To check item asking what it is. A
+candidate becomes a label only when no big bone reaches it (`fused_to` names none) and its crop shows it apart from
+the bone across joint space; it never stands in for a structure whose SAM track failed (redo that track). A
 structure in two pieces is two components, each labelled. A model's name for a piece is a guess.
 
 The scan's notes come before any naming. A structure is **absent** when the notes put it
