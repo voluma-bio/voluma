@@ -14,8 +14,8 @@ or from another grid is refused). This script reads these keys; any other key is
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections; a point more than
                           `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused, naming the section, and so
                           is a face with a gap over the plate: on a section, two points more than `max_gap_um` of the spec (entry
-                          plate-faces) apart where the tibia lies both above and below the line between them, each within that (a line
-                          across empty space between two pieces of bone does not count); in V, two sections more than that apart over the
+                          plate-faces) apart where the tibia lies within that below the line between them and anywhere above it (a
+                          line across empty space between two pieces of bone does not count); in V, two sections more than that apart over the
                           rows with tibia within that of the face. Where the face ends, in U and V, is not tested: check it on the QC;
                           and so is a face that jumps between neighbouring traced sections: a median W change, over the U columns both cover on the
                           tibia's footprint (when they share at least `jump_overlap_um`), of more than `max_jump_um` plus the sections' distance apart

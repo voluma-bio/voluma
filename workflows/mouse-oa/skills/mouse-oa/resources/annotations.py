@@ -198,9 +198,9 @@ def refuse_off_tibia(ann, key, tib, spec_path, vox):
 
 def refuse_gaps(ann, key, tib, spec_path, vox):
     """Refuse a face with a gap over the plate, at the spec's `max_gap_um` (entry plate-faces): on a traced section, two
-    neighbouring points further apart than that over columns where the tibia lies both above and below the line between them,
-    each within it (the plate sits between the epiphysis and the metaphysis, and the mask often leaves the plate out; a line
-    across empty space between two pieces of bone has bone on one side at most); or two neighbouring traced sections further
+    neighbouring points further apart than that over columns where the tibia lies within it below the line between them and
+    anywhere above it (the plate sits on the metaphysis under the epiphysis, which can be porous, and the mask often leaves the
+    plate out; a line across empty space between two pieces of bone has no bone close below it); or two neighbouring traced sections further
     apart than that over rows where the tibia is within it of the traced surface. Where a face ends, in U and in V, is not
     tested: the mask does not show where the plate ends (the condyles overhang it, the fibula and other pieces lie beside it),
     so the ends are checked on the QC sheets. The stop names each stretch."""
@@ -215,13 +215,13 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
         return cum[hi, v, u] > cum[lo, v, u]
 
     def sandwiched(v, w):
-        """Bool over U: tibia on section v both above and below W `w` (per U), each within the gap. The plate lies between the
-        epiphysis and the metaphysis and is often left out of the mask; a curve crossing empty space between two pieces of bone
-        has bone on at most one side."""
+        """Bool over U: tibia on section v within the gap below W `w` (per U) and anywhere above it. The plate lies on the
+        metaphysis under the epiphysis (which can be porous for more than the gap) and is often left out of the mask; a curve
+        crossing empty space between two pieces of bone has no bone close below it."""
         u = np.arange(tib.shape[2])
         wi = np.clip(np.rint(w), 0, tib.shape[0]).astype(int)
-        lo, hi = np.clip(np.floor(w - gap), 0, tib.shape[0]).astype(int), np.clip(np.floor(w + gap) + 1, 0, tib.shape[0]).astype(int)
-        return (cum[wi, v, u] > cum[lo, v, u]) & (cum[hi, v, u] > cum[wi, v, u])
+        hi = np.clip(np.floor(w + gap) + 1, 0, tib.shape[0]).astype(int)
+        return (cum[wi, v, u] > 0) & (cum[hi, v, u] > cum[wi, v, u])
 
     def count_between(mask, a, b):
         """Columns of `mask` strictly between positions a and b."""

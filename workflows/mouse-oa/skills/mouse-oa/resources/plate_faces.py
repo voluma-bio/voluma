@@ -21,8 +21,8 @@ end and on the sections with no span. The spans, the V range and what ended each
 flagged stretch. Copy both keys into your annotations.json. The flagged stretches are in `plate-faces.json` (`stretches`:
 {"<V>": [{"u": [first U, last U], "why": [tests that fired]}]}): where to look hardest and to retrace, by adding your points to the
 section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold the faces to one rule, flagged or not: no gap over the plate wider than `max_gap_um`, on a section
-between two points where the tibia lies both above and below the line between them (a line across empty space between two pieces of bone
-does not count), or in V between two sections over the rows with tibia near the face (a surface is linear between points and held constant
+between two points where the tibia lies within that below the line between them and anywhere above it (a line across empty space between
+two pieces of bone does not count), or in V between two sections over the rows with tibia near the face (a surface is linear between points and held constant
 past them, so an untraced stretch is a straight bridge, wrong geometry however the plate looks there). Where a face ends is not tested:
 carry it to the plate's ends yourself, past every span end, and check them on the QC,
 and no point more than `off_tibia_margin_um` off the tibia mask. Look at every flagged stretch and retrace it wherever it is wrong, and add points wherever a gap

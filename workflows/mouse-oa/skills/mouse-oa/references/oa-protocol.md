@@ -74,7 +74,7 @@ schema is `regions-and-landmarks`'):
   and the script's output) and is where you start, not where you stop: you trace the plate over the whole tibia at plate level, on zoomed
   views, past every span end, on the sections with no span, and out to the V ends. `iioc.py` and `metaphysis_roi.py` stop on a face whose
   curves have a gap over the plate wider than the spec's `max_gap_um` (about 24 rows): on a section, two points that far apart where the tibia lies
-  both above and below the line between them (a line across empty space between two pieces of bone does not count); across V, two sections that
+  within that below the line between them and anywhere above it (a line across empty space between two pieces of bone does not count); across V, two sections that
   far apart over the rows with tibia near the face. They do not test where a face ends, in U or V: the mask does not show where the plate ends
   (the condyles overhang it, the fibula lies beside it), so open the ends on the QC. They name the V rows and U ranges; they also stop on a point more than
   `off_tibia_margin_um` off the tibia mask, and on a face that jumps between neighbouring traced sections by more than `max_jump_um` plus
