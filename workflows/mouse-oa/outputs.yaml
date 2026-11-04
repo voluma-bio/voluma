@@ -48,8 +48,8 @@
   from: scan
   planes: { XY: axial, XZ: coronal, YZ: sagittal }
   expect:
-    - +U is medial on this knee, confirmed on the frame's QC montage against the fibula (lateral); a
-      left knee flips the sign rule.
+    - +U medial and +V anterior (tibia_frame.py's medial_side and anterior_side, from the fibula and the
+      patella), confirmed on the frame's QC montage.
 
 - id: scan-notes
   kind: file

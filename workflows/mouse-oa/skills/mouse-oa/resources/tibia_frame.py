@@ -1,8 +1,10 @@
 """Make a shaft-aligned frame and a cropped HU stack and mask for one long bone (the tibia for IIOC).
 
 Puts the shaft's long axis on W, 0 degrees off in both the coronal (W-U) and the sagittal (W-V) plane, takes the epiphyseal
-long cross-axis as U (+U medial and +V anterior come from a sign rule on scan y and `--joint-end` that assumes one knee and one
-scan orientation: confirm it on the QC montage before naming a side), and resamples the HU volume and the bone mask onto that
+long cross-axis as U, turned so that `--fibula-label` (lateral) lies at -U: +U medial and, the grid being right-handed,
++V anterior on a right knee (on a left knee +V is posterior; `anterior_side` checks V against `--patella-label`). Without a
+fibula label, or with the fibula within 0.3 mm of the tibia's centre along U, the first guess's sign rule on scan y
+stands and `medial_side` says `unknown`. The frame's `axes` note repeats both sides. It then resamples the HU volume and the bone mask onto that
 frame, cropped around the joint end. The growth plate is not levelled: its roll stays as the anatomy has it. The axis is fitted
 on the shaft between `--axis-mm` from the joint end: a first guess from scan-z slices (`--shaft-frac`), then, up to five
 times, the scan's mask is sampled on the provisional grid's W sections over that range (sampled from the scan, so the range
@@ -14,7 +16,7 @@ turns W further, to cancel a lean seen on the QC. Everything the protocol annota
 heights, plate patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
 The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
-because its sign rule (+U medial, +V anterior) and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
+because its sign rule and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
 voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, fewer than ten sections with bone
 in the `--axis-mm` range, a `--joint-end` on the side away from the femur, and a `--label` whose joint end has the femur's
 notch where `--femur-label`'s is solid (the two labels swapped): the joint-end caps' solidities, in the result record, tell the two bones apart.
@@ -27,7 +29,11 @@ Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolatio
         <out>/<name>-frame-qc-sagittal.jpg  the same for six sagittal (W-V) sections
         <out>/<name>.json  the result record: `objects` holds the aligned grid as `tibia-grid` (a volume on the frame's affine)
 Prints: one JSON line {out, values, objects, hu, mask, frame, qc, qc_sagittal, grid_id, shape_wvu, mask_volume_mm3,
-        axis_residual_deg {coronal, sagittal}, axis_mm, axis_w, tilt_deg, iterations, converged, shaft_z, epiphysis_z, tibia_check, ...}
+        axis_residual_deg {coronal, sagittal}, axis_mm, axis_w, tilt_deg, iterations, converged, shaft_z, epiphysis_z, tibia_check,
+        medial_side, fibula_u_mm, anterior_side, patella_v_mm, ...}
+        medial_side: "+U" when the grid was turned to put the fibula at -U; "unknown" without a fibula label or with the
+        fibula within 0.3 mm of the tibia's centre along U: then find the fibula on the QC yourself. anterior_side: "+V" or
+        "-V" from where the patella lies along V (anterior), "unknown" without a patella label or with it within 0.3 mm. Both offsets are measured on the final grid.
         axis_residual_deg: the axis's angle to W on the final grid, at full resolution; positive coronal = the shaft's lower
         end (toward +W) at larger U than its top, positive sagittal the same with V. axis_w: the --axis-mm range as W indices
         of the output grid; its end may lie past the grid's last W index (the fit samples the scan, not the crop).
@@ -121,6 +127,22 @@ def fit_frame(mask, shaft_z, epi_z, joint_end, vox):
     return np.column_stack([u, v, w]), p.mean(axis=0)
 
 
+SIDE_MIN_MM = 0.3  # a side marker's centroid this far off the tibia's centre, or the side is not called
+
+
+def offset_mm(labels, label, axis, origin, vox):
+    """How far label `label`'s centroid lies along `axis` (scan xyz unit vector) from `origin`, in mm; None if absent."""
+    if not label:
+        return None
+    pts = np.argwhere(labels[::4, ::4, ::4] == label) * 4
+    return round(float((pts[:, ::-1].mean(axis=0) - origin) @ axis) * vox, 3) if len(pts) else None
+
+
+def side(off, axis):
+    """'+axis' when the marker at `off` mm says the positive direction is the named side, '-axis' the other, 'unknown' if unclear."""
+    return 'unknown' if off is None or abs(off) < SIDE_MIN_MM else (f'+{axis}' if off > 0 else f'-{axis}')
+
+
 def joint_part(mask, joint_end, depth_vox):
     """Scan xyz of the bone voxels within depth_vox slices of the joint end: what the crop must cover."""
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
@@ -194,6 +216,8 @@ def main():
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
     ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script refuses a --label whose joint end looks like the femur\'s, and a --joint-end on the wrong side')
+    ap.add_argument('--fibula-label', type=int, default=4, help='label id of the fibula (4), which is lateral: the grid is turned to put it at -U (0: none)')
+    ap.add_argument('--patella-label', type=int, default=3, help='label id of the patella (3), which is anterior: reported as anterior_side, a check on +V (0: none)')
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--name', default='tibia', help='prefix of the output files')
@@ -250,6 +274,11 @@ def main():
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)
     basis, origin = fit_frame(mask, shaft_z, epi_z, a.joint_end, sp[0])
+    fibula_u_mm = offset_mm(labels, a.fibula_label, basis[:, 0], origin, sp[0])
+    if fibula_u_mm is not None and fibula_u_mm >= SIDE_MIN_MM:
+        basis[:, :2] *= -1  # half a turn about W: the fibula (lateral) to -U, still right-handed
+        fibula_u_mm = -fibula_u_mm
+    medial = side(None if fibula_u_mm is None else -fibula_u_mm, 'U')
     joint = joint_part(mask, a.joint_end, round(a.depth_mm / sp[0]))
 
     def crop(basis):
@@ -271,6 +300,13 @@ def main():
         basis = tilted(basis, *np.tan(np.radians(a.tilt_deg)))
     low, shape_xyz, w_range = crop(basis)
     shape_zyx = tuple(int(i) for i in shape_xyz[::-1])
+    fibula_u_mm = offset_mm(labels, a.fibula_label, basis[:, 0], origin, sp[0])  # on the final grid, for the record
+    patella_v_mm = offset_mm(labels, a.patella_label, basis[:, 1], origin, sp[0])
+    anterior = side(patella_v_mm, 'V')
+    sides = (f'{medial} medial (the fibula lies {fibula_u_mm:+.2f} mm along U)' if medial != 'unknown' else
+             'medial side unknown (no fibula label, or the fibula is within 0.3 mm of the tibia\'s centre along U): find the fibula on the QC')
+    sides += (f', {anterior} anterior (the patella lies {patella_v_mm:+.2f} mm along V)' if anterior != 'unknown' else
+              ', anterior side unknown (no patella label, or the patella is within 0.3 mm of the tibia\'s centre along V)')
     frame = fr.make(
         g['grid_id'],
         sp,
@@ -278,7 +314,7 @@ def main():
         R_zyx=basis[::-1, ::-1].T,  # frame axis i (W, V, U) as a scan (z, y, x) vector: the basis columns, reversed
         origin_zyx=(origin + basis @ low)[::-1],
         shape=shape_zyx,
-        axes='aligned array axes (W, V, U): +U roughly medial, +V anterior, +W from the joint toward the shaft; '
+        axes=f'aligned array axes (W, V, U): {sides}, +W from the joint toward the shaft; '
         'check on the QC montage before annotating',
     )
     aligned = fr.resample(hu, frame, order=1, cval=-1000)
@@ -339,6 +375,10 @@ def main():
         shape_wvu=list(shape_zyx),
         mask_volume_mm3=round(float(amask.sum()) * sp[0] ** 3, 4),
         axis_residual_deg=residual,
+        medial_side=medial,
+        fibula_u_mm=fibula_u_mm,
+        anterior_side=anterior,
+        patella_v_mm=patella_v_mm,
         axis_mm=a.axis_mm,
         axis_w=list(w_range),
         tilt_deg=a.tilt_deg,
