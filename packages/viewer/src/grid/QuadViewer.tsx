@@ -382,8 +382,8 @@ export function QuadViewer({
     layout: given,
     views: Object.fromEntries(
       VIEW_ORDER.flatMap((v) => {
-        const h = handles[v]?.current;
-        return h ? [[v, h.view()]] : [];
+        const at = handles[v]?.current?.view();
+        return at ? [[v, at]] : [];
       }),
     ),
   });
