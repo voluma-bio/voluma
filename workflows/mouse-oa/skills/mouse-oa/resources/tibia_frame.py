@@ -65,16 +65,30 @@ def largest_piece(m):
     return out
 
 
-def cap_solidity(m, low_end, cap_vox):
-    """Area over convex-hull area of the cap of mask `m` within `cap_vox` slices of its low or high end, projected along z.
-    The femur's cap holds the intercondylar notch, open toward the joint, so its footprint is U-shaped; the tibial plateau's is a solid blob. On ten lab scans the femur's cap gave 0.51 to 0.80 and the
-    tibia's 0.83 to 0.95, the smallest gap 0.12."""
+def cap_solidity(m, toward, cap_vox):
+    """Area over convex-hull area of the cap of mask `m`: its voxels within `cap_vox` of its end facing the point `toward`
+    (scan zyx), measured along the mask's own long axis (its principal axis) and projected along that axis. The femur's
+    cap holds the intercondylar notch, open toward the joint, so its footprint is U-shaped; the tibial plateau's is a
+    solid blob. Taken along the bone's axis, not scan z: on a flexed knee a scan-z slab cuts each bone obliquely, which
+    fills the femur's notch and cuts into the plateau (staging run 27ccb04f, OA6-2RK: tibia 0.78 against femur 0.91 along
+    scan z, the labels right). On ten lab scans along scan z the femur's cap gave 0.51 to 0.80 and the tibia's 0.83 to 0.95."""
     from skimage.morphology import convex_hull_image
 
-    zs = np.flatnonzero(m.any(axis=(1, 2)))
-    z0, z1 = zs[0], zs[-1]
-    lo, hi = (z0, z0 + cap_vox) if low_end else (max(z1 - cap_vox + 1, z0), z1 + 1)
-    foot = m[lo:hi].any(axis=0)
+    pts = np.argwhere(m)
+    c = pts[::8].mean(axis=0)
+    axis = np.linalg.eigh(np.cov((pts[::8] - c).T))[1][:, -1]
+    if (np.asarray(toward, float) - c) @ axis < 0:
+        axis = -axis
+    s = (pts - c) @ axis
+    cap = pts[s > s.max() - cap_vox]
+    e1 = np.cross(axis, [1.0, 0, 0] if abs(axis[0]) < 0.9 else [0, 1.0, 0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(axis, e1)
+    uv = np.floor(cap @ np.column_stack([e1, e2]))
+    uv = (uv - uv.min(axis=0)).astype(int) + 2
+    foot = np.zeros(uv.max(axis=0) + 3, bool)
+    foot[uv[:, 0], uv[:, 1]] = True
+    foot = ndi.binary_closing(foot)  # an oblique projection of voxels leaves pinholes; the notch is far wider than one pixel
     return float(foot.sum() / max(convex_hull_image(foot).sum(), 1))
 
 
@@ -87,10 +101,10 @@ def check_bone(labels, mask, label, other, joint_end, vox):
     if not oth.any():
         return {'tibia_check': f'not made: label {other} (the femur) is empty, so nothing to compare against; check the QC'}
     mask, oth = largest_piece(mask), largest_piece(oth)
-    zc, zo = (float(np.flatnonzero(m.any(axis=(1, 2))).mean()) for m in (mask, oth))
-    facing_low = zo < zc  # the end of this bone that faces the femur
+    cm, co = (np.argwhere(m[::4, ::4, ::4]).mean(axis=0) * 4 for m in (mask, oth))
+    facing_low = co[0] < cm[0]  # the end of this bone (in scan z) that faces the femur
     cap = round(CAP_MM / vox)
-    s, so = cap_solidity(mask, facing_low, cap), cap_solidity(oth, not facing_low, cap)
+    s, so = cap_solidity(mask, co, cap), cap_solidity(oth, cm, cap)
     if s < so - CAP_GAP:
         sidecar.fail(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap '
                      f'solidity {s:.3f} against {so:.3f}), so the two bones\' labels look swapped in bone-labels, or a piece of another bone is merged into one of them: tell main, '
