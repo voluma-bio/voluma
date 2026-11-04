@@ -164,6 +164,20 @@ export const volumeSchema = z.object({
 });
 export type Volume = z.infer<typeof volumeSchema>;
 
+/**
+ * A grid the run published, image or not: a base output's grid, or a frame a task oriented for (a
+ * file output such as intake's joint frame), named by the output that first published it.
+ */
+export type Grid = {
+  /** The output that published it. */
+  id: string;
+  name: string;
+  /** The task that published it ("intake"). */
+  by: string;
+  kind: "base" | "file";
+  affine: Volume["affine"];
+};
+
 /** A segmented object: a label in a `labels` volume, or a cropped mask on a grid. */
 export const structureSchema = z
   .object({
