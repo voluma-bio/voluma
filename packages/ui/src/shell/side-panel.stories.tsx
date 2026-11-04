@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Box, ListTree, MessageSquare, Sigma } from "lucide-react";
+import { Box, ListTree, MessageSquare } from "lucide-react";
 import { useState } from "react";
 import { SampleTree } from "../sample-tree";
 import { INPUT_WORD } from "../words";
@@ -13,8 +13,8 @@ import { StoryRail } from "./story-rail";
  * frame whose sides keep their width across pages. **Where:** the input page (Conversation and
  * Scans; Final outputs) and the study pages.
  *
- * Try: drag a seam (or focus it and use the arrow keys); fold a side with its button, `\\` or `]`,
- * both with F; a folded side is a 28 px strip with its icon and badge, and what is inside stays
+ * Try: drag a seam (or focus it and use the arrow keys); Hide folds a named panel;
+ * a folded side is a 28 px strip with a visible Show action and badge, and its content stays
  * mounted. Widths are kept in localStorage (`voluma.sides`).
  */
 const meta = {
@@ -90,7 +90,7 @@ function Page({ theme, waiting }: { theme: "light" | "dark"; waiting?: boolean }
           side="right"
           title="Final outputs"
           meta="1 of 2 in"
-          icon={<Sigma />}
+          icon={null}
           badge={12}
           badgeLabel="12 need you"
         >
@@ -110,4 +110,20 @@ export const DarkWithBadge: Story = {
   globals: { theme: "dark" },
   args: { side: "right", title: "", icon: null, children: null },
   render: () => <Page theme="dark" waiting />,
+};
+
+export const FoldedLight: Story = {
+  ...Light,
+  play: async ({ canvasElement }) => {
+    for (const button of canvasElement.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label^="Hide "]',
+    )) {
+      button.click();
+    }
+  },
+};
+
+export const FoldedDark: Story = {
+  ...DarkWithBadge,
+  play: FoldedLight.play,
 };

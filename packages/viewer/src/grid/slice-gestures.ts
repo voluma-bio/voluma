@@ -12,7 +12,7 @@
  * line, an angle) or of a published ruler moves that end (`onEdit`); a click there goes to the tool
  * (places, probes, adds a line end), and with no tool picks the mark (`onPick`).
  */
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { angleAbout, type Basis, type Slab, unit, type Vec3 } from "./frame";
 import {
   angleDegrees,
@@ -63,8 +63,8 @@ export type GestureInputs = {
   annotations: readonly GridAnnotation[];
   /** An end dragged; absent, no end can be. */
   onEdit?(edit: MarkEdit): void;
-  /** A mark's end clicked without moving. */
-  onPick?(id: string): void;
+  /** A mark's end clicked without moving, or no mark on a navigation click. */
+  onPick?(id?: string): void;
 };
 
 /** A drag shorter than this (CSS px) is a click. */
@@ -140,6 +140,22 @@ export function useSliceGestures(args: {
     text: string;
   } | null>(null);
   const [hovering, setHovering] = useState(false);
+  // An untilted pane steps whole slices; a tilted one steps the finest spacing along its normal.
+  const step = useCallback(
+    (by: number) => {
+      const { scene, axis } = first.current;
+      const { point: at, whole: w, basis: b } = latest.current;
+      const p = [...at];
+      if (w) p[axis] = clamp(Math.round(p[axis]!) + by, scene.shapeZyx[axis]);
+      else {
+        const h = Math.min(...scene.spacingZyx) * by;
+        for (const k of [0, 1, 2]) p[k] = p[k]! + (h * b.normal[k]!) / scene.spacingZyx[k]!;
+        if (p.some((v, k) => v < 0 || v > scene.shapeZyx[k]! - 1)) return;
+      }
+      latest.current.onPoint(p as unknown as Zyx);
+    },
+    [latest],
+  );
 
   useEffect(() => {
     const element = host.current!;
@@ -291,6 +307,7 @@ export function useSliceGestures(args: {
       return Math.hypot(dx, dy) < SPIN_STILL_PX ? null : Math.atan2(dy, dx);
     };
     const down = (event: PointerEvent) => {
+      if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) return;
       if (drag || !view.current) return;
       element.focus({ preventScroll: true });
       const pan = event.button === 1 || event.button === 2 || event.shiftKey;
@@ -341,8 +358,11 @@ export function useSliceGestures(args: {
         return;
       }
       if (!layer.owns(event)) return;
-      if (drag.mode === "cross") latest.current.onPoint(toVoxel(event));
-      else if (drag.mode === "tilt") {
+      if (drag.mode === "cross") {
+        if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= CLICK_PX)
+          drag.moved = true;
+        latest.current.onPoint(toVoxel(event));
+      } else if (drag.mode === "tilt") {
         const toward = towardPointer(event);
         const angle = angleAbout(drag.toward!, toward, latest.current.basis.normal);
         drag.toward = toward;
@@ -424,6 +444,7 @@ export function useSliceGestures(args: {
         else if (!d.moved && end.from === "mark") latest.current.onPick?.(end.id);
         return;
       }
+      if (d.mode === "cross" && !d.moved) latest.current.onPick?.(undefined);
       // A click toward a line or an angle: keep going until the mark has all its ends.
       if ((d.mode === "line" && (!d.moved || clicks.length)) || d.mode === "angle") {
         clicks.push(toPosition(event));
@@ -558,20 +579,16 @@ export function useSliceGestures(args: {
       }
       step(Math.sign(event.deltaY));
     };
-    // An untilted pane steps whole slices; a tilted one steps the grid's finest spacing along its normal.
-    const step = (by: number) => {
-      const { point: at, whole: w, basis: b } = latest.current;
-      const p = [...at];
-      if (w) p[axis] = clamp(Math.round(p[axis]!) + by, scene.shapeZyx[axis]);
-      else {
-        const h = Math.min(...scene.spacingZyx) * by;
-        for (const k of [0, 1, 2]) p[k] = p[k]! + (h * b.normal[k]!) / scene.spacingZyx[k]!;
-        if (p.some((v, k) => v < 0 || v > scene.shapeZyx[k]! - 1)) return;
-      }
-      latest.current.onPoint(p as unknown as Zyx);
-    };
     const key = (event: KeyboardEvent) => {
-      if (event.target !== element) return;
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.target !== element
+      )
+        return;
       const by = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key];
       if (by === undefined) return;
       event.preventDefault();
@@ -626,7 +643,7 @@ export function useSliceGestures(args: {
   useEffect(() => {
     if (tool !== "probe") setReadout(null);
   }, [tool]);
-  return { readout, hovering };
+  return { readout, hovering, step };
 }
 
 const clamp = (n: number, size: number) => Math.max(0, Math.min(size - 1, n));

@@ -48,7 +48,11 @@ first drops a mark being drawn, then puts the tool away, then (the shell's) leav
 thing per press. A new mark names the grid's image volume (`ReviewGrid.imageId`) and gets a tag;
 its identity (`gridKeyOf`) also pins the image hash, grid id, shape and affine, so a new version
 that replaces the image cannot inherit its old marks just because it reuses a block id. The viewer
-draws only marks matching that identity. The focus handed to a newly mounted viewer is keyed the
+draws only marks matching that identity. Visible mark tags in slices and 3D are native selection
+buttons (click, Tab then Enter/Space), exposing Delete for your own selection above the viewer.
+Activating the selected tag again clears the selection, as does a Navigate click away from tags
+and editable endpoints; drags and slice stepping keep it. Deselecting never changes the mark.
+The focus handed to a newly mounted viewer is keyed the
 same way: it starts at that grid's target or centre, never the previous grid's voxel while an
 effect catches up.
 
@@ -84,11 +88,15 @@ the first value resting on it (`show`, also what a click in the whole run does).
 layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
 (both sides folded) plus that pane: the page keeps only which view fills and derives the rest
 from the shell, so leaving Full view by any means gives the panes back. The whole run folds Final
-outputs while it is up and unfolds it after (the shell's `useFoldWhile`); unfolding the strip
-during it leaves it. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
-run or agents, an open row. W toggles the whole run. The panes stay mounted (hidden) under the
-whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate
-(V), Point with a note (P), Ruler (L), Angle (A), Outline (O), Line, drawn freehand (D: an open path, tag L), Probe (I). Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
+outputs while it is up and unfolds it after (the shell's `useFoldWhile`); showing a panel only
+changes its visibility, not the centre. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
+run or agents, an open row, only within its focused workspace and never while typing elsewhere.
+Visible Whole run / Back to the views controls switch the centre. The panes stay mounted (hidden) under the
+whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate,
+Point, Ruler, Angle, Outline, Freehand line (an open path, tag L), Probe. These are
+labelled choices, with no command-key bindings. Point notes have no editor or display; old stored
+note fields remain readable and intact when a mark moves or is restored. Probe values still show.
+Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
 (`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
 "Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
@@ -107,15 +115,22 @@ A finished own-key run holds no key, so `RunAlert` shows a key form (`ReopenKeys
 
 **Editing a mark is a correction, and nothing reaches main until Send.** A new mark, a moved one
 (Navigate: drag an end of your point, line or angle in a slice; a click on an end picks the mark),
-a deleted one (Delete or Backspace on the picked mark) and a published ruler's end dragged (a new
+a deleted one (the visible Delete mark action on your picked mark) and a published ruler's end dragged (a new
 line mark of yours, tag R<n>, `output` the ruler's) are written to the log at once and wait as chips
 beside the box. Which marks wait is derived, never kept: `useRunMarks`'s `changes` judges each of your
 marks by the API's own rule (`toldMarks`, `changeOf` in `review-state.ts`): a mark no message of
 yours carried, one changed since, and one main was told of that you deleted. Someone who can't
 write to main sees no waiting chips.
 x on a chip undoes the change (a new mark goes; a moved or deleted one goes back to what main saw).
+This is distinct from Undo delete: the persistent session action restores the exact immediately
+pre-delete mark, including unsent edits, through `place` and the existing per-mark write queue.
+Undo stays available after a failed restore; a replaced image cannot inherit the old mark.
+It offers the newest still-restorable deletion; replaced grids or marks restored elsewhere do not
+block older deletions. Successful Undo returns to the mark's output and slice and focuses Delete.
+Restoring after Send is a new correction, not a retraction of the sent message. Reloading or leaving
+the run clears deletion history. No mark undo keyboard binding is installed.
 Nothing is written into the box: main gets each attached mark with its change and positions, and
-the empty box shows what the marks say. Tags are never reused in a run (`MarkStore.tags`): a message
+the placeholder stays a writing prompt instead of repeating the mark chips. Tags are never reused in a run (`MarkStore.tags`): a message
 may name a deleted one. A send waits for the writes of the marks it names (`settled`), since the API
 freezes them from the log; if one failed, nothing is sent.
 

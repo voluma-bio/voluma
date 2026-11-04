@@ -4,8 +4,7 @@
  * keeps whether each side is folded, so it carries across pages. The main area (`children`) is
  * rendered once and never remounts when a side folds, so a viewer inside it keeps its state.
  *
- * Keys: `\` and `]` fold the left and right side; F folds both, or unfolds both if either is
- * folded; Esc unfolds both when both are folded (Full view).
+ * Visible controls fold panels; scoped Escape leaves Full view.
  */
 import {
   createContext,
@@ -43,7 +42,12 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [folded, setFolded] = useState<Record<ShellSide, boolean>>({ left: false, right: false });
+  const fullOpener = useRef<HTMLElement | null>(null);
   const fold = useCallback((side: ShellSide | "both", value: boolean) => {
+    if (side === "both") {
+      if (value) fullOpener.current = document.activeElement as HTMLElement;
+      else requestAnimationFrame(() => fullOpener.current?.focus());
+    }
     setFolded((f) =>
       side === "both"
         ? f.left === value && f.right === value
@@ -67,21 +71,19 @@ export function AppShell({
         target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
       )
         return;
-      if (event.key === "\\") fold("left", !folded.left);
-      else if (event.key === "]") fold("right", !folded.right);
-      else if (event.key === "Escape") {
+      if (!target.closest("[data-shell-workspace]")) return;
+      if (event.key === "Escape") {
         // Esc belongs to an open menu, popover or dialog first.
         if (!full) return;
         if (target.closest("[role=menu], [role=dialog], [data-radix-popper-content-wrapper]"))
           return;
         fold("both", false);
-      } else if (event.key.toLowerCase() === "f") fold("both", !(folded.left || folded.right));
-      else return;
+      } else return;
       event.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [fold, folded, full]);
+  }, [fold, full]);
 
   const state = useMemo<ShellState>(() => ({ folded, fold }), [folded, fold]);
 
@@ -95,7 +97,10 @@ export function AppShell({
               ref={setHeading}
               className="flex min-h-[var(--header-h)] shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-3.5 py-1 empty:hidden"
             />
-            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-card">
+            <main
+              data-shell-workspace
+              className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-card"
+            >
               {children}
             </main>
           </div>
@@ -114,10 +119,9 @@ export function useFullView(): [boolean, (full: boolean) => void] {
 
 /**
  * Folds `side` while `active`, and puts it back when `active` ends or the screen unmounts, unless
- * it was folded already. `onUnfolded`: the person unfolded it while active (the screen leaves
- * what needed the room).
+ * it was folded already or the person unfolded it in the meantime.
  */
-export function useFoldWhile(side: ShellSide, active: boolean, onUnfolded?: () => void): void {
+export function useFoldWhile(side: ShellSide, active: boolean): void {
   const shell = useContext(ShellContext);
   if (!shell) throw new Error("useFoldWhile must be used inside AppShell");
   const { fold } = shell;
@@ -125,11 +129,11 @@ export function useFoldWhile(side: ShellSide, active: boolean, onUnfolded?: () =
   // Whether this hook folded the side, so only it unfolds it; and the fold as last rendered.
   const mine = useRef(false);
   const was = useRef(folded);
-  const latest = useRef({ folded, onUnfolded });
-  latest.current = { folded, onUnfolded };
+  const latest = useRef(folded);
+  latest.current = folded;
   useEffect(() => {
     if (!active) return;
-    if (!latest.current.folded) {
+    if (!latest.current) {
       mine.current = true;
       fold(side, true);
     }
@@ -143,7 +147,6 @@ export function useFoldWhile(side: ShellSide, active: boolean, onUnfolded?: () =
     was.current = folded;
     if (mine.current && before && !folded) {
       mine.current = false;
-      latest.current.onUnfolded?.();
     }
   }, [folded]);
 }
