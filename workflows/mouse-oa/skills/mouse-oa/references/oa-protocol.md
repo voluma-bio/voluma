@@ -83,7 +83,8 @@ schema is `regions-and-landmarks`'):
   and last few sections in V, where the plate is partial, it can draw a full-width line through other bone, its largest errors: open those
   sections first. A stray band piece on separate bone can be bridged into the line. `plate-faces.json` lists the model's band pieces
   (`pieces`) and marks `suspect` the ones with faces on them that lie on a small separate part of the tibia mask; the QC sheet names them
-  in its title. Open each suspect's section: a band piece on the fibula (thin bone beside the tibia) is a stray, drop it. Take strays
+  in its title. Open each suspect's section: a band piece on the fibula (thin bone beside the tibia) is a stray, drop it. A fibula the
+  section's mask joins to the tibia is never marked suspect: look beside the tibia on every section too. Take strays
   out with `prune_plate.py` (`--help`) before you trace: `--drop-pieces` for a stray that is its own piece, `--cut` for a U range where a
   stray is joined to the plate by a bridge of band (one piece, so dropping it would drop the plate too), or for any stretch of the line
   that is on the wrong bone. It only removes points, from both faces at once, and lists each range it emptied: trace the ones that are

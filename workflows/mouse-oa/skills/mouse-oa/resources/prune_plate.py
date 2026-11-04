@@ -80,7 +80,13 @@ def main():
         sidecar.fail('nothing to prune: name --drop-pieces, --cut or both')
     if bad := [i for i in drop_ids if i not in pieces]:
         sidecar.fail(f'piece {bad[0]} is not in {src / "plate-faces.json"}: name ids from its `pieces`')
-    sections = sorted(int(v) for v in ann[KEYS[0]]['slices'])
+    # a worker may have edited the file, so the faces need not share sections or columns: work on their union
+    sections = sorted({int(v) for key in KEYS for v in ann[key]['slices']})
+
+    def columns(v):
+        """U columns either face has a point on, on section v."""
+        return {int(u) for key in KEYS for _, u in ann[key]['slices'].get(str(v), [])}
+
     for v0, v1, *_ in cuts:
         if not any(v0 <= v <= v1 for v in sections):
             sidecar.fail(f'--cut V {v0}-{v1} holds no proposed section: the proposal has V={sections[0]}..{sections[-1]}, every '
@@ -96,7 +102,7 @@ def main():
         cols = set()
         for key in KEYS:
             for w, u in ann[key]['slices'].get(str(v), []):
-                w = round(w)
+                w, u = round(w), int(u)
                 if (lab[max(w - 1, 0) : w + 2, u] == i).any():
                     cols.add(u)
         if v in remove:
@@ -107,7 +113,7 @@ def main():
         n = 0
         for v in sections:
             if v0 <= v <= v1:
-                cols = {u for _, u in ann[KEYS[0]]['slices'][str(v)] if u0 <= u <= u1}
+                cols = {u for u in columns(v) if u0 <= u <= u1}
                 remove[v] |= cols
                 n += len(cols)
         cut_records.append({'v': [v0, v1], 'u': [u0, u1], 'columns': n})
@@ -125,14 +131,14 @@ def main():
         if not remove[v]:
             continue
         touched.append(v)
-        us = np.array(sorted(u for _, u in ann[KEYS[0]]['slices'][str(v)]))
+        us = np.array(sorted(columns(v)))
         gone = np.isin(us, sorted(remove[v]))
         emptied[str(v)] = [[int(us[a]), int(us[b])] for a, b in runs_of(gone)]
-        if str(v) not in pruned[KEYS[0]]['slices'] or str(v) not in pruned[KEYS[1]]['slices']:
+        if any(str(v) in ann[key]['slices'] and str(v) not in pruned[key]['slices'] for key in KEYS):
             removed_sections.append(v)
             for key in KEYS:
                 pruned[key]['slices'].pop(str(v), None)
-    if len(pruned[KEYS[0]]['slices']) < 2:
+    if min(len(pruned[key]['slices']) for key in KEYS) < 2:
         sidecar.fail('the pruning leaves fewer than two sections with a curve: that is no proposal; run plate_faces.py or trace the plate yourself')
 
     out = Path(a.out)
@@ -150,7 +156,7 @@ def main():
             v = int(v)
             sets, ws, us = [], [], []
             for key, colour in zip(KEYS, ('orange', 'cyan'), strict=True):
-                pts = np.array(ann[key]['slices'][str(v)], float)
+                pts = np.array(ann[key]['slices'].get(str(v), []), float).reshape(-1, 2)
                 ws += list(pts[:, 0])
                 us += list(pts[:, 1])
                 gone = np.isin(pts[:, 1], sorted(remove[v]))
