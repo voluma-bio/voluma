@@ -66,7 +66,8 @@ function threadSandbox(
       sandbox: (async () => {
         onState(threadId, "starting");
         try {
-          const sandbox = await create(threadId);
+          // Called after this entry is `current`, so a creation that throws at once is forgotten too.
+          const sandbox = await Promise.resolve().then(() => create(threadId));
           onState(threadId, "ready");
           return sandbox;
         } catch (error) {
