@@ -13,20 +13,17 @@
  * anyway (expired leases), a poll holds no
  * connection or in-memory wake-up on the API, and a run lasts minutes, so two
  * seconds of pickup delay costs nothing. Every run is created `queued` and
- * only a claim starts it (`run.ts`). `claim` is atomic: it picks the oldest
- * `queued` run the org's limits allow (a `visitor` run skips the runs-at-once
- * count, and is taken only while the server holds its keys), choosing across
- * orgs so one org's queue never holds another's back: among each org's oldest
- * claimable run, it takes the one whose org was claimed from least recently
- * (from the runs' stored claim times, never from an API process's memory);
- * ties go to the older run. It moves it to
+ * only a claim starts it (`run.ts`). `claim` is atomic: it takes the first `queued` run in
+ * the queue's order (`queueOrder` in the API: a run that already started first; then a `visitor`
+ * run while no other `visitor` run is running, its starters taking turns; then `voluma` runs by
+ * organization priority; oldest first within each), skipping a `visitor` run while one is running
+ * and taking nothing while the app already has `RUN_LIMITS_APP_RUNNING` runs running. It moves the run to
  * `running`, and takes the lease. A run's `startedAt` is its first claim's
  * time; a re-claim keeps it. Taking the
  * run is what starts it, so the runner reports no "running". `claim` answers
  * `{ claim: null }` when there is nothing to start. For a `visitor` run the
- * response is the only place the keys go and the server forgets them as it
- * answers. A response lost on the way costs that run its keys, which the lease
- * below recovers like any other lost keys.
+ * response carries its keys, opened from the run's sealed column (the server keeps them for
+ * the run's life, so a lost response or a re-claim after a deploy gets them again).
  *
  * Lease. A claim is a lease on the run for `LEASE_SECONDS` from the server's
  * last heartbeat for it. The holder (`runnerId`), the lease token, the expiry

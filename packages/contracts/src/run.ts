@@ -124,20 +124,17 @@
  *
  * Limits: each org has its own, given to the run domain by the API's
  * composition root:
- *   - per caller: at most this many runs that haven't ended, per `credentials`
- *     kind (none for an org whose members share one account); another answers
- *     409;
- *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
- *     while the org is under it);
  *   - app-wide, enforced by the claim (a run over a cap just stays `queued`;
  *     nothing is refused): at most `RUN_LIMITS_APP_RUNNING` runs `running`, of which at most one on a
  *     `visitor` run's own keys;
+ *   - `visitor` runs that haven't ended, over every account: at most 100; a start past it is
+ *     refused 429;
  *   - for `voluma` runs only: a total model spend per org (the summed model
- *     cost of its runs). A start, resume or reopen at or past it is refused
+ *     cost of its runs). A start or reopen at or past it is refused
  *     (429, a reopen 409); a claim refuses a run that never started and
  *     never one that has.
  * Every run is created `queued`, and only a claim starts it (`runner.ts`). A
- * `visitor` run skips the org's runs-at-once count but still waits for a claim.
+ * `visitor` run waits for a claim too.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
@@ -149,7 +146,7 @@ import { workflowPinSchema } from "./workflow";
  * A scan a run reads. `source` says where its files are: an `upload` lives at
  * `inputPrefix(id)`; the `reference` scan is `referencePrefix("scan")`. The
  * server derives the R2 prefix; the browser never needs it. Its key layout
- * is `inputKey` in `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
+ * is `inputKey` in `r2.ts`. `listInputs` lists the caller's uploads and the
  * org's reference scan.
  */
 /** The levels a person may pick at `/new`: ones every offered model supports (or is mapped to). */
@@ -174,7 +171,7 @@ export const runStateSchema = z.discriminatedUnion("status", [
    * `visitor` run is running, `visitor` runs first; then `voluma` runs by
    * organization priority, then oldest first); 1 starts next. The server computes
    * it at read time and doesn't store it, so the run screen polls `getRun` to see
-   * it move. Under `self`, it still counts other callers' runs (only a count leaks).
+   * it move. It counts other callers' runs (only a count leaks).
    */
   z.object({
     status: z.literal("queued"),

@@ -33,7 +33,7 @@ services:
     runtime: node
     region: virginia
     plan: 0.5c-512mb # $7 (the web build runs in the build container, not here)
-    numInstances: 1 # the key vault and stream notifier are in-process: never more than one
+    numInstances: 1 # the stream notifier is in-process: never more than one
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @voluma/web build
     preDeployCommand: pnpm --filter @voluma/api db:migrate
     # `exec` so node gets SIGTERM; from apps/api because that is where tsx resolves.
