@@ -18,7 +18,7 @@ Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolatio
         <out>/<name>-frame-qc.jpg  six coronal sections of the aligned stack with the mask outlined: check the axes here
         <out>/<name>.json  the result record: `objects` holds the aligned grid as `tibia-grid` (a volume on the frame's affine)
 Prints: one JSON line {out, values, objects, hu, mask, frame, qc, grid_id, shape_wvu, mask_volume_mm3, shaft_z, epiphysis_z}
-Example: python tibia_frame.py --window anatomy.json --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
+Example: python tibia_frame.py --window scan-settings.json --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -140,7 +140,7 @@ def main():
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
     ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script refuses a --label whose joint end looks like the femur\'s, and a --joint-end on the wrong side')
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--name', default='tibia', help='prefix of the output files')
     ap.add_argument(

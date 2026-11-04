@@ -7,7 +7,7 @@ output, not with the mask. Never refill the clipped voxels with the nearest labe
 
 Writes: <out>  the clipped labels (.npy, the shape of --labels), with its sidecar (the labels' grid, the threshold)
 Prints: one JSON line {labels, volume_mm3: {label id: clipped volume}, removed_mm3: {label id: volume removed}}
-Example: python clip_to_bone.py --hu hu.npy --labels labels.npy --out clipped.npy --threshold-hu 2500
+Example: python clip_to_bone.py --hu hu.npy --labels labels.npy --out clipped.npy --threshold-hu scan-settings.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -19,7 +19,7 @@ if __name__ == '__main__':
     ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
     ap.add_argument('--out', required=True, help='clipped labels .npy to write')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels below this are cleared (the segmentation threshold of the workflow\'s anatomy reference)')
+    ap.add_argument('--threshold-hu', type=sidecar.threshold_arg, required=True, help='voxels below it are cleared: the scan\'s segmentation threshold: its scan-settings.json, or a number in HU')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels)

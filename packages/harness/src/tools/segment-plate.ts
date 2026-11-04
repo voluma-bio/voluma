@@ -24,7 +24,7 @@ const input = z
     window: z
       .string()
       .describe(
-        "The QC sheets' display window, as the other mouse-oa QC scripts take `--window`: `lo,hi` in HU or the file that holds it. The model gets raw HU either way.",
+        "The QC sheets' display window: the scan's scan-settings.json (intake's), or `lo,hi` in HU. The model gets raw HU either way.",
       ),
     sections: z
       .array(z.number().int().min(0))

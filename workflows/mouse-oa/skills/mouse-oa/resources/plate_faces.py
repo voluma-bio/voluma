@@ -44,7 +44,7 @@ Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sid
   qc-plate-<n>.jpg  coronal sections framed on each section's span, every proposed section unless --sections names others: orange proximal
                     face, cyan distal face, white centre across the span; a red tick under each flagged column, where the faces have no line
 Prints: the result record {out, values, annotations, centre, flagged, stretches, qc (the images)}
-Example: python plate_faces.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --out plate/
+Example: python plate_faces.py --spec protocol.json --window scan-settings.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --out plate/
 Exits 2 with one sentence on bad input, before writing anything, and when the search finds the plate on fewer than two sections.
 """
 
@@ -269,7 +269,7 @@ def qc_images(out, h, maps, kept, flagged, spans, sections, panels, window, vox)
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help=f"the workflow's protocol.json: the entry {SPEC_ID} gives the search and flag thresholds")
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--out', required=True, help='output directory (created)')

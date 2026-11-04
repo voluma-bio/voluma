@@ -22,8 +22,8 @@ evidence, so whoever checks it and the researcher see what you saw.
 | What is this small thing, and which label is it under? | crop sheet: three orthogonal cuts through the piece | `render_crops.py` |
 | Which of two segmentations is right here? | disagreement panel | `disagree.py` (`segmentation-check`) |
 
-Pass the workflow's `anatomy.json` as `--names` so the legend names every label, and its display window as
-`--window`. To compare before and after a fix, open both at once. An image that has dropped out of your history
+Pass the workflow's `anatomy.json` as `--names` so the legend names every label, and the scan's
+`scan-settings.json` (intake's) as `--window`. To compare before and after a fix, open both at once. An image that has dropped out of your history
 shows only as its text line: open it again before you judge from it.
 
 ## What your eyes are good for
