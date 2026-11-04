@@ -26,3 +26,5 @@
   mark at send (`freezeAttached`) to close it.
 
 - **`segment_plate` is a mouse-oa tool in the shared worker role.** `workflows/core/agents/worker.md` lists it, so every workflow's workers are offered it, and outside mouse-oa `python3 -m plate_model` fails with `ModuleNotFoundError` and the fallback hint. Let a workflow declare the tools it adds to a role, the way it lists skills, and move `segment_plate` to mouse-oa's declaration (#550 review).
+
+- **Delete `preFixStartFailure` in `review-assets.ts`** once no run a person can reopen holds an `assets.failed` from before `START_FAILED` ("the convert sandbox failed: the sandbox could not be started: …", e.g. staging `4df02afe`): reopen those first, or check every staging run's stream for the phrase (#559 review).

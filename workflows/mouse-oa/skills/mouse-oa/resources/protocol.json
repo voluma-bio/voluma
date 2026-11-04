@@ -37,7 +37,8 @@
   "plate-model": {
     "min_checkpoints": 2,
     "flag_spread_um": 50,
-    "flag_min_um": 42
+    "flag_min_um": 42,
+    "stray_bone_share": 0.25
   },
 
   "roi-iioc": {

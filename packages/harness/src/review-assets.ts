@@ -5,13 +5,17 @@
  * run's root thread. Review fetches the files by `reviewAssetKey`.
  *
  * Queue: every `output.published` event in the recorder's view, from the first (a resume reads the whole
- * log), minus the files that already have an `assets.*` event; new
+ * log), minus the files that already have an `assets.ready` or a genuine `assets.failed`; new
  * outputs join as the recorder stores them (polled, one cheap scan of the new events). One file at a
  * time, in the run's `convert` sandbox (`convertLayout`, from the sandbox session, which
  * creates it at the first file and replaces one the provider ended, running a command it
  * refused once more). A conversion that fails is retried once (not after a timeout or bad
- * arguments, not when stopped) and then recorded; a sandbox that dies or cannot be created is
- * recorded without a retry. The worker moves on. Identity never comes from the converter's output: the
+ * arguments, not when stopped) and then recorded. A sandbox that dies mid-command is recorded
+ * without a retry. One that cannot be started is tried again after a backoff (`START_BACKOFF_MS`),
+ * then recorded with its start error; the drain does not wait for a backoff and records the
+ * last start error at once. A stored start failure is not finished for the next claim, which
+ * converts the file again (a reopen included); a ready or converter failure that follows it takes
+ * a suffixed id (`record`). Identity never comes from the converter's output: the
  * `sourceSha256` is the queue item's, and a converter that prints another one has failed.
  *
  * `options.signal` is the host's cut-off (a stop, a lost lease, shutdown): the worker ends and
@@ -29,6 +33,7 @@ import { errorText } from "./error-text";
 import { OUTPUTS, REVIEW, WORKFLOW } from "./layout";
 import { type Sandbox, SandboxEndedError } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
+import { SandboxUnavailableError } from "./tools/tool";
 
 /** One conversion; a 1.25 GB scan is minutes. The drain bounds the end of the run, not this. */
 const CONVERT_TIMEOUT_SECONDS = 1200;
@@ -36,6 +41,25 @@ const CONVERT_TIMEOUT_SECONDS = 1200;
 type ConvertResult = { manifest: ReviewAssetsManifest } | { error: string; retry?: false };
 
 const lastLine = (text: string) => text.split("\n").filter(Boolean).at(-1) ?? "";
+
+/** How long a file waits before each new try at starting the convert sandbox, within one claim. */
+const START_BACKOFF_MS = [15_000, 60_000, 240_000];
+/** Leads every `assets.failed.error` stored because the convert sandbox could not start. */
+const START_FAILED = "the convert sandbox did not start: ";
+
+/** A stored `assets.failed.error` that says the convert sandbox never ran: not final for the run. */
+function startFailure(error: string): boolean {
+  return error.startsWith(START_FAILED) || preFixStartFailure(error);
+}
+
+/**
+ * Delete once no run a person can reopen holds one (`packages/harness/.context/TODO.md`): the
+ * start failures stored before `START_FAILED`, as "the convert sandbox failed: the sandbox could
+ * not be started: …".
+ */
+function preFixStartFailure(error: string): boolean {
+  return error.includes("could not be started");
+}
 
 /** One sentence for `assets.failed`; a traceback stays in the runner log. */
 function recordedAssetError(stderr: string, code: number): string {
@@ -93,20 +117,25 @@ interface Recording {
 
 /**
  * Queues the job's `assets.*` event; a scan marks it finished once it is stored. `emit` retries,
- * and its id is the job's, so a repeat is a no-op.
+ * and its id is the job's, so a repeat is a no-op. A stored start-failure already holds that id:
+ * a later ready or genuine failed uses a suffix so the recorder actually writes it.
  */
 function record({ runId, rootThreadId, recorder }: Recording, job: Job, result: ConvertResult) {
   const id = `${runId}:assets:${job.sha256}`;
-  if ("manifest" in result)
+  const held = recorder.events().find((e) => e.id === id);
+  if ("manifest" in result) {
+    const emitId = held?.type === "assets.failed" ? `${id}:ready` : id;
     recorder.emit(
       rootThreadId,
       "assets.ready",
       { ...result.manifest, sourceSha256: job.sha256 },
-      id,
+      emitId,
     );
-  else {
+  } else {
     const error = result.error.slice(-ASSET_ERROR_MAX) || "conversion failed";
-    recorder.emit(rootThreadId, "assets.failed", { sourceSha256: job.sha256, error }, id);
+    const emitId =
+      held?.type === "assets.failed" && startFailure(held.payload.error) ? `${id}:failed` : id;
+    recorder.emit(rootThreadId, "assets.failed", { sourceSha256: job.sha256, error }, emitId);
   }
 }
 
@@ -143,8 +172,6 @@ export interface ReviewAssetsWorker {
    * having recorded nothing, when `options.signal` fires first.
    */
   drain(timeoutMs: number): Promise<boolean>;
-  /** Aborts when the worker is halted or cut off; the convert sandbox's creation obeys it. */
-  readonly signal: AbortSignal;
   /** Stops the worker, ending a conversion in flight; the session closes the sandbox. */
   close(): Promise<void>;
 }
@@ -159,28 +186,41 @@ export interface ReviewAssetsOptions {
   sandbox(): Promise<Sandbox>;
   /** The host's cut-off. */
   signal: AbortSignal;
+  /** Drain and close abort this. Pass the controller whose signal the convert sandbox's creation uses. */
+  halt: AbortController;
   log(line: string): void;
 }
 
 export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWorker {
-  const { recorder, log } = options;
-  // Drain and close abort this: they end a conversion in flight and its sandbox creation.
-  const halt = new AbortController();
+  const { recorder, log, halt } = options;
   const signal = AbortSignal.any([options.signal, halt.signal]);
 
   let scanned = 0;
-  const finished = new Set<string>(); // has a stored assets.* event
+  const finished = new Set<string>(); // has a stored assets.* event that is not a start-failure
   const known = new Map<string, Job>(); // queued once
   const queue: Job[] = [];
   let running: Job | undefined;
+  /** Failed starts of the convert sandbox this claim, per file. */
+  const startAttempts = new Map<string, number>();
+  /** Files waiting out a start backoff, with the last start error. */
+  const waiting = new Map<string, { job: Job; error: string; timer: NodeJS.Timeout }>();
+  /** Files whose start failure is final for this claim. */
+  const gaveUp = new Set<string>();
+  signal.addEventListener("abort", () => {
+    for (const { timer } of waiting.values()) clearTimeout(timer);
+  });
 
   /** Reads the events stored since the last scan. */
   function scan() {
     const events = recorder.events();
     for (; scanned < events.length; scanned++) {
       const event = events[scanned] as RunEvent;
-      if (event.type === "assets.ready" || event.type === "assets.failed") {
+      if (event.type === "assets.ready") {
         finished.add(event.payload.sourceSha256);
+        continue;
+      }
+      if (event.type === "assets.failed") {
+        if (!startFailure(event.payload.error)) finished.add(event.payload.sourceSha256);
         continue;
       }
       const job = convertJob(event);
@@ -190,8 +230,24 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       }
     }
   }
-  /** Every output seen so far without a stored `assets.*` event. */
-  const pending = () => [...known.values()].filter((job) => !finished.has(job.sha256));
+  /** Every output seen so far still owed a conversion this claim, not counting a start backoff. */
+  const pending = () =>
+    [...known.values()].filter(
+      ({ sha256 }) => !finished.has(sha256) && !gaveUp.has(sha256) && !waiting.has(sha256),
+    );
+
+  /**
+   * Records the file's start failure, once per claim. A start failure from an earlier claim
+   * already holds the file's id and says the same; `:failed` stays for a converter's failure.
+   */
+  function giveUp(job: Job, error: string) {
+    gaveUp.add(job.sha256);
+    const id = `${options.runId}:assets:${job.sha256}`;
+    if (recorder.events().some((e) => e.id === id)) return;
+    // `record` keeps the tail; the prefix must survive it.
+    const kept = error.slice(-(ASSET_ERROR_MAX - START_FAILED.length));
+    record(options, job, { error: `${START_FAILED}${kept}` });
+  }
 
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -302,6 +358,21 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       if (signal.aborted) return; // stopped: the next claim finds the file again
       const failure = errorText(e);
       log(`review assets: ${job.sha256} failed: ${failure}`);
+      if (e instanceof SandboxUnavailableError) {
+        const n = (startAttempts.get(job.sha256) ?? 0) + 1;
+        startAttempts.set(job.sha256, n);
+        const delay = START_BACKOFF_MS[n - 1];
+        if (delay === undefined) return giveUp(job, failure);
+        log(
+          `review assets: ${job.sha256.slice(0, 8)} convert sandbox not started, retrying in ${delay / 1000}s`,
+        );
+        const timer = setTimeout(() => {
+          waiting.delete(job.sha256);
+          queue.push(job);
+        }, delay);
+        waiting.set(job.sha256, { job, error: failure, timer });
+        return;
+      }
       record(options, job, { error: `the convert sandbox failed: ${failure}` });
     }
   }
@@ -343,6 +414,9 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       // A call that ignores the abort (creating a sandbox) must not hold the end of the run.
       await Promise.race([loop.catch(() => {}), new Promise((r) => setTimeout(r, HALT_GRACE_MS))]);
       if (options.signal.aborted) return false;
+      // The halt cleared the backoff timers: a file still waiting failed to start, so say so.
+      for (const { job, error } of waiting.values()) giveUp(job, error);
+      waiting.clear();
       // Everything queued so far is stored before the last scan, so what is still without an
       // event is final.
       await recorder.flush();
@@ -351,7 +425,6 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
         timedOut ? "timed out" : "the run ended before the file was converted",
       );
     },
-    signal,
     async close() {
       halt.abort();
       await loop.catch(() => {});

@@ -19,13 +19,23 @@ for iioc.py) and `growth_plate_distal_curves` (annotation C, for metaphysis_roi.
 `point_step_um`, none in a flagged column. `plate-faces.json` has the flagged stretches (`stretches`: {"<V>": [{"u": [first U, last U],
 "why": [...]}]}) and the coverage (`covered`: the V range and each section's U span), in `plate_faces.py`'s form.
 
+The band. `plate-band.npz` holds the checkpoints' voted band on every section sent, as pieces: each connected piece of band on a
+section has its own label. `plate-faces.json` lists them (`pieces`): voxels, U and W extent, face columns kept on it, whether it is the
+section's main piece (the one carrying the most face columns), its distance to the main piece, the share of its voxels the checkpoints
+disagree on, and `bone_share`: null when it lies on the same part of the section's tibia mask as the main piece, else the size of its
+part over the main piece's part. A piece is `suspect` when faces were kept on it and it lies on a part under `stray_bone_share` of the
+main one: a band on separate bone, such as the fibula's growth plate, that the faces were bridged onto. Two halves of the plate on
+either side of the notch are normal and not suspect. The QC sheet names a section's suspects in its title. `prune_plate.py` drops
+pieces or cuts ranges. The band is never clipped to the tibia mask: the mask leaves out much of the plate.
+
 Writes: in <out>, on the aligned grid (array axes W, V, U):
   plate-annotations.json  the proposed curves (annotation A and C), no points in flagged columns
   plate-faces.json        the result record: counts, `stretches`, `covered`, the grid_id and the model's recipe and timings
   plate-model.npz         the model's reply as it came: V, each checkpoint's band mask and faces, the vote, meta
+  plate-band.npz          `V` (the sections sent) and `labels` (n, W, U) uint16: the voted band, one label per piece (0: no band)
   qc-plate-<n>.jpg        coronal sections framed on each section's span, every proposed section unless --sections names others:
                           orange proximal face, cyan distal face; a red tick under each flagged column
-Prints: the result record {out, values, annotations, model, stretches, covered, qc}
+Prints: the result record {out, values, annotations, model, band, stretches, covered, suspects (the suspect pieces), qc}
 Example: python plate_model.py --window <window> --hu-aligned tibia-hu.npy --mask tibia-mask.npy --out plate/
 Exits 2 with one sentence, before writing anything, on bad input, when the model cannot be reached or refuses, and when it finds
 the plate on fewer than two sections. Then run plate_faces.py instead.
@@ -49,7 +59,7 @@ from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
 SPEC_ID = 'plate-model'  # this script's own numbers
-SPEC_KEYS = ('min_checkpoints', 'flag_spread_um', 'flag_min_um')
+SPEC_KEYS = ('min_checkpoints', 'flag_spread_um', 'flag_min_um', 'stray_bone_share')
 SHARED_ID = 'plate-faces'  # how a proposal samples the plate and what iioc.py accepts, shared with plate_faces.py
 SHARED_KEYS = ('section_step_um', 'point_step_um', 'off_tibia_margin_um', 'min_run_um', 'qc_panels')
 RETRY_STATUS = {502, 503, 504}  # the gateway or Modal restarting: one more try after RETRY_WAIT_S, while the deadline allows
@@ -152,7 +162,50 @@ def stretches(flagged, why, sections):
     return found
 
 
-def qc_images(out, h, upper, lower, kept, flagged, spans, sections, panels, window, vox):
+def band_pieces(z, names, vs, tib, upper, lower, kept, vox, stray_share):
+    """The voted band as pieces -> labels (n, W, U) uint16 on the sections sent and the piece table. The vote is the model's
+    (vote.py, abstain): a voxel is band where at least half the checkpoints that saw a band on the section have it."""
+    masks = np.stack([z[f'{n}.mask'] for n in names])  # (k, n, W, U)
+    voting = masks.any((2, 3), keepdims=True).sum(0)
+    votes = masks.sum(0)
+    band = (votes >= np.maximum(voting, 1) / 2) & (votes > 0)
+    labels, table, next_id = np.zeros(band.shape, np.uint16), [], 1
+    for i, v in enumerate(vs):
+        lab, n = ndi.label(band[i], structure=np.ones((3, 3)))
+        if not n:
+            continue
+        cols = np.flatnonzero(kept[v])
+        on = np.zeros(n + 1, int)  # face columns per piece: the kept column's upper or lower face row lies on it (within a row)
+        for face in (upper[v], lower[v]):
+            w = np.rint(face[cols]).astype(int)
+            hit = np.zeros(len(cols), int)
+            for dw in (0, -1, 1):
+                ww = np.clip(w + dw, 0, lab.shape[0] - 1)
+                hit = np.where(hit > 0, hit, lab[ww, cols])
+            np.add.at(on, hit, 1)
+        on[0] = 0
+        main = int(on.argmax()) if on.any() else 0
+        gap = ndi.distance_transform_edt(lab != main) if main else None
+        parts, _ = ndi.label(tib[:, v, :], structure=np.ones((3, 3)))  # the section's tibia mask in parts; each band voxel takes its nearest
+        part_size = np.bincount(parts.ravel())
+        _, (iw, iu) = ndi.distance_transform_edt(parts == 0, return_indices=True)
+        near = parts[iw, iu]
+        part_of = [int(np.bincount(near[lab == k]).argmax()) for k in range(n + 1)]
+        for k in range(1, n + 1):
+            piece = lab == k
+            share = None if not main or part_of[k] == part_of[main] else round(part_size[part_of[k]] / part_size[part_of[main]], 3)
+            w_idx, u_idx = np.nonzero(piece)
+            labels[i][piece] = next_id
+            table.append({'id': next_id, 'v': int(v), 'voxels': int(piece.sum()), 'u': [int(u_idx.min()), int(u_idx.max())],
+                          'w': [int(w_idx.min()), int(w_idx.max())], 'face_columns': int(on[k]), 'main': k == main,
+                          'gap_to_main_um': None if gap is None or k == main else round(float(gap[piece].min()) * vox * 1000, 1),
+                          'disagreement': round(float((votes[i][piece] < voting[i, 0, 0]).mean()), 3),
+                          'bone_share': share, 'suspect': bool(on[k]) and share is not None and share < stray_share})
+            next_id += 1
+    return labels, table
+
+
+def qc_images(out, h, upper, lower, kept, flagged, spans, sections, panels, window, vox, suspects):
     """qc-plate-<n>.jpg: `panels` coronal sections per sheet, framed on each span; faces on the kept columns, a red tick under each
     flagged column (at the section's median face height where the column has none)."""
     paths, x = [], np.arange(h.shape[2])
@@ -165,7 +218,8 @@ def qc_images(out, h, upper, lower, kept, flagged, spans, sections, panels, wind
             crops.append((max(w0, 0), max(a - 20, 0), min(w1, h.shape[0]), min(b + 21, h.shape[2])))
             tick = np.where(np.isnan(lower[v]), np.nanmedian(lower[v] * show), lower[v]) + 6
             curve_sets.append([(x, upper[v] * show, 'orange'), (x, lower[v] * show, 'cyan'), (x[flagged[v]], tick[flagged[v]], 'red', '|')])
-            titles.append(f'V={v}, proposed U {a} to {b}')
+            odd = [f"{s['id']} (U {s['u'][0]}-{s['u'][1]})" for s in suspects if s['v'] == v]
+            titles.append(f'V={v}, proposed U {a} to {b}' + (f'; suspect piece {", ".join(odd)}' if odd else ''))
         path = out / f'qc-plate-{n + 1}.jpg'
         vl.slice_sheet(path, h, [], 1, [int(v) for v in chunk], window, cols=3, crops=crops, curves=curve_sets, titles=titles,
                        axis_names=('W', 'V', 'U'), voxel_mm=vox)
@@ -232,7 +286,10 @@ def main():
     (out / 'plate-model.npz').write_bytes(reply)
     found = stretches(flagged, why, sections)
     cover = {'v': [sections[0], sections[-1]], 'sections': {str(v): {'u': list(spans[v])} for v in sections}}
-    qc = qc_images(out, h, upper, lower, kept, flagged, spans, qc_v, sp['qc_panels'], a.window, vox)
+    labels, pieces = band_pieces(z, names, vs, tib, upper, lower, kept, vox, sp['stray_bone_share'])
+    np.savez_compressed(out / 'plate-band.npz', V=np.array(vs), labels=labels)
+    suspects = [p for p in pieces if p['suspect']]
+    qc = qc_images(out, h, upper, lower, kept, flagged, spans, qc_v, sp['qc_panels'], a.window, vox, suspects)
     in_span = sum(hi - lo + 1 for lo, hi in spans.values())
     values = {
         'plate-flagged-fraction': sidecar.value(
@@ -245,11 +302,14 @@ def main():
     sidecar.emit_values(
         out / 'plate-faces.json',
         values,
-        {'grid_id': grid['grid_id'], 'source': 'segment_plate', 'plate_model': model, 'stretches': found, 'covered': cover},
+        {'grid_id': grid['grid_id'], 'source': 'segment_plate', 'plate_model': model, 'stretches': found, 'covered': cover,
+         'pieces': pieces},
         annotations=str(ann_path),
         model=str(out / 'plate-model.npz'),
+        band=str(out / 'plate-band.npz'),
         stretches=found,
         covered=cover,
+        suspects=suspects,
         qc=qc,
     )
 
