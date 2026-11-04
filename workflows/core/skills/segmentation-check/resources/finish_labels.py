@@ -5,7 +5,10 @@ label's specks (26-connected pieces under `--min-piece-mm3`, the loose fragments
 off the bone in 3D), then runs `label_stats.py`'s and `unlabelled.py --ranges`'s checks on the cleaned volume. Each flag has a
 key (volume:5, pieces:6, absent:3, joined:9-2, joined:1-2, fused:4, ...). A flag is open until the labels no longer raise it
 or you pass `--accept <key>=<why>`: the To check item's title that holds it (the CT cannot settle it), or the reason it is
-not a fault (a structure the scan's notes put outside the field). While any flag is open the labels are not written (and an earlier
+not a fault (a structure the scan's notes put outside the field). A `joined:` or `fused:` flag is never accepted: one label holds
+another bone's bone, which the labels can always fix (split it at the contact with `classic_segment.py --within`, or redo the
+track). Refused too: labels that are `classic_segment.py`'s default-mode watershed, which gives every threshold voxel to some
+label, so bones that touch at threshold always join; it is the cross-check, not the labels you report. While any flag is open the labels are not written (and an earlier
 run's at <out> are deleted): fix them and run this again. An accepted key the labels no longer raise is refused, so the record says what this volume raises.
 
 Writes: <out>  the cleaned labels (.npy, the grid of --labels), with its sidecar, only when no flag is open
@@ -14,7 +17,7 @@ Writes: <out>  the cleaned labels (.npy, the grid of --labels), with its sidecar
         <out stem>-candidates.npy  unlabelled.py's candidate volume of the cleaned labels, with its sidecar (relabel.py --pieces)
 Prints: one JSON line {labels (null while a flag is open), check, candidates, dropped, open: {key: sentence}, accepted}
 Example: python finish_labels.py --hu hu.npy --labels merged.npy --threshold-hu scan-settings.json --ranges anatomy.json
-  --out labels.npy --accept 'absent:3=the scan notes put the patella outside the field'
+  --out labels.npy --accept 'absent:12=none in its region (section 2)'
 Exits 2 with one sentence on bad input, before writing anything; exits 2 after writing the check record and the candidates
 while a flag is open.
 """
@@ -49,10 +52,19 @@ def drop_specks(labels, vox, min_piece_mm3):
     return out, dropped
 
 
+# a label holding another bone's bone is always fixable, so these flags are fixed, never accepted; fused: ids are also
+# candidate size ranks that shift between passes
+NEVER_ACCEPTED = ('joined:', 'fused:')
+
+
 def accepted_arg(s):
     key, sep, why = s.partition('=')
     if not sep or not key.strip() or not why.strip():
-        raise argparse.ArgumentTypeError(f'{s!r} is not <key>=<why>, e.g. "joined:1-2=To check: femur-tibia contact at slice 440"')
+        raise argparse.ArgumentTypeError(f'{s!r} is not <key>=<why>, e.g. "absent:12=none in its region"')
+    if key.strip().startswith(NEVER_ACCEPTED):
+        raise argparse.ArgumentTypeError(f'{key.strip()} cannot be accepted: one label holds another bone\'s bone. Split it at the '
+                                         'contact (classic_segment.py --within <label> with seeds from each bone\'s core) or redo '
+                                         'the track (sam-segmentation, "When a track fails"), then run this again')
     return key.strip(), why.strip()
 
 
@@ -73,6 +85,10 @@ if __name__ == '__main__':
         sidecar.fail(f'--out {a.out} must be a .npy path')
     if out.resolve() == Path(a.labels).resolve():
         sidecar.fail(f'--out is --labels ({a.labels}): write the finished labels to a new path')
+    made = json.loads(sidecar.sidecar_path(a.labels).read_text())
+    if made.get('script') == 'classic_segment.py' and made.get('params', {}).get('within') is None:
+        sidecar.fail(f'{a.labels} is classic_segment.py\'s watershed, the cross-check: it gives every threshold voxel to a label, '
+                     'so touching bones always join. Finish the labels you made (the merged SAM labels and your fixes) instead')
     accepted = dict(a.accept)
     labels = np.load(a.labels)
     sp = sidecar.grid(str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
