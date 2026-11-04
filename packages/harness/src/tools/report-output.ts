@@ -195,6 +195,12 @@ async function pointsOf(
  * a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is refused for a
  * missing sidecar, and an affine the contract refuses (not spaced-rigid) is logged and dropped for
  * the diagonal one.
+ *
+ * A file output's own `.json` that is a grid header (a `frame.json`, `hu.json`: `grid_id` and a valid
+ * `affine_xyz_to_world_mm`) is read the same way and gives only `gridId` and `affine`, so a frame's
+ * geometry is published as the same pair every block carries and nobody parses the file. A file
+ * with no pose gives nothing: a result record names its grid and spacing, and a diagonal guessed from
+ * them would fix its grid's affine for every later block.
  */
 async function detailFromSidecar(
   deps: OutputToolDeps,
@@ -242,6 +248,7 @@ async function detailFromSidecar(
         [0, 0, spacing[0], 0],
         [0, 0, 0, 1],
       ];
+  if (kind === "file") return gridId && pose.success ? { gridId, affine: pose.data } : {};
   return {
     ...(affine && { affine }),
     ...(offset && { offsetZyx: offset }),
@@ -533,7 +540,16 @@ export function reportOutput(
               publishedCopy(deps, caller, inOwnFolder(layout.dir, sidecarPath, "The sidecar")),
               ctx.signal,
             )
-          : {};
+          : plan.kind === "file" && first.endsWith(".json")
+            ? await detailFromSidecar(
+                deps,
+                plan.kind,
+                undefined,
+                layout.keyOf(first, "read"),
+                undefined,
+                ctx.signal,
+              )
+            : {};
         const points =
           plan.shape === "line" || plan.shape === "point"
             ? await pointsOf(deps, input, plan, layout.keyOf(first, "read"), ctx.signal)
