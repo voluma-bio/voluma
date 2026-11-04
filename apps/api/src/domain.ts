@@ -15,12 +15,6 @@ type UserBase = {
   name: string | null;
   /** The user's WorkOS organization: the tenant every record is filed under. */
   labId: string;
-  /**
-   * Whether this account runs on Voluma's key: true for members of the pre-created organizations
-   * (the ones with an entry in `Limits.voluma`, which is what the API enforces), false for a guest. This holds only because a member can sign in only to those organizations.
-   * The browser reads it from `/me` to decide whether a run needs the user's own key.
-   */
-  volumaKey: boolean;
 };
 
 export type Principal =

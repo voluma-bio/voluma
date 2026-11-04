@@ -36,7 +36,7 @@ export interface AgentDefinition {
   description: string;
   /** An alias (`wonder`) the runner's config maps to a provider model. */
   model: string;
-  /** The role's thinking level; unset: the runner's `RUNNER_THINKING`. */
+  /** The role's thinking level; unset: none is requested (a run's own `thinking` wins). */
   thinking?: ModelThinkingLevel;
   /** Every tool the role holds, base tools included (names in `AGENT_TOOL_NAMES`, `harness/agents/tools/registry.ts`). */
   tools: string[];

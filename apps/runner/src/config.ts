@@ -9,10 +9,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { isIPv4 } from "node:net";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { modelRefSchema } from "@voluma/contracts/ids";
 import { parseTokenSecrets } from "@voluma/provider-calls/token";
-import { THINKING_LEVELS } from "@voluma/workflow/definition";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -105,33 +103,33 @@ const MODEL_ALIASES: Record<string, string | undefined> = {
 
 /**
  * The model of each alias: `RUNNER_MODEL_<ALIAS>`, else the alias's default, else the alias is
- * absent (a run whose role file names it fails when it starts). `RUNNER_MODEL`, when set, forces
- * every alias to one model (a plumbing check on a cheap provider).
+ * absent (a run whose role file names it fails when it starts). Only a run with no recorded model
+ * uses these; the rest use `run.model`.
  */
 function modelAliases(): Record<string, ModelRef> {
-  const forced = optional("RUNNER_MODEL") ? modelRef("RUNNER_MODEL") : undefined;
   const models: Record<string, ModelRef> = {};
   for (const [alias, fallback] of Object.entries(MODEL_ALIASES)) {
     const name = `RUNNER_MODEL_${alias.toUpperCase()}`;
-    if (forced) models[alias] = forced;
-    else if (fallback || optional(name)) models[alias] = modelRef(name, fallback);
+    if (fallback || optional(name)) models[alias] = modelRef(name, fallback);
   }
   return models;
 }
 
-/** `RUNNER_THINKING`, one of Pi's thinking levels; unset: Pi sends none. */
-function thinkingLevel(): ModelThinkingLevel | undefined {
-  const raw = optional("RUNNER_THINKING");
-  if (raw === undefined) return undefined;
-  const level = THINKING_LEVELS.find((l) => l === raw);
-  if (!level)
-    throw new Error(`RUNNER_THINKING must be one of ${THINKING_LEVELS.join(", ")}, got "${raw}"`);
-  return level;
-}
+/**
+ * Settings that no longer exist. A silently ignored one would send an agent's plumbing run to a
+ * paid Meta model, so the runner refuses to boot while it is set.
+ */
+const GONE: Record<string, string> = {
+  RUNNER_MODEL:
+    "RUNNER_MODEL is gone: set RUN_MODEL_OVERRIDE=deepseek/deepseek-flash in .env for the local API (`pnpm dev`) for plumbing runs, and unset RUNNER_MODEL",
+  RUNNER_THINKING:
+    "RUNNER_THINKING is gone: pick thinking at /new or send `thinking` on the start request, and unset RUNNER_THINKING",
+};
 
-/** Whether a run's own Meta key and scan may go to this model: Standard-mode Meta only, since a `-contributor` model lets Meta train on what it is sent. */
-export const isVisitorSafe = (ref: ModelRef) =>
-  ref.provider === "meta" && !ref.id.endsWith("-contributor");
+function assertNoGoneSettings() {
+  for (const [name, message] of Object.entries(GONE))
+    if (optional(name) !== undefined) throw new Error(message);
+}
 
 /** Our key for a provider, if set (`VOLUMA_<PROVIDER>_API_KEY`). */
 export const providerKey = (provider: string) =>
@@ -167,6 +165,7 @@ function checkoutCommit(): string {
 export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
+  assertNoGoneSettings();
   const modal = modalToken();
   const models = modelAliases();
   for (const { provider } of Object.values(models))
@@ -224,18 +223,6 @@ export function runnerConfig() {
      * for a `voluma` run. Our key for each provider is `VOLUMA_<PROVIDER>_API_KEY`.
      */
     models,
-    /**
-     * `RUNNER_THINKING`: the thinking level of a `voluma` run's roles whose file sets none, or of
-     * every role when the model is forced, set as each Pi agent's `thinkingLevel`; main.ts refuses a non-off level an alias's model does
-     * not support, since Pi would quietly use another. Unset or "off": no requested effort
-     * (DeepSeek: thinking disabled; Muse: provider default).
-     */
-    thinking: thinkingLevel(),
-    /**
-     * `RUNNER_MODEL` forces every role onto one model (a test run); each role keeps its file's
-     * thinking level, at the nearest the forced model supports, unless `RUNNER_THINKING` sets one.
-     */
-    modelForced: optional("RUNNER_MODEL") !== undefined,
     modal,
     /**
      * The gateway sandboxes reach providers through, and the secrets their tokens are minted
