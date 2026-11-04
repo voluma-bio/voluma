@@ -2,19 +2,19 @@
  * The agent loop's tools, by name. A role file picks its tools from this list. `buildAgentTools` builds exactly the tools a role names for one thread.
  */
 
-import type { BashRuntime } from "../../bash-runtime";
-import type { ThreadLayout } from "../../layout";
-import type { Files } from "../../ports/files";
-import { bashTool } from "../../tools/bash";
-import { bashManageTool } from "../../tools/bash-manage";
-import { segmentSamTool } from "../../tools/segment-sam";
-import type { Tool } from "../../tools/tool";
+import type { BashRuntime } from "../bash-runtime";
+import type { ThreadLayout } from "../layout";
+import type { RunBucket } from "../ports/bucket";
+import { bashTool } from "./bash";
+import { bashManageTool } from "./bash-manage";
 import { type AgentsApi, coordinationTools } from "./coordination";
 import { gate, gatedNames } from "./gate";
 import { keepOutput } from "./keep-output";
 import type { OutputToolDeps } from "./output-shared";
 import { readTool } from "./read";
 import { reportOutput } from "./report-output";
+import { segmentSamTool } from "./segment-sam";
+import type { Tool } from "./tool";
 
 export const AGENT_TOOL_NAMES = [
   "bash",
@@ -35,13 +35,13 @@ const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) 
   bash: ({ layout, bash }) => bashTool(layout, bash),
   bash_manage: ({ bash }) => bashManageTool(bash),
   segment_sam: ({ layout }) => segmentSamTool(layout),
-  read: ({ layout, files }, names) =>
-    readTool({ layout, files, hasSandbox: names.includes("bash") }),
+  read: ({ layout, bucket }, names) =>
+    readTool({ layout, bucket, hasSandbox: names.includes("bash") }),
 };
 
 export interface AgentToolDeps {
   layout: ThreadLayout;
-  files: Files;
+  bucket: RunBucket;
   bash: BashRuntime;
   api: AgentsApi;
   outputs: OutputToolDeps;

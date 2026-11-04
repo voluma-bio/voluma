@@ -6,8 +6,8 @@
  */
 import { renderFinalOutputs, renderOutputsIndex } from "@voluma/contracts/output-files";
 import { runFilesPrefix } from "@voluma/contracts/r2";
-import type { Files } from "../ports/files";
-import type { Recorder } from "../recorder";
+import type { RunBucket } from "./ports/bucket";
+import type { Recorder } from "./recorder";
 
 export interface RunFiles {
   /** Resolves once the files hold every event stored before the call. */
@@ -17,7 +17,7 @@ export interface RunFiles {
 export function runFiles(o: {
   runId: string;
   recorder: Recorder;
-  files: Files;
+  bucket: RunBucket;
   signal: AbortSignal;
 }): RunFiles {
   const prefix = runFilesPrefix(o.runId);
@@ -33,7 +33,7 @@ export function runFiles(o: {
     };
     for (const [name, text] of Object.entries(rendered)) {
       if (written.get(name) === text) continue;
-      await o.files.write(`${prefix}${name}`, Buffer.from(text), o.signal);
+      await o.bucket.write(`${prefix}${name}`, Buffer.from(text), o.signal);
       written.set(name, text);
     }
   }

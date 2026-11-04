@@ -1,21 +1,24 @@
 /**
- * The agent loop's half of `superviseRun`'s wiring: each agent's layout (its own `/work` folder
- * and the read-only shared mounts), the tools its role holds, its prompts and model, and the
- * loop on the shared shell's pool and lock.
+ * The agent loop on a run's parts: each agent's layout (its own `/work` folder and the read-only
+ * shared mounts), the tools its role holds, its prompts and model. `agentLayouts` is what the
+ * sandbox session needs before the loop runs; `runAgents` is the loop itself.
  */
 import { type AgentLog, agentLog } from "@voluma/contracts/agents";
 import { openingOutputs } from "@voluma/contracts/final-outputs";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
-import { summarizeRows } from "../adapters/pi/compaction";
-import type { ThreadLayout } from "../layout";
-import { runLayout } from "../layout";
-import type { Shared, Wire } from "../loop-shell";
-import { usageOf } from "../model-usage";
-import { FileNotFound } from "../ports/publish";
-import type { Recorder } from "../recorder";
+import { summarizeRows } from "./adapters/pi/compaction";
+import type { BashRuntime } from "./bash-runtime";
+import type { ProviderError } from "./failure-policy";
 import { keepNotes, restoreMainPlan } from "./keep-notes";
+import type { ThreadLayout } from "./layout";
+import { runLayout } from "./layout";
 import { agentLoop, interruptedResult } from "./loop";
+import type { LoopConfig, ModelSetup } from "./loop-config";
+import type { Section } from "./loop-shell";
+import { usageOf } from "./model-usage";
+import { FileNotFound, type RunBucket } from "./ports/bucket";
+import type { History } from "./ports/history";
 import {
   type AgentStart,
   firstMessageOf,
@@ -23,15 +26,18 @@ import {
   skillBlock,
   systemPromptOf,
 } from "./prompts";
+import type { Recorder } from "./recorder";
 import { runFiles } from "./run-files";
 import { sandboxHash } from "./sandbox-hash";
+import type { SandboxSession } from "./sandbox-session";
+import type { Threads } from "./threads";
 import type { AgentsApi } from "./tools/coordination";
 import { leaveToResearcher } from "./tools/keep-output";
 import type { OutputToolDeps } from "./tools/output-shared";
 import { approvedTool, buildAgentTools } from "./tools/registry";
 import { prepareTranscript } from "./transcript";
 
-interface AgentsWireOptions {
+interface AgentLayoutsOptions {
   runId: string;
   inputPrefix: string;
   recorder: Recorder;
@@ -40,11 +46,11 @@ interface AgentsWireOptions {
   gateway: boolean;
 }
 
-export function agentsWire(o: AgentsWireOptions): Wire {
+export function agentLayouts(o: AgentLayoutsOptions) {
   const { recorder, definition } = o;
   /** Each role's tools: its file's list, less `segment_sam` where no gateway is configured. */
   const toolsOf = (role: "main" | "worker") =>
-    (definition.agents[role]?.tools ?? []).filter((t) => t !== "segment_sam" || o.gateway);
+    definition.agents[role].tools.filter((t) => t !== "segment_sam" || o.gateway);
   const layout = runLayout({
     runId: o.runId,
     inputPrefix: o.inputPrefix,
@@ -71,6 +77,8 @@ export function agentsWire(o: AgentsWireOptions): Wire {
       peers: [...agentLog(recorder.events()).records.values()].map((r) => r.name),
     });
   return {
+    forAgent,
+    /** A thread's sandbox; its `thread.started` is stored before its first sandbox call. */
     sandboxOf: (threadId: string): ThreadLayout => {
       const r = recordOf(threadId);
       return forAgent(r.name, r.place, r.blind !== undefined, r.from);
@@ -81,7 +89,6 @@ export function agentsWire(o: AgentsWireOptions): Wire {
       const end = agentLog(recorder.events()).records.get(threadId)?.end?.status;
       return end !== "closed" && end !== "cancelled";
     },
-    run: (shared) => runAgents(shared, definition, forAgent),
   };
 }
 
@@ -91,19 +98,41 @@ const startedFrom = (d: AgentLog, name: string) => ({
   note: [...d.records.values()].find((r) => r.name === name)?.end?.note ?? "",
 });
 
-async function runAgents(
-  o: Shared,
-  definition: WorkflowDefinition,
-  forAgent: (name: string, role: "main" | "worker", blind: boolean, from?: string) => ThreadLayout,
-): Promise<void> {
-  const { recorder } = o;
+export interface RunAgentsOptions {
+  runId: string;
+  rootThreadId: string;
+  recorder: Recorder;
+  definition: WorkflowDefinition;
+  forAgent: ReturnType<typeof agentLayouts>["forAgent"];
+  /** The model, thinking level and call function of a thread of `role` (`recorded`: the model a resumed thread started on). */
+  model(role: "main" | "worker", recorded: string | undefined): ModelSetup;
+  selectedOutputs: readonly string[] | undefined;
+  notes: string | undefined;
+  config?: Partial<LoopConfig>;
+  providerError?(error: string): ProviderError | undefined;
+  bucket: RunBucket;
+  /** The agents' stored conversations (`transcript.ts` renders one). */
+  history: History;
+  session: SandboxSession;
+  pool: Threads;
+  /** The claim's background commands (`bash-runtime.ts`). */
+  bash: BashRuntime;
+  /** Stops a thread's background commands and releases its sandbox (called for an agent that has really ended). */
+  release(threadId: string): Promise<void>;
+  /** The run's one lock. */
+  section: Section;
+  signal: AbortSignal;
+}
+
+export async function runAgents(o: RunAgentsOptions): Promise<void> {
+  const { recorder, definition, forAgent } = o;
   const catalog = definition.outputCatalog;
-  const files = runFiles({ runId: o.runId, recorder, files: o.files, signal: o.signal });
+  const files = runFiles({ runId: o.runId, recorder, bucket: o.bucket, signal: o.signal });
   /** `sandboxThread`: the thread whose sandbox hashes a file (an approved call runs in the live main's, whoever made it). */
   const outputDeps = (api: AgentsApi, sandboxThread?: string): OutputToolDeps => ({
     runId: o.runId,
     recorder,
-    publish: o.publish,
+    bucket: o.bucket,
     catalog,
     layoutOf: (threadId) => {
       const r = api.log().records.get(threadId);
@@ -128,12 +157,12 @@ async function runAgents(
     runFiles: files,
     bash: o.bash,
     release: o.release,
-    restoreMainPlan: () => restoreMainPlan(o.publish, o.runId, o.signal),
-    keepNotes: (agent) => keepNotes(o.publish, o.runId, agent, o.signal),
+    restoreMainPlan: () => restoreMainPlan(o.bucket, o.runId, o.signal),
+    keepNotes: (agent) => keepNotes(o.bucket, o.runId, agent, o.signal),
     prepareTranscript: (agent) =>
       prepareTranscript({
         history: o.history,
-        files: o.files,
+        bucket: o.bucket,
         runId: o.runId,
         agent,
         signal: o.signal,
@@ -173,7 +202,7 @@ async function runAgents(
       const main = forAgent("main", "main", false);
       const file = `person/${snapshotKey.split("/").pop()}`;
       try {
-        await o.publish.copy(snapshotKey, `${main.own.prefix}${file}`, { signal: o.signal });
+        await o.bucket.copy(snapshotKey, `${main.own.prefix}${file}`, { signal: o.signal });
       } catch (error) {
         if (error instanceof FileNotFound) return undefined;
         throw error;
@@ -197,7 +226,7 @@ async function runAgents(
       const sandboxThread = api.log().main?.id ?? call.threadId;
       const tool = approvedTool(
         call.tool,
-        { layout, files: o.files, api, bash: o.bash, outputs: outputDeps(api, sandboxThread) },
+        { layout, bucket: o.bucket, api, bash: o.bash, outputs: outputDeps(api, sandboxThread) },
         call.fileHashes,
       );
       return tool.execute(tool.input.parse(call.args), {
@@ -234,7 +263,7 @@ async function runAgents(
             };
       const tools = buildAgentTools(layout.tools, {
         layout,
-        files: o.files,
+        bucket: o.bucket,
         api,
         bash: o.bash,
         outputs: outputDeps(api),
@@ -247,7 +276,7 @@ async function runAgents(
         labelOf: (sender) => {
           if (sender.kind === "person") return "the researcher";
           if (sender.kind === "runtime") return "Voluma";
-          return api.log().records.get(sender.threadId)?.role === "main"
+          return api.log().records.get(sender.threadId)?.place === "main"
             ? "main"
             : (api.log().records.get(sender.threadId)?.name ?? "an agent");
         },

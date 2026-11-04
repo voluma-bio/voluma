@@ -23,10 +23,6 @@ import {
 } from "@voluma/contracts/output-catalog";
 import { outputsFold, pendingFinal, undecidedOutOfDate } from "@voluma/contracts/output-fold";
 import { z } from "zod";
-import type { Section } from "../../loop-shell";
-import type { Recorder } from "../../recorder";
-import { threadIdOf } from "../../thread-id";
-import type { Tool, ToolContext, ToolResult } from "../../tools/tool";
 import { wrapUpText } from "../deliveries";
 import {
   activityId,
@@ -36,7 +32,11 @@ import {
   closeWorkerId,
   messageEventId,
 } from "../effects";
+import type { Section } from "../loop-shell";
+import type { Recorder } from "../recorder";
+import { threadIdOf } from "../thread-id";
 import { Refusal } from "./refusal";
+import type { Tool, ToolContext, ToolResult } from "./tool";
 
 /** What the tools need of the loop: its lock, the log, and the few things only it can do. */
 export interface AgentsApi {

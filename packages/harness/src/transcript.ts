@@ -5,9 +5,9 @@
  */
 
 import { workPrefix } from "@voluma/contracts/r2";
-import { foldHistory } from "../adapters/pi/compaction";
-import type { Files } from "../ports/files";
-import type { History } from "../ports/history";
+import { foldHistory } from "./adapters/pi/compaction";
+import type { RunBucket } from "./ports/bucket";
+import type { History } from "./ports/history";
 
 const RESULT_CHARS = 2_000;
 const MESSAGE_CHARS = 3_000;
@@ -65,11 +65,12 @@ export function renderTranscript(rows: string[]): string {
 /** Loads and renders the history now; the returned function writes the file. */
 export async function prepareTranscript(o: {
   history: History;
-  files: Files;
+  bucket: RunBucket;
   runId: string;
   agent: { id: string; name: string };
   signal: AbortSignal;
 }): Promise<() => Promise<void>> {
   const body = Buffer.from(renderTranscript(await o.history.load(o.agent.id)));
-  return () => o.files.write(`${workPrefix(o.runId)}${o.agent.name}/transcript.md`, body, o.signal);
+  return () =>
+    o.bucket.write(`${workPrefix(o.runId)}${o.agent.name}/transcript.md`, body, o.signal);
 }

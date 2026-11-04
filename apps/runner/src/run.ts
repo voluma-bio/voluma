@@ -28,7 +28,7 @@
  * period, then closes the sandboxes; the next claim resumes the queue. A stop by the server
  * or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
- * (which learns why from `claim.previousClaim`) resumes them (`agents/loop.ts`). The exception
+ * (which learns why from `claim.previousClaim`) resumes them (`loop.ts`). The exception
  * is a user's cancel, which the runner learns as `stop`: the API has already ended every
  * thread `cancelled` with the run, and an ended run is never claimed again.
  */
@@ -40,7 +40,6 @@ import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/co
 import { ownKeyMayUse } from "@voluma/contracts/run";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
-import { AGENT_TOOL_NAMES } from "@voluma/harness/agents/tools/registry";
 import { errorText } from "@voluma/harness/error-text";
 import { usageOf } from "@voluma/harness/model-usage";
 import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
@@ -53,6 +52,7 @@ import {
   type Supervised,
   superviseRun,
 } from "@voluma/harness/supervise-run";
+import { AGENT_TOOL_NAMES } from "@voluma/harness/tools/registry";
 import type { ObjectStore } from "@voluma/object-store";
 import type { AgentDefinition } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
@@ -65,8 +65,7 @@ import { loggedFetch } from "./model-fetch.ts";
 import { providerFailure } from "./provider-error.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
-import { storeFiles } from "./store-files.ts";
-import { storePublish } from "./store-publish.ts";
+import { storeBucket } from "./store-bucket.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking, nearestThinking } from "./thinking.ts";
 import { withTransientRetry } from "./transient.ts";
@@ -435,7 +434,7 @@ async function claimBody(
           // Only a model this run uses (each already passed the own-key rule in `roleModel`). Any other
           // thread (a run made on another model, reopened for a correction) gets the role's model:
           // its stored history was written by another, so it is refused as unresumable and the run
-          // loop starts the work again (`agents/loop.ts`), instead of the run failing.
+          // loop starts the work again (`loop.ts`), instead of the run failing.
           const [provider = "", ...id] = recorded.split("/");
           const allowed = [...setups.values()].some(
             ({ model: m }) => `${m.provider}/${m.id}` === recorded,
@@ -469,8 +468,7 @@ async function claimBody(
       workflows: run.workflows,
       recorder: events,
       history: client,
-      files: storeFiles(objects),
-      publish: storePublish(objects),
+      bucket: storeBucket(objects),
       createSandbox,
       // The image is recorded on the root's first event, so `sandboxImage` is the run's own.
       sandbox: {

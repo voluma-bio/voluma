@@ -18,9 +18,10 @@ export interface BundledWorkflow {
   description: string;
 }
 
+/** Keyed by `path`, as `outputCatalogOf` and the API's catalogs are. */
 export const catalog = {
   // A starter for the lab to edit (`workflows/mouse-oa/skills/mouse-oa/SKILL.md`).
-  "mouse-oa": {
+  "workflows/mouse-oa": {
     id: "mouse-oa",
     path: "workflows/mouse-oa",
     name: "Mouse OA knee",
@@ -28,14 +29,17 @@ export const catalog = {
   },
 } satisfies Record<string, BundledWorkflow>;
 
-type WorkflowId = keyof typeof catalog;
-
 /** The catalog entry for a request's `workflowId`, or undefined for an id the catalog lacks. */
 export const workflowById = (id: string): BundledWorkflow | undefined =>
-  Object.hasOwn(catalog, id) ? catalog[id as WorkflowId] : undefined;
+  Object.values(catalog).find((w) => w.id === id);
+
+/** The catalog entry of a run's pinned workflow path, or undefined for a path outside the catalog. */
+export const workflowByPath = (path: string | undefined): BundledWorkflow | undefined =>
+  path !== undefined && Object.hasOwn(catalog, path)
+    ? catalog[path as keyof typeof catalog]
+    : undefined;
 
 /** A run's pinned workflow path as a name; a path outside the catalog shows its directory name. */
 export function workflowName(path: string | undefined): string {
-  const entry = Object.values(catalog).find((w) => w.path === path);
-  return entry?.name ?? path?.split("/").pop() ?? "Workflow";
+  return workflowByPath(path)?.name ?? path?.split("/").pop() ?? "Workflow";
 }

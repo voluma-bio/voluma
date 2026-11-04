@@ -6,9 +6,9 @@
  */
 import type { OutputCatalog } from "@voluma/contracts/output-catalog";
 import { OUTPUTS_MOUNT, outputsFold } from "@voluma/contracts/output-fold";
-import type { ThreadLayout } from "../../layout";
-import type { Publish } from "../../ports/publish";
-import type { PayloadOf, Recorder } from "../../recorder";
+import type { ThreadLayout } from "../layout";
+import type { RunBucket } from "../ports/bucket";
+import type { PayloadOf, Recorder } from "../recorder";
 import { Refusal } from "./refusal";
 
 export type OutputEvent = PayloadOf<"output.published">;
@@ -16,7 +16,7 @@ export type OutputEvent = PayloadOf<"output.published">;
 export interface OutputToolDeps {
   runId: string;
   recorder: Recorder;
-  publish: Publish;
+  bucket: RunBucket;
   /** The workflow's outputs: what may be reported without `kind`. */
   catalog: OutputCatalog;
   /** The calling thread's layout (`forAgent`), for its paths. */

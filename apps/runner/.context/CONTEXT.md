@@ -280,7 +280,7 @@ thread takes its model from the log, so a base-URL override set for one model ca
 
 # Runner: `read` shows the model files the sandbox wrote
 
-`packages/harness/src/agents/tools/read.ts` reads up to 4 text or PNG/JPEG files from the run's mounts (a path
+`packages/harness/src/tools/read.ts` reads up to 4 text or PNG/JPEG files from the run's mounts (a path
 outside them, such as the sandbox's `/tmp`, through the thread's sandbox: `tools/read-whole.ts`) and returns the
 images as image content; a `ToolResult` may carry `images`, which the Pi adapter turns into image blocks. An image over
 1 MiB or 2000 px a side is cut at the panes its `.view.json` names or downscaled with sharp (`tools/image-fit.ts`: EXIF
@@ -368,7 +368,7 @@ the reply that ended the thread had started. A compaction summary call reports t
 interrupted, and neither is a failure before any call (stored history). The field is optional: an API from before it
 strips it, and that one end then reads as not interrupted (a fresh main, as before).
 
-What survives goes to the run loop (`packages/harness/src/agents/loop.ts`), which asks `provider-error.ts` for the
+What survives goes to the run loop (`packages/harness/src/loop.ts`), which asks `provider-error.ts` for the
 text's class (the unit test there pins the texts) and reads `interrupted` from the end:
 - *fatal* (any other 4xx: auth, `404 model_not_found`, an empty account): fails the run at once, on any thread
   (`failureKind`).
@@ -435,8 +435,8 @@ lifetime) and once more 23 min into the replacement, before the exit code was lo
 
 # Runner: role text, tool grants and models come from the run's role files
 
-Role files are `workflows/core/agents/`, built by `packages/harness/src/agents/prompts.ts` with tools from
-`packages/harness/src/agents/tools/registry.ts` (`workflows/core/agents/AGENTS.md`).
+Role files are `workflows/core/agents/`, built by `packages/harness/src/prompts.ts` with tools from
+`packages/harness/src/tools/registry.ts` (`workflows/core/agents/AGENTS.md`).
 
 An agent's system prompt is `workflows/core/agents/<role>.md`'s body, then the sandbox text (`layout.ts` `description`), then the role's skill list and the tool index (one line per skill
 script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
@@ -476,8 +476,8 @@ The next claim learns why from `claim.previousClaim` (the API records `lease-exp
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
 run loop then resumes each agent still open (its latest `thread.started` has no
 `thread.ended`) that this process hasn't started. It resumes with the message of `cutOffText`
-(`agents/messages.ts`), naming the tool the log shows with no result, or the no-tool form, and a
-tool the cut-off interrupted is answered from the log (`agents/effects.ts`). A tool whose `tool.call` event was
+(`messages.ts`), naming the tool the log shows with no result, or the no-tool form, and a
+tool the cut-off interrupted is answered from the log (`effects.ts`). A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.
 

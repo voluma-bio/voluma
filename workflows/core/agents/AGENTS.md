@@ -1,7 +1,7 @@
 # Roles of the agent loop
 
 `main.md` and `worker.md` are the role files; `words.md` and `environment.md`
-are text `packages/harness/src/agents/prompts.ts` appends to every role's system prompt; neither is a role.
+are text `packages/harness/src/prompts.ts` appends to every role's system prompt; neither is a role.
 The review main's extra text is `../review.md`, outside this folder: a runner from before it parses every
 other `.md` here as a role, so a file here without frontmatter fails a run it resumes during a deploy.
 
@@ -13,5 +13,5 @@ the `researcher` skill (a run main gets it with the researcher's first message; 
 Python packages: they are the sandbox image's (`workflows/core/requirements.txt`), not a workflow's.
 
 Frontmatter is `name`, `description`, `model`, `thinking`, `tools`; tool names come from the agent loop's
-registry (`packages/harness/src/agents/tools/registry.ts`). Design: the docs repo's `work/agent-model/design/`
+registry (`packages/harness/src/tools/registry.ts`). Design: the docs repo's `work/agent-model/design/`
 (`main-prompt.md`, `agents.md`).
