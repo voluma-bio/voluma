@@ -140,13 +140,21 @@ const SHAPES: Record<string, string> = {
   path: "a path",
 };
 
-/** The message the researcher sent, with each mark they attached in the plain terms of the notice (`design-r3.md`). Positions are world mm, never voxels. */
+/**
+ * The message the researcher sent, with each mark they attached in the plain terms of the notice (`design-r3.md`). Positions
+ * are mm on the image the mark was drawn on, named by output id and version: voxel index times spacing from that image's
+ * voxel 0, the review's own placement (`detailFromSidecar`), not the scan's world mm, so a worker maps them with that
+ * image's header (`marks_to_grid.py --drawn-on`).
+ */
 function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?: string): string {
   const fold = outputsFold(events);
   const marks = (m.attached ?? []).map((a) => {
     const shape = SHAPES[Object.keys(a.mark.mark).find((k) => k in SHAPES) ?? ""] ?? "a mark";
     const view = a.mark.plane ? `the ${a.mark.plane.view.toUpperCase()} plane` : "3D";
-    const where = `${shape} in ${view}`;
+    const image = fold.byId.get(a.mark.volume)?.latest;
+    // With no spacing in its sidecar the review shows that image at 1 mm a voxel: its "mm" are voxel indices.
+    const unspaced = image && !(image.detail as { affine?: unknown } | undefined)?.affine;
+    const where = `${shape} drawn on ${a.mark.volume}${image ? ` v${image.version}` : ""}${unspaced ? " (no spacing known: its mm below are voxel indices)" : ""}, in ${view}`;
     const head = `- ${a.change}: "${a.mark.tag}" on ${a.mark.output} v${a.version}, ${where}`;
     const { line, path } = a.mark.mark as {
       line?: { lengthMm?: number };
@@ -182,7 +190,7 @@ function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?:
     ...about,
     ...(marks.length > 0
       ? [
-          "Marks they attached (their annotations, not outputs; nothing changed until you change it):",
+          "Marks they attached (their annotations, not outputs; nothing changed until you change it). Their mm are on the image each was drawn on, not the scan's world mm:",
           ...marks,
         ]
       : []),

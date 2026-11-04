@@ -15,9 +15,9 @@ test("unset and off send no level; unsupported non-off levels still fail", () =>
   expect(() => assertThinking(undefined, [wonder, spark], "worker")).not.toThrow();
   expect(() => assertThinking("off", [wonder, spark], "worker")).not.toThrow();
   expect(() => assertThinking("high", [wonder, spark], "worker")).not.toThrow();
-  expect(() => assertThinking("xhigh", [wonder], "RUNNER_THINKING")).not.toThrow();
+  expect(() => assertThinking("xhigh", [wonder], "the role's")).not.toThrow();
   expect(() => assertThinking("xhigh", [opus], "worker")).toThrow(/not one anthropic\/claude-opus/);
-  expect(() => assertThinking("xhigh", [wonder, opus], "RUNNER_THINKING")).toThrow(
+  expect(() => assertThinking("xhigh", [wonder, opus], "the role's")).toThrow(
     /not one anthropic\/claude-opus/,
   );
 });

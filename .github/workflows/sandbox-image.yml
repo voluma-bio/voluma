@@ -1,7 +1,7 @@
 # Builds the sandbox image (apps/runner/sandbox/Dockerfile, with workflows/core/requirements.txt and
 # the bundled voluma-sam from packages/voluma-sam) for linux/amd64 and pushes it
 # to ghcr.io/voluma-bio/voluma-sandbox. The digest it prints goes into SANDBOX_IMAGE in
-# apps/runner/src/config.ts. The package must be public so a visitor's Modal workspace can pull it.
+# apps/runner/src/config.ts. The package must be public so a guest's Modal workspace can pull it.
 name: Sandbox image
 
 on:

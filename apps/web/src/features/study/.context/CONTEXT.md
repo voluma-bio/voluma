@@ -68,7 +68,7 @@ shown as its input and linked straight to its page (`/studies/:id/inputs/:inputI
   Stopped, Waiting, Needs your keys (paused)), `liveStatus` ("Running · N of M in" while a run
   runs, from `outputs`, its final outputs in),
   `inputStatus` (a sample's: its newest run's, "Not started" with no run), the Samples tree's data
-  (`sampleTree`), `inputHref`, the formatters (`whenText` included), and visitor keys.
+  (`sampleTree`), `inputHref`, the formatters (`whenText` included), and own keys.
   `runStatus` takes a run's `state` and its review in brief: a `newestRuns` entry's or a study
   input's `review` (the run's open To check items on its final outputs and what they rest on,
   `OutputsFold.toCheck`, the sample page's "To check" count, worded "N to check" by `toCheckText`;

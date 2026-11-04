@@ -7,9 +7,9 @@
  * connection.
  */
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
+import { cancelRun } from "@voluma/api-client";
 import { runQuery } from "@voluma/api-client/query";
-import type { Run, RunRead, VisitorKeys } from "@voluma/contracts/run";
+import type { Run, RunRead } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { failedThreads } from "@voluma/contracts/threads";
 import {
@@ -37,7 +37,7 @@ import {
 } from "@voluma/ui";
 import { workflowById, workflowName } from "@voluma/workflow/bundled";
 import { Check, ChevronDown, Copy } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 /** "OA6-1, right knee", from the study's input; the input's file name when the study can't say. */
@@ -208,7 +208,7 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
         "Not recorded yet"
       ),
     ],
-    ["Keys", run.credentials === "visitor" ? "The starter's own" : "Voluma's"],
+    ["Keys", run.credentials !== "voluma" ? "The starter's own" : "Voluma's"],
     ["Failed agents", failed > 0 ? String(failed) : "None"],
     [
       "Gateway requests",
@@ -300,14 +300,13 @@ function StopRun({ run }: { run: Run }) {
 
 const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
 
-/** The run's own problems, over the views: waiting for its starter's keys, failed, or out of touch. */
+/** The run's own problems, over the views: failed, or out of touch. */
 export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string; stale: boolean }) {
   const { state } = run;
-  if (state.status === "awaiting-keys") return <AwaitingKeys run={run} userId={userId} />;
   if (
     state.status === "ended" &&
     state.outcome === "completed" &&
-    run.credentials === "visitor" &&
+    run.credentials !== "voluma" &&
     run.cannotMessage === null
   )
     return <ReopenKeys userId={userId} />;
@@ -361,108 +360,6 @@ function ReopenKeys({ userId }: { userId: string }) {
       </div>
     </section>
   );
-}
-
-/**
- * Failed sends the page retries by itself when the server or network is down, and the most it waits
- * between two. A 429 (too many runs going) is retried every MAX_WAIT_MS with no cap: it clears only
- * when other runs end, which can take longer than any cap would allow.
- */
-const OUTAGE_SENDS = 30;
-const MAX_WAIT_MS = 60_000;
-
-const full = (error: unknown) => error instanceof ApiError && error.status === 429;
-const down = (error: unknown) => !(error instanceof ApiError) || error.status >= 500;
-
-/**
- * The starter's own run waiting for keys. Mounted once per wait, it sends the key stored in this
- * browser by itself, and again after a refusal that clears: a 429 every minute for as long as the
- * wait lasts, a 5xx or network error after a wait doubling from 5 s to a minute, OUTAGE_SENDS times.
- * A send from the form, which shows after the first failure, stops it. A 409 means the run already
- * left the wait (another tab sent the key): not an error.
- */
-function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
-  const client = useQueryClient();
-  const [stored] = useState(() => loadKeys(userId));
-  const [sends, setSends] = useState(0);
-  const [outages, setOutages] = useState(0);
-  const [manual, setManual] = useState(false);
-  const [failure, setFailure] = useState<unknown>();
-  const resend = useMutation({
-    mutationFn: (keys: VisitorKeys) => resendKeys(run.id, keys),
-    onSuccess: (next) => showRun(client, next),
-    onError: (error) => {
-      if (error instanceof ApiError && error.status === 409) {
-        setFailure(undefined);
-        void client.invalidateQueries({ queryKey: runQuery(run.id).queryKey });
-        return;
-      }
-      if (down(error)) setOutages((n) => n + 1);
-      setFailure(error);
-    },
-  });
-  const { mutate } = resend;
-  const retrying =
-    failure !== undefined &&
-    !!stored &&
-    !manual &&
-    (full(failure) || (down(failure) && outages < OUTAGE_SENDS));
-  const due = sends === 0 ? !!stored : retrying && resend.isError;
-  const wait =
-    sends === 0
-      ? 0
-      : full(failure)
-        ? MAX_WAIT_MS
-        : Math.min(5000 * 2 ** (outages - 1), MAX_WAIT_MS);
-  // A timer even for the first send: StrictMode's second effect run clears the first timer.
-  useEffect(() => {
-    if (!due || !stored) return;
-    const timer = setTimeout(() => {
-      setSends((n) => n + 1);
-      mutate(stored);
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [due, sends, wait, stored, mutate]);
-
-  if (stored && !manual && failure === undefined)
-    return (
-      <p role="status" className={`${bar} bg-muted text-muted-foreground`}>
-        The server restarted. Reconnecting with your saved key…
-      </p>
-    );
-  const busy = manual && resend.isPending;
-  return (
-    <section className={`${bar} grid gap-2 bg-check-tint text-check-strong`}>
-      <p>The run is waiting for your keys: the server no longer has a usable copy.</p>
-      <div className="max-w-sm">
-        <KeysForm
-          userId={userId}
-          submitLabel="Continue the run"
-          busy={busy}
-          onSubmit={(keys) => {
-            setManual(true);
-            setFailure(undefined);
-            resend.mutate(keys);
-          }}
-        />
-      </div>
-      {failure !== undefined && !busy && (
-        <p role="alert" className="text-destructive">
-          {failureMessage(failure, retrying)}
-        </p>
-      )}
-    </section>
-  );
-}
-
-function failureMessage(error: unknown, retrying: boolean) {
-  if (retrying)
-    return full(error)
-      ? "Too many runs are going right now. Your saved key will be sent again shortly."
-      : "Couldn't send your saved key. Trying again shortly.";
-  return full(error)
-    ? "Too many runs are going right now. Try again shortly."
-    : "Couldn't send the keys. Try again.";
 }
 
 /** Shows a run the API returned; first cancels a poll in flight, whose older read would land after it. */

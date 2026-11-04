@@ -1,7 +1,7 @@
 /**
  * Studies, under `/api/run`: a study is a group of runs, one per input, of one workflow. Every
  * run belongs to one (`runSchema.studyId`). A study of one is a study whose input count is 1;
- * nothing marks it. The rules of `run.ts` (org scoping, limits, visitor keys) apply to every
+ * nothing marks it. The rules of `run.ts` (org scoping, limits, own keys) apply to every
  * call here.
  *
  *   POST /api/run/studies      body `createStudyRequestSchema` → 200 `studyDetailSchema`
@@ -14,7 +14,7 @@
  *   GET  /api/run/studies/:id  → 200 `studyDetailSchema` (404 when absent or unreadable)
  *
  * Creating a study stores it, its inputs and one `queued` run for each `start` input in one
- * transaction under the queue's lock. A refusal (a limit, 20 unfinished own-key runs) refuses the
+ * transaction under the queue's lock. A refusal (a limit, 20 unfinished own-key runs per starter) refuses the
  * whole call: no study is left behind. The inputs not in `start` wait with no run
  * ("not started"); `POST /api/run/runs` (`startRunRequestSchema`) starts them later, one at
  * a time. The stored input row is the confirmed one: nothing runs until the researcher
@@ -38,12 +38,12 @@ import { inputIdSchema, modelRefSchema, runIdSchema, segmentSchema, studyIdSchem
 import type { OutputStatus } from "./output-fold";
 import {
   inputSchema,
+  ownKeysSchema,
   runOutputsInSchema,
   runSchema,
   runStateSchema,
   runThinkingSchema,
   selectedOutputsSchema,
-  visitorKeysSchema,
   workflowIdSchema,
 } from "./run";
 
@@ -190,8 +190,8 @@ export const createStudyRequestSchema = z.preprocess(
       /** For every run started by this call, as in `startRunRequestSchema`. */
       selectedOutputs: selectedOutputsSchema.min(1).optional(),
       notes: z.string().max(4000).optional(),
-      /** Present: these runs use these (`credentials: "visitor"`). */
-      keys: visitorKeysSchema.optional(),
+      /** Present: these runs use these (`credentials: "own"`). */
+      keys: ownKeysSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */
       model: modelRefSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */

@@ -4,7 +4,7 @@
 importing each other: the outputs review's model and trail (`outputs-model.ts`,
 `outputs-trail.ts`), the run's events (`run-store.tsx`), `ItemToCheck`, `ApprovalCard`, the
 model's prose as Markdown (`chat/markdown.tsx`), the clock (`use-now.ts`), an input's status in a
-study (`study-inputs.ts`, `samples.ts`), and the status, formatting and visitor-key helpers. It has
+study (`study-inputs.ts`, `samples.ts`), and the status, formatting and own-key helpers. It has
 no router. Its screens are the input review (`apps/web/src/features/input`) and the study pages
 (`apps/web/src/features/study`).
 
@@ -13,6 +13,26 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
 - **The run's events** live in one store per run page (`RunStoreProvider`, keyed on the run, fed by
   the page's stream; `useEvents`), so the page and its header read one log. Only durable events are
   kept.
+- **An agent's thread** (`transcript.ts`, `agent-threads.ts`, `transcript-view.tsx`,
+  `agent-thread.tsx`) is the agents view's body: `agentEntries` lists main first (only when the
+  run has one; `main` and every `main.N` of a review are one entry, a divider where each later
+  one starts), then every worker or check in start order, from `workersOf` and `agentLog`'s
+  `place`, never a thread's `kind` or `role`. `threadRows` derives rows for the picked thread
+  only, from durable events (the stream sends no token deltas): prose in the open, and main's
+  `message` calls to the researcher too ("To the researcher", as the conversation shows them); reasoning and
+  runs of tool calls fold closed under a digest, their bodies built on first open
+  (`ProcessDisclosure`, `ActivityRow`); a call with no result is running, and the live line names
+  it; on an ended run it reads stopped. Tool arguments and output show their last 8000
+  characters with a "Shortened" note. `start_worker`, `message` and `close_worker` name their
+  worker through `AgentLinks`, and `Markdown`'s `agents` prop turns inline code that is exactly
+  an agent's name into the same link. Tool titles are `toolTitle`: a new tool shows as its name and
+  arguments until it gets a case; a fold's digest names a few other calls ("started worker
+  intake"). Who a message is from: on main, the researcher's words arrive inside a runtime
+  delivery whose `covers` range holds a `person.message` ("Message from you"), else "Update from
+  Voluma"; on a worker, the first is "Brief", later ones "Message from <name>" or "Update from
+  Voluma". The scroll follows the newest line only when the reader was at the bottom before the
+  update, and an ended thread opens at the top. Origin: the transcript viewer deleted with the task loop
+  (`eed32205^1`), without tasks, attempts or verdicts.
 - **Researcher words** everywhere: the AI, main; no paths, file names or tool names. Values take
   the workflow's names (`outputName`, from the bundled `outputs.yaml`), an output's id as words for
   one the catalog lacks.
@@ -34,17 +54,11 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   link is ticked by its status (a label overlay's is its map's; pending and missing are not yet in). `outputsReview` carries each row's
   `trail` and `chain` and the run's `others` (published, not final, not on a chain), so components
   only read them.
-- **Visitor keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
+- **Own keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
   way an account without Voluma's key (`Me.volumaKey` false: a guest) runs (the API refuses a start without it, 403); an account with it may keep one too. A key
   in this browser is sent with every start, and with a message or answer to a finished own-key run (`keysToReopen`: the server wiped the run's keys when it ended), and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
-  `voluma.visitor-keys.<userId>`. A run in `awaiting-keys` is handled on its page
-  (`features/input/input-header.tsx`) for the user who started it only: with a key stored, the page
-  sends it (`resendKeys`) by itself, and again after a refusal that clears: a 429 every minute with no
-  cap (a slot frees only when another run ends), a 5xx or network failure with a capped backoff. So
-  the run page polls in a background tab too. A 409 means another tab already sent it. The form
-  shows when no key is stored or a send fails. `/keys` doesn't check the key: a revoked one fails the
-  run at its first model call (401). Other users see that the run waits for its starter.
+  `voluma.visitor-keys.<userId>`.
 - **A run's status** (`runStatus`, `liveStatus`: a word and a `StatusMark` state) and the
   formatters (`formatUsd`, `formatDuration`, `plural`) are `@voluma/run-view`, shared with the study pages;
   `use-now.ts` is the clock. A completed run with open To check items reads "N to check"

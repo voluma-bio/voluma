@@ -304,6 +304,7 @@
 - id: patella-volume
   kind: value
   name: Patella volume
+  section: Segmentation
   description: patella label, thresholded voxels
   source: "deck #1"
   unit: mm3
@@ -315,6 +316,7 @@
 - id: lateral-meniscus-osteophyte-volume
   kind: value
   name: Lateral meniscus/osteophyte volume
+  section: Segmentation
   description:
     "lateral meniscus and its spurs together, one volume per side (the lab cannot separate
     them); on OA6-1RK label 6. Open: whether label 9's pieces and tibial margin fragments 10 and 11
@@ -328,6 +330,7 @@
 - id: medial-meniscus-osteophyte-volume
   kind: value
   name: Medial meniscus/osteophyte volume
+  section: Segmentation
   description: "medial meniscus and its spurs together, one volume per side (the lab cannot separate
     them); on OA6-1RK label 5. Open: whether label 9's pieces and tibial margin fragments 10 and 11
     count"
@@ -340,6 +343,7 @@
 - id: bone-threshold
   kind: value
   name: Bone threshold
+  section: Segmentation
   description: the HU threshold that separates bone from soft tissue in the segmentation (review
     derives the bone inside a region from it)
   unit: "[hnsf'U]"
@@ -349,6 +353,7 @@
 - id: tv-tibial-iioc
   kind: value
   name: TV, tibial IIOC
+  section: Tibial IIOC
   description: "ROI-1: growth plate to articular surface"
   source: "deck #4"
   unit: mm3
@@ -359,6 +364,7 @@
 - id: bv-tibial-iioc
   kind: value
   name: BV, tibial IIOC
+  section: Tibial IIOC
   description: ROI-1
   source: "deck #5"
   unit: mm3
@@ -369,6 +375,7 @@
 - id: bv-tv-tibial-iioc
   kind: value
   name: BV/TV, tibial IIOC
+  section: Tibial IIOC
   description: ROI-1
   source: "deck #6"
   unit: "%"
@@ -380,6 +387,7 @@
 - id: iioc-height
   kind: value
   name: IIOC height
+  section: Tibial IIOC
   description: middle of the growth plate to the top of the articular bone, vertical
   source: "deck #7"
   unit: mm
@@ -393,6 +401,7 @@
 - id: iioc-height-medial-compartment
   kind: value
   name: IIOC height, medial compartment
+  section: Tibial IIOC
   description: "as #7, medial"
   source: "deck #8"
   unit: mm
@@ -404,6 +413,7 @@
 - id: iioc-height-lateral-compartment
   kind: value
   name: IIOC height, lateral compartment
+  section: Tibial IIOC
   description: "as #7, lateral"
   source: "deck #9"
   unit: mm
@@ -415,6 +425,7 @@
 - id: tibial-width-at-the-growth-plate
   kind: value
   name: Tibial width at the growth plate
+  section: Tibial IIOC
   description: "centre of the fibula–tibia junction on the tibial surface to the prominent point on
     the other side (open question for the lab: confirm the endpoints on one annotated scan)"
   source: "deck #10"
@@ -430,6 +441,7 @@
 - id: subchondral-bone-plate-thickness-medial
   kind: value
   name: Subchondral bone plate thickness, medial
+  section: Subchondral plate
   description: medial plate
   source: "deck #11"
   unit: mm
@@ -440,6 +452,7 @@
 - id: subchondral-bone-plate-thickness-lateral
   kind: value
   name: Subchondral bone plate thickness, lateral
+  section: Subchondral plate
   description: lateral plate
   source: "deck #12"
   unit: mm
@@ -450,6 +463,7 @@
 - id: tv-iioc-trab
   kind: value
   name: TV, IIOC-trab
+  section: IIOC trabecular bone
   description: "ROI-2: ROI-1 minus the subchondral plate and the cortical line next to the growth plate"
   source: "deck #13"
   unit: mm3
@@ -460,6 +474,7 @@
 - id: bv-iioc-trab
   kind: value
   name: BV, IIOC-trab
+  section: IIOC trabecular bone
   description: ROI-2
   source: "deck #14"
   unit: mm3
@@ -470,6 +485,7 @@
 - id: bv-tv-iioc-trab
   kind: value
   name: BV/TV, IIOC-trab
+  section: IIOC trabecular bone
   description: ROI-2
   source: "deck #15"
   unit: "%"
@@ -480,6 +496,7 @@
 - id: metaphyseal-tv
   kind: value
   name: TV, proximal tibial trabeculae
+  section: Proximal tibial trabeculae
   description: "ROI-3: a band below the growth plate, clear of cortical bone (offsets in protocol.json)"
   source: "deck #16"
   unit: mm3
@@ -490,6 +507,7 @@
 - id: metaphyseal-bv
   kind: value
   name: BV, proximal tibial trabeculae
+  section: Proximal tibial trabeculae
   description: ROI-3
   source: "deck #17"
   unit: mm3
@@ -500,6 +518,7 @@
 - id: metaphyseal-bv-tv
   kind: value
   name: BV/TV, proximal tibial trabeculae
+  section: Proximal tibial trabeculae
   description: ROI-3
   source: "deck #18"
   unit: "%"
@@ -510,6 +529,7 @@
 - id: metaphyseal-tb-n
   kind: value
   name: Tb.N, proximal tibial trabeculae
+  section: Proximal tibial trabeculae
   description: ROI-3
   source: "deck #19"
   unit: 1/mm
@@ -520,6 +540,7 @@
 - id: metaphyseal-tb-th
   kind: value
   name: Tb.Th, proximal tibial trabeculae
+  section: Proximal tibial trabeculae
   description: ROI-3, largest contained sphere
   source: "deck #20"
   unit: mm
@@ -530,6 +551,7 @@
 - id: metaphyseal-tb-sp
   kind: value
   name: Tb.Sp, proximal tibial trabeculae
+  section: Proximal tibial trabeculae
   description: ROI-3, largest contained sphere in marrow
   source: "deck #21"
   unit: mm
@@ -540,6 +562,7 @@
 - id: metaphyseal-tb-nd
   kind: value
   name: Tb.Nd, trabecular nodes
+  section: Proximal tibial trabeculae
   description: ROI-3, 3D skeleton junctions of ≥3 struts (the lab reports a count per tissue volume)
   source: "deck #22"
   unit: 1/mm3
@@ -550,6 +573,7 @@
 - id: metaphyseal-tb-tm
   kind: value
   name: Tb.Tm, trabecular ends
+  section: Proximal tibial trabeculae
   description: ROI-3, skeleton free ends (the lab reports a count per tissue volume)
   source: "deck #23"
   unit: 1/mm3
@@ -560,6 +584,7 @@
 - id: cortical-thickness-100-um-below-the-growth-plate
   kind: value
   name: Cortical thickness, 100 µm below the growth plate
+  section: Cortical bone
   description: cortical shell at that level
   source: "deck #24"
   unit: mm
@@ -570,6 +595,7 @@
 - id: cortical-thickness-1000-um-below-the-growth-plate
   kind: value
   name: Cortical thickness, 1000 µm below the growth plate
+  section: Cortical bone
   description: "as #24"
   source: "deck #25"
   unit: mm
@@ -581,6 +607,7 @@
 - id: distal-femoral-length-dfl
   kind: value
   name: Distal femoral length (DFL)
+  section: Distal femur
   description: midpoint (a) of the upper line of the intercondylar groove to the intercondylar notch (b)
   source: "deck #26"
   unit: mm
@@ -591,6 +618,7 @@
 - id: distal-femoral-width-dfw
   kind: value
   name: Distal femoral width (DFW)
+  section: Distal femur
   description: "midpoint (c) of the ridge on the lateral condyle surface to the vertex (d) of the
     medial condyle (open question for the lab: confirm the endpoints on one annotated scan)"
   source: "deck #27"
@@ -601,6 +629,7 @@
 - id: width-length-ratio
   kind: value
   name: Width/length ratio
+  section: Distal femur
   description: "#27 ÷ #26"
   source: "deck #28"
   unit: "1"

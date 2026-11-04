@@ -1,7 +1,7 @@
 /**
  * The browser's study routes (`@voluma/contracts/study`): create (a study, its inputs and the
  * runs to start now, in one transaction), list and get. Reads take `requireReader`, create
- * takes `requireUser`; the queue holds visitor keys, so no handler logs a body.
+ * takes `requireUser`; the queue holds own keys, so no handler logs a body.
  */
 import { randomUUID } from "node:crypto";
 import { createStudyRequestSchema } from "@voluma/contracts/study";

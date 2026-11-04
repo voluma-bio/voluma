@@ -14,6 +14,8 @@ From the skillset move (`workflows/` in this repo):
 - **The image a run begins on is this runner's, not the pinned commit's.** A run records its image on the root `thread.started` (`sandboxImage`) at its first claim and keeps it on every resume, so a deploy no longer moves a running run. A run that starts on a new runner whose workflow commit is older still gets the newest image. To tie them: tag the image with the hash of `workflows/core/requirements.txt` and resolve that tag from the requirements at the pinned commit.
 
 
-- **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message), and the runner's boot line prints `RUNNER_THINKING`, but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.
+- **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message) but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.
 
 - **Every Meta request hashes every inline image** (`meta-images.ts`, `fileIdFor`): about 54 ms of event-loop time per 40 images of 1 MiB, plus short-lived copies. Cache the hash per image if it ever competes with the lease timers.
+
+- **Delete the `RUNNER_MODEL` / `RUNNER_THINKING` boot refusal in `config.ts`** about a week after #540 merges, once every host has dropped both variables.

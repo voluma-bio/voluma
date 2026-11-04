@@ -15,7 +15,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import type { MessageSent } from "../../ports";
-import { admit, type Limits, refusalMessage, usage } from "./admission";
+import { admit, type Limits, refusalMessage, spentUsd } from "./admission";
 import { freezeAttached } from "./agent-review";
 import { noLease } from "./lease";
 import { eventLock, insertEvent, lockRun } from "./pg-event-log";
@@ -121,8 +121,12 @@ export type ReopenContext = {
  * The sealed keys a reopen stores. An own-key run's keys were wiped when it ended, so the request
  * brings them; a Voluma-key run holds none.
  */
-function reopenKeys(sealer: KeySealer, caller: Caller, run: { id: string; credentials: string }) {
-  if (run.credentials !== "visitor") return null;
+function reopenKeys(
+  sealer: KeySealer,
+  caller: Caller,
+  run: { id: string; credentials: Run["credentials"] },
+) {
+  if (run.credentials === "voluma") return null;
   if (!caller.keys)
     throw new HTTPException(403, {
       message:
@@ -137,11 +141,11 @@ export type MessageTarget = {
   startedBy: string;
   studyId: string;
   example: boolean;
-  credentials: "voluma" | "visitor";
+  credentials: Run["credentials"];
   workflows: WorkflowPin[];
   /** The study's workflow when the caller already holds it, which spares the lookup. */
   studyWorkflowId?: string;
-  /** The queue state: `queued`, `running`, `awaiting-keys` or `ended`. */
+  /** The queue state: `queued`, `running` or `ended`. */
   state: string;
   outcome: string | null;
 };
@@ -271,7 +275,7 @@ export async function decideMessage(
   const reopening = run.state === "ended";
   const sealedKeys = reopening ? reopenKeys(o.sealer, caller, run) : null;
   if (reopening) {
-    const refused = admit("reopen", o.limits, reader.labId, await usage(tx, reader.labId), run);
+    const refused = admit(o.limits, reader.labId, await spentUsd(tx, reader.labId), run);
     if (refused === "no-key")
       throw new HTTPException(403, {
         message:
