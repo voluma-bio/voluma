@@ -3,6 +3,7 @@
     {
       "id": 1,
       "name": "femur",
+      "one_piece": true,
       "joint_cap": "notched",
       "volume_mm3": [6.296, 10.913],
       "components": 1,
@@ -12,6 +13,7 @@
     {
       "id": 2,
       "name": "tibia",
+      "one_piece": true,
       "joint_cap": "solid",
       "volume_mm3": [5.283, 9.157],
       "components": 1,
@@ -20,6 +22,7 @@
     {
       "id": 3,
       "name": "patella",
+      "one_piece": true,
       "volume_mm3": [0.957, 1.659],
       "components": 1,
       "notes": "May be outside the field (`segmentation-check`, section 2). Does not include label 12 (proximal patellar ossification), which stays separate. Range is the OA6-1RK reference volume 1.276 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
@@ -27,6 +30,7 @@
     {
       "id": 4,
       "name": "fibula",
+      "one_piece": true,
       "volume_mm3": [0.744, 1.29],
       "components": 1,
       "must_touch": [2],
