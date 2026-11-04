@@ -26,7 +26,7 @@ packages/
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
 workflows/      `core/` (role files, generic micro-CT skills, Python requirements) and one directory per workflow (`outputs.yaml`, `skills/`), with their Python skill resources
-training/       offline model training, not part of the app: plate-finetune/ (SAM 3.1 fine-tuned to find the growth plate), its own uv project; no app imports it, no run snapshots it, no deploy builds it
+training/       offline model training and its Modal inference app, not part of the app: plate-finetune/ (SAM 3.1 fine-tuned to find the growth plate), its own uv project; no app imports it, no run snapshots it, no Render deploy builds it (`serve.py` is deployed by hand with `modal deploy`)
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```

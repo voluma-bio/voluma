@@ -1,12 +1,11 @@
 """Predict a mask on sections of a scan with a trained checkpoint: the IIOC region (prompt "epiphysis") or the plate band
 ("growth plate"), whichever the checkpoint was trained on.
 
-  python predict.py --scan OA8-19L --ckpt runs/band-s0/ckpt-bestval.pt --text "growth plate" --threshold 0.3 \
-      --out preds/band-s0 --sections-from data/region
+  python predict.py --scan OA8-19L --ckpt runs/band-s0/ckpt-bestval.pt --text "growth plate" --out preds/band-s0 \
+      --sections-from data/region
 
 Writes <out>/<scan>.npz: V (the predicted sections) and mask[n, W, U] bool on the scan's grid, the union of the detector's instances
-scoring above --threshold (none: an empty section). The band recipe uses 0.3: at 0.5 a band seed returns nothing on about one
-section in twenty, at 0.3 on none of the six scored scans (L33). The region recipe uses 0.5. --sections-from takes the labelled
+scoring above --threshold (none: an empty section), by default the prompt's THRESHOLD. --sections-from takes the labelled
 sections of the scan from an export (its heldout or val labels); without it every section is predicted.
 """
 import argparse
@@ -18,9 +17,15 @@ import torch
 from PIL import Image
 from sam3.model.sam3_image_processor import Sam3Processor
 
+import band
+import export
 import model as M
 import scans
 from export import pad_scale
+
+# Detector score per prompt. Band 0.3: at 0.5 a band seed returns nothing on about one section in twenty, at 0.3 on none of the
+# six scored scans (L33).
+THRESHOLD = {export.TEXT: 0.5, band.TEXT: 0.3}
 
 
 def predict_vol(proc, vol, text, vs):
@@ -48,11 +53,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scan", required=True, nargs="+")
     ap.add_argument("--ckpt", required=True, type=Path)
-    ap.add_argument("--text", required=True, help="the prompt the checkpoint was trained on: epiphysis (region) or growth plate (band)")
+    ap.add_argument("--text", required=True, choices=list(THRESHOLD), help="the prompt the checkpoint was trained on")
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--threshold", type=float, default=0.5, help="instance score to keep: 0.3 for the band recipe, 0.5 for region")
+    ap.add_argument("--threshold", type=float, help="instance score to keep (default: the prompt's THRESHOLD)")
     ap.add_argument("--sections-from", type=Path, help="an export: predict only the scan's labelled sections")
     a = ap.parse_args()
+    a.threshold = a.threshold or THRESHOLD[a.text]
     a.out.mkdir(parents=True, exist_ok=True)
     proc = Sam3Processor(M.build(ckpt=a.ckpt).eval(), confidence_threshold=a.threshold)
     for scan in a.scan:

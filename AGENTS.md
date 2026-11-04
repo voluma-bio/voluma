@@ -198,9 +198,10 @@ they need:
   knee workflow. Models come from runner config. A run snapshots `core/` and its
   workflow's directory and nothing else. Python lives only in
   `workflows/`, as skill resources: CLI scripts that take and return paths,
-  never bytes. The one exception is `training/`: offline model training
-  (`training/plate-finetune/`, its own uv project), which no app imports and
-  no run snapshots. Skill resource dependencies are
+  never bytes. The one exception is `training/`: offline model training and
+  its Modal inference app (`training/plate-finetune/`, its own uv project;
+  `serve.py` is deployed by hand with `modal deploy`, not by Render), which
+  no app imports and no run snapshots. Skill resource dependencies are
   `workflows/core/requirements.txt`, compiled from `requirements.in`;
   changing it means running the "Sandbox image" workflow and updating `SANDBOX_IMAGE` in `apps/runner/src/config.ts`.
   `pnpm check` runs ruff and pytest

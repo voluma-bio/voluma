@@ -3,8 +3,9 @@
   python faces.py --band preds/band-s0 --lines preds/band-s0-region --out scores/band-s0-faces.json
 
 Per U column where both traced faces are defined and the traced plate is flat (|dW/dU| <= 1), the band's run (a connected vertical
-run of the mask) nearest to the predicted cut line gives its top (proximal) and bottom (distal) face; errors in µm against the
-traced faces, thickness = bottom - top + 1 voxels against the traced distal - proximal + 1. Per section the median over its
+run of the mask) nearest to the predicted cut line, within band_to_region.MID_MAX voxels, gives its top (proximal) and bottom
+(distal) face (band_to_region.band_faces); errors in µm against the traced faces, thickness = bottom - top + 1 voxels against
+the traced distal - proximal + 1. Per section the median over its
 columns; per scan the median over sections, and how many sections have a face more than 50 µm off (a median hides them).
 Sections the model missed have no line and contribute nothing, so read these numbers with the empty-section counts of score.py.
 """
@@ -16,36 +17,10 @@ import numpy as np
 
 import cutline
 import scans
+from band_to_region import band_faces
 
 FLAT = 1.0
 OFF_UM = 50
-MID_MAX = 4   # voxels: a cut-line point moves to the faces' midpoint only when that is this close
-
-
-def band_faces(band, line):
-    """A band section (W, U) and its cut line (n, 2) [w, u] -> (top, bottom) per U column: the first and last row W of the band's
-    run nearest the line; NaN outside the line's U extent and in columns without band."""
-    n_u = band.shape[1]
-    top, bot = np.full(n_u, np.nan), np.full(n_u, np.nan)
-    line = line[np.argsort(line[:, 1])]
-    c = np.arange(max(int(np.ceil(line[0, 1])), 0), min(int(np.floor(line[-1, 1])), n_u - 1) + 1)
-    for u, w in zip(c, np.interp(c, line[:, 1], line[:, 0])):
-        rows = np.flatnonzero(band[:, u])
-        if len(rows):
-            r = min(np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1), key=lambda r: abs((r[0] + r[-1]) / 2 - w))
-            top[u], bot[u] = r[0], r[-1]
-    return top, bot
-
-
-def midline(line, top, bot):
-    """The cut line (n, 2) [w, u] with each point's W moved to the midpoint of the faces (band_faces) in its column, where both
-    faces exist there and the midpoint is within MID_MAX voxels of the point."""
-    out = line.copy()
-    for k, (w, u) in enumerate(line):
-        c = int(round(u))
-        if 0 <= c < len(top) and not np.isnan(top[c]) and abs((top[c] + bot[c]) / 2 - w) <= MID_MAX:
-            out[k, 0] = (top[c] + bot[c]) / 2
-    return out
 
 
 def section_faces(band, line, curves, n_u):
