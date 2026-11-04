@@ -184,7 +184,7 @@ export function OutputsReview({
     review.undeclared[0];
   const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
   const live = run.state.status !== "ended";
-  const { trailOpen, standIn } = inViewOf(review, selected, opened, live);
+  const { trailOpen, standIn, soFar } = inViewOf(review, selected, opened, live, blocks);
   // Picking any output: a listed value opens in place; anything else under the value resting on it.
   const show = useCallback(
     (id: string) => {
@@ -504,6 +504,7 @@ export function OutputsReview({
             live={live}
             root={selected}
             standIn={!!standIn}
+            soFar={!!soFar}
             inView={inView}
             trailOpen={!!trailOpen}
             onBack={() => select({ trail: null, item: null })}
@@ -604,6 +605,7 @@ function SceneBar({
   live,
   root,
   standIn,
+  soFar,
   inView,
   trailOpen,
   onBack,
@@ -618,6 +620,8 @@ function SceneBar({
   root: OutputRow | undefined;
   /** `inView` is what `root`, not in yet, rests on. */
   standIn: boolean;
+  /** `inView` is the run's newest drawable output, shown while nothing `root` rests on is in. */
+  soFar: boolean;
   inView: OutputRow | undefined;
   trailOpen: boolean;
   onBack: () => void;
@@ -643,7 +647,7 @@ function SceneBar({
         </Button>
       </header>
     );
-  if (!inView || !root) return null;
+  if (!inView || (!root && !soFar)) return null;
   const { status, word } = statusOf(inView, live);
   // A reported value can still rest on something to check.
   const inherited = !trailOpen && restsOnOpen(inView);
@@ -656,9 +660,11 @@ function SceneBar({
           aria-keyshortcuts="Escape"
           className="shrink-0 cursor-pointer text-xs text-muted-foreground hover:text-foreground"
         >
-          {root.name} ›
+          {root?.name} ›
         </button>
-      ) : standIn ? (
+      ) : soFar ? (
+        <span className="shrink-0 text-xs text-muted-foreground">Made so far, not final:</span>
+      ) : standIn && root ? (
         <span className="shrink-0 text-xs text-muted-foreground">{root.name} is based on</span>
       ) : (
         inView.state.section && (
