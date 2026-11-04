@@ -15,6 +15,7 @@ import {
   groupBySection,
   labelMapOf,
   labelMapsOf,
+  OTHER_SECTION,
   type OutputCatalog,
   type OutputEntry,
   outputKindSchema,
@@ -73,7 +74,7 @@ export const finalOutputsSchema = z
   });
 export type FinalOutputs = z.infer<typeof finalOutputsSchema>;
 
-const OTHER = "Other";
+const OTHER = OTHER_SECTION;
 
 export const sectionsOf = (list: FinalOutputs | undefined) => list?.sections ?? [];
 
@@ -171,7 +172,8 @@ export function openingChange(
     : {
         by: "runner",
         reason: "The outputs the researcher chose for this run.",
-        add: entries,
+        // The opening `sections` is the run's one grouping; the catalog's field would go stale when main regroups.
+        add: entries.map(({ section: _section, ...entry }) => entry),
         ...(sections.length > 0 && { sections }),
         labels: labelMapsOf(catalog),
       };

@@ -5,7 +5,12 @@
  * Shown in "See measurements" (a side panel over Run on new samples, so the choice in progress
  * stays put) and on the Workflows page; the study pages read their columns and units from here.
  */
-import { groupBySection, type OutputEntry, unitAsWritten } from "@voluma/contracts/output-catalog";
+import {
+  groupBySection,
+  OTHER_SECTION,
+  type OutputEntry,
+  unitAsWritten,
+} from "@voluma/contracts/output-catalog";
 import { Button } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
@@ -35,7 +40,7 @@ export function MeasurementList({ workflow }: { workflow: Pick<BundledWorkflow, 
   return (
     <div className="grid gap-5">
       {groups.map((g) => {
-        const title = g.title ?? "Other";
+        const title = g.title ?? OTHER_SECTION;
         return (
           <section key={title} aria-label={title} className="grid gap-1.5">
             <h3 className="m-0 font-semibold text-sm">{title}</h3>

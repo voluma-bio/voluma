@@ -17,6 +17,10 @@
  * PyYAML reads a bare `on` key as `True`, and the loader refuses it.
  */
 import { z } from "zod";
+
+/** The heading of the outputs that name no section, wherever outputs are grouped. */
+export const OTHER_SECTION = "Other";
+
 import { segmentSchema } from "./ids";
 
 const nonEmpty = z.string().min(1);
@@ -70,9 +74,15 @@ const entryBase = {
   selectable: z.boolean().optional(),
   /**
    * The heading it is listed under where the outputs are grouped: the start screen's list and,
-   * from the run's opening change, its final outputs. Sections follow catalog order.
+   * from the run's opening change, its final outputs. Sections follow catalog order. Never
+   * `OTHER_SECTION`, the heading of the outputs that name none.
    */
-  section: nonEmpty.optional(),
+  section: nonEmpty
+    .refine(
+      (s) => s !== OTHER_SECTION,
+      `"${OTHER_SECTION}" is the heading of outputs with no section`,
+    )
+    .optional(),
   /** How it opens in review: its presets, the first the default. */
   views: z.array(viewSchema).min(1).optional(),
 };
