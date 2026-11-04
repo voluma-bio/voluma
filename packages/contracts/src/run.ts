@@ -134,16 +134,13 @@
  *     409;
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
  *     while the org is under it);
- *   - for `visitor` runs: at most this many `queued` or `running` in the org
- *     (those hold the visitor's keys in the server's memory, or a runner
- *     slot; an `awaiting-keys` run holds neither and doesn't count). Starting
- *     one, or `/keys`, answers 429 at the cap. Only those two calls add to the
- *     count, so the claim needn't check it again;
+ *   - app-wide, enforced by the claim (a run over a cap just stays `queued`;
+ *     nothing is refused): at most `RUN_LIMITS_APP_RUNNING` runs `running`, of which at most one on a
+ *     `visitor` run's own keys;
  *   - for `voluma` runs only: a total model spend per org (the summed model
  *     cost of its runs). A start, resume or reopen at or past it is refused
  *     (429, a reopen 409); a claim refuses a run that never started and
  *     never one that has.
- * Which org's run a claim takes: `runner.ts`.
  * Every run is created `queued`, and only a claim starts it (`runner.ts`). A
  * `visitor` run skips the org's runs-at-once count but still waits for a claim.
  */
@@ -186,11 +183,11 @@ export const workflowIdSchema = z.string().min(1);
 
 export const runStateSchema = z.discriminatedUnion("status", [
   /**
-   * 1-based place in the org's queue; 1 starts next. The server computes it at
-   * read time and doesn't store it, so the run screen polls `getRun` to see it
-   * move. Under `self`, it still counts other visitors' runs (only a count leaks).
-   * A `visitor` run is not held by the org's runs-at-once limit, so its
-   * position is always 1: it waits only for a free runner.
+   * 1-based place in the app-wide queue, in the order claims take runs (while no
+   * `visitor` run is running, `visitor` runs first; then `voluma` runs by
+   * organization priority, then oldest first); 1 starts next. The server computes
+   * it at read time and doesn't store it, so the run screen polls `getRun` to see
+   * it move. Under `self`, it still counts other callers' runs (only a count leaks).
    */
   z.object({
     status: z.literal("queued"),

@@ -16,22 +16,23 @@ export type KeyLimits = {
 };
 
 /**
- * What guards Voluma's key: `voluma` has an entry for each pre-created organization that may
- * run on it (index.ts), each counted on its own; `ownKeyActive` caps the runs on callers' own keys
- * (queued or running, over every account), since the server holds their keys in memory.
+ * What guards Voluma's key and the runner slots (index.ts). `voluma` has an entry for each
+ * pre-created organization that may run on it, each counted on its own; its order is the queue
+ * priority (first is served first). `appRunning` caps runs `running` over every account and
+ * organization, enforced by the claim, of which at most one is on a caller's own keys. A run over
+ * a cap waits `queued`; nothing is refused for it.
  */
 export type Limits = {
   voluma: ReadonlyMap<string, KeyLimits>;
-  ownKeyActive: number;
+  appRunning: number;
 };
 
-export type Refusal = "concurrent" | "no-key" | "own-key-active" | "spend";
+export type Refusal = "concurrent" | "no-key" | "spend";
 
 /** One message per refusal: the API's answer when a start, resume or reopen is refused. */
 export const refusalMessage: Record<Refusal, string> = {
   concurrent: "The organization's runs-at-once limit was reached.",
   "no-key": "This account has no access to Voluma's keys. Add your own keys.",
-  "own-key-active": "Too many runs with your own keys are active.",
   spend: "This organization has used its model budget for runs.",
 };
 
@@ -42,39 +43,28 @@ export const refusalMessage: Record<Refusal, string> = {
 export const refusalError: Record<Refusal, string> = {
   concurrent: "the organization's runs-at-once limit was reached",
   "no-key": "this account can no longer use Voluma's keys",
-  "own-key-active": "too many runs with your own keys were active",
   spend: "the organization had used its model budget for runs",
 };
 
 export type Usage = {
   /** The org's `voluma` runs running now. */
   running: number;
-  /** Own-key runs queued or running, over every org; 0 unless the usage was read for an own-key run. An `awaiting-keys` run holds neither keys nor a runner. */
-  ownKeyActive: number;
   /** Model dollars spent by the org's runs on Voluma's keys, every run ever (the heartbeat adds to `runs.model_cost_usd`). */
   spentUsd: number;
 };
 
-export async function usage(
-  tx: Tx,
-  labId: string,
-  credentials: Run["credentials"],
-): Promise<Usage> {
-  const [row] = await tx.execute<Pick<Usage, "running" | "spentUsd">>(sql`
+export async function usage(tx: Tx, labId: string): Promise<Usage> {
+  const [row] = await tx.execute<Usage>(sql`
     SELECT
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
       (coalesce(sum(model_cost_usd) FILTER (WHERE credentials = 'voluma'), 0))::float8 AS "spentUsd"
     FROM runs WHERE lab_id = ${labId} AND NOT example`);
-  if (credentials === "voluma") return { ...row, ownKeyActive: 0 } as Usage;
-  const [own] = await tx.execute<{ n: number }>(sql`
-    SELECT count(*)::int AS n FROM runs
-    WHERE credentials = 'visitor' AND state IN ('queued', 'running') AND NOT example`);
-  return { ...row, ownKeyActive: own?.n ?? 0 } as Usage;
+  return row as Usage;
 }
 
 /**
- * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
- * claim is for `voluma` runs, since an own-key run's cap was checked when it was queued. A reopen
+ * Why `run` may not go on at `stage`, or null. An own-key run is never refused (it costs
+ * Voluma only runner time, which the claim's slot caps queue). A reopen
  * (a correction) of a `voluma` run (the route refuses own-key runs first) is judged by the spend
  * limit. A claim refuses on spend only a run that never started (one start request can queue
  * many runs under the limit); a run that started keeps going after a deploy or a reopen, so a
@@ -87,9 +77,7 @@ export function admit(
   u: Usage,
   run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
-  if (run.credentials === "visitor") {
-    return stage !== "reopen" && u.ownKeyActive >= limits.ownKeyActive ? "own-key-active" : null;
-  }
+  if (run.credentials === "visitor") return null;
   const org = limits.voluma.get(labId);
   if (!org) return "no-key";
   if (stage === "claim" && u.running >= org.concurrent) return "concurrent";

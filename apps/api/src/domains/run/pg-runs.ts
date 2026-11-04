@@ -168,23 +168,56 @@ function toRun({ run, input, position, calls }: Row, results: Results): Run {
   });
 }
 
+/** True while a run on a caller's own keys is running: the one own-key slot is taken (`queueOrder`, the claim). */
+export const ownKeyBusy = sql`EXISTS (
+  SELECT 1 FROM runs r WHERE r.state = 'running' AND r.credentials = 'visitor' AND NOT r.example
+)`;
+
 /**
- * Runs matching `where`, newest first. A queued `voluma` run's place is counted here, at
- * read time: its place among its org's queued `voluma` runs, oldest first. A visitor run
- * waits only for a runner, so its place is 1.
+ * The order the claim serves queued runs in, and so their places in line:
+ *   0. a run that already started (released at a deploy, lease expired, reopened), so work in
+ *      progress finishes before new work begins;
+ *   1. an own-key run, while the own-key slot is free, so a backlog of Voluma-key runs can't starve
+ *      a guest; its starters take turns (the starter claimed longest ago first, never claimed: first);
+ *   2. Voluma-key runs, by organization priority (`orgs`, first served first; an org not listed
+ *      last);
+ *   3. an own-key run, while the slot is taken (the claim skips it, so this is only its place).
+ * Then oldest first.
  */
-async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
+export const queueOrder = (orgs: readonly string[]): SQL[] => [
+  sql`(CASE
+    WHEN ${runs.startedAt} IS NOT NULL THEN 0
+    WHEN ${runs.credentials} = 'visitor' THEN (CASE WHEN ${ownKeyBusy} THEN 3 ELSE 1 END)
+    ELSE 2 END)`,
+  sql`(CASE WHEN ${runs.startedAt} IS NULL AND ${runs.credentials} = 'visitor' THEN coalesce(
+    (SELECT max(o.claimed_at) FROM runs o
+      WHERE o.credentials = 'visitor' AND o.started_by = ${runs.startedBy}),
+    '-infinity'::timestamptz
+  ) ELSE '-infinity'::timestamptz END)`,
+  sql`coalesce(array_position(ARRAY[${sql.join(
+    orgs.map((id) => sql`${id}`),
+    sql`, `,
+  )}]::text[], ${runs.labId}), ${orgs.length + 1})`,
+  sql`${runs.createdAt}`,
+  sql`${runs.id}`,
+];
+
+/**
+ * Runs matching `where`, newest first. A queued run's place is counted here, at read time:
+ * its place among all queued runs in the claim's order (`queueOrder`).
+ */
+async function loadRows(tx: Tx, where: SQL | undefined, orgs: readonly string[]): Promise<Row[]> {
   const place = tx.$with("place").as(
     tx
       .select({
         id: runs.id,
         position:
-          sql<number>`(row_number() OVER (PARTITION BY ${runs.labId} ORDER BY ${runs.createdAt}, ${runs.id}))::int`.as(
+          sql<number>`(row_number() OVER (ORDER BY ${sql.join(queueOrder(orgs), sql`, `)}))::int`.as(
             "position",
           ),
       })
       .from(runs)
-      .where(and(eq(runs.state, "queued"), eq(runs.credentials, "voluma"))),
+      .where(eq(runs.state, "queued")),
   );
   const rows = await tx
     .with(place)
@@ -329,9 +362,10 @@ interface LoadOptions {
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
+  orgs: readonly string[],
   { cache = newCache(), skipSummaryless = false, stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
-  const rows = await loadRows(tx, where);
+  const rows = await loadRows(tx, where, orgs);
   // Rows are newest first, so an input's first row is its newest run.
   const seen = new Set<string>();
   const foldRows = rows.filter(({ run }) => {
@@ -397,20 +431,24 @@ async function loadResults(
 }
 
 /** `loadResults` through one cache, so the run and study reads fold a run once between them. */
-export function resultsLoader() {
+export function resultsLoader(orgs: readonly string[]) {
   const cache = newCache();
   return (tx: Tx, where: SQL | undefined, options: Omit<LoadOptions, "cache"> = {}) =>
-    loadResults(tx, where, { ...options, cache });
+    loadResults(tx, where, orgs, { ...options, cache });
 }
 export type ResultsLoader = ReturnType<typeof resultsLoader>;
 
-export async function loadRuns(tx: Tx, where: SQL | undefined): Promise<Run[]> {
-  return (await loadResults(tx, where)).map(({ run }) => run);
+export async function loadRuns(
+  tx: Tx,
+  where: SQL | undefined,
+  orgs: readonly string[],
+): Promise<Run[]> {
+  return (await loadResults(tx, where, orgs)).map(({ run }) => run);
 }
 
 /** The run just written, which must exist. */
-export async function loadRun(tx: Tx, runId: string): Promise<Run> {
-  const [run] = await loadRuns(tx, eq(runs.id, runId));
+export async function loadRun(tx: Tx, runId: string, orgs: readonly string[]): Promise<Run> {
+  const [run] = await loadRuns(tx, eq(runs.id, runId), orgs);
   if (!run) throw new Error(`run ${runId} vanished inside its transaction`);
   return run;
 }
