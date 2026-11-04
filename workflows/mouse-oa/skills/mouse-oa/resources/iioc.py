@@ -16,7 +16,7 @@ or from another grid is refused). This script reads these keys; any other key is
                           is a face with a gap over the plate: on a section, two points more than `max_gap_um` of the spec (entry
                           plate-faces) apart where the tibia lies within that below the line between them and anywhere above it (a
                           line across empty space between two pieces of bone does not count); in V, two sections more than that apart over the
-                          rows with tibia within that of the face. Where the face ends, in U and V, is not tested: check it on the QC;
+                          rows with tibia within that of the face. Where the face ends, in U and V, is not tested (ROI-1's side is, below): check it on the QC;
                           and so is a face that jumps between neighbouring traced sections: a median W change, over the U columns both cover on the
                           tibia's footprint (when they share at least `jump_overlap_um`), of more than `max_jump_um` plus the sections' distance apart
   plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
@@ -45,6 +45,11 @@ V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] re
 is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
 V between traced sections (constant past the first and last). A point is [w, u], not [u, w]. At least two sections;
 anything but axis 1 and height row is refused.
+
+ROI-1 follows the tibia mask, so its side (its faces toward U and V, below the articular top and above the face) should be the
+bone's outer surface. The script stops on a patch of that side larger than `cut_max_area_mm2` (spec, entry roi-iioc) with bone
+(HU over the threshold) for `cut_depth_um` beyond it, naming the patch's V and U ranges: the mask stopped inside the bone there,
+which the labels fix, not the face.
 
 Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sidecar:
   iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32, NaN off the tibia (a surface object)
@@ -169,6 +174,49 @@ def refuse_width_points(wp, gp, tib, off_face_um, margin, vox):
                      f'and {margin * vox * 1000:.0f} um of the tibia')
 
 
+def shifted(a, axis, step, fill):
+    """`a` moved so that out[i] = a[i + step] along `axis`; indices past the grid read `fill`."""
+    out = np.full_like(a, fill)
+    n = a.shape[axis]
+    src = [slice(None)] * a.ndim
+    dst = [slice(None)] * a.ndim
+    src[axis] = slice(max(step, 0), n + min(step, 0))
+    dst[axis] = slice(max(-step, 0), n - max(step, 0))
+    out[tuple(dst)] = a[tuple(src)]
+    return out
+
+
+def refuse_cut_sides(roi, gp, above, depth, max_area_mm2, vox):
+    """Refuse an ROI-1 whose side (its faces toward U and V) runs through bone: a patch of side surface larger than
+    `max_area_mm2` where every voxel for `depth` beyond it is bone (`above`, HU over the threshold). The bone's outer
+    surface has soft tissue, air or a joint gap beyond it; solid bone beyond means the tibia mask, which ROI-1 follows,
+    stopped inside the bone. `depth` voxels also keep the test off the partial-volume rim, off the cut face `gp` and off
+    the articular top (and the femur on it): a side voxel counts only `depth` below the ROI top and above the face in its
+    own and the neighbouring column, and not where the neighbouring column's ROI starts lower (a step of the top)."""
+    w = np.arange(roi.shape[0])[:, None, None]
+    valid = roi.any(axis=0)
+    top = np.where(valid, np.argmax(roi, axis=0), 0)  # 0 off the footprint: an empty neighbouring column is no top step
+    cut = np.zeros(roi.shape, np.uint8)  # side faces per voxel with bone beyond
+    for axis in (1, 2):
+        for step in (1, -1):
+            side = roi & ~shifted(roi, axis, step, False)
+            side &= w >= shifted(top, axis - 1, step, 0)[None]
+            side &= w < np.minimum(gp, shifted(gp, axis - 1, step, np.inf))[None] - depth
+            side &= w >= top[None] + depth
+            for k in range(1, depth + 1):
+                side &= shifted(above, axis, step * k, False)
+            cut += side
+    cc, _ = ndi.label(cut > 0, np.ones((3, 3, 3)))
+    area = np.bincount(cc.ravel(), cut.ravel())[1:] * vox**2  # mm2: one voxel face per side face counted
+    big = [(a, s) for a, s in zip(area, ndi.find_objects(cc), strict=True) if a > max_area_mm2]
+    if big:
+        big.sort(key=lambda b: -b[0])
+        where = '; '.join(f'V {s[1].start}-{s[1].stop - 1}, U {s[2].start}-{s[2].stop - 1} ({a:.3f} mm2)' for a, s in big)
+        sidecar.fail(f'ROI-1\'s side runs through bone instead of along the bone\'s outer surface (patches of side over {max_area_mm2:g} mm2 '
+                     f'with bone for {depth * vox * 1000:.0f} um beyond them) at {where}: the tibia label stops inside bone there: '
+                     'give that bone to the tibia in the labels (segmentation-check), then rerun tibia_frame.py')
+
+
 def first_run(bone, v, u):
     ww = np.flatnonzero(bone[:, v, u])
     if not len(ww):
@@ -197,7 +245,7 @@ def main():
         help='mm: move the traced growth-plate face by this much (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
-    spec = sidecar.protocol(a.spec, ROI_ID, 'plate_patch_width_um', 'width_point_off_face_um')
+    spec = sidecar.protocol(a.spec, ROI_ID, 'plate_patch_width_um', 'width_point_off_face_um', 'cut_depth_um', 'cut_max_area_mm2')
     plate_qc_panels = sidecar.protocol(a.spec, 'plate-faces', 'qc_panels')['qc_panels']
     frame = fr.load(a.frame)
     ann = load_annotations(a.annotations, frame)
@@ -233,7 +281,9 @@ def main():
         keep[:, vlo:vhi, ulo:uhi] = w >= surf[None, vlo:vhi, ulo:uhi]
         roi &= keep
     roi, removed = largest(roi)
-    bone = roi & (np.asarray(h) > a.threshold)
+    above = np.asarray(h) > a.threshold
+    refuse_cut_sides(roi, gp, above, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
+    bone = roi & above
     scan_roi = fr.to_scan(roi, frame, g['shape'])
     values = {
         'voxel-size': sidecar.value(vox, 'mm', 'voxel edge of the aligned grid, which every length here is a multiple of', kind='diagnostic'),
