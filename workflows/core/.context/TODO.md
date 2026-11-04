@@ -68,3 +68,13 @@ The review places every image at its voxel 0, unrotated: `Volume.affine` is spac
 was drawn on, and `marks_to_grid.py --drawn-on` turns them into voxels. When a second reader needs the scan's world mm
 (lab coordinates, Amira), publish each base with its true affine (`hu.json` / `frame.json`) and drop `--drawn-on`'s spacing
 step in the same change.
+
+## HU calibration for a scan without it
+
+A series with valid HU (rescale tags, or Scanco's calibration) is used as it is. One without, `intake.py` refuses ("No valid
+positive-slope HU mapping"), and the kit has nothing for that case. Jimmy (4 Nov): HU calibration should still be part of the
+kit. Add a `scan-intake` script for it. It maps the raw values to HU from what the researcher's files give: the units and
+scaling, or a phantom's known values. Failing that, it uses two references found in the scan: air outside the specimen and
+soft tissue as water. It writes `hu.json` with the calibration marked estimated and its evidence. A To check item says the
+HU are estimated. The measurement scripts then need `--threshold`, unless the units give the lab's 2.16/cm directly (a scan in
+linear attenuation). Keep the rule that a scan with HU is never re-mapped from its histogram.

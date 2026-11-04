@@ -135,7 +135,7 @@ def bone_threshold_hu(header, override=None):
 
     HU = 1000 * (mu / mu_water - 1), with mu_water from the `calibration` block scan-intake wrote into hu.json (2459.9 HU
     at mu_water 0.6243/cm). Another scanner or energy gives another HU value for the same 2.16/cm, so there is no literal.
-    This is the measurement threshold; the 2500 HU used to build segmentation masks is a separate, passed-in choice.
+    This is the measurement threshold; the segmentation threshold that builds masks is a separate, passed-in choice (scan-settings.json).
     """
     if override is not None:
         return float(override)
