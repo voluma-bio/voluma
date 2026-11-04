@@ -5,7 +5,8 @@ label's specks (26-connected pieces under `--min-piece-mm3`, the loose fragments
 off the bone in 3D), then runs `label_stats.py`'s and `unlabelled.py --ranges`'s checks on the cleaned volume. Each flag has a
 key (volume:5, pieces:6, absent:3, joined:9-2, joined:1-2, fused:4, ...). A flag is open until the labels no longer raise it
 or you pass `--accept <key>=<why>`: the To check item's title that holds it (the CT cannot settle it), or the reason it is
-not a fault (a structure the scan's notes put outside the field). A `joined:` or `fused:` flag is never accepted. Two bones that
+not a fault (a structure the scan's notes put outside the field). A `joined:` or `fused:` flag is never accepted, nor a
+`pieces:` flag on a label the anatomy marks `one_piece` (a long bone or the patella is one bone). Two bones that
 touch are separated: redo the track first; where they still touch, cut them apart with `classic_segment.py --within A,B` and pass
 its output with `--cut`. A `joined:A-B` flag then passes as a cut when every voxel where A and B touch lies on that cut (within
 2 voxels: later edits elsewhere are fine) and no more than the contact tolerance of their contact runs through bone no label
@@ -64,6 +65,10 @@ NEVER_ACCEPTED = {
     'fused:': 'it is bone no label holds, touching a big bone: give it its label (relabel.py --pieces, segmentation-check '
               'section 1), and its id shifts between passes',
 }
+
+# A one_piece label (anatomy.json) in more than one piece holds bone that is not its own.
+ONE_PIECE = ('Give each piece away from the main one to the label it belongs to, or drop it (relabel.py --at <its voxel> '
+             '--to <id or 0>); fragments spread across the joint mean the track ran onto other bone: redo it')
 
 
 def on_cut(labels, pair, at, joined, contact_mm2):
@@ -145,6 +150,9 @@ if __name__ == '__main__':
     labels = np.load(a.labels)
     sp = sidecar.grid(str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
     expected = load_ranges(a.ranges)
+    whole = {f'pieces:{i}' for i, e in expected.items() if e.get('one_piece')}
+    for key in sorted(set(accepted) & whole):
+        sidecar.fail(f'{key} cannot be accepted: {expected[int(key[7:])]["name"]} is one bone. {ONE_PIECE}')
     cleaned, dropped = drop_specks(labels, float(np.prod(sp)), a.min_piece_mm3)
     del labels
     table, flags, _ = check(cleaned, sp, expected, min_piece_mm3=a.min_piece_mm3)
@@ -189,11 +197,12 @@ if __name__ == '__main__':
     if unraised:
         sidecar.fail(f'--accept names {unraised}, which these labels do not raise: drop it (a fixed flag needs no reason); labels not written')
     if open_flags:
-        fixed_only = [k for k in open_flags if k.startswith(tuple(NEVER_ACCEPTED))]
+        fixed_only = [k for k in open_flags if k.startswith(tuple(NEVER_ACCEPTED)) or k in whole]
         rest = [k for k in open_flags if k not in fixed_only]
         said = f'{len(open_flags)} flag(s) open: '
         if fixed_only:
-            said += f'{", ".join(fixed_only)} must be fixed (a joined pair separated, by a redone track or a --cut; a fused candidate labelled)'
+            said += (f'{", ".join(fixed_only)} must be fixed (a joined pair separated, by a redone track or else a --cut; a fused '
+                     f'candidate labelled; a one-piece bone made one piece: {ONE_PIECE[0].lower() + ONE_PIECE[1:]})')
         if rest:
             said += ('; ' if fixed_only else '') + (f'{", ".join(rest)}: fix them, or pass --accept <key>=<why> for one the CT '
                                                     'cannot settle (the To check item that holds it)')

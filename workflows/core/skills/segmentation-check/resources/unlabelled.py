@@ -177,21 +177,19 @@ def find(hu_path, labels, sp, threshold_hu, expected, out_path, min_mm3=0.01, ri
                 found = (f'{s} {name[s]} is joined to {b} {name.get(b, "")} through bone, {through}: a contact patch of '
                          f'{c["largest_patch_mm2"]} mm2 ({c["mm2"]} in all, tolerance {contact_mm2:g}) at {c["voxel_zyx"]}. '
                          f'The anatomy puts it across joint space from the {name.get(b, b)}, so one label holds the other\'s bone: '
-                         f'open it there and give each bone\'s voxels to its own label')
+                         f'give each bone\'s voxels to its own label. First redo the track')
                 if s in bigs:  # two big bones: one track took the other's bone, or a label is threshold remainder
-                    fix = (f' (classic_segment.py --within {s} with seeds from each bone\'s core, the joined piece included), or redo the '
-                           f'big-bone request (sam-segmentation, "When a track fails": a subVolume around the bone, negative points '
-                           f'on the {name.get(b, b)}, otherFrames where it ran on); then run this again. A big bone\'s label is never the '
+                    fix = (f': the big-bone request (sam-segmentation, "When a track fails": a subVolume around the bone, negative '
+                           f'points on the {name.get(b, b)}, otherFrames where it ran on), or classic_segment.py --within {s} with '
+                           f'seeds from each bone\'s core for a piece wholly the other bone\'s. A big bone\'s label is never the '
                            f'threshold bone the other bones\' labels left over')
                 else:
-                    fix = (f' (classic_segment.py --within {s} or --within {b} with seeds; relabel.py for a piece apart), or redo the '
-                           f'structure (a tight segment_sam box with negative points on the {name.get(b, b)}) or write your own cleanup '
-                           f'and show it on a crop sheet; then run this again. Label {s} must end apart from label {b}; a threshold '
-                           f'candidate is never its label by itself')
+                    fix = (f': a tight segment_sam box with negative points on the {name.get(b, b)} (relabel.py for a piece apart). '
+                           f'Label {s} must end apart from label {b}; a threshold candidate is never its label by itself')
                 # never accepted (finish_labels.py); a recorded cut passes it (finish_labels.py --cut)
-                flags[f'joined:{s}-{b}'] = (found + fix + f'. Where they still touch, cut them apart at the narrowest bone '
-                                            f'between them: classic_segment.py --within {s},{b}, '
-                                            f'then finish_labels.py --cut <that output>; this flag is never accepted')
+                flags[f'joined:{s}-{b}'] = (found + fix + f'. Only where they still touch after that, cut them apart at the '
+                                            f'narrowest bone between them: classic_segment.py --within {s},{b}, then '
+                                            f'finish_labels.py --cut <that output>; this flag is never accepted')
         fused = []
         for c in cands:
             over = {b: t for b, t in c['fused_to'].items() if b in bigs and t['largest_patch_mm2'] > contact_mm2}
