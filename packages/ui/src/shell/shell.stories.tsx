@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Box } from "lucide-react";
 import { AppShell, ShellHeading } from "./shell";
-import { StoryRail } from "./story-rail";
+import { StoryBrand, StoryRail } from "./story-rail";
 
 /**
  * **What:** the one frame every screen sits in: a header line, the rail at the far left, the main
@@ -14,14 +14,14 @@ const meta = {
   title: "Shell/AppShell",
   component: AppShell,
   parameters: { layout: "fullscreen" },
-  args: { theme: "light", rail: null, children: null },
+  args: { theme: "light", brand: null, rail: null, children: null },
 } satisfies Meta<typeof AppShell>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 function Frame({ theme }: { theme: "light" | "dark" }) {
   return (
-    <AppShell theme={theme} rail={<StoryRail />}>
+    <AppShell theme={theme} brand={<StoryBrand />} rail={<StoryRail />}>
       <ShellHeading>
         <span className="text-muted-foreground text-sm">OA7 DMM vs Sham</span>
         <span className="font-medium text-sm">OA7-2, left knee</span>
