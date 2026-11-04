@@ -122,9 +122,16 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   spun in its own plane counts; the words ("Turned 3.6°") and Reset follow the panes' own on-grid
   test, so a pane a hair off the grid says "Turned 0.0°" rather than hiding behind the grid's
   name. On the grid's axes the tool bar names the grid (`gridName`, "Tibia long-axis grid"), and Align lists the grid itself first ("Along the tibia long-axis grid", marked Measured on), which does what Reset does.
-- **Align.** Targets come from the caller (`planeTargets`, `targets.ts`): a plane fitted (least
-  squares, `fitNormal`) through the vertices of every published surface whose catalog entry has
-  `fitsPlane` (mouse-oa: both growth-plate faces, so "GP"), and every other image grid's axes.
+- **Align.** Targets come from the caller (`planeTargets`, `targets.ts`), after the shown grid
+  itself: every other grid the run published, then a plane fitted (least squares, `fitNormal`)
+  through the vertices of every published surface whose catalog entry has `fitsPlane` (mouse-oa:
+  both growth-plate faces, so "GP"). A grid is any published base or file output whose `detail`
+  carries a `gridId` and its affine, one entry per `gridId` (the first output in the fold names
+  it): image volumes and frames alike, such as intake's joint frame. Each is named by its catalog
+  entry and tagged with the task that published it. Nothing is fetched to list or align to a
+  grid: its geometry is only what the harness publishes in `detail`, so a frame published with
+  no `detail` (runs before the harness carried it) is not listed. The affine maths is in
+  `@voluma/contracts/ruler`.
   Aligning to a plane turns the pane nearest it onto it, the others following by Gram–Schmidt;
   aligning to a grid takes its axes, flipped so no pane shows mirrored. The fitted plane also gives
   the GP view, a fifth pane coloured as the nearest anatomy. GP is data, not a side effect of

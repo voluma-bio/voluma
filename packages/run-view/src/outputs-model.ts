@@ -30,6 +30,7 @@ import type {
   Surface,
   Volume,
 } from "@voluma/contracts/review";
+import { affineIn } from "@voluma/contracts/ruler";
 import { type ChainLink, chainOf, type TrailRow, trailOf } from "./outputs-trail";
 
 /** One To check item, on the version it was raised on. */
@@ -247,12 +248,6 @@ const IDENTITY: Volume["affine"] = [
   [0, 0, 1, 0],
   [0, 0, 0, 1],
 ];
-const isRow = (r: unknown): r is [number, number, number, number] =>
-  Array.isArray(r) && r.length === 4 && r.every((n) => typeof n === "number");
-const affineOf = (d: Detail): Volume["affine"] =>
-  Array.isArray(d.affine) && d.affine.length === 4 && d.affine.every(isRow)
-    ? (d.affine as Volume["affine"])
-    : IDENTITY;
 const zyx = (p: unknown): [number, number, number] | undefined =>
   Array.isArray(p) && p.length === 3 && p.every((n) => Number.isInteger(n) && n >= 0)
     ? (p as [number, number, number])
@@ -298,7 +293,7 @@ export function outputBlocks(
       name,
       kind,
       shapeZyx: shapeOf(assets, sha256),
-      affine: affineOf(d),
+      affine: affineIn(d) ?? IDENTITY,
       unit: typeof d.unit === "string" ? d.unit : null,
       gridId,
       data: {
