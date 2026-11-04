@@ -21,25 +21,31 @@ FLAT = 1.0
 OFF_UM = 50
 
 
+def band_faces(band, line):
+    """A band section (W, U) and its cut line (n, 2) [w, u] -> (top, bottom) per U column: the first and last row W of the band's
+    run nearest the line; NaN outside the line's U extent and in columns without band."""
+    n_u = band.shape[1]
+    top, bot = np.full(n_u, np.nan), np.full(n_u, np.nan)
+    line = line[np.argsort(line[:, 1])]
+    c = np.arange(max(int(np.ceil(line[0, 1])), 0), min(int(np.floor(line[-1, 1])), n_u - 1) + 1)
+    for u, w in zip(c, np.interp(c, line[:, 1], line[:, 0])):
+        rows = np.flatnonzero(band[:, u])
+        if len(rows):
+            r = min(np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1), key=lambda r: abs((r[0] + r[-1]) / 2 - w))
+            top[u], bot[u] = r[0], r[-1]
+    return top, bot
+
+
 def section_faces(band, line, curves, n_u):
     top, bot = (cutline.face_rows(c, n_u) for c in curves)
     ok = ~np.isnan(top) & ~np.isnan(bot)
     slope = np.abs(np.gradient(np.where(ok, (top + bot) / 2, np.nan)))
-    pc = np.full(n_u, np.nan)
-    line = line[np.argsort(line[:, 1])]
-    c = np.arange(int(np.ceil(line[0, 1])), int(np.floor(line[-1, 1])) + 1)
-    pc[c] = np.interp(c, line[:, 1], line[:, 0])
+    ptop, pbot = band_faces(band, line)
     te, be, tp, tt = [], [], [], []
-    for u in np.flatnonzero(ok & ~np.isnan(pc) & (slope <= FLAT)):
-        col = band[:, u]
-        if not col.any():
-            continue
-        rows = np.flatnonzero(col)
-        runs = np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1)
-        r = min(runs, key=lambda r: abs((r[0] + r[-1]) / 2 - pc[u]))
-        te.append(abs(r[0] - top[u]) * scans.UM)
-        be.append(abs(r[-1] - bot[u]) * scans.UM)
-        tp.append(len(r))
+    for u in np.flatnonzero(ok & ~np.isnan(ptop) & (slope <= FLAT)):
+        te.append(abs(ptop[u] - top[u]) * scans.UM)
+        be.append(abs(pbot[u] - bot[u]) * scans.UM)
+        tp.append(pbot[u] - ptop[u] + 1)
         tt.append(abs(bot[u] - top[u]) + 1)
     if te:
         return {"top": float(np.median(te)), "bot": float(np.median(be)), "thick_pred": float(np.median(tp)), "thick_true": float(np.median(tt))}

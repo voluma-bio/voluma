@@ -22,8 +22,9 @@ dependencies = [
 ]
 
 [dependency-groups]
-# Moving data and weights: the R2 dataset (dataset_r2.py), Hugging Face (upload_weights.py), the Modal launcher.
-release = ["boto3", "huggingface-hub", "modal==1.6.3"]
+# Moving data and weights: the R2 dataset (dataset_r2.py), Hugging Face (upload_weights.py), the Modal launcher and server
+# (modal_train.py, serve.py; the Modal image installs this group too).
+release = ["boto3", "fastapi[standard]", "huggingface-hub", "modal==1.6.3"]
 
 [tool.uv]
 package = false

@@ -22,8 +22,8 @@ import scans
 from export import pad_scale
 
 
-def predict_scan(proc, scan, text, vs):
-    vol = scans.load_vol(scan)
+def predict_vol(proc, vol, text, vs):
+    """vol: a tibia grid's HU (W, V, U), vs: the sections to predict -> mask[len(vs), W, U] bool."""
     out = np.zeros((len(vs), vol.shape[0], vol.shape[2]), bool)
     for i, v in enumerate(vs):
         img, s = pad_scale(scans.section_img(vol, v))
@@ -57,7 +57,7 @@ def main():
     for scan in a.scan:
         vs = labelled_sections(a.sections_from, scan) if a.sections_from else list(range(scans.load_vol(scan).shape[1]))
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-            mask = predict_scan(proc, scan, a.text, vs)
+            mask = predict_vol(proc, scans.load_vol(scan), a.text, vs)
         np.savez_compressed(a.out / f"{scan}.npz", V=np.array(vs), mask=mask)
         (a.out / f"{scan}.json").write_text(json.dumps({"grid_id": scans.grid_id(scan), "axes": "V, W, U", "ckpt": str(a.ckpt),
                                                         "text": a.text, "threshold": a.threshold}, indent=1))

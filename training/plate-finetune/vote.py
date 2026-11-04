@@ -12,6 +12,13 @@ from pathlib import Path
 import numpy as np
 
 
+def vote(masks, abstain):
+    """masks[k, n, W, U]: k models' predictions of the same n sections -> the voted mask[n, W, U]."""
+    n = masks.any((2, 3), keepdims=True).sum(0) if abstain else len(masks)   # models voting per section
+    votes = masks.sum(0)
+    return (votes >= np.maximum(n, 1) / 2) & (votes > 0)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("preds", nargs="+", type=Path)
@@ -22,10 +29,7 @@ def main():
     for f in sorted(a.preds[0].glob("*.npz")):
         zs = [np.load(d / f.name) for d in a.preds]
         assert all(np.array_equal(z["V"], zs[0]["V"]) for z in zs), f"{f.name}: the predictions cover different sections"
-        m = np.stack([z["mask"] for z in zs])
-        n = m.any((2, 3), keepdims=True).sum(0) if a.abstain else len(zs)   # models voting per section
-        votes = m.sum(0)
-        np.savez_compressed(a.out / f.name, V=zs[0]["V"], mask=(votes >= np.maximum(n, 1) / 2) & (votes > 0))
+        np.savez_compressed(a.out / f.name, V=zs[0]["V"], mask=vote(np.stack([z["mask"] for z in zs]), a.abstain))
 
 
 if __name__ == "__main__":

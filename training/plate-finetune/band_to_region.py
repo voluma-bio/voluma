@@ -107,6 +107,19 @@ def line_of(band, env):
     return np.vstack(keep) if keep else None
 
 
+def band_regions(band, vs, tibia, pieces=None, not_visible=None):
+    """band[n, W, U] predictions on sections vs -> (region[n, W, U], {V: line (m, 2) [w, u]}); a section with no line has an empty
+    region. tibia: the scan's mask (W, V, U); pieces, not_visible: the reviewed plateau pieces and not-visible ranges, when known."""
+    region = np.zeros_like(band)
+    lines = {}
+    for i, v in enumerate(vs):
+        p = line_of(band[i], cutline.envelope(tibia[:, v, :])) if band[i].any() else None
+        if p is not None and len(p) > 1:
+            region[i] = labels.label_section(v, p, [], (not_visible or {}).get(v, ()), tibia, pieces).region
+            lines[v] = p
+    return region, lines
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred", required=True, type=Path, help="predict.py output of a band model")
@@ -116,16 +129,10 @@ def main():
     for f in sorted(a.pred.glob("*.npz")):
         scan = f.stem
         z = np.load(f)
-        tibia, pieces, nv = scans.load_tibia_mask(scan), scans.load_pieces(scan), labels.not_visible_ranges(scan)
-        region = np.zeros_like(z["mask"])
-        lines = {}
-        for i, v in enumerate(int(v) for v in z["V"]):
-            p = line_of(z["mask"][i], cutline.envelope(tibia[:, v, :])) if z["mask"][i].any() else None
-            if p is not None and len(p) > 1:
-                region[i] = labels.label_section(v, p, [], nv.get(v, ()), tibia, pieces).region
-                lines[v] = p.tolist()
+        region, lines = band_regions(z["mask"], [int(v) for v in z["V"]], scans.load_tibia_mask(scan), scans.load_pieces(scan),
+                                     labels.not_visible_ranges(scan))
         np.savez_compressed(a.out / f"{scan}.npz", V=z["V"], mask=region)
-        (a.out / f"{scan}-lines.json").write_text(json.dumps(lines))
+        (a.out / f"{scan}-lines.json").write_text(json.dumps({v: p.tolist() for v, p in lines.items()}))
         print(scan, len(lines), "lines of", len(z["V"]), "sections", flush=True)
 
 

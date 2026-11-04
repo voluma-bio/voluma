@@ -30,9 +30,14 @@ def build(ckpt=None, lora_rank=0, device="cuda"):
                          target_modules=r".*blocks\.\d+\.attn\.(qkv|proj)")
         model.backbone.vision_backbone.trunk = inject_adapter_in_model(cfg, model.backbone.vision_backbone.trunk)
     if state:
-        bad = model.load_state_dict(state["trainable"], strict=False)
-        assert not bad.unexpected_keys, bad.unexpected_keys
+        load_trainable(model, state)
     return model.to(device)
+
+
+def load_trainable(model, state):
+    """Overwrite the model's trainable tensors with a checkpoint's (serve.py swaps checkpoints this way on one model)."""
+    bad = model.load_state_dict(state["trainable"], strict=False)
+    assert not bad.unexpected_keys, bad.unexpected_keys
 
 
 def set_trainable(model):
