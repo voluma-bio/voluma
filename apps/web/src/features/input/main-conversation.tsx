@@ -8,7 +8,13 @@
  * The message itself is `useMainMessage`.
  */
 import type { ConversationItem } from "@voluma/contracts/conversation";
-import { type AgentLinks, ApprovalCard, approvalWords, Markdown } from "@voluma/run-view";
+import {
+  type AgentLinks,
+  ApprovalCard,
+  approvalWords,
+  Markdown,
+  plainError,
+} from "@voluma/run-view";
 import { Button, Chip, cx, EmptyState, IconButton, StatusMark, TextAreaField } from "@voluma/ui";
 import { Bookmark, Send, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
@@ -94,10 +100,7 @@ export function MainConversation({
   const items = useMemo(() => {
     // A finished request's reply is the answer; only one that didn't finish gets a line of its own.
     const said = conversation
-      .filter(
-        (m): m is Exclude<ConversationItem, { from: "outcome"; status: "completed" }> =>
-          m.from !== "outcome" || m.status !== "completed",
-      )
+      .filter((m) => m.from !== "outcome" || m.status !== "completed")
       .map((m) => ({ ...m, kind: "said" as const }));
     return [...said, ...views.map((v) => ({ ...v, kind: "view" as const }))].sort(
       (a, b) => a.seq - b.seq,
@@ -188,7 +191,7 @@ export function MainConversation({
                 <li key={m.id} className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
                   {m.status === "cancelled"
                     ? "You stopped this request. Results are unchanged."
-                    : `Your request didn't finish${m.text ? `: ${m.text.replace(/\.$/, "")}` : ""}. Results are unchanged.`}
+                    : `Your request didn't finish${m.text ? `: ${plainError(m.text).replace(/[.!?]$/, "")}` : ""}. Results are unchanged.`}
                 </li>
               ) : m.from === "agent" ? (
                 <li key={m.id} className="grid gap-1">

@@ -1,6 +1,6 @@
 /**
  * The spans a run's corrections make (`messages.ts`): a `run.reopened`, its one `person.message`,
- * and what closed it: `correction.ended` (in the log of an older run) or the next `run.reopened`; a root `thread.ended` only marks that the correction's claim ended. The only place correction state is derived from the log: the conversation,
+ * and what closed it: `correction.ended` (a failed or cancelled request) or the next `run.reopened`; a root `thread.ended` only marks that the correction's claim ended. The only place correction state is derived from the log: the conversation,
  * and the API's reopen and end of a correction, read it.
  */
 import type { RunEvent } from "./events";
