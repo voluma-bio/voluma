@@ -1,4 +1,4 @@
-"""A researcher's mark in world mm onto a grid: a section's curve in annotations, or a seed in an outline.
+"""A researcher's mark (mm on the image it was drawn on) onto a grid: a section's curve, or a seed in an outline.
 
 A mark arrives in mm, (x, y, z), as your delivery prints it: "drawn on tibia-grid v1 ... at (2.11, 1.81, 2.13)–(2.38, 1.81, 2.11)– ... mm".
 `--world` takes that line as it is: it reads the bracketed triples after whichever of " at " and " to " comes last (a moved
@@ -67,7 +67,7 @@ def world_points(text):
         text = text[cut + 4:]
     found = TRIPLE.findall(text)
     if not found:
-        sidecar.fail('--world holds no (x, y, z) point: pass the mark\'s points as your delivery prints them, "(8.12, 5.03, 129.4)–..."')
+        sidecar.fail('--world holds no (x, y, z) point: pass the mark\'s points as your delivery prints them, "(2.11, 1.81, 2.13)–..."')
     return np.array(found, float)
 
 

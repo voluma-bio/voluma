@@ -151,8 +151,10 @@ function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?:
   const marks = (m.attached ?? []).map((a) => {
     const shape = SHAPES[Object.keys(a.mark.mark).find((k) => k in SHAPES) ?? ""] ?? "a mark";
     const view = a.mark.plane ? `the ${a.mark.plane.view.toUpperCase()} plane` : "3D";
-    const image = fold.byId.get(a.mark.volume)?.latest?.version;
-    const where = `${shape} drawn on ${a.mark.volume}${image === undefined ? "" : ` v${image}`}, in ${view}`;
+    const image = fold.byId.get(a.mark.volume)?.latest;
+    // With no spacing in its sidecar the review shows that image at 1 mm a voxel: its "mm" are voxel indices.
+    const unspaced = image && !(image.detail as { affine?: unknown } | undefined)?.affine;
+    const where = `${shape} drawn on ${a.mark.volume}${image ? ` v${image.version}` : ""}${unspaced ? " (no spacing known: its mm below are voxel indices)" : ""}, in ${view}`;
     const head = `- ${a.change}: "${a.mark.tag}" on ${a.mark.output} v${a.version}, ${where}`;
     const { line, path } = a.mark.mark as {
       line?: { lengthMm?: number };

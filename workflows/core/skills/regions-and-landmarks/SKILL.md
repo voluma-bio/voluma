@@ -38,7 +38,7 @@ region.
 ## A researcher's mark
 
 A mark comes in mm on the image it was drawn on, which the delivery names ("drawn on tibia-grid v1"): voxel index times
-that image's spacing, not the scan's world mm. `marks_to_grid.py --drawn-on <that image's header>` maps it onto the grid you
+that image's spacing, not the scan's world mm. `marks_to_grid.py --drawn-on <that image's header>` (the `.json` beside its `.npy`; `/run/outputs.yaml`) maps it onto the grid you
 work on (`--grid`, that grid's own header), through the scan's world mm when the two grids differ: `--curve`
 splices a line or path drawn along a face on one section into that section's curve, in a copy of your annotations; `--seed` gives a labelled
 voxel inside an outline and says whether its piece stands apart from the bone, to take the piece out of its label
