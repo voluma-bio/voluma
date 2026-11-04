@@ -184,7 +184,7 @@ export function OutputsReview({
     review.undeclared[0];
   const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
   const live = run.state.status !== "ended";
-  const { trailOpen, standIn, soFar } = inViewOf(review, selected, opened, live);
+  const { trailOpen, standIn, soFar } = inViewOf(review, selected, opened, live, blocks);
   // Picking any output: a listed value opens in place; anything else under the value resting on it.
   const show = useCallback(
     (id: string) => {

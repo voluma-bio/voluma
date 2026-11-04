@@ -66,7 +66,7 @@ says only Running), with Needs you only once something does; and "Other outputs 
 values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
 stays open until Esc. A section's tick waits for every value in it. Until the value has a version or is
 marked missing, the centre shows the nearest link on its chain with a version (the scene bar saying
-"<value> is based on"), else the output published last that the panes draw (the scan, from intake
+"<value> is based on"), else the output published last whose whole scene has blocks to draw (the scan, from intake
 on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the
 run is going and the AI is still setting up only while nothing drawable is published. `studiesQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.

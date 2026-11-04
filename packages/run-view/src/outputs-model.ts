@@ -202,8 +202,8 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
 /**
  * What the centre shows besides the selected value: `opened`, else while the run goes `standIn`,
  * the nearest published link of the value's chain when the value is pending, else (`soFar`) the
- * output published last that the panes draw (the scan, from intake on), so a run going shows what
- * it has made as soon as it has. One opened from Other outputs stays open after the run ends (until
+ * output published last whose whole scene `blocks` can draw (the scan, from intake on), so a run
+ * going shows what it has made as soon as it has. One opened from Other outputs stays open after the run ends (until
  * Esc): the whole run opens outputs the same way.
  */
 export function inViewOf(
@@ -211,6 +211,7 @@ export function inViewOf(
   selected: OutputRow | undefined,
   opened: OutputRow | undefined,
   live: boolean,
+  blocks: OutputBlocks,
 ): { trailOpen?: OutputRow; standIn?: OutputRow; soFar?: boolean } {
   if (opened && opened.id !== selected?.id) return { trailOpen: opened };
   if (!live || (selected && selected.state.status !== "pending")) return {};
@@ -220,7 +221,10 @@ export function inViewOf(
     .find((r) => r?.state.latest);
   if (onChain) return { standIn: onChain };
   const drawn = [...review.rows.values()]
-    .filter((r) => r.state.latest && r.state.kind !== "file" && r.state.kind !== "collection")
+    .filter((r) => {
+      const shown = shownOf(r);
+      return !!r.state.latest && shown.length > 0 && undrawn(blocks, shown).length === 0;
+    })
     .sort((a, b) => (b.state.latest?.at ?? "").localeCompare(a.state.latest?.at ?? ""))[0];
   return drawn ? { standIn: drawn, soFar: true } : {};
 }
