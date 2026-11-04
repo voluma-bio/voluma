@@ -1,0 +1,9 @@
+{
+  "name": "plate-finetune",
+  "targets": {
+    "test": {
+      "command": "uvx --quiet ruff@0.17.3 check .",
+      "options": { "cwd": "training/plate-finetune" }
+    }
+  }
+}
