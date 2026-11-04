@@ -84,8 +84,9 @@ def on_cut(labels, pair, at, joined, contact_mm2):
         z, y, x = np.argwhere(now & ~near)[0] + [s.start for s in box]
         return f'{off} voxels of their contact lie off the cut, e.g. at {[int(z), int(y), int(x)]}; cut again from these labels'
     if joined['mm2'] - joined['direct_mm2'] > contact_mm2:
-        return (f'{round(joined["mm2"] - joined["direct_mm2"], 5)} mm2 of the contact runs through bone no label holds, a piece '
-                'the cut left (too large, or touching a third bone): label it first (relabel.py --pieces), then cut again')
+        return (f'{round(joined["mm2"] - joined["direct_mm2"], 5)} mm2 of the contact runs through bone no label holds that the cut '
+                'did not take (a piece over --bridge-max-mm3, or one touching a third bone: see the fused flags and candidates): '
+                'label it (relabel.py --pieces), then cut again from these labels')
     return None
 
 

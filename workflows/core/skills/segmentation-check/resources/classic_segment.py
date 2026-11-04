@@ -17,15 +17,17 @@ a seed outside the region around label L is refused.
 where A meets B plus the bridging pieces: threshold bone no label holds, under `--bridge-max-mm3`, touching both and no other
 label (a larger piece, or one touching a third bone, is a candidate to label first). In a box `--reach-mm` around the contact,
 A's and B's bone at least `--seed-mm` from it seeds each side, and the watershed (minus the distance to the bone's edge) puts the
-boundary at the narrowest bone between them; bone farther than `--reach-mm` from the contact never changes label. It prints
-the bone that moved (`moved_mm3`: A to B, B to A, bridge to each) and records where the two touch after the cut in
+boundary at the narrowest bone between them; bone at least `--seed-mm` from the contact keeps its label. A pass moves the
+boundary, so pieces that touched one bone may then touch both: it cuts again, up to 3 passes, until a pass takes no bridge.
+It prints the bone that moved (`moved_mm3`: A to B, B to A, bridge to each), the bridge pieces' count, volume and largest
+(all of them in the sidecar) and records where the two touch after the cut in
 `<out stem>-cuts.npz`; pass the output to `finish_labels.py --cut`, which lets that contact pass as a cut, not a join. Open a
 crop at the cut before you report: the moved bone should be the joint's, not a condyle's.
 
 Writes: <out>  uint8 labels on the grid of --labels, with its sidecar
         <out stem>-cuts.npz  with --within A,B: under key "lo-hi", the voxels of the lower label that touch the other (z,y,x rows)
 Prints: one JSON line {labels, volume_mm3: {label id: volume}, core_fallback_labels (default mode only); with --within A,B also
-  contact_box_zyx, bridge_pieces [{voxels, centre_zyx}], moved_mm3, cut_voxels}
+  passes, contact_box_zyx (the last pass's), bridge_pieces {count, mm3, largest [{voxels, centre_zyx}]}, moved_mm3, cut_voxels}
 Example: python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu scan-settings.json
          python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu scan-settings.json --within 2 --seeds seeds.json
          python classic_segment.py --hu hu.npy --labels labels.npy --out cut.npy --threshold-hu scan-settings.json --within 6,2
@@ -41,6 +43,7 @@ from scipy import ndimage as ndi
 from skimage.segmentation._watershed_cy import watershed_raveled
 
 MARGIN = 10
+CUT_PASSES = 3
 SLAB = 64  # z-slab depth of the chunked gradient and distance
 GRADIENT_RADIUS = 4  # a Gaussian of sigma 1 voxel reaches 4 voxels: the halo a slab needs for the whole-volume values
 
@@ -222,16 +225,27 @@ if __name__ == '__main__':
     if not two and (a.within is None) != (a.seeds is None):
         sidecar.fail('--within L and --seeds go together')
     if two:
-        full, new, at, info = cut_pair(labels, hu, a.within, a.threshold_hu, sp, a.reach_mm, a.seed_mm, a.bridge_max_mm3)
+        # a pass moves the boundary, so pieces that touched one bone can touch both: cut again until a pass takes no bridge
         out = np.asarray(labels).copy()
-        out[full] = new
+        moved, pieces, passes = {}, [], 0
+        for passes in range(1, CUT_PASSES + 1):
+            full, new, at, info = cut_pair(out, hu, a.within, a.threshold_hu, sp, a.reach_mm, a.seed_mm, a.bridge_max_mm3)
+            out[full] = new
+            for k, v in info['moved_mm3'].items():
+                moved[k] = round(moved.get(k, 0) + v, 5)
+            pieces += info['bridge_pieces']
+            if not info['bridge_pieces']:
+                break
+        pieces.sort(key=lambda q: -q['voxels'])
+        vox = float(np.prod(sp))
+        info = {'passes': passes, 'contact_box_zyx': info['contact_box_zyx'], 'moved_mm3': moved, 'cut_voxels': info['cut_voxels'],
+                'bridge_pieces': {'count': len(pieces), 'mm3': round(sum(q['voxels'] for q in pieces) * vox, 5), 'largest': pieces[:5]}}
         lo, hi = sorted(a.within)
         np.savez_compressed(Path(a.out).with_name(f'{Path(a.out).stem}-cuts.npz'), **{f'{lo}-{hi}': at})
         np.save(a.out, out)
         sidecar.write(a.out, like=str(sidecar.sidecar_path(a.labels)), inputs=[a.hu, a.labels],
                       params={'threshold_hu': a.threshold_hu, 'within': a.within, 'reach_mm': a.reach_mm, 'seed_mm': a.seed_mm,
-                              'bridge_max_mm3': a.bridge_max_mm3, 'moved_mm3': info['moved_mm3']})
-        vox = float(np.prod(sp))
+                              'bridge_max_mm3': a.bridge_max_mm3, 'moved_mm3': moved, 'passes': passes, 'bridge_pieces': pieces})
         ids, counts = np.unique(out[out > 0], return_counts=True)
         sidecar.emit(labels=a.out, volume_mm3={int(i): round(float(c) * vox, 4) for i, c in zip(ids, counts)}, **info)
         raise SystemExit(0)

@@ -110,8 +110,8 @@ open until the labels no longer raise it or you pass `--accept <key>=<why>`: the
 it when the CT cannot settle it, or why it is no fault (a structure the scan's notes put outside the field, or one you recorded as absent in its
 region, section 2). A `joined:` or `fused:` flag is never accepted (the script refuses it). Two bones that touch are
 separated, as well as the CT allows: redo the track first; where they still touch, cut them apart with
-`classic_segment.py --within A,B` (it seeds itself from each bone near the contact, moves bone only within 0.3 mm of
-it, and prints what moved: open a crop at the cut) and pass its output with `--cut`. The contact then passes as a cut, recorded under `cuts` in the check record with
+`classic_segment.py --within A,B` (it seeds itself from each bone near the contact, moves bone only within about 0.15 mm
+of it, and prints what moved: open a crop at the cut) and pass its output with `--cut`. The contact then passes as a cut, recorded under `cuts` in the check record with
 where it lies; a join the cut does not account for (contact off the cut, or through bone no label holds) stays open. A
 `fused:` candidate is labelled (section 1). Finish the labels you made, the
 merged SAM labels with your fixes; `classic_segment.py`'s watershed is the cross-check of section 3, never the reported
