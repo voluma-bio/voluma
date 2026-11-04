@@ -445,13 +445,15 @@ const changeOutputsTool = (api: AgentsApi): Tool => {
     if (role !== "main") throw new Refusal("Only main changes the final outputs.");
     const list = outputsFold(api.recorder.events()).list;
     // An output the workflow declares is listed as the run's catalog writes it, as the opening
-    // change lists it, so its entry (description included) is never main's own wording.
+    // change lists it, so its entry (description included) is never main's own wording, even where the catalog has
+    // no description.
     const declared = (id: string) => api.catalog.find((e) => e.id === id);
     const add = input.add?.map((own) => {
       const entry = declared(own.id);
       if (!entry) return own;
       const { section: _section, ...fields } = entry;
-      return { ...own, ...fields };
+      const { description: _description, ...rest } = own;
+      return { ...rest, ...fields };
     });
     const change = { by: "main" as const, ...input, ...(add && { add }) };
     const why = refuseOutputsChange(list, change, api.catalog);
