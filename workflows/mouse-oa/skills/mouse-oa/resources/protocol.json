@@ -104,7 +104,7 @@
   "distal-femoral-width-dfw": {
     "points": ["c", "d"],
     "ruler": "dfw-ruler",
-    "definition": "deck #27: straight distance from c (midpoint of the ridge on the lateral condyle) to d (vertex of the medial condyle)"
+    "definition": "deck #27: straight distance from c (outer vertex of the lateral condyle) to d (outer vertex of the medial condyle), across the distal condyles"
   },
   "width-length-ratio": {
     "num": "distal-femoral-width-dfw",

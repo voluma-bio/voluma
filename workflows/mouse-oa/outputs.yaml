@@ -107,6 +107,8 @@
     - Every label is one structure, and every piece present is labelled or raised as a To check
       item, checked on the 3D sheet and the label checks, as
       /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (segmentation) describes.
+    - The file reported is the one finish_labels.py wrote, with its check record cited as evidence;
+      each flag the record accepts names the To check item that holds it, or why it is no fault.
 
 - id: disagreement
   kind: overlay
@@ -163,6 +165,8 @@
     - ROI-1 runs from the growth plate's proximal face to the articular surface, as
       /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (iioc) describes, checked on a
       render with the tibia plateau up, as in the deck figure.
+    - "Its evidence cites qc-coronal.jpg from that iioc.py run, opened before reporting: green ROI-1 sits on the
+      orange face along the plate band, on every panel, not down in the metaphysis."
 
 - id: roi-iioc-trabecular
   kind: overlay
@@ -283,6 +287,17 @@
   expect:
     - Points a–d sit where /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md
       (femoral-geometry) puts them, each checked on a second view.
+
+- id: femur-frame
+  kind: file
+  name: Femur frame
+  description:
+    "femur-frame.json from femoral_frame.py: the femur's shaft and mediolateral axes; Align turns
+    the view to it"
+  mediaType: application/json
+  expect:
+    - W runs along the femur's shaft and U across the condyles, from the same femur label the
+      landmarks were checked on.
 
 - id: iioc-height-ruler
   kind: overlay
@@ -409,6 +424,11 @@
   expect: &a4
     - Measured along the shaft axis (the deck value), with the perpendicular height and the
       growth-plate plane residual beside it; which the lab means is open.
+    - "Its evidence cites qc-heights.jpg and qc-coronal.jpg from the iioc.py run it reports, both opened before
+      reporting. On qc-heights.jpg each ruler runs from ROI-1's bottom edge to the top of the articular bone; on
+      qc-coronal.jpg the orange face runs along the upper edge of the thin dark plate band on every panel, as the
+      roi-iioc expect line says. A face traced below the band, in the metaphysis, makes every height and the TV too
+      large, by up to twice."
 
 - id: iioc-height-medial-compartment
   kind: value
@@ -631,8 +651,7 @@
   kind: value
   name: Distal femoral width (DFW)
   section: Distal femur
-  description: "midpoint (c) of the ridge on the lateral condyle surface to the vertex (d) of the
-    medial condyle (open question for the lab: confirm the endpoints on one annotated scan)"
+  description: outer vertex of the lateral condyle (c) to outer vertex of the medial condyle (d), across the distal condyles
   source: "deck #27"
   unit: mm
   "on": [dfw-ruler]
