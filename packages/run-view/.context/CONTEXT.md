@@ -25,7 +25,12 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   characters with a "Shortened" note. `start_worker`, `message` and `close_worker` name their
   worker through `AgentLinks`, and `Markdown`'s `agents` prop turns inline code that is exactly
   an agent's name into the same link. Tool titles are `toolTitle`: a new tool shows as its name and
-  arguments until it gets a case. Origin: the transcript viewer deleted with the task loop
+  arguments until it gets a case; a fold's digest names a few other calls ("started worker
+  intake"). Who a message is from: on main, the researcher's words arrive inside a runtime
+  delivery whose `covers` range holds a `person.message` ("Message from you"), else "Update from
+  Voluma"; on a worker, the first is "Brief", later ones "Message from <name>" or "Update from
+  Voluma". The scroll follows the newest line only when the reader was at the bottom before the
+  update, and an ended thread opens at the top. Origin: the transcript viewer deleted with the task loop
   (`eed32205^1`), without tasks, attempts or verdicts.
 - **Researcher words** everywhere: the AI, main; no paths, file names or tool names. Values take
   the workflow's names (`outputName`, from the bundled `outputs.yaml`), an output's id as words for

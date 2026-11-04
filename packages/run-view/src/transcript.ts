@@ -48,7 +48,6 @@ export function toolTitle(name: string, input: unknown): { title: string; target
             detach: "Let a background command run on",
           }[s("action") ?? ""] ?? "Managed background commands",
       };
-    case "view_image":
     case "read": {
       const files = list("paths").map((p) => p.split("/").pop());
       return { title: `Read ${files.join(", ") || "files"}` };
@@ -116,6 +115,7 @@ export function digest(steps: Step[]): string {
   let commands = 0;
   let reads = 0;
   let other = 0;
+  const named: string[] = [];
   let failed = 0;
   let thought = false;
   for (const s of steps) {
@@ -126,14 +126,25 @@ export function digest(steps: Step[]): string {
     } else {
       if (s.name === "bash") commands++;
       else if (s.name === "read") reads++;
-      else other++;
+      else {
+        const name = s.target ? `${s.title} ${s.target}` : s.title;
+        // Activity text and unknown tools are too long or too vague to name.
+        if (s.name !== "activity" && name.length <= 40) named.push(name);
+        else other++;
+      }
       if (s.status === "error") failed++;
     }
   }
   const parts = [
     commands > 0 && `ran ${plural(commands, "command")}`,
     reads > 0 && `read ${plural(reads, "file")}`,
-    other > 0 && plural(other, "step"),
+    // A few other calls are named ("started worker intake"); more are counted.
+    ...(named.length <= 2 ? named.map((n) => n[0]?.toLowerCase() + n.slice(1)) : []),
+    (other > 0 || named.length > 2) &&
+      plural(
+        other + (named.length > 2 ? named.length : 0),
+        commands + reads + named.length > 0 ? "other step" : "step",
+      ),
     failed > 0 && `${failed} failed`,
   ].filter((p): p is string => Boolean(p));
   const text = parts.join(", ");
@@ -175,12 +186,16 @@ export function threadRows(events: readonly RunEvent[], ids: readonly string[], 
   const tools = new Map<string, ToolStep>();
   const started = new Set<string>();
   const briefed = new Set<string>();
+  // Main's deliveries say which log events they cover: a person.message in that range is the researcher.
+  const position = new Map(events.map((e, i) => [e.id, i]));
+  let lastCovered = -1;
   let systemSeen = false;
   const stopRunning = () => {
     for (const step of tools.values()) if (step.status === "running") step.status = "stopped";
   };
   for (const e of events) {
     if (!shown.has(e.threadId)) continue;
+    const isMain = names.get(e.threadId)?.place === "main";
     switch (e.type) {
       case "thread.started":
         if (started.size > 0 && !started.has(e.threadId))
@@ -208,13 +223,27 @@ export function threadRows(events: readonly RunEvent[], ids: readonly string[], 
         } else {
           const { sender } = p;
           let label: string;
-          if (sender.kind === "person") label = "Message from you";
+          if (sender.kind === "runtime" && sender.notice) label = "Context notice";
+          else if (isMain) {
+            // The researcher's words reach main inside a runtime delivery that covers them.
+            let fromYou = sender.kind === "person";
+            if (sender.kind === "runtime" && sender.covers) {
+              const to = position.get(sender.covers);
+              if (to !== undefined) {
+                for (let i = lastCovered + 1; i <= to && !fromYou; i++)
+                  fromYou = events[i]?.type === "person.message";
+                lastCovered = Math.max(lastCovered, to);
+              }
+            }
+            if (fromYou) label = "Message from you";
+            else if (sender.kind === "thread")
+              label = `Message from ${names.get(sender.threadId)?.name ?? "another agent"}`;
+            else label = "Update from Voluma";
+          } else if (!briefed.has(e.threadId)) label = "Brief";
           else if (sender.kind === "thread")
             label = `Message from ${names.get(sender.threadId)?.name ?? "another agent"}`;
-          else if (sender.notice) label = "Context notice";
-          else label = briefed.has(e.threadId) ? "Update from Voluma" : "Brief";
-          if (sender.kind !== "person" && !(sender.kind === "runtime" && sender.notice))
-            briefed.add(e.threadId);
+          else label = sender.kind === "runtime" ? "Update from Voluma" : "Message";
+          briefed.add(e.threadId);
           b.row({ kind: "brief", id: e.id, label, text: p.text });
         }
         break;

@@ -203,16 +203,21 @@ export function OutputsReview({
   const item = selected?.items.find((i) => i.key === params.get("item"));
   // The agents a name can open: each agent's thread names (`main.2` opens main's thread).
   const agents = useMemo(() => agentEntries(events, fold, live), [events, fold, live]);
+  // The links change only when the set of names does, and `open` reads the latest entries and
+  // `select`, so the conversation's replies don't re-render on every event of a live run.
+  const nameKey = agents.flatMap((a) => a.names).join("\n");
+  const latest = useRef({ agents, select });
+  latest.current = { agents, select };
   const agentLinks = useMemo<AgentLinks>(
     () => ({
-      names: new Set(agents.flatMap((a) => a.names)),
+      names: new Set(nameKey ? nameKey.split("\n") : []),
       open: (name) =>
-        select({
+        latest.current.select({
           centre: "agents",
-          agent: agents.find((a) => a.names.includes(name))?.name ?? name,
+          agent: latest.current.agents.find((a) => a.names.includes(name))?.name ?? name,
         }),
     }),
-    [agents, select],
+    [nameKey],
   );
   // Show moves the crosshair once per press: a new object each time.
   const [picked, setPicked] = useState(0);
