@@ -384,13 +384,16 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const previous = mains.at(-1);
     const handed = d.reviewing && previous ? await handoverOf(id, previous) : undefined;
     // End the main before it, or a ping or a finished command would resume it beside the review main.
-    if (handed && previous && stateOf(previous) !== "closed") {
-      await recorder.append(
-        previous.id,
-        "thread.ended",
-        { status: "closed" },
-        `${previous.id}:handed-over`,
-      );
+    // A failed one stays failed: `mainFailed` reads that to replace a failing main only once.
+    const before = previous && stateOf(previous);
+    if (handed && previous && before !== "closed") {
+      if (before !== "failed")
+        await recorder.append(
+          previous.id,
+          "thread.ended",
+          { status: "closed" },
+          `${previous.id}:handed-over`,
+        );
       await o.release(previous.id);
     }
     return begin(
