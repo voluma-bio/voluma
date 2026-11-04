@@ -15,7 +15,7 @@ contested voxel is counted in the output by big label and by where it went, and 
 gave away against its size, so a leak shows: a small label with a large contested count against its volume, or a big
 label that lost much, is a To check item. A big label with no own voxels is lost whole to the small side, which
 `big_lost` shows. Refused: a small temp label holding more than `--max-big-share` of a big label's voxels (that track followed
-the bone: SAM's tibia-sized "small structure" on OA6-2RK held 83% of the tibia, and merged it would have split the tibia midway), a temp or final label that is also a label in `--big`, a label in `--small` that `--map`
+the bone: on OA6-2RK a "small structure" track held 83% of SAM's tibia, and merged it would have split the tibia midway), a temp or final label that is also a label in `--big`, a label in `--small` that `--map`
 does not mention, volumes of different shape or grid id.
 
 Writes: <out>  the merged labels (.npy, the grid of --big), with its sidecar (the map)
