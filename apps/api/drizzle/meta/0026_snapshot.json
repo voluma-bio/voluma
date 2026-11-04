@@ -1,5 +1,5 @@
 {
-  "id": "f644e088-9061-48b6-8ead-2fdf8ff34e63",
+  "id": "2f5fd744-f1e7-4b60-96e8-dd11d30f4481",
   "prevId": "987a2ee7-07e9-493c-952d-5e5d900fd700",
   "version": "7",
   "dialect": "postgresql",
@@ -287,12 +287,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "sealed_keys": {
-          "name": "sealed_keys",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "model": {
           "name": "model",

@@ -1,5 +1,9 @@
 # TODO
 
+- **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
+  (`domains/run/corrections.ts`) refuses a run holding a `convert:<runId>:outputs` event, because
+  its R2 snapshot is the task loop's. Delete that lookup once the deletion PR's snapshot fallback
+  is live and the 7 old `.snapshot-done` markers are deleted ([convert-task-runs.md](convert-task-runs.md)).
 - **Reconcile abandoned provider calls before archiving their runs.** Archive now refuses
   calls without a completed settlement (`duration_ms IS NULL`), including swept `cut` rows.
   Late settlement is preserved; genuinely settled unknown-cost calls remain archivable.

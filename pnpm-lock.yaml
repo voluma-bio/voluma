@@ -152,6 +152,9 @@ importers:
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
       zarrita:
         specifier: 'catalog:'
         version: 0.7.5
