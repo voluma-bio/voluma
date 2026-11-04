@@ -8,7 +8,7 @@ where it is used.
 
 ## Two themes, one token set
 
-- **Light by default**, with a personal Light / Dark choice under Settings on the rail. The
+- **Light by default**, with a personal Light / Dark choice under Settings. The
   choice applies to every page, including navigation, reports, controls and pane headings. The
   3D and slice image wells stay dark in both themes for anatomy contrast.
 - Components use semantic token utilities (`bg-card`, `text-muted-foreground`,
@@ -40,10 +40,23 @@ where it is used.
 
 ## The shell
 
-- **One shell on every page**: a 44 px rail at the far left (Studies, Workflows, Settings), one
-  panel on each side, the page's work in the centre. A side holds one panel, with tabs when it
+- **One labelled vertical navigation rail**: Studies and Workflows sit at the top of the 80 px rail,
+  beneath the non-interactive Voluma mark. The sidebar spans the full height; its mark is 36 px in
+  a 56 px slot because it has no label. Breadcrumbs sit beside it, not across its top; top-level
+  pages have no empty breadcrumb header.
+  Separate Settings (gear) and Account actions sit at its foot. All four controls share 20 px icons
+  with visible text beneath them. Settings holds preferences; Account holds identity and Sign in or
+  Sign out. There is no duplicate horizontal navigation. Top-level pages omit breadcrumbs;
+  nested pages keep a separate, wrapping breadcrumb for study context.
+  Below it each page has one h1 with metadata, status and actions; these never sit inside the
+  breadcrumb. A sample uses a compact single title/metadata/status row, with Run details on the
+  right; it wraps only when space runs out. Run finished means computation ended, not that the
+  results were checked; show outstanding checks separately.
+- **One shell on every page**: the navigation rail at the left, one panel on each side, and the
+  page's work in the centre. A side holds one panel, with tabs when it
   has more than one thing to show. Both sides resize by dragging, keep their width across pages,
-  and fold to 28 px icon strips. Panels push the centre aside; nothing floats.
+  and fold to 28 px icon strips. Workspace panels push the centre aside; they never float.
+  Transient menus, popovers (including Settings and Run details) and dialogs are the exception.
 - **No divider lines in lists or between side blocks.** Spacing separates them.
 
 ## The review
