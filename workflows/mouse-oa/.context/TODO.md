@@ -48,3 +48,4 @@
   (OA6-2RK's plate-test-opus trace: 12 of 19); run 0ed8e7d3's copied faces: 15 of 28. The same HU check would catch one misread
   section between sparse neighbours, which `refuse_jumps` passes when it is less than about 330 to 420 µm off with neighbours 16 to 20 apart. It would also catch a worker that clears a jump refusal by deleting the sections in between: the sections left still
   pass the jump and gap checks with the same generated points (0ed8e7d3 with V=202 and 212 removed passes from V=197 to 217).
+- **`tibia_frame.py --joint-end` automatic.** The script already finds the joint end from where the femur lies and refuses a flag that disagrees; drop the flag and take that end.
