@@ -137,8 +137,9 @@ face. That moves the midline in a few columns: regions change by 1–20 voxels i
 
 ## Serving on Modal
 
-`serve.py` puts the model behind one web endpoint on a Modal GPU. Voluma runs don't call it yet; wiring it into runs is in
-[.context/TODO.md](.context/TODO.md). It runs the same code as the scripts above (`predict_vol`, `band_to_region.band_regions`,
+`serve.py` puts the model behind one web endpoint on a Modal GPU. Runs call the `plate-serve` app through the provider gateway:
+the `segment_plate` tool runs mouse-oa's `plate_model.py`, which sends the grid in the body and reads `<name>.top`/`.bottom`, `<name>.mask`,
+`V` and `meta`. Those are runner-facing now: change them expand then contract (root `AGENTS.md`, "Contract changes"). It runs the same code as the scripts above (`predict_vol`, `band_to_region.band_regions`,
 `vote.vote`), so its output follows any change to them.
 
 Deploy (from this directory; the app name defaults to `plate-serve`):

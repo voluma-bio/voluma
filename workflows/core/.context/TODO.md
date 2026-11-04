@@ -62,7 +62,7 @@ in the tibia mask (the femur/tibia regrow splits a block touching both along a s
 `~/experiments/plate-data/tracing/pieces/RESULTS-L24.md`. Add a check-first line to `segmentation-check`: look for a piece
 joined to the plateau along a dark seam, and split it with `classic_segment.py --within` before the tibial regions are built.
 
-## Real world mm in the review
+## Real world mm in the review ([#553](https://github.com/voluma-bio/voluma/issues/553))
 
 The review places every image at its voxel 0, unrotated: `Volume.affine` is spacing only (`report-output.ts`
 `detailFromSidecar`; `.npy` sidecars carry no `affine_xyz_to_world_mm`). So a researcher's mark arrives in mm on the image it

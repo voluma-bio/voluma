@@ -73,8 +73,8 @@ segmentation a later step needs (the growth plate traced closely) is that step's
   slice just below the plateau), find which way along U is medial on this knee, and record it before you name a
   compartment. `tibia_frame.py`'s sign rule assumes one knee and one scan orientation and has no flip, so where +U
   is lateral, keep the frame and name the medial and lateral fields of the annotations from what you saw.
-- **Makes:** `tibia-grid` (the aligned frame; protocol step 1), `growth-plate-proximal-face` (step 2: `plate_faces.py`
-  proposes both faces where it finds the plate; you trace the plate over the whole tibia from there and open every
+- **Makes:** `tibia-grid` (the aligned frame; protocol step 1), `growth-plate-proximal-face` (step 2: the proposal
+  (`segment_plate`) gives both faces where it finds the plate; you trace the plate over the whole tibia from there and open every
   `qc-faces` sheet),
   `articular-surface`, `roi-iioc`, the four rulers and #4–10 (steps 3 and 7). Report both height definitions with
   the plane residual (protocol, "What the deck says").
@@ -103,7 +103,7 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 - **Check first:** below the growth plate, where ROI-3 and the cortex go, the tibia label holds no fibula voxels:
   the fibula joins the tibia toward the shaft, and a cortex mask that reaches it is wrong.
 - **Makes:** `growth-plate-distal-face` (annotation C, over at least the proximal face's range: trace the distal face
-  over the whole tibia from `plate_faces.py`'s proposal and open every `qc-faces` sheet), `cortex`, `roi-metaphyseal`, #16–23 (protocol steps 6, 7).
+  over the whole tibia from the proposal (`segment_plate`) and open every `qc-faces` sheet), `cortex`, `roi-metaphyseal`, #16–23 (protocol steps 6, 7).
   Where the plate is eroded, report the eroded ranges and `plate-eroded-fraction` from `roi3.json` with the face, and
   raise a To check item naming them.
 - **Leaves:** step 6 measures on this `cortex` and distal face and never traces the face again. A new distal face

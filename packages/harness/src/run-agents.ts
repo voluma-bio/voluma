@@ -11,7 +11,7 @@ import type { BashRuntime } from "./bash-runtime";
 import type { ProviderError } from "./failure-policy";
 import { keepNotes, restoreMainPlan } from "./keep-notes";
 import type { ThreadLayout } from "./layout";
-import { runLayout } from "./layout";
+import { GATEWAY_TOOLS, runLayout } from "./layout";
 import { agentLoop, interruptedResult } from "./loop";
 import type { LoopConfig, ModelSetup } from "./loop-config";
 import type { Section } from "./loop-shell";
@@ -34,15 +34,15 @@ interface AgentLayoutsOptions {
   inputPrefix: string;
   recorder: Recorder;
   definition: WorkflowDefinition;
-  /** Whether a gateway is configured (`segment_sam` is held only where it can be used). */
+  /** Whether a gateway is configured (the gateway tools are held only where they can be used). */
   gateway: boolean;
 }
 
 export function agentLayouts(o: AgentLayoutsOptions) {
   const { recorder, definition } = o;
-  /** Each role's tools: its file's list, less `segment_sam` where no gateway is configured. */
+  /** Each role's tools: its file's list, less the gateway tools where no gateway is configured. */
   const toolsOf = (role: "main" | "worker") =>
-    definition.agents[role].tools.filter((t) => t !== "segment_sam" || o.gateway);
+    definition.agents[role].tools.filter((t) => !GATEWAY_TOOLS.includes(t) || o.gateway);
   const layout = runLayout({
     runId: o.runId,
     inputPrefix: o.inputPrefix,

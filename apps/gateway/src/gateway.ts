@@ -177,12 +177,14 @@ export function createGateway(deps: GatewayDeps) {
     if (!claims) throw new Refused(401, "invalid or expired token");
     if (!claims.providers.includes(provider)) throw new Refused(403, `no access to ${provider}`);
     // An own-key token holds the starter's keys and nothing falls back to ours.
-    const ownKeys = claims.ownKeys;
+    const ownKeys = PROVIDERS[provider].ours ? undefined : claims.ownKeys;
     const key = ownKeys ? ownKeys[provider] : keys[provider];
     if (!key) throw new Refused(403, `no ${provider} key for this token`);
     const method = req.method ?? "GET";
     const matched = matchRoute(provider, method, upstreamPath);
     if (!matched) throw new Refused(403, `${method} ${upstreamPath} is not allowed`);
+    if (matched.route.noQuery && query !== undefined)
+      throw new Refused(403, `${method} ${upstreamPath} takes no query string`);
 
     const scanner = new BodyScanner();
     const peek =
@@ -386,7 +388,9 @@ export function createGateway(deps: GatewayDeps) {
       ? 0
       : matched.route.kind === "model"
         ? costUsd(provider, model ?? "", seen)
-        : 0;
+        : matched.route.kind === "timed"
+          ? ((Date.now() - started) / 3_600_000) * (matched.route.usdPerHour ?? 0)
+          : 0;
     // A reply that was cut short, or that reported nothing to price, may still have been billed: its cost stays unknown (null).
     // An Anthropic or Responses stream that never reached its last event has partial usage.
     const finished = !streamed || provider === "meta" || finalEvent;

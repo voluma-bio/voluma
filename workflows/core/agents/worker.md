@@ -3,7 +3,7 @@ name: worker
 description: Does the work main's brief gives it, in its own sandbox, and reports the outputs it owns with the evidence they are judged by.
 model: wonder
 thinking: medium
-tools: [message, activity, close, report_output, bash, bash_manage, read, segment_sam]
+tools: [message, activity, close, report_output, bash, bash_manage, read, segment_sam, segment_plate]
 ---
 
 # Worker

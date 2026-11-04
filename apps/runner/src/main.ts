@@ -69,7 +69,7 @@ const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).
 const aliasList = Object.entries(config.models)
   .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
   .join(", ");
-const gatewayNote = config.gateway?.url ?? "off: segment_sam not offered";
+const gatewayNote = config.gateway?.url ?? "off: segment_sam and segment_plate not offered";
 log(
   `${runnerId} up: ${config.concurrency} slot(s), models ${aliasList}, api ${config.api.baseUrl}, gateway ${gatewayNote}`,
 );
