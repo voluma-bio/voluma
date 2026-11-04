@@ -1,10 +1,11 @@
 /**
  * A bundled workflow's measurements as a researcher reads them: the values its catalog
- * (`outputs.yaml`, `outputCatalogOf`) declares, in catalog order, with their names and units.
+ * (`outputs.yaml`, `outputCatalogOf`) declares, in catalog order, with their names and units,
+ * under their catalog sections when it names any.
  * Shown in "See measurements" (a side panel over Run on new samples, so the choice in progress
  * stays put) and on the Workflows page; the study pages read their columns and units from here.
  */
-import { type OutputEntry, unitAsWritten } from "@voluma/contracts/output-catalog";
+import { groupBySection, type OutputEntry, unitAsWritten } from "@voluma/contracts/output-catalog";
 import { Button } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
@@ -27,9 +28,29 @@ export const headlinesOf = (workflow: Pick<BundledWorkflow, "path">) =>
 export const unitOf = (output: Measurement) => unitAsWritten(output.unit);
 
 export function MeasurementList({ workflow }: { workflow: Pick<BundledWorkflow, "path"> }) {
+  const groups = groupBySection(measurementsOf(workflow));
+  const [only] = groups;
+  if (groups.length === 1 && only && only.title === undefined)
+    return <Measurements label="Measurements" items={only.entries} />;
   return (
-    <ul aria-label="Measurements" className="grid gap-1">
-      {measurementsOf(workflow).map((o) => (
+    <div className="grid gap-5">
+      {groups.map((g) => {
+        const title = g.title ?? "Other";
+        return (
+          <section key={title} aria-label={title} className="grid gap-1.5">
+            <h3 className="m-0 font-semibold text-sm">{title}</h3>
+            <Measurements label={title} items={g.entries} />
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function Measurements({ label, items }: { label: string; items: Measurement[] }) {
+  return (
+    <ul aria-label={label} className="grid gap-1">
+      {items.map((o) => (
         <li key={o.id} className="flex items-baseline gap-2 text-sm">
           {o.name}
           <span className="text-fg-subtle">{unitOf(o)}</span>

@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type { outputsChangedSchema } from "./agent-events";
 import {
+  groupBySection,
   labelMapOf,
   labelMapsOf,
   type OutputCatalog,
@@ -153,18 +154,25 @@ export function openingOutputs(
     : catalog.filter((e) => e.selectable);
 }
 
-/** The first change of a run, which sets its final outputs; undefined when there are none to list. */
+/**
+ * The first change of a run, which sets its final outputs in their catalog sections (those with
+ * none go in "Other"); undefined when there are none to list.
+ */
 export function openingChange(
   catalog: OutputCatalog,
   selected: readonly string[] | undefined,
 ): OutputsChange | undefined {
   const entries = openingOutputs(catalog, selected);
+  const sections = groupBySection(entries).flatMap((g) =>
+    g.title ? [{ title: g.title, outputs: g.entries.map((e) => e.id) }] : [],
+  );
   return entries.length === 0
     ? undefined
     : {
         by: "runner",
         reason: "The outputs the researcher chose for this run.",
         add: entries,
+        ...(sections.length > 0 && { sections }),
         labels: labelMapsOf(catalog),
       };
 }
