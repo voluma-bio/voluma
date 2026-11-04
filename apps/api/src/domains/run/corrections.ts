@@ -111,6 +111,21 @@ export async function openCorrection(tx: Queryable, runId: string): Promise<stri
   return openCorrectionOf(rows)?.id ?? null;
 }
 
+/** Writes `correction.ended`, keyed to the open correction's `run.reopened` (`openCorrection`). */
+export async function endCorrection(
+  tx: Tx,
+  runId: string,
+  reopenId: string,
+  status: "failed" | "cancelled",
+  error?: string,
+) {
+  await appendPersonEvent(tx, runId, {
+    id: `${reopenId.slice(0, -":reopened".length)}:ended`,
+    type: "correction.ended",
+    payload: { status, ...(error !== undefined && { error }) },
+  });
+}
+
 /** What the reopen of a finished run needs besides the run: how to workflow-check it and seal keys. */
 export type ReopenContext = {
   pinsOf: (workflowId: string) => WorkflowPin[] | undefined;

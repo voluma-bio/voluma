@@ -25,8 +25,8 @@
  * A correction never ends a run worse than `completed`: a failure or cancel of a correction claim
  * (a thread failure, the no-progress limit, a user cancel, a lease that cannot be recovered)
  * ends the claim's workers and the root, leaves main cut off for the researcher's next message,
- * and the run ends `completed` again. (`correction.ended`, `correctionEndedSchema`, is what an
- * earlier version wrote for this; runs keep theirs.) The run page shows the span from
+ * and the run ends `completed` again, with `correction.ended` (`correctionEndedSchema`) recording
+ * how the request ended; the conversation says it didn't finish. The run page shows the span from
  * `run.reopened` to the next root `thread.ended` or `correction.ended`.
  *
  * Who may send: only the run's `startedBy` (403 otherwise). Cookie auth and Origin rules are

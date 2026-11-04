@@ -89,8 +89,12 @@ export function MainConversation({
   onDiscard: (id: string) => void;
 }) {
   const items = useMemo(() => {
+    // A finished request's reply is the answer; only one that didn't finish gets a line of its own.
     const said = conversation
-      .filter((m): m is Exclude<ConversationItem, { from: "outcome" }> => m.from !== "outcome")
+      .filter(
+        (m): m is Exclude<ConversationItem, { from: "outcome"; status: "completed" }> =>
+          m.from !== "outcome" || m.status !== "completed",
+      )
       .map((m) => ({ ...m, kind: "said" as const }));
     return [...said, ...views.map((v) => ({ ...v, kind: "view" as const }))].sort(
       (a, b) => a.seq - b.seq,
@@ -176,6 +180,12 @@ export function MainConversation({
                       </p>
                     )}
                   </div>
+                </li>
+              ) : m.from === "outcome" ? (
+                <li key={m.id} className="text-xs text-muted-foreground">
+                  {m.status === "cancelled"
+                    ? "You stopped this request. Results are unchanged."
+                    : `Your request didn't finish${m.text ? `: ${m.text.replace(/\.$/, "")}` : ""}. Results are unchanged.`}
                 </li>
               ) : m.from === "agent" ? (
                 <li key={m.id} className="grid gap-1">
