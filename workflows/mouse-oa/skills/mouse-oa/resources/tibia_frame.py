@@ -1,8 +1,9 @@
 """Make a shaft-aligned frame and a cropped HU stack and mask for one long bone (the tibia for IIOC).
 
 Puts the shaft's long axis on W, 0 degrees off in both the coronal (W-U) and the sagittal (W-V) plane, takes the epiphyseal
-long cross-axis as U (+U medial and +V anterior come from a sign rule on scan y and `--joint-end` that assumes one knee and one
-scan orientation: confirm it on the QC montage before naming a side), and resamples the HU volume and the bone mask onto that
+long cross-axis as U (+V anterior from a sign rule on scan y and `--joint-end`; the grid is right-handed, so whether +U is
+medial depends on the knee: the record's `medial_side` says which way, from where `--fibula-label` (lateral) lies along U,
+and the frame's `axes` note repeats it), and resamples the HU volume and the bone mask onto that
 frame, cropped around the joint end. The growth plate is not levelled: its roll stays as the anatomy has it. The axis is fitted
 on the shaft between `--axis-mm` from the joint end: a first guess from scan-z slices (`--shaft-frac`), then, up to five
 times, the scan's mask is sampled on the provisional grid's W sections over that range (sampled from the scan, so the range
@@ -14,7 +15,7 @@ turns W further, to cancel a lean seen on the QC. Everything the protocol annota
 heights, plate patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
 The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
-because its sign rule (+U medial, +V anterior) and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
+because its sign rule and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
 voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, fewer than ten sections with bone
 in the `--axis-mm` range, a `--joint-end` on the side away from the femur, and a `--label` whose joint end has the femur's
 notch where `--femur-label`'s is solid (the two labels swapped): the joint-end caps' solidities, in the result record, tell the two bones apart.
@@ -27,7 +28,10 @@ Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolatio
         <out>/<name>-frame-qc-sagittal.jpg  the same for six sagittal (W-V) sections
         <out>/<name>.json  the result record: `objects` holds the aligned grid as `tibia-grid` (a volume on the frame's affine)
 Prints: one JSON line {out, values, objects, hu, mask, frame, qc, qc_sagittal, grid_id, shape_wvu, mask_volume_mm3,
-        axis_residual_deg {coronal, sagittal}, axis_mm, axis_w, tilt_deg, iterations, converged, shaft_z, epiphysis_z, tibia_check, ...}
+        axis_residual_deg {coronal, sagittal}, axis_mm, axis_w, tilt_deg, iterations, converged, shaft_z, epiphysis_z, tibia_check,
+        medial_side, fibula_u_mm, ...}
+        medial_side: "+U" or "-U", the medial direction along U (the fibula lies on the other side); "unknown" without a
+        fibula label or with the fibula within 0.3 mm of the tibia's centre along U: then find the fibula on the QC yourself.
         axis_residual_deg: the axis's angle to W on the final grid, at full resolution; positive coronal = the shaft's lower
         end (toward +W) at larger U than its top, positive sagittal the same with V. axis_w: the --axis-mm range as W indices
         of the output grid; its end may lie past the grid's last W index (the fit samples the scan, not the crop).
@@ -121,6 +125,22 @@ def fit_frame(mask, shaft_z, epi_z, joint_end, vox):
     return np.column_stack([u, v, w]), p.mean(axis=0)
 
 
+FIBULA_MIN_MM = 0.3  # fibula centroid this far off the tibia's centre along U, or the side is not called
+
+
+def medial_side(labels, fibula, basis, origin, vox):
+    """('+U' | '-U' | 'unknown', fibula centroid offset along U in mm): the fibula is lateral, so medial is the other way."""
+    if fibula is None:
+        return 'unknown', None
+    pts = np.argwhere(labels[::4, ::4, ::4] == fibula) * 4
+    if not len(pts):
+        return 'unknown', None
+    off = float((pts[:, ::-1].mean(axis=0) - origin) @ basis[:, 0]) * vox
+    if abs(off) < FIBULA_MIN_MM:
+        return 'unknown', round(off, 3)
+    return ('-U' if off > 0 else '+U'), round(off, 3)
+
+
 def joint_part(mask, joint_end, depth_vox):
     """Scan xyz of the bone voxels within depth_vox slices of the joint end: what the crop must cover."""
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
@@ -194,6 +214,7 @@ def main():
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
     ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script refuses a --label whose joint end looks like the femur\'s, and a --joint-end on the wrong side')
+    ap.add_argument('--fibula-label', type=int, default=4, help='label id of the fibula (4), which is lateral: it decides which way along U is medial (0: none)')
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--name', default='tibia', help='prefix of the output files')
@@ -271,6 +292,9 @@ def main():
         basis = tilted(basis, *np.tan(np.radians(a.tilt_deg)))
     low, shape_xyz, w_range = crop(basis)
     shape_zyx = tuple(int(i) for i in shape_xyz[::-1])
+    medial, fibula_u_mm = medial_side(labels, a.fibula_label or None, basis, origin, sp[0])
+    side = (f'{medial} medial (the fibula, lateral, lies {fibula_u_mm:+.2f} mm along U)' if medial != 'unknown'
+            else 'medial side unknown (no fibula label to tell): find the fibula on the QC before naming a side')
     frame = fr.make(
         g['grid_id'],
         sp,
@@ -278,7 +302,7 @@ def main():
         R_zyx=basis[::-1, ::-1].T,  # frame axis i (W, V, U) as a scan (z, y, x) vector: the basis columns, reversed
         origin_zyx=(origin + basis @ low)[::-1],
         shape=shape_zyx,
-        axes='aligned array axes (W, V, U): +U roughly medial, +V anterior, +W from the joint toward the shaft; '
+        axes=f'aligned array axes (W, V, U): {side}, +V anterior, +W from the joint toward the shaft; '
         'check on the QC montage before annotating',
     )
     aligned = fr.resample(hu, frame, order=1, cval=-1000)
@@ -339,6 +363,8 @@ def main():
         shape_wvu=list(shape_zyx),
         mask_volume_mm3=round(float(amask.sum()) * sp[0] ** 3, 4),
         axis_residual_deg=residual,
+        medial_side=medial,
+        fibula_u_mm=fibula_u_mm,
         axis_mm=a.axis_mm,
         axis_w=list(w_range),
         tilt_deg=a.tilt_deg,

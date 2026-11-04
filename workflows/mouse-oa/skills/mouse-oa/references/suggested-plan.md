@@ -80,9 +80,9 @@ segmentation a later step needs (the growth plate traced closely) is that step's
   bone's outer surface: where the label stops short of the cortex, `iioc.py` stops after the tracing, and fixing the labels
   then makes a new `tibia-grid` that the tracing is redone on. Which side is
   medial: the fibula is lateral. On a view of the aligned grid that shows the fibula beside the tibia (an axial
-  slice just below the plateau), find which way along U is medial on this knee, and record it before you name a
-  compartment. `tibia_frame.py`'s sign rule assumes one knee and one scan orientation and has no flip, so where +U
-  is lateral, keep the frame and name the medial and lateral fields of the annotations from what you saw.
+  slice just below the plateau), check that it agrees with `tibia_frame.py`'s `medial_side`
+  (from where the fibula label lies along U), and record it before you name a compartment. +U is lateral on some knees
+  (OA6-2RK, a right knee, is one): name the medial and lateral fields of the annotations from the side you confirmed.
 - **Makes:** `tibia-grid` (the aligned frame; protocol step 1), `growth-plate-proximal-face` (step 2: the proposal
   (`segment_plate`) gives both faces where it finds the plate; you trace the plate over the whole tibia from there and open every
   `qc-faces` sheet),
