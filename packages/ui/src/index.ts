@@ -5,6 +5,7 @@
  */
 
 export { Box, type BoxProps } from "./box";
+export { volumaMarkUrl } from "./brand";
 export { Breadcrumb, type BreadcrumbProps, type CrumbTo } from "./breadcrumb";
 export {
   Button,

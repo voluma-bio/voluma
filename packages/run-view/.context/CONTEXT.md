@@ -58,13 +58,7 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   way an account without Voluma's key (`Me.volumaKey` false: a guest) runs (the API refuses a start without it, 403); an account with it may keep one too. A key
   in this browser is sent with every start, and with a message or answer to a finished own-key run (`keysToReopen`: the server wiped the run's keys when it ended), and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
-  `voluma.visitor-keys.<userId>`. A run in `awaiting-keys` is handled on its page
-  (`features/input/input-header.tsx`) for the user who started it only: with a key stored, the page
-  sends it (`resendKeys`) by itself, and again after a refusal that clears: a 429 every minute with no
-  cap (a slot frees only when another run ends), a 5xx or network failure with a capped backoff. So
-  the run page polls in a background tab too. A 409 means another tab already sent it. The form
-  shows when no key is stored or a send fails. `/keys` doesn't check the key: a revoked one fails the
-  run at its first model call (401). Other users see that the run waits for its starter.
+  `voluma.visitor-keys.<userId>`.
 - **A run's status** (`runStatus`, `liveStatus`: a word and a `StatusMark` state) and the
   formatters (`formatUsd`, `formatDuration`, `plural`) are `@voluma/run-view`, shared with the study pages;
   `use-now.ts` is the clock. A completed run with open To check items reads "N to check"

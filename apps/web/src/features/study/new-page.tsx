@@ -442,7 +442,7 @@ export function NewPage() {
                   onChange={() => setPilot(false)}
                   title={`Run all ${table.length} now`}
                 >
-                  They queue under your lab's limit on runs at once.
+                  They wait in the queue and start as the system frees up.
                 </Choice>
               </fieldset>
             )}

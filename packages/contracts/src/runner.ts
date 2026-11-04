@@ -13,16 +13,18 @@
  * anyway (expired leases), a poll holds no
  * connection or in-memory wake-up on the API, and a run lasts minutes, so two
  * seconds of pickup delay costs nothing. Every run is created `queued` and
- * only a claim starts it (`run.ts`). `claim` is atomic: it takes the first `queued` run in the queue order
- * (`queueOrder`, `apps/api/src/domains/run/pg-runs.ts`) that the caps allow: runs
- * running at once over every account, one slot for own-key runs, and an organization's
- * limits for a Voluma-key run. It moves it to `running`, and takes the lease. A run's
- * `startedAt` is its first claim's time; a re-claim keeps it. Taking the
+ * only a claim starts it (`run.ts`). `claim` is atomic: it takes the first `queued` run in
+ * the queue's order (`queueOrder` in the API: a run that already started first; then an own-key
+ * run while no other own-key run is running, its starters taking turns; then `voluma` runs by
+ * organization priority; oldest first within each), skipping an own-key run while one is running
+ * taking nothing while the app already has `RUN_LIMITS_APP_RUNNING` runs running, and failing a
+ * never-started Voluma-key run its organization may no longer pay for (over its spend, or no key). It moves the run to
+ * `running`, and takes the lease. A run's `startedAt` is its first claim's
+ * time; a re-claim keeps it. Taking the
  * run is what starts it, so the runner reports no "running". `claim` answers
- * `{ claim: null }` when there is nothing to start. An own-key run's keys are sealed
- * in its row for its life; the claim response opens them for the runner, and an
- * ended run's row loses them. Keys that cannot be opened (a rotated secret) move the run
- * to `awaiting-keys` until the browser resends them.
+ * `{ claim: null }` when there is nothing to start. For an own-key run the
+ * response carries its keys, opened from the run's sealed column (the server keeps them for
+ * the run's life, so a lost response or a re-claim after a deploy gets them again).
  *
  * Lease. A claim is a lease on the run for `LEASE_SECONDS` from the server's
  * last heartbeat for it. The holder (`runnerId`), the lease token, the expiry
