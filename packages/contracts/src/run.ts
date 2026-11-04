@@ -95,7 +95,7 @@
  * Starting work. The rules below hold for every call that creates a run or
  * makes one run again: `startRun`, a reopen by a message (`messages.ts`), `/keys`, and any added later.
  *
- * Who pays (`credentials`): own-key (stored `visitor` until the rename's step 2, then `own`) when the request that creates the run
+ * Who pays (`credentials`): `own` when the request that creates the run
  * carries `keys`, else `voluma`. It never changes afterwards, and an own-key
  * run never falls back to Voluma's model credentials. An account without Voluma's key
  * (`Me.volumaKey` false: a guest) may only start own-key runs: a start without `keys` is
@@ -269,11 +269,8 @@ export const runSchema = z.object({
   selectedOutputs: selectedOutputsSchema.optional(),
   /** Free text the user added at the start; the workflow's main thread reads it. */
   notes: z.string().max(4000).optional(),
-  /**
-   * Who pays for models and sandboxes; see the header. `visitor` is the old stored name of `own`
-   * (renamed in three deploys, `apps/api/.context/TODO.md`); readers test only `"voluma"`.
-   */
-  credentials: z.enum(["voluma", "own", "visitor"]),
+  /** Who pays for models and sandboxes; see the header. Readers test only `"voluma"`. */
+  credentials: z.enum(["voluma", "own"]),
   /**
    * The model every role of the run uses, chosen by the API when the run is created (see the
    * header). Absent on runs made before the choice existed: the runner then uses its own

@@ -8,6 +8,7 @@ import { type OwnKeys, ownKeysSchema, type Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
 
+// The name keeps "visitor" on purpose: renaming the key drops every user's saved keys.
 const storageKey = (userId: string) => `voluma.visitor-keys.${userId}`;
 
 /** The keys this user saved in this browser; stored text that doesn't parse is dropped. */

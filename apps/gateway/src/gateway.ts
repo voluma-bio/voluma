@@ -177,7 +177,7 @@ export function createGateway(deps: GatewayDeps) {
     if (!claims) throw new Refused(401, "invalid or expired token");
     if (!claims.providers.includes(provider)) throw new Refused(403, `no access to ${provider}`);
     // An own-key token holds the starter's keys and nothing falls back to ours.
-    const ownKeys = claims.ownKeys ?? claims.visitorKeys;
+    const ownKeys = claims.ownKeys;
     const key = ownKeys ? ownKeys[provider] : keys[provider];
     if (!key) throw new Refused(403, `no ${provider} key for this token`);
     const method = req.method ?? "GET";
