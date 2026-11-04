@@ -36,7 +36,6 @@ import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progre
 import {
   answerApproval,
   decideMessage,
-  endCorrection,
   messageRefusal,
   messageTargetOf,
   openCorrection,
