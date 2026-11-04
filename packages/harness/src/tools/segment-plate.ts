@@ -47,7 +47,9 @@ export function segmentPlateTool(layout: ThreadLayout): Tool<typeof input> {
       "`plate-annotations.json` (annotation A `growth_plate_curves` and C `growth_plate_distal_curves`, with the grid_id; no " +
       "points where it is flagged), `plate-faces.json` (`stretches`, the flagged columns: where the checkpoints disagree, too " +
       "few found the plate, or a face is off the tibia mask; `covered`, the V range and each section's U span) and " +
-      "`qc-plate-<n>.jpg`, plus `plate-model.npz`, the model's reply. Returns the result record. A call takes about a minute " +
+      "`qc-plate-<n>.jpg`, plus `plate-model.npz`, the model's reply, and `plate-band.npz`, its band as pieces (`pieces` in " +
+      "plate-faces.json; `suspects` in the record: pieces with faces on a small separate bone, such as the fibula, for prune_plate.py). " +
+      "Returns the result record. A call takes about a minute " +
       "(up to half a minute more when the model has been idle). It is a proposal, checked and retraced like plate_faces.py's. " +
       "If it returns an error, run plate_faces.py instead. " +
       `${layout.description}`,

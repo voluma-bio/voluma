@@ -37,7 +37,7 @@ on.
 | # | Do | Script | Look at |
 |---|---|---|---|
 | 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` (it refuses a femur passed as the tibia, and a `--joint-end` on the wrong side: fix the labels or the flag it names) | `tibia-frame-qc.jpg`: coronal sections, joint at top, the tibial plateau at the top of the outline (not the femoral condyles and the notch between them), the fibula beside the shaft, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
-| 2 | Propose the growth plate's two faces, check them, and trace the proximal face (annotation A) | `segment_plate` (`plate_faces.py` only when it is not in your tools or returns an error), then you write `annotations.json` | `qc-plate-<n>.jpg`: every proposed section (the default), each framed on the U span the proposal covered, flagged stretches ticked red; then zoomed coronal sections of `tibia-hu.npy` with a pixel grid over each flagged or wrong stretch, and over each stretch you trace beyond the spans |
+| 2 | Propose the growth plate's two faces, check them, and trace the proximal face (annotation A) | `segment_plate` (`plate_faces.py` only when it is not in your tools or returns an error), `prune_plate.py` for strays, then you write `annotations.json` | `qc-plate-<n>.jpg`: every proposed section (the default), each framed on the U span the proposal covered, flagged stretches ticked red, suspect band pieces named in the title; `qc-prune-<n>.jpg` for what you pruned; then zoomed coronal sections of `tibia-hu.npy` with a pixel grid over each flagged or wrong stretch, and over each stretch you trace beyond the spans |
 | 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`; the later tibial steps read ROI-1 and its faces) | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc), and every `qc-faces-<n>.jpg`: the proximal face as delivered, on every traced section, which you open sheet by sheet before you report |
 | 4 | Trace the boundary under the subchondral plate (annotation B) | you | coronal sections with the ROI-1 outline |
 | 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py` | `qc-coronal.jpg` against `examples/README.md` (trabecular-roi) |
@@ -81,8 +81,14 @@ schema is `regions-and-landmarks`'):
   (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
   The proposal is a model's, not a trace: it follows the plate well across the middle of the tibia and goes wrong in known ways. On the first
   and last few sections in V, where the plate is partial, it can draw a full-width line through other bone, its largest errors: open those
-  sections first. A stray band piece on separate bone can be bridged into the line: look for a long straight stretch or a jump to another
-  bone. Its band can thin to about a voxel and its thickness was never checked against an expert, so check the distal face as hard as the
+  sections first. A stray band piece on separate bone can be bridged into the line. `plate-faces.json` lists the model's band pieces
+  (`pieces`) and marks `suspect` the ones with faces on them that lie on a small separate part of the tibia mask; the QC sheet names them
+  in its title. Open each suspect's section: a band piece on the fibula (thin bone beside the tibia) is a stray, drop it. A fibula the
+  section's mask joins to the tibia is never marked suspect: look beside the tibia on every section too. Take strays
+  out with `prune_plate.py` (`--help`) before you trace: `--drop-pieces` for a stray that is its own piece, `--cut` for a U range where a
+  stray is joined to the plate by a bridge of band (one piece, so dropping it would drop the plate too), or for any stretch of the line
+  that is on the wrong bone. It only removes points, from both faces at once, and lists each range it emptied: trace the ones that are
+  plate, and report its drops and cuts with the faces. Look also for a long straight stretch or a jump to another bone. Its band can thin to about a voxel and its thickness was never checked against an expert, so check the distal face as hard as the
   proximal one. Untested, so yours to trace: an eroded or bridged plate (expect a plausible band drawn through the erosion; mark
   `plate_eroded` as below), the wrap down the condyles at the ends (it runs straight there), and coverage out to the U and V ends.
   `plate_faces.py`'s proposal, when you use it, goes wrong differently: it jumps up into dark marrow spaces of the epiphysis and draws a

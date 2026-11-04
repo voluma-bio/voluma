@@ -34,7 +34,7 @@ range and each section's U span are in `plate-faces.json`), and the metaphyseal-
 starts: the faces must follow the plate over the whole tibia at plate level, past each span end and on the sections with no span, out to the V
 ends. A worker checks its faces against these: each lies on the plate's two edges, a few voxels apart, on every section; every flagged
 stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has been looked at on a zoomed view and retraced where wrong, with points the worker read off the view
-wherever it opens a gap wider than `max_gap_um`. The positions are read by looking: code may write them down, but a detector or interpolator choosing them is not tracing, and
+wherever it opens a gap wider than `max_gap_um`; every suspect band piece (named in the sheet's title) has been opened, and faces on a stray (the fibula, another bone) taken out with `prune_plate.py`. The positions are read by looking: code may write them down, but a detector or interpolator choosing them is not tracing, and
 `iioc.py` and `metaphysis_roi.py` passing (they stop on points or sections more than `max_gap_um` apart over bone, or short of its ends, in U or V, and on points off the tibia) does not mean the face is on the plate.
 The plate is a thin sheet of lower density between denser bone, and it is not
 always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong. The right face follows the
