@@ -3,7 +3,7 @@
  * their answers to the calls main holds (`answerApproval`). A message carries the words, the mark
  * changes waiting for it (`useRunMarks`'s `changes`, by id: the API freezes them from the log), the
  * output in view, the view as Save view would keep it, a picture of the panes when the researcher
- * leaves "as you see it" on, and the To check item it answers ("Tell main what's wrong"). Nothing
+ * leaves "as you see it" on, and the To check item it answers ("Tell the AI what's wrong"). Nothing
  * reaches main until Send, and a send waits for the writes of the marks it names: if one fails,
  * the message stays unsent. A send or an answer to an ended run reopens it: the page reconnects its
  * stream and reads the run again (`onSent`).
@@ -32,7 +32,7 @@ import type { SceneHandle } from "./viewer";
 function refusal(error: Error, what: "message" | "answer"): string {
   // Every mark named is as main last saw it, and there are no words.
   if (error instanceof ApiError && error.serverMessage?.startsWith("Nothing new to send"))
-    return "Main already has your marks as they are. Write something, or change a mark, to send.";
+    return "The AI already has your marks as they are. Write something, or change a mark, to send.";
   return refusalOf(error, (status) => {
     switch (status) {
       case 400:

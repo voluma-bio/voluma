@@ -10,7 +10,7 @@ import { useState } from "react";
 import { Markdown } from "./chat/markdown";
 
 export type ApprovalCardProps = {
-  /** What the call is, in words: "Start a worker". */
+  /** What the call is, in words: "Publish a new version". */
   title: string;
   /** What it would do, as code wrote it. */
   summary: string;
@@ -142,13 +142,12 @@ export function ApprovalCard({
 }
 
 /** A held call in words, by the tool main called: what it is, and what Yes says. */
-export function approvalWords(tool: string, args: unknown): { title: string; yes: string } {
-  const name = (args as { name?: unknown } | null)?.name;
+export function approvalWords(tool: string): { title: string; yes: string } {
   switch (tool) {
     case "start_worker":
       return {
-        title: "Start a worker",
-        yes: typeof name === "string" ? `Yes, start ${name}` : "Yes, start it",
+        title: "Hand part of the work to another AI",
+        yes: "Yes, start it",
       };
     case "report_output":
       return { title: "Publish a new version", yes: "Yes, publish it" };
@@ -157,6 +156,6 @@ export function approvalWords(tool: string, args: unknown): { title: string; yes
     case "keep_output":
       return { title: "Keep as they are", yes: "Yes, keep them" };
     default:
-      return { title: tool, yes: "Yes" };
+      return { title: "A change the AI asks to make", yes: "Yes" };
   }
 }

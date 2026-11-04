@@ -1,15 +1,15 @@
 /** A slice pane's picture: the image in grey between its contrast limits, overlays blended on top. */
 import { Color } from "three";
 import type { Plane } from "./planes";
-import { type Axis, type Overlay, planeAxes } from "./scene";
+import { type Axis, type Overlay, type OverlayStyle, planeAxes } from "./scene";
 
 export type Contrast = { low: number; high: number };
 /** An overlay's plane, at its own level (`scale`) and crop offset. */
 export type OverlayPlane = { overlay: Overlay; plane: Plane; scale: number };
 
 const OVERLAY_ALPHA = 0.45;
-/** An outlined region's fill; its edge is opaque. */
-const OUTLINED_ALPHA = 0.65;
+/** A highlighted region's fill; its edge is opaque. */
+const HIGHLIGHT_ALPHA = 0.65;
 
 const rgbCache = new Map<string, [number, number, number]>();
 function rgb(color: string): [number, number, number] {
@@ -79,16 +79,17 @@ export function composeSampled(
 
 /**
  * Blends an overlay's values, one per pixel of a picture `cols` wide, into its visible pixels:
- * each value's colour at its opacity, nothing for 0 or an uncoloured label. An outlined value is
- * filled stronger, and opaque where a 4-neighbour inside the picture holds another value.
+ * each value's colour at its opacity, nothing for 0 or an uncoloured label. Its style
+ * (`OverlayStyle`) says how strongly the inside is filled; a highlighted or outlined value is
+ * opaque where a 4-neighbour inside the picture holds another value.
  */
 function blend(rgba: Uint8Array, cols: number, overlay: Overlay, values: ArrayLike<number>) {
   const single = typeof overlay.color === "string" ? rgb(overlay.color) : null;
   const byLabel = typeof overlay.color === "string" ? null : overlay.color;
   const opacityOf = (value: number) =>
     typeof overlay.opacity === "number" ? overlay.opacity : (overlay.opacity[value] ?? 1);
-  const outlined = (value: number) =>
-    typeof overlay.outline === "object" ? !!overlay.outline[value] : !!overlay.outline;
+  const styleOf = (value: number): OverlayStyle =>
+    (typeof overlay.style === "object" ? overlay.style[value] : overlay.style) ?? "fill";
   const rows = values.length / cols;
   // NaN off a resliced picture counts as no value.
   const at = (i: number) => values[i]! || 0;
@@ -98,8 +99,9 @@ function blend(rgba: Uint8Array, cols: number, overlay: Overlay, values: ArrayLi
     const hex = byLabel?.[value];
     const color = single ?? (hex ? rgb(hex) : null);
     if (!color) continue;
+    const style = styleOf(value);
     let a = OVERLAY_ALPHA;
-    if (outlined(value)) {
+    if (style !== "fill") {
       const r = Math.floor(i / cols);
       const c = i - r * cols;
       const edge =
@@ -107,9 +109,10 @@ function blend(rgba: Uint8Array, cols: number, overlay: Overlay, values: ArrayLi
         (r < rows - 1 && at(i + cols) !== value) ||
         (c > 0 && at(i - 1) !== value) ||
         (c < cols - 1 && at(i + 1) !== value);
-      a = edge ? 1 : OUTLINED_ALPHA;
+      a = edge ? 1 : style === "highlight" ? HIGHLIGHT_ALPHA : 0;
     }
     a *= opacityOf(value);
+    if (!a) continue;
     const o = i * 4;
     rgba[o] = rgba[o]! * (1 - a) + color[0] * a;
     rgba[o + 1] = rgba[o + 1]! * (1 - a) + color[1] * a;

@@ -18,7 +18,7 @@
  * is shown; on a grid with nothing to fit (or a failed fit) its slot shows the view GP replaced. Planes are coloured by the anatomy the grid's
  * catalog entry gives (`planes`), a tilted one by the grid plane nearest it, else left uncoloured.
  */
-import type { Anatomy } from "@voluma/contracts/output-catalog";
+import { type Anatomy, unitAsWritten } from "@voluma/contracts/output-catalog";
 import { Button, cx, IconButton, Menu, MenuItem, Popover } from "@voluma/ui";
 import {
   Axis3d,
@@ -196,6 +196,7 @@ const Key = ({ children }: { children: ReactNode }) => (
   <kbd className="font-mono text-foreground">{children}</kbd>
 );
 const capital = (word: string) => word[0]!.toUpperCase() + word.slice(1);
+const lower = (name: string) => name.charAt(0).toLowerCase() + name.slice(1);
 
 /** The gap between panes, in px: the seams. */
 const GAP = 4;
@@ -266,6 +267,8 @@ export function QuadViewer({
   const [status, setStatus] = useState<Partial<Record<QuadView, PaneStatus>>>({});
   const [split, setSplit] = useState({ col: 0.5, row: 0.5 });
   const [orientation, setOrientation] = useState<Orientation>(GRID);
+  // Whether 3D outlines where the three slices cut the grid (the Planes popover's first item).
+  const [planesIn3d, setPlanesIn3d] = useState(true);
   const [aligned, setAligned] = useState<{ id: string; name: string } | null>(null);
   const [aligning, setAligning] = useState<string>();
   const [alignError, setAlignError] = useState<string>();
@@ -471,7 +474,17 @@ export function QuadViewer({
     const a = anatomyOf(view);
     return a ? ANATOMY[a] : NEUTRAL;
   };
-  const labelOf = (view: QuadView) => (view === "gp" ? (plateTarget?.code ?? "GP") : LABEL[view]);
+  /** The grid's own code for a view: XY, XZ, YZ, or the fitted plane's ("GP"). */
+  const codeOf = (view: QuadView) => (view === "gp" ? (plateTarget?.code ?? "GP") : LABEL[view]);
+  /**
+   * A view's name: the anatomical plane where the grid's catalog entry says which it is, the
+   * fitted plane's name for GP, else the grid's code.
+   */
+  const labelOf = (view: QuadView) => {
+    if (view === "gp") return plateTarget ? capital(plateTarget.name.replace(/^the /, "")) : "GP";
+    const anatomy = view === "3d" ? undefined : planes?.[PLANE_OF[FRAME[view]]];
+    return anatomy ? capital(anatomy) : LABEL[view];
+  };
 
   const cols = layout.full || layout.count === 1 ? "1fr" : `${split.col}fr ${1 - split.col}fr`;
   const rows = layout.full || layout.count < 4 ? "1fr" : `${split.row}fr ${1 - split.row}fr`;
@@ -625,13 +638,17 @@ export function QuadViewer({
             pane = (
               <Grid3D
                 scene={scene}
-                planes={{
-                  at: point,
-                  cuts: ([0, 1, 2] as const).map((axis) => ({
-                    normal: orientation[axis].normal,
-                    color: tokenColor(planeToken(axis) ?? axisToken(axis)),
-                  })),
-                }}
+                planes={
+                  planesIn3d
+                    ? {
+                        at: point,
+                        cuts: ([0, 1, 2] as const).map((axis) => ({
+                          normal: orientation[axis].normal,
+                          color: tokenColor(planeToken(axis) ?? axisToken(axis)),
+                        })),
+                      }
+                    : undefined
+                }
                 contrast={contrast}
                 onPoint={setPoint}
                 handle={handles[view]!}
@@ -733,6 +750,7 @@ export function QuadViewer({
                   layout={layout}
                   styleOf={styleOf}
                   labelOf={labelOf}
+                  codeOf={codeOf}
                   plate={plateTarget}
                   onPick={(next) => pick(slot, next)}
                 />
@@ -746,121 +764,120 @@ export function QuadViewer({
       <div
         role="toolbar"
         aria-label="Tools"
-        className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-2 py-1.5"
+        className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border bg-card px-2 py-1"
       >
         {children}
         <span className="flex-1" />
-        {(lie || gridName) && (
-          <span
-            className="truncate text-xs text-muted-foreground"
-            role="status"
-            title={lie ?? "The planes lie on this grid's axes"}
-          >
-            {lie ?? gridName}
+        {lie && (
+          <span className="truncate text-xs text-muted-foreground" role="status">
+            {lie}
           </span>
         )}
-        {targets.length > 0 && (
-          <Menu
-            align="end"
-            className="w-72"
-            trigger={
-              <IconButton label="Align the planes" size="sm" disabled={!!aligning}>
-                <Axis3d />
-              </IconButton>
-            }
-          >
-            {gridName && (
-              <MenuItem disabled={!lie} onSelect={reset}>
-                <span className="flex items-baseline justify-between gap-3">
-                  <span>Along the {gridName.charAt(0).toLowerCase() + gridName.slice(1)}</span>
-                  <span className="text-xs text-fg-subtle">Measured on</span>
-                </span>
-              </MenuItem>
-            )}
-            {targets.map((t) => (
-              <MenuItem
-                key={t.id}
-                disabled={!t.load}
-                icon={t.code ? <span className="font-mono text-[10px]">{t.code}</span> : undefined}
-                onSelect={() => void align(t)}
-              >
-                <span className="flex items-baseline justify-between gap-3">
-                  <span>Along {t.name}</span>
-                  {(t.reason ?? t.tag) && (
-                    <span className="text-xs text-fg-subtle">{t.reason ?? t.tag}</span>
-                  )}
-                </span>
-              </MenuItem>
-            ))}
-          </Menu>
-        )}
         <Popover
-          label="Turn the planes"
+          label="Planes"
           align="end"
           side="top"
-          className="w-auto"
+          className="w-80"
           trigger={
-            <IconButton label="Turn the planes" size="sm">
-              <Rotate3d />
-            </IconButton>
+            <Button size="sm" variant="ghost" disabled={!!aligning}>
+              <Rotate3d aria-hidden />
+              Planes
+            </Button>
           }
         >
-          <div className="grid gap-2 text-xs">
-            {(["xy", "xz", "yz"] as const).map((view) => {
-              const axis = FRAME[view];
-              const anatomy = anatomyOf(view);
-              const name = anatomy ? `${capital(anatomy)} (${LABEL[view]})` : LABEL[view];
-              return (
-                <div key={view} className="flex items-center gap-1">
-                  <span className={cx("size-3 shrink-0 rounded-[2px]", styleOf(view).swatch)} />
-                  <span className="mr-auto pr-3 pl-1">{name}</span>
-                  {TURNS.map((by) => (
-                    <Button
-                      key={by}
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Turn the ${anatomy ?? LABEL[view]} image ${Math.abs(by)}° ${by < 0 ? "anticlockwise" : "clockwise"}`}
-                      onClick={() => spins[axis]!((by * Math.PI) / 180)}
-                    >
-                      {by < 0 ? <RotateCcw /> : <RotateCw />}
-                      {Math.abs(by)}°
-                    </Button>
-                  ))}
-                </div>
-              );
-            })}
-            <p className="text-muted-foreground">
-              Alt-drag in a slice turns it; <Key>,</Key> <Key>.</Key> by 1°, with Shift 0.1°
+          <div className="grid gap-3 text-xs">
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={planesIn3d}
+                onChange={(event) => setPlanesIn3d(event.target.checked)}
+              />
+              Show the planes in 3D
+            </label>
+            <p role="status" className="font-medium text-sm">
+              {lie ?? (gridName ? `Along the ${lower(gridName)}` : "On the grid's axes")}
             </p>
-            <p role="status">{lie ?? "On the grid's axes"}</p>
+            {targets.length > 0 && (
+              <section className="grid gap-0.5">
+                <h3 className="pb-1 text-muted-foreground">Align the planes</h3>
+                {targets.map((t) => (
+                  <Button
+                    key={t.id}
+                    size="sm"
+                    variant="ghost"
+                    className="justify-between"
+                    disabled={!t.load || !!aligning}
+                    onClick={() => void align(t)}
+                  >
+                    <span>Along {t.name}</span>
+                    {(t.reason ?? t.tag) && (
+                      <span className="font-normal text-fg-subtle text-xs">
+                        {t.reason ?? t.tag}
+                      </span>
+                    )}
+                  </Button>
+                ))}
+              </section>
+            )}
+            <section className="grid gap-1">
+              <h3 className="pb-1 text-muted-foreground">Turn one view's image</h3>
+              {(["xy", "xz", "yz"] as const).map((view) => {
+                const axis = FRAME[view];
+                const name = labelOf(view);
+                return (
+                  <div key={view} className="flex items-center gap-1">
+                    <span className={cx("size-3 shrink-0 rounded-[2px]", styleOf(view).swatch)} />
+                    <span className="mr-auto pr-3 pl-1">{name}</span>
+                    {TURNS.map((by) => (
+                      <Button
+                        key={by}
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`Turn the ${name} image ${Math.abs(by)}° ${by < 0 ? "anticlockwise" : "clockwise"}`}
+                        onClick={() => spins[axis]!((by * Math.PI) / 180)}
+                      >
+                        {by < 0 ? <RotateCcw /> : <RotateCw />}
+                        {Math.abs(by)}°
+                      </Button>
+                    ))}
+                  </div>
+                );
+              })}
+              <p className="text-muted-foreground">
+                Alt-drag in a slice turns it; <Key>,</Key> <Key>.</Key> by 1°, with Shift 0.1°
+              </p>
+            </section>
+            <Button size="sm" disabled={!lie} onClick={reset} className="justify-self-start">
+              <RotateCcw aria-hidden />
+              {gridName ? `Back along the ${lower(gridName)}` : "Back to the grid's axes"}
+            </Button>
           </div>
         </Popover>
-        <IconButton label="Back to the grid's axes" size="sm" disabled={!lie} onClick={reset}>
-          <RotateCcw />
-        </IconButton>
         {contrast && (
           <Popover
-            label="Window"
+            label="Contrast"
             align="end"
             side="top"
             className="w-auto"
             trigger={
-              <IconButton label="Window" size="sm">
-                <SunMedium />
-              </IconButton>
+              <Button size="sm" variant="ghost">
+                <SunMedium aria-hidden />
+                Contrast
+              </Button>
             }
           >
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <NumberField
-                label="Window low"
+                label="Black at"
                 value={contrast.low}
                 onCommit={(low) => setContrast({ ...contrast, low })}
               />
               <NumberField
-                label="high"
+                label="White at"
                 value={contrast.high}
                 onCommit={(high) => setContrast({ ...contrast, high })}
               />
+              {scene.imageUnit && <span>{unitAsWritten(scene.imageUnit)}</span>}
             </div>
           </Popover>
         )}
@@ -868,9 +885,9 @@ export function QuadViewer({
           <legend className="sr-only">Panes</legend>
           {(
             [
-              [1, "One pane", <Square key="1" />],
-              [2, "Two panes", <Columns2 key="2" />],
-              [4, "Four panes", <Grid2x2 key="4" />],
+              [1, "One view", <Square key="1" />],
+              [2, "Two views", <Columns2 key="2" />],
+              [4, "Four views", <Grid2x2 key="4" />],
             ] as const
           ).map(([count, label, icon]) => (
             <IconButton
@@ -886,9 +903,10 @@ export function QuadViewer({
           ))}
         </fieldset>
         {onSave && (
-          <IconButton label="Save view" size="sm" onClick={save}>
-            <Bookmark />
-          </IconButton>
+          <Button size="sm" onClick={save}>
+            <Bookmark aria-hidden />
+            Save view
+          </Button>
         )}
       </div>
     </section>
@@ -902,6 +920,7 @@ function ViewChip({
   layout,
   styleOf,
   labelOf,
+  codeOf,
   plate,
   onPick,
 }: {
@@ -910,6 +929,7 @@ function ViewChip({
   layout: QuadLayout;
   styleOf(view: QuadView): { swatch: string };
   labelOf(view: QuadView): string;
+  codeOf(view: QuadView): string;
   /** The fitted plane GP shows; none, and GP isn't offered. */
   plate: PlaneTarget | undefined;
   onPick(view: QuadView): void;
@@ -926,7 +946,7 @@ function ViewChip({
           type="button"
           aria-label={`${labelOf(view)}: show another view in this pane`}
           className={cx(
-            "flex h-6 cursor-pointer items-center gap-0.5 rounded-sm pr-1 pl-1.5 font-mono text-xs font-medium",
+            "flex h-6 cursor-pointer items-center gap-0.5 rounded-sm pr-1 pl-1.5 text-xs font-medium",
             look,
           )}
         >
@@ -946,9 +966,9 @@ function ViewChip({
           >
             <span className="flex items-baseline justify-between gap-3">
               <span>
-                <span className="font-mono">{labelOf(v)}</span>
-                {v === "gp" && plate && (
-                  <span className="ml-2 text-xs text-muted-foreground">along {plate.name}</span>
+                {labelOf(v)}
+                {labelOf(v) !== codeOf(v) && (
+                  <span className="ml-2 font-mono text-xs text-muted-foreground">{codeOf(v)}</span>
                 )}
               </span>
               <span className="text-xs text-fg-subtle">

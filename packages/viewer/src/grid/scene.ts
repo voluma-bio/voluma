@@ -62,12 +62,16 @@ export type Overlay = ZarrSource & {
   color: string | Readonly<Record<number, string>>;
   /** 0 to 1, of the overlay's full blend: one for the mask, or one per label value (default 1). */
   opacity: number | Readonly<Record<number, number>>;
-  /**
-   * The subject's own region, for every value or per label value: filled stronger, and a pixel
-   * whose 4-neighbour holds another value of this overlay is painted at full opacity.
-   */
-  outline?: boolean | Readonly<Record<number, boolean>>;
+  /** How each value is drawn on the slices, for every value or per label value (default `fill`). */
+  style?: OverlayStyle | Readonly<Record<number, OverlayStyle>>;
 };
+
+/**
+ * `fill`: a see-through fill. `highlight` (the subject's own region, a check's): filled stronger,
+ * and a pixel whose 4-neighbour holds another value of this overlay is painted at full opacity.
+ * `outline`: only those edge pixels, so the image inside stays readable.
+ */
+export type OverlayStyle = "fill" | "highlight" | "outline";
 
 /** float32 vertices (x, y, z) in source voxels, then uint32 indices, little-endian. */
 export type GridMesh = {
@@ -105,6 +109,8 @@ export type GridScene = {
   shapeZyx: Zyx;
   /** mm per voxel along z, y, x: the norms of the affine's columns. */
   spacingZyx: Zyx;
+  /** Whether the run published the grid's geometry; without it the spacing is one per voxel, not mm. */
+  measured?: boolean;
   image: ZarrSource;
   /** What the image's values are (`"HU"`), for the probe; null or absent when unitless. */
   imageUnit?: string | null;

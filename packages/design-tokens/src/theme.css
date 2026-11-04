@@ -71,6 +71,7 @@
   --color-viewer-well: var(--viewer-well);
   --color-viewer-chip: var(--viewer-chip);
   --color-viewer-chip-fg: var(--viewer-chip-fg);
+  --color-scale-bar: var(--scale-bar);
   --color-plane-coronal: var(--plane-coronal);
   --color-plane-sagittal: var(--plane-sagittal);
   --color-plane-axial: var(--plane-axial);

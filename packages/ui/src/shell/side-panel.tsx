@@ -262,7 +262,7 @@ function Tabs({
             title={t.label}
             onClick={() => onChange(t.id)}
             className={cx(
-              "inline-flex h-6.5 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring @max-[260px]:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0",
+              "inline-flex h-6.5 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring @max-[340px]:px-1.5 @min-[260px]:@max-[340px]:[&_svg]:hidden [&_svg]:size-3.5 [&_svg]:shrink-0",
               on
                 ? "bg-secondary font-medium text-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-foreground",

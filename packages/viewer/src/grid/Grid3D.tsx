@@ -19,7 +19,7 @@
  * Each frame renders the meshes into a target with depth, copies it to the canvas, then
  * ray-marches the volume, if any, over it (`volume.ts`).
  */
-import { Button, cx, IconButton } from "@voluma/ui";
+import { cx, IconButton } from "@voluma/ui";
 import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -100,7 +100,6 @@ export function Grid3D({
   onStatus(status: PaneStatus): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
-  const [planesShown, setPlanesShown] = useState(true);
   const three = useRef<{
     meshes: Group;
     annotations: Scene;
@@ -535,7 +534,7 @@ export function Grid3D({
   const planesKey = planes && JSON.stringify(planes);
   useEffect(() => {
     const t = three.current;
-    if (!t || !planes || !planesShown) return;
+    if (!t || !planes) return;
     const objects: (LineLoop | Mesh)[] = [];
     for (const { normal, color } of planes.cuts) {
       const corners = planeOutline(normal, planes.at, scene.shapeZyx, scene.spacingZyx);
@@ -570,7 +569,7 @@ export function Grid3D({
       }
       t.render();
     };
-  }, [planesKey, planesShown, scene.shapeZyx, scene.spacingZyx]);
+  }, [planesKey, scene.shapeZyx, scene.spacingZyx]);
 
   useEffect(() => {
     const t = three.current;
@@ -789,18 +788,6 @@ export function Grid3D({
           <span className={cx(CHIP, "static")} role="status">
             {chip}
           </span>
-        )}
-        {planes && (
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-pressed={planesShown}
-            title="Show where the three slices cut the knee"
-            className="bg-viewer-chip text-viewer-chip-fg hover:bg-viewer-well hover:text-viewer-chip-fg aria-pressed:bg-viewer-chip aria-pressed:text-viewer-chip-fg"
-            onClick={() => setPlanesShown((shown) => !shown)}
-          >
-            {planesShown ? "Hide planes" : "Show planes"}
-          </Button>
         )}
         <IconButton
           size="sm"

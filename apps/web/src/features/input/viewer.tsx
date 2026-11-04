@@ -8,12 +8,14 @@
  */
 import { reviewAssetUrl } from "@voluma/api-client";
 import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
-import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
+import { Button, EmptyState, ErrorState, Menu, MenuItem, SegmentedControl } from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
   type GridPlanes,
   type GridScene,
+  type LabelDisplay,
+  type LegendEntry,
   labelsBox,
   type MarkEdit,
   type MarkPlane,
@@ -31,6 +33,7 @@ import {
   type VoxelBox,
   type Zyx,
 } from "@voluma/viewer/grid";
+import { ChevronDown } from "lucide-react";
 import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { gridKeyOf, type ShownGrid, TOOLS, type YourMark } from "./marking";
 
@@ -48,6 +51,8 @@ export function SceneViewer({
   onJumped,
   onMark,
   onShown,
+  display,
+  onLegend,
   quad,
 }: {
   runId: string;
@@ -69,6 +74,10 @@ export function SceneViewer({
   onMark: (mark: GridMark, volumeId: string, gridKey: string, plane?: MarkPlane | null) => void;
   /** The mounted output and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
+  /** How the labels and the output's own regions are drawn (the Segmentation panel). */
+  display: LabelDisplay;
+  /** What each colour drawn on the shown grid is; undefined while none is shown. */
+  onLegend: (legend: LegendEntry[] | undefined) => void;
   /** The four panes' layout, which holds across grids, and each grid's planes by the image's id. */
   quad: {
     layout: QuadLayout;
@@ -93,24 +102,26 @@ export function SceneViewer({
     ref?: Ref<SceneHandle>;
   };
 }) {
-  const [labels, setLabels] = useState(true);
   const grid = useMemo(
     () =>
       reviewGrid({
         revision,
         shown: subject.shown,
         assets,
-        labels,
+        display,
         focus,
         // The zarr reader resolves level paths against this, so it is absolute.
         assetBase: (sha256) =>
           new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href,
         token: tokenColor,
       }),
-    [runId, revision, subject.shown, assets, labels, focus],
+    [runId, revision, subject.shown, assets, display, focus],
   );
+  const legend = grid.state === "ready" ? grid.legend : undefined;
+  useEffect(() => onLegend(legend), [legend, onLegend]);
+  useEffect(() => () => onLegend(undefined), [onLegend]);
   // A focused label has no extent in the run's data: find it on the grid. Keyed by what it
-  // reads, since `grid` is rebuilt whenever Labels is toggled.
+  // reads, since `grid` is rebuilt whenever the display changes.
   const focusLabels = grid.state === "ready" ? grid.focusLabels : undefined;
   const labelsKey = focusLabels && `${focusLabels.source.base}|${focusLabels.labels.join()}`;
   const latestLabels = useRef(focusLabels);
@@ -126,7 +137,7 @@ export function SceneViewer({
     return () => abort.abort();
   }, [labelsKey]);
   // Where the item is and the region the panes frame. A new object per item selection or found
-  // region, so the panes move then and not when Labels is toggled.
+  // region, so the panes move then and not when the display changes.
   const labelsFound = labelsFocus?.for === labelsKey ? labelsFocus?.box : undefined;
   const region =
     grid.state !== "ready"
@@ -231,28 +242,9 @@ export function SceneViewer({
     [gridKey, subject.id, shownReady, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
-  // The marking tools and the Labels toggle, on the shown viewer's bar.
-  const bar = (on: boolean) =>
-    on && (
-      <>
-        {onTool && (
-          <SegmentedControl
-            label="Marking tool"
-            options={TOOLS.map((t) => ({
-              value: t.value,
-              label: t.label,
-            }))}
-            className="flex-wrap"
-            value={tool ?? "navigate"}
-            onValueChange={(v) => onTool(v === "navigate" ? null : v)}
-          />
-        )}
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} />
-          Labels
-        </label>
-      </>
-    );
+  // The marking tools, on the shown viewer's bar: the ones a reviewer points with named, the
+  // measuring ones under More tools.
+  const bar = (on: boolean) => on && onTool && <ToolBar tool={tool} onTool={onTool} />;
   // One tree shape whether or not this subject's grid is ready, so the kept viewers never remount.
   return (
     <>
@@ -342,3 +334,57 @@ const keep = (had: Kept[], live: View | undefined, revision: Blocks): Kept[] => 
   const ready = had.find((k) => k.key === live.key)?.ready ?? false;
   return [...others, { ...live, ready }].slice(-MAX_KEPT);
 };
+
+/** Tools named on the bar; the rest are under More tools. */
+const NAMED = new Set<MarkTool | "navigate">(["navigate", "point", "line"]);
+
+function ToolBar({
+  tool,
+  onTool,
+}: {
+  tool: MarkTool | null;
+  onTool: (tool: MarkTool | null) => void;
+}) {
+  const value = tool ?? "navigate";
+  const more = TOOLS.filter((t) => !NAMED.has(t.value));
+  const picked = more.find((t) => t.value === value);
+  return (
+    <>
+      <SegmentedControl
+        label="Marking tool"
+        options={TOOLS.filter((t) => NAMED.has(t.value)).map((t) => ({
+          value: t.value,
+          label: t.short,
+        }))}
+        value={value}
+        onValueChange={(v) => onTool(v === "navigate" ? null : v)}
+      />
+      <Menu
+        align="start"
+        trigger={
+          <Button size="sm" variant="ghost" aria-pressed={!!picked}>
+            {picked ? (
+              <>
+                {picked.icon}
+                {picked.short}
+              </>
+            ) : (
+              "More tools"
+            )}
+            <ChevronDown aria-hidden />
+          </Button>
+        }
+      >
+        {more.map((t) => (
+          <MenuItem
+            key={t.value}
+            icon={t.icon}
+            onSelect={() => onTool(t.value === "navigate" ? null : t.value)}
+          >
+            {t.label}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}

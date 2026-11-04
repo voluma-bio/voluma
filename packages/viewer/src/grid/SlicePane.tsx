@@ -134,6 +134,7 @@ export function SlicePane({
   );
   const s = scene.spacingZyx;
   const host = useRef<HTMLDivElement>(null);
+  const scaleBar = useRef<HTMLDivElement>(null);
   const three = useRef<{
     renderer: WebGLRenderer;
     camera: OrthographicCamera;
@@ -333,6 +334,7 @@ export function SlicePane({
       for (const o of drawings.children) if (o.userData.dot) o.scale.setScalar(1 / v.zoom);
       renderer.render(sc, camera);
       layer.draw();
+      if (scaleBar.current) placeScale(scaleBar.current, v.zoom);
       // A tilted pane panned or zoomed out near its fine picture's edge loads a new window.
       const w = fineWindow.current;
       if (
@@ -869,7 +871,6 @@ export function SlicePane({
           ? "failed"
           : "ready";
   useEffect(() => latest.current.onStatus(status), [status]);
-  const scale = shown && Math.max(...scene.image.levels[shown.level]!.scaleZyx);
   // A tilted pane counts along the grid axis nearest its normal, primed.
   const counted = whole ? axis : nearestAxis(basis.normal);
   const sliceHelp = useId();
@@ -887,6 +888,7 @@ export function SlicePane({
     >
       <div
         className={cx(CHIP, "pointer-events-auto top-12 left-2 flex items-center gap-1")}
+        title={whole ? undefined : "Counted along the scan's nearest axis"}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <Button size="sm" variant="ghost" aria-label="Previous slice" onClick={() => step(-1)}>
@@ -894,7 +896,6 @@ export function SlicePane({
         </Button>
         {Math.round(point[counted]) + 1}
         {!whole && "′"} / {scene.shapeZyx[counted]}
-        {scale && scale > 1 && <span className="ml-2">1:{scale}</span>}
         <Button size="sm" variant="ghost" aria-label="Next slice" onClick={() => step(1)}>
           +
         </Button>
@@ -902,6 +903,15 @@ export function SlicePane({
       <span id={sliceHelp} className={cx(CHIP, "top-2 left-2")}>
         Focus slice: ↑/↓ 1 · Page Up/Down 10
       </span>
+      {/* Without the grid's geometry the pane's units are voxels: no scale to show. */}
+      <div
+        ref={scaleBar}
+        hidden={!scene.measured}
+        aria-hidden
+        className="pointer-events-none absolute bottom-2 left-2 z-10 grid justify-items-center border-scale-bar [&[hidden]]:hidden border-t-2 pt-0.5 font-mono text-scale-bar text-xs"
+      >
+        <span />
+      </div>
       {(!shown || refining) && !error && (
         <span className={cx(CHIP, "top-24 right-2 left-2")} role="status">
           {shown ? "Loading full resolution…" : "Loading…"}
@@ -927,6 +937,17 @@ export function SlicePane({
       )}
     </div>
   );
+}
+
+/** Scale bar lengths to choose from, in mm. */
+const SCALE_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20];
+
+/** Sizes the scale bar to the longest round length under 100 CSS px at `zoom` (px per mm). */
+function placeScale(bar: HTMLElement, zoom: number) {
+  const mm = [...SCALE_STEPS].reverse().find((l) => l * zoom <= 100) ?? SCALE_STEPS[0]!;
+  bar.style.width = `${mm * zoom}px`;
+  const label = mm < 1 ? `${Math.round(mm * 1000)} µm` : `${mm} mm`;
+  if (bar.firstElementChild) bar.firstElementChild.textContent = label;
 }
 
 /** The same object while its value is the same, so effects keyed on it run only on a change. */
