@@ -22,7 +22,7 @@ backlog and stays closed until a message is sent or the run resumes.
 ## Each grid keeps its viewer
 
 An output is shown on its own grid (`reviewGrid`, `viewer.tsx`'s `SceneViewer`); mouse-oa has two,
-the Scan and the aligned tibia grid. `SceneViewer` keeps one `QuadViewer` per grid shown, at most
+the Scan and the tibia long-axis grid. `SceneViewer` keeps one `QuadViewer` per grid shown, at most
 two mounted at any commit (`MAX_KEPT`: each holds four WebGL contexts, and Chrome allows 16 per
 page), and hides the others (`hidden`). One function, `keep`, decides what is kept, both for what
 mounts in a render and for the `kept` state: viewers whose image is still among the blocks, least

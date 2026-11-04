@@ -27,3 +27,10 @@
 - `QuadViewer` has one-off sizes (`text-[10px]` on the Align menu's code, `rounded-[2px]` on the
   chip swatch), and no story; neither has `NumberField`, which belongs in `@voluma/ui` with a story
   if anything outside the viewer needs it.
+- Turning the planes (#567): one window key listener in `QuadViewer` that knows the hovered or focused pane,
+  instead of one per `SlicePane` choosing by `[data-slice-pane]:hover`; share the "typing or overlay target"
+  check with `apps/web/src/features/input/marking.tsx` and the shell; fold `tilts`/`spins` in `QuadViewer`
+  into one helper; `finish()` in `slice-gestures.ts` asks "is this a marking tool" instead of listing modes.
+- 3D pane (#567): the overlay row around the status chip and reset button catches drags that start over it;
+  dispose the Arcball gizmo geometry `setTbRadius` replaces on each resize. Ask the expert whether a dial
+  turned back to 0° should count as on the grid (today the bar says "Turned 0.0°" until Reset).

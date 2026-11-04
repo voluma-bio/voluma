@@ -141,11 +141,13 @@ export type PaneView =
  */
 export type PaneStatus = "loading" | "refining" | "ready" | "failed";
 
-/** What a pane does for screenshots: its pixels as drawn now, and showing a saved view. */
+/** What a pane does for saved views and screenshots: its view now, showing a saved view, and its canvases. */
 export type PaneHandle = {
-  capture(): { pngBase64: string; width: number; height: number; view: PaneView };
-  /** The pane's own view now, without drawing. */
-  view(): PaneView;
+  /**
+   * The pane's own view now, without drawing; null for a slice pane that has never had a size
+   * (a mounted view no layout has shown yet).
+   */
+  view(): PaneView | null;
   show(view: PaneView): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
@@ -180,13 +182,3 @@ export async function pngWithin(frozen: HTMLCanvasElement, maxBytes: number): Pr
 
 /** The widest picture a snapshot is drawn at, in pixels. */
 export const SNAPSHOT_WIDTH = SNAPSHOT_WIDTHS[0]!;
-
-/** Draws the pane now and reads its canvas, before the browser clears the drawing buffer. */
-export function capturePane(canvas: HTMLCanvasElement, draw: () => void) {
-  draw();
-  return {
-    pngBase64: canvas.toDataURL("image/png").slice("data:image/png;base64,".length),
-    width: canvas.width,
-    height: canvas.height,
-  };
-}

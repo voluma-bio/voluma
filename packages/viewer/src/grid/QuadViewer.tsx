@@ -5,11 +5,13 @@
  * trades the two panes. A view is shown at most once. Every view stays mounted and only moves
  * between grid cells, so a swap, a layout change or full screen keeps its camera, zoom and loaded
  * data. The tool bar is docked under the panes: the caller's tools on the left; how far the
- * planes are turned, Align, Reset, the window, the 1/2/4 layout and Save view on the right.
+ * planes are turned (or, on the grid's axes, the grid's name), Align, Turn, Reset, the window,
+ * the 1/2/4 layout and Save view on the right.
  *
- * The three planes tilt together (`frame.ts`): by hand from the dots at their crosshair lines'
- * ends, or all at once with Align (a fitted plane, another grid's axes); Reset puts them back on
- * the grid's axes. The orientation is this grid's and holds while other outputs on it are shown.
+ * The three planes turn together (`frame.ts`): tilted by hand from the dots at their crosshair
+ * lines' ends, spun by turning one pane's image in place (Alt-drag or `,` `.` in it, or Turn's
+ * buttons), or all at once with Align (a fitted plane, another grid's axes); Reset puts them back
+ * on the grid's axes. The orientation is this grid's and holds while other outputs on it are shown.
  *
  * The layout (`QuadLayout`) is the caller's, so it holds when another output, on another grid,
  * is shown; the seams' positions are this grid's. A layout naming GP fits the plane whenever GP
@@ -17,7 +19,7 @@
  * catalog entry gives (`planes`), a tilted one by the grid plane nearest it, else left uncoloured.
  */
 import type { Anatomy } from "@voluma/contracts/output-catalog";
-import { cx, IconButton, Menu, MenuItem, Popover } from "@voluma/ui";
+import { Button, cx, IconButton, Menu, MenuItem, Popover } from "@voluma/ui";
 import {
   Axis3d,
   Bookmark,
@@ -26,7 +28,9 @@ import {
   Grid2x2,
   Maximize2,
   Minimize2,
+  Rotate3d,
   RotateCcw,
+  RotateCw,
   Square,
   SunMedium,
 } from "lucide-react";
@@ -50,6 +54,7 @@ import {
   nearestAxis,
   type Orientation,
   orientationWords,
+  spin,
   tilt,
   type Vec3,
 } from "./frame";
@@ -182,12 +187,20 @@ const NEUTRAL = {
   swatch: "bg-viewer-chip-fg",
 };
 
+/** What Turn's buttons turn a plane's image by, in degrees clockwise. */
+const TURNS = [-5, -1, 1, 5] as const;
+const Key = ({ children }: { children: ReactNode }) => (
+  <kbd className="font-mono text-foreground">{children}</kbd>
+);
+const capital = (word: string) => word[0]!.toUpperCase() + word.slice(1);
+
 /** The gap between panes, in px: the seams. */
 const GAP = 4;
 const clampSplit = (f: number) => Math.min(0.8, Math.max(0.2, f));
 
 export function QuadViewer({
   scene,
+  gridName,
   planes,
   layout: given,
   onLayout,
@@ -208,6 +221,11 @@ export function QuadViewer({
 }: {
   /** Remount (`key`) for another grid; on the same grid, new overlays redraw in place. */
   scene: GridScene;
+  /**
+   * The grid's name ("Tibia long-axis grid"): said in the tool bar while the planes lie on its axes,
+   * and Align's first entry, which puts them back there (the grid the outputs on it were measured on).
+   */
+  gridName?: string;
   planes?: GridPlanes;
   layout: QuadLayout;
   onLayout(layout: QuadLayout): void;
@@ -382,8 +400,8 @@ export function QuadViewer({
     layout: given,
     views: Object.fromEntries(
       VIEW_ORDER.flatMap((v) => {
-        const h = handles[v]?.current;
-        return h ? [[v, h.view()]] : [];
+        const at = handles[v]?.current?.view();
+        return at ? [[v, at]] : [];
       }),
     ),
   });
@@ -558,6 +576,15 @@ export function QuadViewer({
       }),
     [],
   );
+  /** Turn each plane's image in place, clockwise on screen; the other two planes follow. */
+  const spins = useMemo(
+    () =>
+      ([0, 1, 2] as const).map((axis) => (angle: number) => {
+        setOrientation((o) => spin(o, axis, angle));
+        setAligned(null);
+      }),
+    [],
+  );
   const cutsOf = (normals: readonly { axis: Axis; normal: Vec3 }[]) =>
     normals.map((c) => ({ ...c, token: planeToken(c.axis) }));
 
@@ -673,6 +700,7 @@ export function QuadViewer({
                 onEdit={onEdit && editIn(view)}
                 onPick={pickMark}
                 onTilt={tilts[axis]}
+                onSpin={spins[axis]}
                 note={note}
                 planeToken={planeToken}
               />
@@ -730,9 +758,13 @@ export function QuadViewer({
       >
         {children}
         <span className="flex-1" />
-        {lie && (
-          <span className="truncate text-xs text-muted-foreground" role="status">
-            {lie}
+        {(lie || gridName) && (
+          <span
+            className="truncate text-xs text-muted-foreground"
+            role="status"
+            title={lie ? undefined : "The planes lie on this grid's axes"}
+          >
+            {lie ?? gridName}
           </span>
         )}
         {targets.length > 0 && (
@@ -745,6 +777,14 @@ export function QuadViewer({
               </IconButton>
             }
           >
+            {gridName && (
+              <MenuItem disabled={!lie} onSelect={reset}>
+                <span className="flex items-baseline justify-between gap-3">
+                  <span>Along the {gridName.charAt(0).toLowerCase() + gridName.slice(1)}</span>
+                  <span className="text-xs text-fg-subtle">Measured on</span>
+                </span>
+              </MenuItem>
+            )}
             {targets.map((t) => (
               <MenuItem
                 key={t.id}
@@ -760,6 +800,47 @@ export function QuadViewer({
             ))}
           </Menu>
         )}
+        <Popover
+          label="Turn the planes"
+          align="end"
+          side="top"
+          className="w-auto"
+          trigger={
+            <IconButton label="Turn the planes" size="sm">
+              <Rotate3d />
+            </IconButton>
+          }
+        >
+          <div className="grid gap-2 text-xs">
+            {(["xy", "xz", "yz"] as const).map((view) => {
+              const axis = FRAME[view];
+              const anatomy = anatomyOf(view);
+              const name = anatomy ? `${capital(anatomy)} (${LABEL[view]})` : LABEL[view];
+              return (
+                <div key={view} className="flex items-center gap-1">
+                  <span className={cx("size-3 shrink-0 rounded-[2px]", styleOf(view).swatch)} />
+                  <span className="mr-auto pr-3 pl-1">{name}</span>
+                  {TURNS.map((by) => (
+                    <Button
+                      key={by}
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Turn the ${anatomy ?? LABEL[view]} image ${Math.abs(by)}° ${by < 0 ? "anticlockwise" : "clockwise"}`}
+                      onClick={() => spins[axis]!((by * Math.PI) / 180)}
+                    >
+                      {by < 0 ? <RotateCcw /> : <RotateCw />}
+                      {Math.abs(by)}°
+                    </Button>
+                  ))}
+                </div>
+              );
+            })}
+            <p className="text-muted-foreground">
+              Alt-drag in a slice turns it; <Key>,</Key> <Key>.</Key> by 1°, with Shift 0.1°
+            </p>
+            <p role="status">{lie ?? "On the grid's axes"}</p>
+          </div>
+        </Popover>
         <IconButton label="Back to the grid's axes" size="sm" disabled={!lie} onClick={reset}>
           <RotateCcw />
         </IconButton>
