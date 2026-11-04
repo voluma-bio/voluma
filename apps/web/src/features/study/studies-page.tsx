@@ -25,11 +25,13 @@ import {
 } from "@voluma/run-view";
 import {
   Button,
+  Count as CountBadge,
   cx,
   EmptyState,
   ErrorState,
   INPUT_WORD,
   LoadingState,
+  PageHead,
   Progress,
   SidePanel,
   type Status,
@@ -37,7 +39,7 @@ import {
   Thumbnail,
 } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
-import { ChevronRight, Info, Plus } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { type KeyboardEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ACT_ON, PLACES, type Place, placeOf } from "./study/study-model";
@@ -139,29 +141,25 @@ export function StudiesPage() {
     );
   }
 
-  const samples = list.reduce((n, s) => n + s.inputCount, 0);
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-8">
-        <header className="mb-4 flex flex-wrap items-baseline gap-3">
-          <h1 className="m-0 text-xl font-semibold">Studies</h1>
-          {list.length > 0 && (
-            <span className="text-sm text-muted-foreground">
-              {plural(list.length, "study", "studies")} ·{" "}
-              {plural(samples, INPUT_WORD.one, INPUT_WORD.many)}
-            </span>
-          )}
-          <Button asChild variant="primary" size="sm" className="ml-auto">
-            <Link to="/new">
-              <Plus aria-hidden />
-              New study
-            </Link>
-          </Button>
-        </header>
-        {body}
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <PageHead
+          title="Studies"
+          count={list.length > 0 && <CountBadge>{list.length}</CountBadge>}
+          actions={
+            <Button asChild variant="primary" size="sm">
+              <Link to="/new">
+                <Plus aria-hidden />
+                New study
+              </Link>
+            </Button>
+          }
+        />
+        <div className="px-6 pt-4 pb-8">{body}</div>
       </div>
       {selected && (
-        <SidePanel side="right" title={selected.name} icon={<Info />}>
+        <SidePanel side="right" title={selected.name} foldedLabel="details">
           <StudyPane study={selected} />
         </SidePanel>
       )}

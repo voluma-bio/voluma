@@ -11,7 +11,10 @@ shown as its input and linked straight to its page (`/studies/:id/inputs/:inputI
 - **Studies** (design: the agent-model `review.md`, "The shell and the study pages"; mockup
   `q24/c-quad-graph/study.html`) is a list with a details pane, like a file browser: a click
   selects a study and the right side describes it; the chevron, a double-click, Enter or "Open
-  study" opens it. The list reads `listStudies` alone (each input's newest run in brief), refetched
+  study" opens it. Its header uses the same `PageHead` as Workflows (title/count, facts, actions
+  and divider). Details panels collapse to an expansion-arrow control with "Show details" in its
+  tooltip and accessible name, while keeping their expanded titles.
+  The list reads `listStudies` alone (each input's newest run in brief), refetched
   every 5 s while a run is live; the pane reads the selected study's `getStudy`, which polls the
   same way once it holds a live run (both rules live in `studiesQuery`/`studyQuery`), and refetches
   when the list shows a new live run. A sample's
@@ -22,7 +25,7 @@ shown as its input and linked straight to its page (`/studies/:id/inputs/:inputI
 - **A sample's place** (`placeOf`): Needs you (To check, paused for keys, failed or stopped),
   Running (live or queued), Done, then Not started (no run). The group comes from one function,
   `placeOfStatus(status, example)` in run-view, which the tree, the Studies counts, the study
-  page, Compare and "Next sample that needs you" all use, so a sample sits in the same group
+  page and Compare all use, so a sample sits in the same group
   everywhere; an example's samples are always Done, since nobody can change an example.
   `?status=<place>` shows one group, on the study page and on Compare.
 - **Measurements, names and units** come from the workflow's `outputs.yaml`, bundled
@@ -75,16 +78,19 @@ shown as its input and linked straight to its page (`/studies/:id/inputs/:inputI
   a group of samples says its unit, "1 sample needs you", so a count of items and a count of
   samples never read alike). Every page uses this mapping; don't add another.
 - **A study's pages** sit under `study/study-layout.tsx`, which loads the study once, renders the
-  header line (breadcrumb, "Next sample that needs you") and the Samples tree on the left side
-  (`SidePanel`, `SampleTree` from `@voluma/ui`), and hands the study to each page through
-  `useStudy`. A page renders the centre and, if it has one, its right side beside the tree. They
+  header line and hands the study to each page through `useStudy`. The centre list is the only
+  sample navigator on Study and Compare; neither mounts a Samples side panel. The overview uses
+  the same `PageHead` title and spacing as Studies and Workflows, without a subtitle, heading
+  divider or next-sample action. Study details has one title, in the panel header, and
+  starts folded with `useFoldWhile`, uses only the sidebar's own control, and becomes an inline disclosure
+  below 1100 px. Leaving Study restores the prior fold rather than folding review by default. They
   derive everything from one `StudyDetail` in `study/study-model.ts` (pure; its header states the
   far-from-group rule, the unit rule and the bar). Nothing on them judges or changes a result:
   every row, cell and dot opens the input review (Compare's cells on their measurement, `?output=`).
 - **To check means needs you.** `needsYou` in the study read's `review` (the newest completed
   run's open To check items, each once: a value that only rests on one is not counted; the input
-  review shows it waiting on that check) is what every "N to check" reads: a sample's status
-  and "Next sample that needs you" (`needsYouOf`).
+  review shows it waiting on that check) is what every "N to check" reads in a sample's status
+  (`needsYouOf`).
 - **Links into the input review**: a sample opens at `inputHref`. Adding samples to an existing study isn't designed, so there is no
   "Add samples". The knee reads from `attributes.knee`, as intake stores it.
 - **"N to check" on a row is a `StatusMark`** (status check); `Count` is only a bare number

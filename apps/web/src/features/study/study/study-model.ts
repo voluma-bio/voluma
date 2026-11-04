@@ -20,14 +20,7 @@
  */
 import type { OutputStatus } from "@voluma/contracts/output-fold";
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
-import {
-  groupNames,
-  groupOf,
-  inputHref,
-  inputStatus,
-  needsYouOf,
-  placeOfStatus,
-} from "@voluma/run-view";
+import { groupNames, groupOf, inputHref, inputStatus, placeOfStatus } from "@voluma/run-view";
 import type { SampleGroup } from "@voluma/ui";
 import { type Measurement, unitOf } from "../workflow-measurements";
 
@@ -185,8 +178,7 @@ export const PLACES: { place: Place; title: string }[] = [
 
 /**
  * An input's place on the study page and Compare: its group in the Samples tree (`placeOfStatus`,
- * which also keeps an example's inputs out of Needs you), or Not started with no run, which the
- * tree leaves out.
+ * which also keeps an example's inputs out of Needs you), or Not started with no run.
  */
 export function placeOf(input: StudyInputDetail, example: boolean): Place {
   return input.runs[0]
@@ -196,16 +188,6 @@ export function placeOf(input: StudyInputDetail, example: boolean): Place {
 
 export const placeParam = (value: string | null): Place | null =>
   PLACES.find((p) => p.place === value)?.place ?? null;
-
-/** The samples with items that need a person (`needsYouOf`), most first. */
-export const byMostToCheck = (inputs: readonly StudyInputDetail[]) =>
-  inputs.filter((s) => needsYouOf(s) > 0).sort((a, b) => needsYouOf(b) - needsYouOf(a));
-
-/** The sample to act on next: one waiting on you first, else the one with most to check. */
-export function nextToAct(inputs: readonly StudyInputDetail[], example: boolean) {
-  const act = inputs.filter((s) => ACT_ON.has(placeOf(s, example)));
-  return act.find((s) => placeOf(s, example) === "waiting-on-you") ?? byMostToCheck(act)[0];
-}
 
 /** One line of a study's recent activity, from its runs' own times. */
 export type Activity = {
