@@ -15,6 +15,7 @@ import type {
   Surface,
   Volume,
 } from "@voluma/contracts/review";
+import { toVoxel } from "@voluma/contracts/ruler";
 import { readLevel } from "./planes";
 import type { GridAnnotation, GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
 
@@ -337,7 +338,7 @@ export function reviewGrid({
       id: a.id,
       name: a.name,
       points: (a.kind === "point" ? [a.position] : [a.a, a.b]).map(
-        (p) => voxelOf(image, p) as unknown as Zyx,
+        (p) => toVoxel(image.affine, p) as unknown as Zyx,
       ),
       color: focused.has(a.id) ? check.color : token("--ruler"),
       opacity: 1,
@@ -462,11 +463,11 @@ function focusPoint(
   // slice through it. Several marks: their middle.
   if (marks.length === 1) {
     const [only] = marks as [(typeof marks)[number]];
-    return clamp(voxelOf(image, only.kind === "point" ? only.position : only.a));
+    return clamp(toVoxel(image.affine, only.kind === "point" ? only.position : only.a));
   }
   const points = marks
     .flatMap((a) => (a.kind === "point" ? [a.position] : [a.a, a.b]))
-    .map((world) => voxelOf(image, world));
+    .map((world) => toVoxel(image.affine, world));
   return middle(points.map((p) => ({ min: p, max: p })));
 }
 
@@ -476,7 +477,7 @@ function focusPoint(
  * the two grids' spacing ratios and a shift; geometry moves, no voxel is resampled. Row-major 4×4.
  */
 function placement(from: Volume, to: Volume): number[][] {
-  const xyzOf = (world: readonly number[]) => voxelOf(to, world).reverse();
+  const xyzOf = (world: readonly number[]) => toVoxel(to.affine, world).reverse();
   const a = from.affine;
   const origin = xyzOf([a[0]![3]!, a[1]![3]!, a[2]![3]!]);
   const columns = [0, 1, 2].map((j) =>
@@ -491,20 +492,6 @@ function placement(from: Volume, to: Volume): number[][] {
 /** Whether a volume's affine carries a pose: an origin, or a rotation off the grid's axes. */
 const posed = (v: Volume) =>
   v.affine.slice(0, 3).some((row, r) => row.some((n, c) => c !== r && n !== 0));
-
-/** World mm to voxel (z, y, x): the affine's columns are orthogonal, so each is a projection. */
-export function voxelOf(volume: Volume, world: readonly number[]): number[] {
-  const m = volume.affine;
-  const d = [0, 1, 2].map((r) => world[r]! - m[r]![3]!);
-  const xyz = [0, 1, 2].map((j) => {
-    const col = [m[0][j]!, m[1][j]!, m[2][j]!];
-    return (
-      (col[0]! * d[0]! + col[1]! * d[1]! + col[2]! * d[2]!) /
-      (col[0]! ** 2 + col[1]! ** 2 + col[2]! ** 2)
-    );
-  });
-  return [xyz[2]!, xyz[1]!, xyz[0]!];
-}
 
 const unique = <T>(xs: T[]) => [...new Set(xs)];
 

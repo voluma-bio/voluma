@@ -16,7 +16,6 @@ export {
   labelsMiddle,
   type ReviewGrid,
   reviewGrid,
-  voxelOf,
 } from "./review";
 export { readView, type StoredView, storedWords, storeView } from "./saved-view";
 export type {
