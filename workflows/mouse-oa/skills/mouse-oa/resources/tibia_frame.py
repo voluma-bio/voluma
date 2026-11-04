@@ -78,6 +78,18 @@ def cap_solidity(m, low_end, cap_vox):
     return float(foot.sum() / max(convex_hull_image(foot).sum(), 1))
 
 
+def extent(m):
+    """`m`'s scan z range, as text."""
+    zs = np.flatnonzero(m.any(axis=(1, 2)))
+    return f'{zs[0]} to {zs[-1]}'
+
+
+def inside(m):
+    """A voxel of `m` (scan z,y,x text) near its centroid, for relabel.py --at."""
+    p = np.argwhere(m[::4, ::4, ::4]) * 4
+    return ','.join(str(int(i)) for i in p[np.argmin(((p - p.mean(axis=0)) ** 2).sum(axis=1))])
+
+
 def check_bone(labels, mask, label, other, joint_end, vox):
     """Refuse a `label` that is not the tibia across the joint from `other` (the femur), then a --joint-end on the wrong
     side. Returns the diagnostics for the result record."""
@@ -92,9 +104,15 @@ def check_bone(labels, mask, label, other, joint_end, vox):
     cap = round(CAP_MM / vox)
     s, so = cap_solidity(mask, facing_low, cap), cap_solidity(oth, not facing_low, cap)
     if s < so - CAP_GAP:
+        at, ato = (inside(m) for m in (mask, oth))
         sidecar.fail(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap '
-                     f'solidity {s:.3f} against {so:.3f}), so the two bones\' labels look swapped in bone-labels, or a piece of another bone is merged into one of them: tell main, '
-                     'with the 3D sheet, so the labels are corrected before any tibial step')
+                     f'solidity {s:.3f} against {so:.3f}). First suspect: the two labels are swapped (on a staging run the 3D sheet '
+                     f'was read three times as right while they were swapped). Compare each label with the scan: label {label} '
+                     f'spans scan z {extent(mask)}, label {other} z {extent(oth)}. If label {label} is the femur, swap them: '
+                     f'relabel.py --at {at} --to 99, then --at {ato} --to {label}, then --at {at} --to {other} (segmentation-check; '
+                     'each moves one connected piece, so check the fragments after), and report the corrected bone-labels. Only if '
+                     f'label {label} really is the tibia, look for a femur piece merged into its joint end. Tell main either way, with '
+                     'the 3D sheet, before any tibial step')
     if (joint_end == 'low') != facing_low:
         sidecar.fail(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {"low" if facing_low else "high"} '
                      f'end of scan z for label {label} on this scan, so pass --joint-end {"low" if facing_low else "high"}')
