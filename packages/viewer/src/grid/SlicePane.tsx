@@ -9,7 +9,7 @@
  * those planes about this pane's normal; this pane stays still. With `onSpin`, Alt-drag and `,` `.`
  * turn this pane's image in place about the crosshair. Esc drops a mark being drawn.
  */
-import { Button, cx } from "@voluma/ui";
+import { cx } from "@voluma/ui";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   BufferGeometry,
@@ -881,6 +881,7 @@ export function SlicePane({
   useEffect(() => latest.current.onStatus(status), [status]);
   // A tilted pane counts along the grid axis nearest its normal, primed.
   const counted = whole ? axis : nearestAxis(basis.normal);
+  const at = Math.round(point[counted]);
   const sliceHelp = useId();
   return (
     // biome-ignore lint/a11y/useSemanticElements: an interactive image surface, not a form fieldset.
@@ -894,21 +895,27 @@ export function SlicePane({
       aria-label={whole ? `Slice ${index + 1} of ${total}` : "Turned slice"}
       aria-describedby={sliceHelp}
     >
-      <div
-        className={cx(CHIP, "pointer-events-auto top-12 left-2 flex items-center gap-1")}
+      {/* The slice as a slider down the pane's left edge, its number above (as in Amira). */}
+      <span
+        className={cx(CHIP, "top-2 left-2 tabular-nums")}
         title={whole ? undefined : "Counted along the scan's nearest axis"}
-        onPointerDown={(event) => event.stopPropagation()}
       >
-        <Button size="sm" variant="ghost" aria-label="Previous slice" onClick={() => step(-1)}>
-          −
-        </Button>
-        {Math.round(point[counted]) + 1}
+        {at + 1}
         {!whole && "′"} / {scene.shapeZyx[counted]}
-        <Button size="sm" variant="ghost" aria-label="Next slice" onClick={() => step(1)}>
-          +
-        </Button>
-      </div>
-      <span id={sliceHelp} className={cx(CHIP, "top-2 left-2")}>
+      </span>
+      <input
+        type="range"
+        aria-label="Slice"
+        aria-valuetext={`Slice ${at + 1} of ${scene.shapeZyx[counted]}`}
+        title="Drag, Shift + scroll, or ↑/↓ (Page Up/Down for 10)"
+        min={0}
+        max={scene.shapeZyx[counted]! - 1}
+        value={at}
+        onChange={(event) => step(Number(event.target.value) - at)}
+        onPointerDown={(event) => event.stopPropagation()}
+        className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [writing-mode:vertical-lr]"
+      />
+      <span id={sliceHelp} className="sr-only">
         Focus slice: ↑/↓ 1 · Page Up/Down 10
       </span>
       {/* Without the grid's geometry the pane's units are voxels: no scale to show. */}
@@ -921,7 +928,7 @@ export function SlicePane({
         <span />
       </div>
       {(!shown || refining) && !error && (
-        <span className={cx(CHIP, "top-24 right-2 left-2")} role="status">
+        <span className={cx(CHIP, "top-2 right-2 left-24")} role="status">
           {shown ? "Loading full resolution…" : "Loading…"}
         </span>
       )}
