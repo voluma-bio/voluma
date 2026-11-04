@@ -37,9 +37,10 @@ carry spacing-only affines and borrow nothing.
   (`reviewAssetsOf`, run-view): absent is "Preparing…", `failed` is its error. For the image that
   replaces the viewer; for an overlay it is a note under the heading.
 - **Display.** `LabelDisplay`, the caller's (the input review's Labels tab): colours on or off,
-  an overall opacity, each structure's opacity and whether it is hidden (by block id; mesh opacity
-  follows, 0 hides), and Fill or Outline, where outline draws only edge pixels on the slices
-  (highlighted regions too). None of it moves the camera or crosshair. A new scene on the same
+  an overall opacity, each context label's opacity and whether it is hidden (by block id; mesh
+  opacity follows, 0 hides; the subject's own region and a check's always draw whole), and Fill
+  or Outline, where outline draws only edge pixels on the slices (highlighted regions too). A
+  check's disagreement mask takes one colour for every region (`Overlay.color` as a string). None of it moves the camera or crosshair. A new scene on the same
   grid redraws in place. `reviewGrid` returns the `legend`: each structure drawn, its colour,
   and whether it is context, the output's own, or the check's, with its usual colour when
   recoloured.

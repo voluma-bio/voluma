@@ -8,7 +8,16 @@
  */
 import { reviewAssetUrl } from "@voluma/api-client";
 import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
-import { Button, EmptyState, ErrorState, Menu, MenuItem, SegmentedControl } from "@voluma/ui";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Menu,
+  MenuRadioGroup,
+  MenuRadioItem,
+  SegmentedControl,
+  Tooltip,
+} from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
@@ -33,7 +42,7 @@ import {
   type VoxelBox,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, EyeOff } from "lucide-react";
 import {
   type ReactNode,
   type Ref,
@@ -62,6 +71,7 @@ export function SceneViewer({
   display,
   onLegend,
   heading,
+  onShowHidden,
   quad,
 }: {
   runId: string;
@@ -86,7 +96,9 @@ export function SceneViewer({
   /** How the labels and the output's own regions are drawn (the Labels panel). */
   display: LabelDisplay;
   /** What each colour drawn on the shown grid is; undefined while none is shown. */
-  onLegend: (legend: LegendEntry[] | undefined) => void;
+  onLegend: (legend: LegendEntry[] | "preparing" | undefined) => void;
+  /** Shows every label the display hides. */
+  onShowHidden: () => void;
   /** What the panes show, over the top-left pane of the shown viewer. */
   heading?: ReactNode;
   /** The four panes' layout, which holds across grids, and each grid's planes by the image's id. */
@@ -128,7 +140,8 @@ export function SceneViewer({
       }),
     [runId, revision, subject.shown, assets, display, focus],
   );
-  const legend = grid.state === "ready" ? grid.legend : undefined;
+  const legend =
+    grid.state === "ready" ? grid.legend : grid.state === "preparing" ? "preparing" : undefined;
   useEffect(() => onLegend(legend), [legend, onLegend]);
   useEffect(() => () => onLegend(undefined), [onLegend]);
   // A focused label has no extent in the run's data: find it on the grid. Keyed by what it
@@ -255,7 +268,25 @@ export function SceneViewer({
   useEffect(() => () => onShown(undefined), [onShown]);
   // The marking tools, on the shown viewer's bar: the ones a reviewer points with named, the
   // measuring ones under More tools.
-  const bar = (on: boolean) => on && onTool && <ToolBar tool={tool} onTool={onTool} />;
+  // Labels hidden on this grid are said on the bar, so a hidden structure is never a surprise.
+  const hiddenHere =
+    grid.state === "ready"
+      ? grid.legend.filter((e) => e.as === "label" && display.hidden.includes(e.id)).length
+      : 0;
+  const bar = (on: boolean) =>
+    on && (
+      <>
+        {onTool && <ToolBar tool={tool} onTool={onTool} />}
+        {hiddenHere > 0 && (
+          <Tooltip label="Show every hidden label">
+            <Button size="sm" variant="ghost" onClick={onShowHidden}>
+              <EyeOff aria-hidden />
+              {hiddenHere} hidden
+            </Button>
+          </Tooltip>
+        )}
+      </>
+    );
   // One tree shape whether or not this subject's grid is ready, so the kept viewers never remount.
   return (
     <>
@@ -361,7 +392,9 @@ function ToolBar({
   onTool: (tool: MarkTool | null) => void;
 }) {
   const value = tool ?? "navigate";
-  const more = TOOLS.filter((t) => !NAMED.has(t.value));
+  const more = TOOLS.filter(
+    (t): t is (typeof TOOLS)[number] & { value: MarkTool } => !NAMED.has(t.value),
+  );
   const picked = more.find((t) => t.value === value);
   return (
     <>
@@ -377,7 +410,7 @@ function ToolBar({
       <Menu
         align="start"
         trigger={
-          <Button size="sm" variant="ghost" aria-pressed={!!picked}>
+          <Button size="sm" variant={picked ? "secondary" : "ghost"}>
             {picked ? (
               <>
                 {picked.icon}
@@ -390,15 +423,17 @@ function ToolBar({
           </Button>
         }
       >
-        {more.map((t) => (
-          <MenuItem
-            key={t.value}
-            icon={t.icon}
-            onSelect={() => onTool(t.value === "navigate" ? null : t.value)}
-          >
-            {t.label}
-          </MenuItem>
-        ))}
+        <MenuRadioGroup
+          label="More tools"
+          value={picked?.value ?? ""}
+          onValueChange={(v) => onTool(v as MarkTool)}
+        >
+          {more.map((t) => (
+            <MenuRadioItem key={t.value} value={t.value}>
+              {t.label}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
       </Menu>
     </>
   );

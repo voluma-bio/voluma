@@ -51,3 +51,7 @@
   the centre fall back to the page scroll earlier.
 - "Agents" in the scene bar and the Agents view still use worker names: a debugging view, left as is.
 - The item card's "Show" and the scene bar are the "Show" framing work's (another PR).
+- Labels sliders apply on release: each display change rebuilds the scene's overlays, and every
+  slice pane rereads its planes (from the worker's chunk cache) before composing. Keeping an
+  overlay's data apart from its look (colour, opacity, style), so a look change only recomposes,
+  would let the sliders apply live.

@@ -59,7 +59,6 @@ import {
   type GridPlanes,
   LABELS_START,
   type LabelDisplay,
-  type LegendEntry,
   type MarkEdit,
   type MarkPlane,
   type PlaneFit,
@@ -82,6 +81,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
+import { LabelsPanel, type Legend, labelVolumes } from "./labels-panel";
 import { MainConversation } from "./main-conversation";
 import { gridKeyOf, useLocalMarks, useMarking, type YourMark } from "./marking";
 import { FinalOutputs } from "./outputs-panel";
@@ -91,7 +91,6 @@ import { useRunMarks } from "./run-marks";
 import { RunNews } from "./run-news";
 import { Samples } from "./samples-tab";
 import { type SavedView, savedViews, useSavedViews } from "./saved-views";
-import { SegmentationPanel, structureVolumes } from "./segmentation-panel";
 import { useAnswers, useMainMessage } from "./use-main-message";
 import type { Accepting } from "./version-report";
 import type { SceneHandle } from "./viewer";
@@ -106,6 +105,7 @@ export function OutputsReview({
   stale,
   refetchRun,
   reopen,
+  logLoaded,
 }: {
   run: RunRead;
   /** The last poll failed: what is shown may be out of date. */
@@ -114,6 +114,8 @@ export function OutputsReview({
   refetchRun: () => void;
   /** Reconnects the run's stream, to catch what a write of yours added to the log. */
   reopen: () => void;
+  /** The stream has closed once: an ended run's whole log is in. */
+  logLoaded: boolean;
 }) {
   const me = useOutletContext<Me>();
   const study = useQuery({
@@ -245,8 +247,8 @@ export function OutputsReview({
   const said = useMemo(() => conversation(events), [events]);
   const [pickedTab, setLeftTab] = useState<string>();
   const [display, setDisplay] = useState<LabelDisplay>(LABELS_START);
-  const [legend, setLegend] = useState<LegendEntry[]>();
-  const volumes = useMemo(() => structureVolumes(review.rows.values()), [review.rows]);
+  const [legend, setLegend] = useState<Legend>();
+  const volumes = useMemo(() => labelVolumes(catalog, review.rows), [catalog, review.rows]);
   const runMarks = useRunMarks({
     run,
     me: me.userId,
@@ -283,13 +285,13 @@ export function OutputsReview({
     jumpTo({ at: at as unknown as Zyx, gridKey, output: inViewId });
   }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
   const allViews = useMemo(() => savedViews(events), [events]);
-  // The left side opens on the conversation once there is something to read or send in it (a
-  // message, a saved view, a mark waiting), else on Segmentation, until you pick a tab.
-  const leftTab =
-    pickedTab ??
-    (said.length > 0 || allViews.length > 0 || store.changes.length > 0
-      ? "conversation"
-      : "segmentation");
+  // Which tab the left side opens on is settled once, never switched under you: Conversation
+  // while the run goes (the AI writes there) or when the loaded log has something in it (a
+  // message, a saved view), else Labels. Using a tab picks it.
+  const [firstTab, setFirstTab] = useState<string | undefined>(live ? "conversation" : undefined);
+  if (firstTab === undefined && logLoaded)
+    setFirstTab(said.length > 0 || allViews.length > 0 ? "conversation" : "labels");
+  const leftTab = pickedTab ?? firstTab ?? "labels";
   const views = useSavedViews(run, allViews, reopen);
   const scene = useRef<SceneHandle>(null);
   const sent = useCallback(() => {
@@ -538,6 +540,7 @@ export function OutputsReview({
         display={display}
         onLegend={setLegend}
         heading={heading}
+        onShowHidden={() => setDisplay((d) => ({ ...d, hidden: [] }))}
         quad={{
           layout,
           onLayout,
@@ -593,17 +596,24 @@ export function OutputsReview({
               ),
             },
             {
-              id: "segmentation",
+              id: "labels",
               label: "Labels",
               icon: <Layers />,
               content: (
-                <SegmentationPanel
-                  legend={legend}
-                  display={display}
-                  onDisplay={setDisplay}
-                  volumes={volumes}
-                  inView={inView?.name}
-                />
+                // Any use of the panel picks it, so the side never switches away under you.
+                <div
+                  className="contents"
+                  onPointerDownCapture={() => setLeftTab((t) => t ?? "labels")}
+                  onKeyDownCapture={() => setLeftTab((t) => t ?? "labels")}
+                >
+                  <LabelsPanel
+                    legend={legend}
+                    display={display}
+                    onDisplay={setDisplay}
+                    volumes={volumes}
+                    inView={inView?.name}
+                  />
+                </div>
               ),
             },
             {
@@ -916,6 +926,7 @@ function OutputScene({
   display,
   onLegend,
   heading,
+  onShowHidden,
   quad,
 }: {
   runId: string;
@@ -927,7 +938,8 @@ function OutputScene({
   focus: OutputItem["focus"];
   marking: ReturnType<typeof useMarking>;
   display: LabelDisplay;
-  onLegend: (legend: LegendEntry[] | undefined) => void;
+  onLegend: (legend: Legend) => void;
+  onShowHidden: () => void;
   heading: React.ReactNode;
   quad: NonNullable<React.ComponentProps<typeof SceneViewer>["quad"]>;
 }) {
@@ -969,6 +981,7 @@ function OutputScene({
             display={display}
             onLegend={onLegend}
             heading={heading}
+            onShowHidden={onShowHidden}
             quad={quad}
           />
         </Suspense>

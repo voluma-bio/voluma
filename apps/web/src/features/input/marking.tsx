@@ -13,7 +13,7 @@ import {
   markPoints,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler, Spline } from "lucide-react";
+import { Angle, Lasso, Pipette, Spline } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -96,7 +96,7 @@ export function gridKeyOf(image: Volume): string | undefined {
 /** A marking tool and the letter of the tags it makes (not a command key). */
 type Tool = {
   value: MarkTool | "navigate";
-  /** Its full name, in tooltips and menus. */
+  /** Its full name, in menus. */
   label: string;
   /** Its name on the bar. */
   short: string;
@@ -106,9 +106,9 @@ type Tool = {
 
 /** The marking tools on the viewer's bar (`viewer.tsx` names some and puts the rest in a menu). */
 export const TOOLS: Tool[] = [
-  { value: "navigate", label: "Navigate", short: "Navigate", icon: <Crosshair /> },
-  { value: "point", label: "Point", short: "Point", letter: "P", icon: <MapPin /> },
-  { value: "line", label: "Ruler", short: "Ruler", letter: "R", icon: <Ruler /> },
+  { value: "navigate", label: "Navigate", short: "Navigate" },
+  { value: "point", label: "Point", short: "Point", letter: "P" },
+  { value: "line", label: "Ruler", short: "Ruler", letter: "R" },
   { value: "angle", label: "Angle", short: "Angle", letter: "A", icon: <Angle /> },
   { value: "outline", label: "Outline", short: "Outline", letter: "O", icon: <Lasso /> },
   { value: "path", label: "Freehand line", short: "Freehand", letter: "L", icon: <Spline /> },

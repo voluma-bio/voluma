@@ -59,11 +59,14 @@ effect catches up.
 ## The outputs review
 
 `outputs-review.tsx` lays out the shell's two `SidePanel`s around the centre. Left: Conversation (badged with the
-calls main still holds, `openApprovals`), Labels (`segmentation-panel.tsx`: what each colour in the views is, from the
-shown grid's `legend`, with each structure's volume from a value measured on it alone in mm³, and the page's `LabelDisplay`)
-and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). Until you pick a
-tab, the side opens on Conversation once it has something to read or send (a message, a saved view, a mark waiting)
-and on Labels before that, so an empty conversation never takes the column. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), Agents (icon) and
+calls main still holds, `openApprovals`), Labels (`labels-panel.tsx`: what each colour in the views is, from the
+shown grid's `legend`; a label's volume only from the catalog's one mm³ value measured on that label alone
+(`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
+output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
+and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The tab the side
+opens on is settled once and never switched under you: Conversation while the run goes, else, once the stream
+has closed with the whole log (`useRunStream`'s return), Conversation if it holds a message or a saved view and
+Labels if not, so an empty conversation never takes the column. Using the Labels panel picks it. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), Agents (icon) and
 Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
 reported value resting on an output with open items is not done: its status is "Waiting on a check
 of <output>" (`rowStatus`, the dashed waiting glyph, never a tick; the same rule in Final outputs, Based on, the chip and the whole run), and the open value shows one line
@@ -106,8 +109,8 @@ outputs while it is up and unfolds it after (the shell's `useFoldWhile`); showin
 changes its visibility, not the centre. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run or agents, an open row, only within its focused workspace and never while typing elsewhere.
 Visible Whole run / Back to the views controls switch the centre. The panes stay mounted (hidden) under the
-whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`); Navigate, Point and Ruler are named on the bar and the rest sit
-under More tools (`viewer.tsx`): Angle, Outline, Freehand line (an open path, tag L), Probe. These are
+whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate, Point and Ruler named on
+the bar, and Angle, Outline, Freehand line (an open path, tag L) and Probe under More tools (`viewer.tsx`). These are
 labelled choices, with no command-key bindings. Point notes have no editor or display; old stored
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.
 Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through

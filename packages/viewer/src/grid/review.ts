@@ -62,13 +62,16 @@ export type ReviewGrid =
 export type LabelDisplay = {
   /** Each label in its own colour; off, every context label in `--bone`. */
   colours: boolean;
-  /** Of every structure's blend, 0 to 1. */
+  /** Of every context label's blend, 0 to 1. */
   opacity: number;
   /** On the slices: filled, or only each region's edge. 3D always shows surfaces. */
   style: "fill" | "outline";
-  /** Each structure's own opacity by block id, 0 to 1; absent is 1. */
+  /**
+   * Each context label's own opacity by block id, 0 to 1; absent is 1. The subject's own region
+   * and a check's always draw whole, so a setting kept from another output never hides them.
+   */
   structures: Readonly<Record<string, number>>;
-  /** Block ids hidden, whatever their opacity. */
+  /** Context labels hidden by block id, whatever their opacity. */
   hidden: readonly string[];
 };
 
@@ -176,25 +179,26 @@ export function reviewGrid({
   const focused = new Set(focus?.on ?? []);
   const focusedLabel = (volume: Volume, label: number) =>
     volume === focusVolume && (focus?.label === undefined || focus.label === label);
-  // How much of a structure shows: the panel's overall opacity times its own, 0 when hidden.
+  // How much of a context label shows: the panel's overall opacity times its own, 0 when hidden.
+  // The subject's own region and the check's always draw whole, whatever the display says.
   const amount = (id: string) =>
     display.hidden.includes(id) ? 0 : display.opacity * (display.structures[id] ?? 1);
   const strong: OverlayStyle = display.style === "outline" ? "outline" : "highlight";
   const legend: LegendEntry[] = [];
   const labelColor = (label: number) => token(`--label-${((label - 1) % 12) + 1}`);
-  const check = (id: string) => ({
+  const check = () => ({
     color: token("--check-outline"),
-    opacity: amount(id),
+    opacity: 1,
     style: strong,
     as: "check" as const,
   });
   // What the subject itself shows, over the context: in `--output`, highlighted in slices.
   const own = (id: string) =>
     focused.has(id)
-      ? check(id)
+      ? check()
       : {
           color: token("--output"),
-          opacity: amount(id),
+          opacity: 1,
           style: strong,
           own: true as const,
           as: "output" as const,
@@ -318,7 +322,7 @@ export function reviewGrid({
       labels.map((l) => [
         l.label,
         focusedLabel(volume, l.label)
-          ? check(l.id)
+          ? check()
           : !whole && (named.includes(l.id) || focused.has(l.id))
             ? own(l.id)
             : contextLook(l.label, l.id),
@@ -381,11 +385,7 @@ export function reviewGrid({
       const sha256 = focusVolume.data.sha256;
       const a = ready(sha256, focusVolume.name);
       if (a) {
-        const values =
-          focus?.label === undefined
-            ? Array.from({ length: 65535 }, (_, n) => n + 1)
-            : [focus.label];
-        const look = check(focusVolume.id);
+        const look = check();
         legend.push({ id: focusVolume.id, name: focusVolume.name, color: look.color, as: "check" });
         overlays.push({
           id: focusVolume.id,
@@ -393,7 +393,8 @@ export function reviewGrid({
           base: assetBase(sha256),
           levels: a.levels,
           offsetZyx: [0, 0, 0],
-          color: Object.fromEntries(values.map((v) => [v, look.color])),
+          // One colour for every region of the mask, or only the check's label.
+          color: focus?.label === undefined ? look.color : { [focus.label]: look.color },
           opacity: look.opacity,
           style: look.style,
         });

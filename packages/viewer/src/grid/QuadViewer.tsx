@@ -789,7 +789,7 @@ export function QuadViewer({
           side="top"
           className="w-80"
           trigger={
-            <Button size="sm" variant="ghost" disabled={!!aligning}>
+            <Button size="sm" variant="ghost">
               <Rotate3d aria-hidden />
               Planes
             </Button>
@@ -892,7 +892,7 @@ export function QuadViewer({
           </Popover>
         )}
         <fieldset className="flex">
-          <legend className="sr-only">Panes</legend>
+          <legend className="sr-only">Views</legend>
           {(
             [
               [1, "One view", <Square key="1" />],

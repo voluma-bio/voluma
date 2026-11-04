@@ -122,11 +122,19 @@ function InputStream({
   refetchRun: () => void;
 }) {
   const [reopened, setReopened] = useState(0);
-  useRunStream(run.id, {
+  const closedOnce = useRunStream(run.id, {
     reopened,
     going: run.state.status !== "ended",
     onClosed: refetchRun,
   });
   const reopen = useCallback(() => setReopened((n) => n + 1), []);
-  return <OutputsReview run={run} stale={stale} refetchRun={refetchRun} reopen={reopen} />;
+  return (
+    <OutputsReview
+      run={run}
+      stale={stale}
+      refetchRun={refetchRun}
+      reopen={reopen}
+      logLoaded={closedOnce}
+    />
+  );
 }
