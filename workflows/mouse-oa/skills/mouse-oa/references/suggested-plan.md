@@ -62,7 +62,8 @@ segmentation a later step needs (the growth plate traced closely) is that step's
   `anatomy.md` "Segmentation notes"). Report `bone-labels` twice: first the merged labels as soon as the SAM merge
   is done, so the researcher sees them at once, with the To check item "Not yet checked: finish_labels.py pending";
   then the file `finish_labels.py` writes as the next version, its check record the evidence (`segmentation-check`,
-  section 6). The first version is a preview: nothing is made from it.
+  section 6). The first version is a preview: nothing is made from it, the label volumes #1–3 included, which are
+  measured on the `finish_labels.py` file.
 - **Leaves:** every step reads `scan`, and steps 2 to 7 read the tibia or the femur from `bone-labels`, starting only
   once a version cites a `finish_labels.py` check record. A new
   `scan` puts everything out of date and a new `bone-labels` all of steps 2 to 7, so settle the labels here, on
