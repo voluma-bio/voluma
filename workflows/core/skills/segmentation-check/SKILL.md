@@ -107,6 +107,8 @@ always reported (section 3).
 specks (the loose fragments a clipped label leaves, dots off the bone in 3D), runs the checks of sections 1 and 2 on the
 cleaned volume, and writes it with a check record (`<out stem>-check.json`) only when no flag is open. A flag stays
 open until the labels no longer raise it or you pass `--accept <key>=<why>`: the title of the To check item that holds
-it when the CT cannot settle it, or why it is no fault (a structure the scan's notes put outside the field, section 2).
+it when the CT cannot settle it, or why it is no fault (a structure the scan's notes put outside the field, or one you recorded as absent in its
+region, section 2). A `fused:` flag is never accepted: its id is a candidate's size rank, which shifts when you change
+the labels, so fix it (section 1).
 Report the file it wrote and cite the check record as evidence; checks you ran on another volume (a watershed, an
 earlier merge) are not this volume's. After any later change to the labels, run it again.
