@@ -9,7 +9,8 @@ Input, the training convention (scans.py): the tibia grid's HU volume and its ti
 coronal section is vol[:, V, :] (rows W, low W = the joint side, columns U). Either the request body is an .npz with `hu` (any
 float or int dtype, HU) and `mask` (bool or 0/1), or the body is empty and `hu_key` and `mask_key` name two .npy objects under
 dev/ in the R2 bucket. Query options: `ckpt` (comma list of CHECKPOINTS names, default DEFAULT), `vote` (off | all | abstain,
-vote.py; ignored with one checkpoint), `sections` (comma list of V, default every V), `threshold` (detector score, default 0.5).
+vote.py; ignored with one checkpoint), `sections` (comma list of V, default every V), `threshold` (detector score, default
+THRESHOLD by recipe).
 
 Response, an .npz: V; per checkpoint <name>.mask (n, W, U) the detector's mask (the region, or the band for a band model),
 <name>.region (the region; a band model's through band_to_region.band_regions), <name>.cut (n, W, U) the region's cut-side
@@ -39,7 +40,8 @@ CHECKPOINTS = {
     **{f"region-s{s}": ("region", f"/runs/l29-a-s{s}/ckpt-bestval.pt") for s in range(3)},
     **{f"band-s{s}": ("band", f"/runs/l32-band-s{s}/ckpt-bestval.pt") for s in range(3)},
 }
-DEFAULT = "band-s0,band-s1,band-s2"   # L32's best: the band seeds, abstain vote; L33 picks the recipe to keep
+DEFAULT = "band-s0,band-s1,band-s2"   # the release recipe (RESULTS-L33): the 3 band seeds, voted
+THRESHOLD = {"region": 0.5, "band": 0.3}   # detector score; at 0.3 no band section came back empty (L33)
 
 app = modal.App(APP, image=image)
 
@@ -107,10 +109,13 @@ class Plate:
         if hu.ndim != 3 or hu.shape != tibia.shape:
             raise HTTPException(400, f"hu {hu.shape} and mask {tibia.shape} must be one (W, V, U) grid")
         tibia = tibia.astype(bool)
-        vs = [int(v) for v in q["sections"].split(",")] if q.get("sections") else list(range(hu.shape[1]))
+        try:
+            vs = [int(v) for v in q["sections"].split(",")] if q.get("sections") else list(range(hu.shape[1]))
+            thresholds = {n: float(q.get("threshold") or THRESHOLD[CHECKPOINTS[n][0]]) for n in names}
+        except ValueError as e:
+            raise HTTPException(400, f"sections and threshold must be numbers: {e}") from None
         if not all(0 <= v < hu.shape[1] for v in vs):
             raise HTTPException(400, f"sections must lie in 0..{hu.shape[1] - 1}")
-        threshold = float(q.get("threshold", 0.5))
         t_in = time.time() - t0
         envs = np.stack([cutline.envelope(tibia[:, v, :]) for v in vs])
         out, lines, t_ck = {"V": np.array(vs)}, {}, {}
@@ -118,9 +123,10 @@ class Plate:
             t = time.time()
             recipe = CHECKPOINTS[name][0]
             M.load_trainable(self.model, self.ckpts[name])
-            proc = Sam3Processor(self.model, confidence_threshold=threshold)
+            proc = Sam3Processor(self.model, confidence_threshold=thresholds[name])
             with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
                 mask = predict_vol(proc, hu, {"region": export.TEXT, "band": band.TEXT}[recipe], vs)
+            t_pred = time.time() - t
             out[f"{name}.mask"] = mask
             if recipe == "band":
                 region, ls = band_to_region.band_regions(mask, vs, tibia)
@@ -131,13 +137,13 @@ class Plate:
                 region = mask
             out[f"{name}.region"] = region
             out[f"{name}.cut"] = np.stack([cutline.cut_boundary(r & e, e) for r, e in zip(region, envs)])
-            t_ck[name] = round(time.time() - t, 2)
+            t_ck[name] = {"predict": round(t_pred, 2), "post": round(time.time() - t - t_pred, 2)}
         if len(names) > 1 and how != "off":
             out["vote.region"] = V.vote(np.stack([out[f"{n}.region"] for n in names]), abstain=how == "abstain")
             out["vote.cut"] = np.stack([cutline.cut_boundary(r & e, e) for r, e in zip(out["vote.region"], envs)])
         meta = {"axes": "mask/region/cut (n, W, U); top/bottom (n, U); lines [w, u]", "um_per_voxel": 10.5, "grid": list(hu.shape),
-                "ckpt": {n: CHECKPOINTS[n][0] for n in names}, "vote": how if len(names) > 1 else "off", "threshold": threshold,
-                "source": CKPT_SOURCE, "gpu": torch.cuda.get_device_name(), "lines": lines,
+                "ckpt": {n: {"recipe": CHECKPOINTS[n][0], "threshold": thresholds[n]} for n in names},
+                "vote": how if len(names) > 1 else "off", "source": CKPT_SOURCE, "gpu": torch.cuda.get_device_name(), "lines": lines,
                 "seconds": {"container_load": round(self.load_s, 1), "input": round(t_in, 2), "per_ckpt": t_ck, "total": round(time.time() - t0, 2)}}
         buf = io.BytesIO()
         np.savez_compressed(buf, meta=np.array(json.dumps(meta)), **out)
