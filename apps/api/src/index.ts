@@ -18,7 +18,7 @@
  * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
  * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
- * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
+ * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member, UPLOAD_LIMIT_PER_USER_GB (50) total stored per person (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -80,6 +80,15 @@ function countFromEnv(name: string, fallback: number): number {
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a whole number`);
+  return value;
+}
+
+/** A positive number of gigabytes from env (fractions allowed), or `fallback` when unset. */
+function gbFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
   return value;
 }
 
@@ -216,6 +225,7 @@ app.route(
       maxFiles: countFromEnv("UPLOAD_MAX_FILES", 5000),
       maxBytes: countFromEnv("UPLOAD_MAX_BYTES", 20_000_000_000),
       maxOpen: countFromEnv("UPLOAD_MAX_OPEN", 3),
+      maxStoredBytes: Math.round(gbFromEnv("UPLOAD_LIMIT_PER_USER_GB", 50) * 1e9),
     },
     shutdown: draining.signal,
   }),
