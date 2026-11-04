@@ -69,7 +69,7 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
 - **Levels.** A pane opens on the coarsest level and loads the level whose voxel still covers at
   least one device pixel at its zoom; the coarse picture shows meanwhile unless the finer one lands
   within 80 ms. Overlays load at the image level's scale (nearest: a label never blends).
-- **Worker.** One module worker reads every plane. Decoded 64³ chunks share one LRU cache
+- **Worker.** One module worker reads every plane, and reslices tilted ones (`readSlice`). Decoded 64³ chunks share one LRU cache
   (384 MiB); fetches wait for 12 slots, newest first, and a chunk no live request still wants is
   never fetched. A 404 chunk is the fill value (zarr v2 omits empty chunks).
 - **Interaction.** Left drag sets the crosshair; wheel, arrows and Page Up/Down step slices;
@@ -111,11 +111,13 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
 
 - **Where a pane lies.** Each slice pane has a basis in the grid's mm, (z, y, x): `right`, `down`,
   `normal` (`frame.ts`). On the grid's axes a pane reads whole slices from zarr as above. Tilted,
-  it is resliced on the CPU (`reslice.ts`) from one whole level shared with the 3D pane
-  (`holdLevel`, at most 16 M voxels): the image trilinear, overlays nearest. A whole level is
-  read once while anyone holds it and dropped when the last pane holding it unmounts or untilts;
-  nothing outlives the viewer. So a tilted pane is
-  softer than an untilted one at high zoom. Its counter is primed (′) on the nearest axis and steps
+  each picture is resliced in the worker (`reslice.ts`) from only the chunks the plane crosses:
+  the image trilinear, overlays nearest, at their own level and offset, samples one level voxel
+  apart (at most 1024 a side). Two layers: the coarsest level over the grid's whole outline, at
+  once, and over it the zoom's level (`levelFor`, as untilted) in a window of the view grown by
+  half its size each way. Panning or zooming out to within an eighth of a view of the window's
+  edge loads a new window; the coarse layer shows meanwhile. A new depth or turn reloads both,
+  from the chunk cache when it can. Its counter is primed (′) on the nearest axis and steps
   the grid's finest spacing along its normal; marks within half a step of the plane count as on it.
 - **Tilting by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
   other two planes' lines; dragging one turns those two planes about this pane's normal (this pane
