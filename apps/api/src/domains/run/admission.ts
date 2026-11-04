@@ -65,7 +65,7 @@ export async function usage(tx: Tx, labId: string): Promise<Usage> {
 /**
  * Why `run` may not go on at `stage`, or null. An own-key run is never refused (it costs
  * Voluma only runner time, which the claim's slot caps queue). A reopen
- * (a correction) of a `voluma` run (the route refuses own-key runs first) is judged by the spend
+ * (a correction) of a `voluma` run (a reopen of an own-key run carries its own keys) is judged by the spend
  * limit. A claim refuses on spend only a run that never started (one start request can queue
  * many runs under the limit); a run that started keeps going after a deploy or a reopen, so a
  * live run is never refused.

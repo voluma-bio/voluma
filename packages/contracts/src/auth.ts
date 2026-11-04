@@ -56,6 +56,8 @@ const meFields = {
   userId: userIdSchema,
   name: z.string().nullable(),
   labId: z.string(),
+  /** Whether this account runs on Voluma's key; without it every run needs the user's own. */
+  volumaKey: z.boolean(),
 };
 
 /**

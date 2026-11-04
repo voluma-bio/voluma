@@ -4,7 +4,7 @@
  * reads, and maps the answer. Each route names its own guard: the reads (list, get) take
  * `requireReader`, so a user reads through `readerOf(user)` (another org's run is a 404)
  * and the debug token reads every lab; the writes take `requireUser`. Visitor keys go straight to the queue,
- * which holds them in memory; no handler logs a body.
+ * which seals them into the run's row; no handler logs a body.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -36,9 +36,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
   /** The run with what `user` may do on it now (`runReadSchema`); no user: the debug token. */
   const readOf = async (user: UserPrincipal | undefined, run: Run): Promise<RunRead> => ({
     ...run,
-    cannotMessage: user
-      ? await queue.cannotMessage(readerOf(user), callerOf(user), run)
-      : READ_ONLY_TOKEN,
+    cannotMessage: user ? await queue.cannotMessage(run) : READ_ONLY_TOKEN,
     cannotAccept: user ? (acceptRefusal(run)?.message ?? null) : READ_ONLY_TOKEN,
   });
   const userOf = (principal: Principal) => (principal.kind === "user" ? principal : undefined);

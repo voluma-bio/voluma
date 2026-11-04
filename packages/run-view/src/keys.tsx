@@ -1,7 +1,8 @@
 /**
- * A visitor's own keys (`VisitorKeys`): asked on Run on new inputs and again when a run is
- * waiting for them. They stay in this browser's localStorage, under the user's id so another
- * user of the browser never sees them; the server holds them in memory only.
+ * A user's own keys (`VisitorKeys`): asked on Run on new inputs, when a run is waiting for them,
+ * and to reopen a finished own-key run. They stay in this browser's localStorage, under the user's
+ * id so another user of the browser never sees them; the server seals them in the database only
+ * while the run lives.
  */
 import { type VisitorKeys, visitorKeysSchema } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
@@ -24,6 +25,19 @@ export function loadKeys(userId: string): VisitorKeys | undefined {
   } catch {}
   forgetKeys(userId);
   return undefined;
+}
+
+/**
+ * The saved keys a message or answer to this run carries: a finished own-key run was wiped of its
+ * keys, so reopening it takes them again. Any other send carries none.
+ */
+export function keysToReopen(
+  userId: string,
+  run: { credentials: "voluma" | "visitor"; state: { status: string } },
+): VisitorKeys | undefined {
+  return run.credentials === "visitor" && run.state.status === "ended"
+    ? loadKeys(userId)
+    : undefined;
 }
 
 const saveKeys = (userId: string, keys: VisitorKeys) =>
@@ -79,16 +93,17 @@ export function KeysForm({
 
 /**
  * Next to a Start button: whose key the run uses, from the key stored in this browser. With
- * a key it can be removed; without one a member can add one, and a guest must (the form).
+ * a key it can be removed; without one an account with Voluma's key can add one, and one without must (the form).
  */
 export function RunKeyLine({
   userId,
-  guest,
+  volumaKey,
   keys,
   onChange,
 }: {
   userId: string;
-  guest: boolean;
+  /** Whether the account has Voluma's key; without it the form is required. */
+  volumaKey: boolean;
   keys: VisitorKeys | undefined;
   onChange: (keys: VisitorKeys | undefined) => void;
 }) {
@@ -111,9 +126,9 @@ export function RunKeyLine({
           </button>
           .
         </p>
-      ) : guest ? (
+      ) : !volumaKey ? (
         <>
-          <p>Runs on your Meta key. Sign in to use Voluma's instead.</p>
+          <p>Runs on your Meta key.</p>
           <KeysForm userId={userId} submitLabel="Save key" onSubmit={onChange} />
         </>
       ) : adding ? (

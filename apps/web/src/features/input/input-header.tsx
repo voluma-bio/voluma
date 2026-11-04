@@ -322,9 +322,16 @@ function StopRun({ run }: { run: Run }) {
 const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
 
 /** The run's own problems, over the views: waiting for its starter's keys, failed, or out of touch. */
-export function RunAlert({ run, userId, stale }: { run: Run; userId: string; stale: boolean }) {
+export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string; stale: boolean }) {
   const { state } = run;
   if (state.status === "awaiting-keys") return <AwaitingKeys run={run} userId={userId} />;
+  if (
+    state.status === "ended" &&
+    state.outcome === "completed" &&
+    run.credentials === "visitor" &&
+    run.cannotMessage === null
+  )
+    return <ReopenKeys userId={userId} />;
   if (state.status === "ended" && state.outcome === "failed")
     return (
       <p role="alert" className={`${bar} bg-destructive-tint text-destructive`}>
@@ -338,6 +345,43 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
       </p>
     );
   return null;
+}
+
+/**
+ * A finished own-key run holds no key, so a message to it needs the user's: the form shows until
+ * this browser has one saved (the messages then carry it, `keysToReopen`), and "Change key"
+ * brings it back to replace a wrong or revoked one.
+ */
+function ReopenKeys({ userId }: { userId: string }) {
+  const [saved, setSaved] = useState(() => !!loadKeys(userId));
+  const [changing, setChanging] = useState(false);
+  if (saved && !changing)
+    return (
+      <p className={`${bar} flex items-center gap-2 bg-muted text-muted-foreground`}>
+        Corrections to this run use your saved Meta key.
+        <Button size="sm" variant="ghost" onClick={() => setChanging(true)}>
+          Change key
+        </Button>
+      </p>
+    );
+  return (
+    <section className={`${bar} grid gap-2 bg-muted text-muted-foreground`}>
+      <p>
+        This run used your own Meta key, which Voluma does not keep once a run ends. Add it to send
+        a correction.
+      </p>
+      <div className="max-w-sm">
+        <KeysForm
+          userId={userId}
+          submitLabel="Save key"
+          onSubmit={() => {
+            setSaved(true);
+            setChanging(false);
+          }}
+        />
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -410,7 +454,7 @@ function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
   const busy = manual && resend.isPending;
   return (
     <section className={`${bar} grid gap-2 bg-check-tint text-check-strong`}>
-      <p>The run is waiting for your keys: the server restarted and no longer has them.</p>
+      <p>The run is waiting for your keys: the server no longer has a usable copy.</p>
       <div className="max-w-sm">
         <KeysForm
           userId={userId}

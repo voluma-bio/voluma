@@ -141,6 +141,8 @@ export const runs = pgTable(
     notes: text(),
     inputId: text().notNull(),
     credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
+    /** An own-key run's keys, sealed (run-keys.ts) while the run lives; null for a Voluma-key run and once the run ends. */
+    sealedKeys: text(),
     /** The model every role of the run uses (`runSchema.model`); null for runs made before the choice existed. */
     model: text(),
     /** How hard every role reasons (`runSchema.thinking`); null for runs made before the choice. */
@@ -181,6 +183,7 @@ export const runs = pgTable(
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),
     index("runs_started_by").on(t.startedBy),
     index("runs_active_state").on(t.state).where(sql`${t.state} IN ('queued', 'running')`),
+    index("runs_sealed_keys").on(t.id).where(sql`${t.sealedKeys} IS NOT NULL`),
     index("runs_study").on(t.studyId),
   ],
 );

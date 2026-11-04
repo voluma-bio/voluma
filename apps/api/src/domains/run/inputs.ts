@@ -3,8 +3,7 @@
  * on, and upload one: create (an `uploading` input and a presigned PUT URL per
  * file), then complete once storage holds every declared file at its declared size, or
  * cancel.
- * Uploading is for members only: a guest can list and start on inputs but not store
- * files. No file passes through here.
+ * Every account uploads, a guest included (an upload costs storage, not model spend). No file passes through here.
  */
 import { randomUUID } from "node:crypto";
 import { inputKey, inputPrefix, uploadKey, uploadPrefix } from "@voluma/contracts/r2";
@@ -50,9 +49,6 @@ export function inputsRoutes({ reads, uploadStore, store, uploadLimits }: RunDep
 
   app.post("/inputs", async (c) => {
     const user = c.var.user;
-    if (user.account !== "member") {
-      return c.json({ error: "Sign in with a lab account to upload a scan." }, 403);
-    }
     if (!store) return c.json({ error: "Scan upload is not set up on this server." }, 503);
     const { name, files } = await parseJson(c, createUploadRequestSchema);
     const bytes = files.reduce((sum, f) => sum + f.size, 0);

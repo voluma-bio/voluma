@@ -79,7 +79,7 @@ stopped.
 - **The AI** writes through `sendRunMessage`; who may write and when is the API's rule, and the
   box says why it is off. Something's wrong makes the message about the item's task and opens
   The AI beside what is open; that subject holds until the task in view changes or the message is
-  sent. A 403 or 409 shows the server's text. Signing in does not let a guest reopen their old
+  sent. A 403 or 409 shows the server's text. A finished own-key run holds no key, so `RunAlert` shows a key form (`ReopenKeys`) until this browser has one saved, and every message and answer to such a run carries it (`keysToReopen`). Signing in does not let a guest reopen their old
   run: the account has a different identity and lab, and only the starter may send. A retry keeps
   the message id and the exact request including its picture, so the server stores it once.
   Submission freezes the task, text, marks and capture before a mutation can pause offline.

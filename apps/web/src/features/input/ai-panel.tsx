@@ -98,7 +98,7 @@ export function useMessage({
     /** The task a go asks to redo. */
     redo?: string;
   }>({
-    runId: run.id,
+    run,
     onSuccess: ({ unseen, meta }) => {
       setText("");
       setAnswer(undefined);
