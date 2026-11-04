@@ -1,8 +1,11 @@
 /**
- * The Conversation tab: main's whole thread (`AgentThread`: its prose and replies, its tool calls
- * folded, the system prompt and what it was handed collapsed), with what only the researcher's
- * side holds put in by log position: your messages with the marks they carried, the calls main
- * holds for your yes (`ApprovalCard`), a request that didn't finish, and the views you saved.
+ * The Conversation tab: main's whole thread (`AgentThread`: its prose and replies, the workers it
+ * starts and the outputs it reports, its other tool calls folded under its status lines, its
+ * instructions and the run's news collapsed), with what only the researcher's
+ * side holds put in by log position: your messages with the marks they carried (and what main got
+ * with them), the calls main holds for your yes (`ApprovalCard`), and a request that didn't
+ * finish. The live line follows the run: waiting in the queue, else main's newest status line
+ * while it works, else nothing.
  * Under it the box: your words, the mark changes waiting for them (each chip goes to its mark; x
  * undoes the change), and whether a picture of the panes goes too. Main gets each mark with its
  * change and positions; the placeholder prompts for your words, while the chips show the
@@ -11,6 +14,7 @@
 
 import type { ConversationItem } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
+import type { RunRead } from "@voluma/contracts/run";
 import {
   type AgentEntry,
   type AgentLinks,
@@ -22,10 +26,9 @@ import {
   type Slot,
 } from "@voluma/run-view";
 import { Button, Chip, cx, IconButton, TextAreaField } from "@voluma/ui";
-import { Bookmark, Send, X } from "lucide-react";
+import { Send, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef } from "react";
 import type { MarkChange } from "./marking";
-import type { SavedView } from "./saved-views";
 import type { useAnswers, useMainMessage } from "./use-main-message";
 
 const CHANGE_WORD: Record<MarkChange["change"], string | undefined> = {
@@ -69,8 +72,7 @@ export function MainConversation({
   events,
   main,
   conversation,
-  views,
-  live,
+  state,
   nameOf,
   agents,
   checkTitle,
@@ -85,9 +87,8 @@ export function MainConversation({
   main: AgentEntry | undefined;
   /** The run's `conversation()`. */
   conversation: readonly ConversationItem[];
-  views: readonly SavedView[];
-  /** The run is queued or running: main is at work on what it was sent. */
-  live: boolean;
+  /** Where the run stands: queued, running or ended. */
+  state: RunRead["state"];
   nameOf: (id: string) => string;
   /** The workers main's replies can name in code to open their thread. */
   agents: AgentLinks;
@@ -104,41 +105,26 @@ export function MainConversation({
   // The thread shows main's replies; the page adds what the thread doesn't hold. A finished
   // request's reply is the answer; only one that didn't finish gets a line of its own.
   const { slots, byId } = useMemo(() => {
-    const own = [
-      ...conversation.filter(
-        (m): m is Exclude<ConversationItem, { from: "agent" }> =>
-          m.from !== "agent" && (m.from !== "outcome" || m.status !== "completed"),
-      ),
-      ...views.map((v) => ({ ...v, from: "view" as const })),
-    ];
+    const own = conversation.filter(
+      (m): m is Exclude<ConversationItem, { from: "agent" }> =>
+        m.from !== "agent" && (m.from !== "outcome" || m.status !== "completed"),
+    );
     return {
-      slots: own.map((m): Slot => ({ id: m.id, seq: m.seq })),
+      slots: own.map((m): Slot => ({ id: m.id, seq: m.seq, person: m.from === "person" })),
       byId: new Map(own.map((m) => [m.id, m])),
     };
-  }, [conversation, views]);
-  // Main is at work while it works, and while the run goes with the last word yours (a message,
-  // or a yes or no) before main has picked it up.
-  const last = conversation.at(-1);
-  const working =
-    live &&
-    (main?.state === "working" ||
-      last?.from === "person" ||
-      (last?.from === "approval" && !!last.answer && !last.settled));
+  }, [conversation]);
+  // The live line says only what is true of the run: in the queue nothing works yet; while it
+  // runs, main is at work only when it is.
+  const live = state.status !== "ended";
+  const waiting =
+    state.status === "queued" ? `Waiting to start · place ${state.position} in line` : undefined;
+  const working = state.status === "running" && main?.state === "working";
 
   const slot = (id: string): ReactNode => {
     const m = byId.get(id);
     if (!m) return null;
     switch (m.from) {
-      case "view":
-        return (
-          <p className="flex gap-2 text-meta text-muted-foreground">
-            <Bookmark aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-            <span>
-              You saved {m.title.toLowerCase()} of {nameOf(m.output)}
-              {m.words && `, ${m.words.charAt(0).toLowerCase()}${m.words.slice(1)}`}.
-            </span>
-          </p>
-        );
       case "person":
         return (
           <div className="grid gap-1">
@@ -227,10 +213,13 @@ export function MainConversation({
         events={events}
         ids={main?.ids ?? []}
         working={working}
+        waiting={waiting}
         live={live}
         links={agents}
         slots={slots}
         slot={slot}
+        nameOf={nameOf}
+        conversation
         opensAtEnd
         empty={live ? "The AI hasn't started yet." : "The AI wrote nothing."}
       />

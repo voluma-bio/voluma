@@ -115,6 +115,7 @@ export function RunAgents({
         ids={agent.ids}
         working={live && agent.state === "working"}
         live={live}
+        nameOf={nameOf}
       />
     </section>
   );

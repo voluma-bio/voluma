@@ -113,24 +113,28 @@ labelled choices, with no command-key bindings. Point notes have no editor or di
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.
 Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
-(`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene chip's
-"Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
+(`POST /api/review/runs/:runId/views`); the scene chip's "Saved views" menu reopens it on its
+grid. The Conversation does not list views: main never receives one (Jimmy, Nov 4). The trail's data is `@voluma/run-view`
 `outputs-trail.ts`.
 
 ### Talking to main (`main-conversation.tsx`, `use-main-message.ts`)
 
 The conversation is the only place anything on the run changes (design review.md, "Corrections",
 "Approvals"). It is main's whole thread (Jimmy, Nov 4: the filtered chat hid the AI's working, which
-a researcher needs to trust a number): run-view's `AgentThread` over main's ids, so the system
-prompt, what main was handed and its tool runs fold closed, its replies to you show as "The AI",
-and a worker's name opens it in Agents. The page puts in, by log position (`slots`), what the
-thread doesn't hold: your messages with the marks they carried, the views you saved, a request that
-didn't finish, and the calls main holds for your yes (`ApprovalCard`, `@voluma/run-view`: what the
+a researcher needs to trust a number): run-view's `AgentThread` over main's ids with
+`conversation` set. Main's words are one voice, "The AI" (its prose and its `message` calls to you
+alike; Jimmy: a proper conversation, as in Claude.ai), the workers it starts and the outputs it
+reports are rows of their own, its other tool runs fold closed under its `activity` lines, its
+instructions and the run's news fold quieter, and a worker's name opens it in Agents. The page puts
+in, by log position (`slots`), what the thread doesn't hold: your messages with the marks they
+carried (each `person` slot, which takes what main got with it as a quiet disclosure), a request
+that didn't finish, and the calls main holds for your yes (`ApprovalCard`, `@voluma/run-view`: what the
 call does in code's words, what it changes and what it makes out of date, by catalog name; Yes and No with optional words through
 `answerApproval`; then the answer, and only the outcome's word: `approval.settled`'s text is
 written for main). `conversation()` (contracts) gives those items; its replies are left to the
-thread. It opens at the newest line. The live line shows while main works, or while the run is
-live and the last word was yours.
+thread. It opens at the newest line. The live line says only what is true of the run (Jimmy, Nov 4:
+a queued run said "The AI is on it"): queued, "Waiting to start · place N in line" with no pulse;
+running with main working, main's newest `activity` line (or "Working"); otherwise none.
 A finished own-key run holds no key, so `RunAlert` shows a key form (`ReopenKeys`) until this browser has one saved, and every message and answer to such a run carries it (`keysToReopen`).
 
 **Editing a mark is a correction, and nothing reaches main until Send.** A new mark, a moved one

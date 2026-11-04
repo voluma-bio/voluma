@@ -600,8 +600,7 @@ export function OutputsReview({
                   events={events}
                   main={main}
                   conversation={said}
-                  views={allViews}
-                  live={live}
+                  state={run.state}
                   nameOf={nameOf}
                   agents={agentLinks}
                   checkTitle={(t) =>

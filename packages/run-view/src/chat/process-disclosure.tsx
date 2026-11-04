@@ -9,7 +9,16 @@
 import { ChevronRight } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 
-export function ProcessDisclosure({ label, children }: { label: ReactNode; children: ReactNode }) {
+export function ProcessDisclosure({
+  label,
+  quiet = false,
+  children,
+}: {
+  label: ReactNode;
+  /** What the thread was handed, not what it did: lighter type, one step back. */
+  quiet?: boolean;
+  children: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const panelId = useId();
@@ -24,7 +33,9 @@ export function ProcessDisclosure({ label, children }: { label: ReactNode; child
         }}
         aria-expanded={open}
         aria-controls={panelId}
-        className="flex w-full min-w-0 items-center gap-2 py-1 text-left text-ui font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className={`flex w-full min-w-0 items-center gap-2 py-1 text-left transition-colors hover:text-foreground ${
+          quiet ? "text-meta text-fg-subtle" : "text-ui font-medium text-muted-foreground"
+        }`}
       >
         <ChevronRight
           className={`size-3 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`}

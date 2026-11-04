@@ -1,23 +1,36 @@
 /**
  * One agent's thread as rows, derived with no React from the run's durable events: what it was
- * told, its prose, and its reasoning and tool calls folded into process blocks whose label is a
- * digest. The stream delivers durable events only, so a row appears when its event lands; a call
- * with no result yet is `running`.
+ * told, its prose, the calls that change results (`VISIBLE`) as rows of their own, and its other
+ * reasoning and tool calls folded into process blocks labelled by its newest `activity` line and
+ * a digest. The stream delivers durable events only, so a row appears when its event lands; a
+ * call with no result yet is `running`.
  *
  * A thread is one or several thread ids: main is `main` plus every `main.N` after a review, in
- * log order, with a divider where each later one starts. A screen can put its own rows into the
- * thread by log position (`slots`): each closes the fold before it and renders as the screen says.
+ * log order, with a divider where each later one starts (none in the Conversation). A screen can
+ * put its own rows into the thread by log position (`slots`): each closes the fold before it and
+ * renders as the screen says.
  */
 
 import { agentLog } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
+import { versionPath } from "@voluma/contracts/r2";
 import { plural } from "./run-status";
 
 // ---------------------------------------------------------------------------------------------
 // Tool calls
 
-/** What one tool call did in a few words, and the agent it names, if it names one. */
-export function toolTitle(name: string, input: unknown): { title: string; target?: string } {
+/** Calls that change results: never folded, a row of their own in every thread. */
+const VISIBLE = new Set(["start_worker", "report_output", "change_outputs"]);
+
+/**
+ * What one tool call did in a few words, and the agent it names, if it names one. `nameOf` gives
+ * an output's catalog name.
+ */
+export function toolTitle(
+  name: string,
+  input: unknown,
+  nameOf: (id: string) => string = (id) => id,
+): { title: string; target?: string } {
   const r = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
   const s = (k: string) => (typeof r[k] === "string" ? (r[k] as string) : undefined);
   const list = (k: string) =>
@@ -62,7 +75,7 @@ export function toolTitle(name: string, input: unknown): { title: string; target
     case "close":
       return { title: "Closed" };
     case "report_output":
-      return { title: `Reported ${s("id") ?? "an output"}` };
+      return { title: `Reported ${nameOf(s("id") ?? "") || "an output"}` };
     case "keep_output":
       return { title: `Kept ${list("ids").join(", ") || "outputs"} as they are` };
     case "change_outputs":
@@ -105,22 +118,37 @@ export type Step =
   | { kind: "note"; id: string; text: string; failed?: boolean };
 
 export type Row =
-  | { kind: "prose"; id: string; text: string }
-  /** What main told the researcher (its `message` call to them), with when. */
-  | { kind: "said"; id: string; text: string; at: string }
-  | { kind: "process"; id: string; steps: Step[]; digest: string }
+  /**
+   * The agent's words: its prose, and on main its `message` calls to the researcher too, one
+   * voice. `head`: in the Conversation, the first words of a turn (the thread's, and each after
+   * your message), which carry "The AI" and the time.
+   */
+  | { kind: "prose"; id: string; text: string; at: string; head?: boolean }
+  /** Folded steps under `label`: the newest `activity` text in them, then their digest. */
+  | { kind: "process"; id: string; steps: Step[]; label: string }
+  /** A call that changes results (`VISIBLE`), shown open. */
+  | { kind: "step"; id: string; step: ToolStep }
   /** What the thread was told: its system prompt, its brief, a message from someone. */
   | { kind: "brief"; id: string; label: string; text: string }
   | { kind: "failure"; id: string; text: string }
   /** Where a later `main.N` thread of the merged main starts. */
   | { kind: "divider"; id: string; text: string }
-  /** A screen's own row at its place in the log (`Slot`); the screen renders it by id. */
-  | { kind: "slot"; id: string };
+  /**
+   * A screen's own row at its place in the log (`Slot`); the screen renders it by id. On a
+   * person's slot, `got` is what main was handed with their words.
+   */
+  | { kind: "slot"; id: string; got?: string };
 
-/** A row a screen puts into the thread: before the first event whose `seq` is past its own. */
-export type Slot = { id: string; seq: number };
+/**
+ * A row a screen puts into the thread: before the first event whose `seq` is past its own.
+ * `person`: the researcher's message, which takes what main got with it.
+ */
+export type Slot = { id: string; seq: number; person?: boolean };
 
-/** "Ran 12 commands, read 2 files, 1 failed": counts across a fold. */
+/**
+ * "Ran 12 commands, read 2 files, 1 failed": counts across a fold. `activity` calls are left out
+ * (their text is the fold's label), and so are sandbox notes, which stay rows inside the fold.
+ */
 export function digest(steps: Step[]): string {
   let commands = 0;
   let reads = 0;
@@ -130,18 +158,13 @@ export function digest(steps: Step[]): string {
   let thought = false;
   for (const s of steps) {
     if (s.kind === "reasoning") thought = true;
-    else if (s.kind === "note") {
-      // A note is short runtime text ("Sandbox stopped"): name it like a call.
-      if (s.text.length <= 40) named.push(s.text);
-      else other++;
-      if (s.failed) failed++;
-    } else {
+    else if (s.kind === "tool" && s.name !== "activity") {
       if (s.name === "bash") commands++;
       else if (s.name === "read") reads++;
       else {
         const name = s.target ? `${s.title} ${s.target}` : s.title;
-        // Activity text and unknown tools are too long or too vague to name.
-        if (s.name !== "activity" && name.length <= 40) named.push(name);
+        // Unknown tools are too long or too vague to name.
+        if (name.length <= 40) named.push(name);
         else other++;
       }
       if (s.status === "error") failed++;
@@ -160,8 +183,30 @@ export function digest(steps: Step[]): string {
     failed > 0 && `${failed} failed`,
   ].filter((p): p is string => Boolean(p));
   const text = parts.join(", ");
-  if (!text) return thought ? "Thinking" : "Working";
+  if (!text) return thought ? "Thought" : "";
   return text[0]?.toUpperCase() + text.slice(1);
+}
+
+/** The newest `activity` text among `steps`: the agent's own status line. */
+function activityOf(steps: readonly Step[]): string | undefined {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i];
+    if (s?.kind === "tool" && s.name === "activity") {
+      const text = (s.input as { text?: unknown } | undefined)?.text;
+      if (typeof text === "string" && text.trim()) return text.trim();
+    }
+  }
+  return undefined;
+}
+
+/** A fold's label: "Checking the scan header · ran 1 command", or the digest alone. */
+function foldLabel(steps: Step[]): string {
+  const said = activityOf(steps);
+  const count = digest(steps);
+  // A fold of sandbox notes alone says the last of them ("Sandbox ready").
+  const note = [...steps].reverse().find((s) => s.kind === "note");
+  if (!said) return count || (note?.kind === "note" ? note.text : "Working");
+  return count ? `${said} · ${count[0]?.toLowerCase()}${count.slice(1)}` : said;
 }
 
 /** Collects steps into the open process block, and closes it when something visible arrives. */
@@ -172,7 +217,7 @@ function rowBuilder() {
     step(s: Step) {
       if (!open) {
         open = [];
-        rows.push({ kind: "process", id: `process:${s.id}`, steps: open, digest: "" });
+        rows.push({ kind: "process", id: `process:${s.id}`, steps: open, label: "" });
       }
       open.push(s);
     },
@@ -181,11 +226,23 @@ function rowBuilder() {
       rows.push(r);
     },
     done(): Row[] {
-      for (const r of rows) if (r.kind === "process") r.digest = digest(r.steps);
+      for (const r of rows) if (r.kind === "process") r.label = foldLabel(r.steps);
       return rows;
     },
   };
 }
+
+/** How a screen wants the thread: output names, and whether it is main's Conversation. */
+export type ThreadOptions = {
+  slots?: readonly Slot[];
+  /** An output's catalog name. */
+  nameOf?: (id: string) => string;
+  /**
+   * Main's thread as the Conversation: no divider where a later `main.N` starts, and each turn's
+   * first words head their row (`head`).
+   */
+  conversation?: boolean;
+};
 
 /**
  * The rows of the threads in `ids` (log order): one worker or check, or main's every thread, with
@@ -196,18 +253,34 @@ export function threadRows(
   events: readonly RunEvent[],
   ids: readonly string[],
   live: boolean,
-  slots: readonly Slot[] = [],
+  { slots = [], nameOf, conversation = false }: ThreadOptions = {},
 ) {
   const shown = new Set(ids);
   const names = agentLog(events).records;
   const b = rowBuilder();
   const pending = [...slots].sort((x, y) => x.seq - y.seq);
   let next = 0;
+  // The researcher's messages placed so far that have nothing attached yet, newest last.
+  let waiting: Extract<Row, { kind: "slot" }>[] = [];
+  // The next words open a turn: the thread's first, and the first after each of your messages.
+  let turn = conversation;
   const placeSlots = (upTo: number) => {
-    for (let s = pending[next]; s && s.seq <= upTo; s = pending[++next])
-      b.row({ kind: "slot", id: s.id });
+    for (let s = pending[next]; s && s.seq <= upTo; s = pending[++next]) {
+      const row: Row = { kind: "slot", id: s.id };
+      if (s.person) {
+        waiting.push(row);
+        turn = conversation;
+      }
+      b.row(row);
+    }
+  };
+  const say = (id: string, text: string, at: string) => {
+    b.row({ kind: "prose", id, text, at, head: turn || undefined });
+    turn = false;
   };
   const tools = new Map<string, ToolStep>();
+  // A report's version folder (`versionPath`) to its call, to name the version once published.
+  const reports = new Map<string, ToolStep>();
   const started = new Set<string>();
   const briefed = new Set<string>();
   // Main's deliveries say which log events they cover: a person.message in that range is the researcher.
@@ -219,11 +292,16 @@ export function threadRows(
   };
   for (const e of events) {
     placeSlots(e.seq);
+    // Whichever thread records it, a published version names the report that made it.
+    if (e.type === "output.published") {
+      const step = reports.get(e.payload.path);
+      if (step) step.title = `${step.title}, version ${e.payload.version}`;
+    }
     if (!shown.has(e.threadId)) continue;
     const isMain = names.get(e.threadId)?.place === "main";
     switch (e.type) {
       case "thread.started":
-        if (started.size > 0 && !started.has(e.threadId))
+        if (!conversation && started.size > 0 && !started.has(e.threadId))
           b.row({ kind: "divider", id: e.id, text: names.get(e.threadId)?.name ?? e.threadId });
         started.add(e.threadId);
         break;
@@ -235,13 +313,18 @@ export function threadRows(
           if (p.compaction) {
             // A summary that failed has no text; its message only carries the spend.
             if (p.text)
-              b.row({ kind: "brief", id: e.id, label: "History summarized", text: p.text });
-          } else if (p.text) b.row({ kind: "prose", id: e.id, text: p.text });
+              b.row({
+                kind: "brief",
+                id: e.id,
+                label: "The AI summarized its work so far",
+                text: p.text,
+              });
+          } else if (p.text) say(e.id, p.text, e.createdAt);
         } else if (p.role === "system") {
           b.row({
             kind: "brief",
             id: e.id,
-            label: systemSeen ? "Tools changed" : "System prompt",
+            label: systemSeen ? "The AI's tools changed" : "The AI's instructions",
             text: p.text,
           });
           systemSeen = true;
@@ -260,15 +343,25 @@ export function threadRows(
                 lastCovered = Math.max(lastCovered, to);
               }
             }
-            // The words show as the screen's own row; this is what main was handed with them.
-            if (fromYou) label = "Your message, as the AI got it";
-            else if (sender.kind === "thread")
+            // The words show as the screen's own row, and what main was handed with them goes
+            // into it: the newest of your messages with nothing attached (one delivery can carry
+            // several; it goes to the last). Only with no such row does it get a row of its own.
+            if (fromYou) {
+              const mine = waiting.at(-1);
+              if (mine) {
+                mine.got = p.text;
+                waiting = [];
+                briefed.add(e.threadId);
+                break;
+              }
+              label = "What the AI got with your message";
+            } else if (sender.kind === "thread")
               label = `Message from ${names.get(sender.threadId)?.name ?? "another agent"}`;
-            else label = "Update from Voluma";
+            else label = "News from the run";
           } else if (!briefed.has(e.threadId)) label = "Brief";
           else if (sender.kind === "thread")
             label = `Message from ${names.get(sender.threadId)?.name ?? "another agent"}`;
-          else label = sender.kind === "runtime" ? "Update from Voluma" : "Message";
+          else label = sender.kind === "runtime" ? "News from the run" : "Message";
           briefed.add(e.threadId);
           b.row({ kind: "brief", id: e.id, label, text: p.text });
         }
@@ -279,7 +372,7 @@ export function threadRows(
           kind: "tool",
           id: e.payload.toolCallId,
           name: e.payload.name,
-          ...toolTitle(e.payload.name, e.payload.input),
+          ...toolTitle(e.payload.name, e.payload.input, nameOf),
           input: e.payload.input,
           status: "running",
         };
@@ -290,8 +383,12 @@ export function threadRows(
           input?.to === "researcher" &&
           typeof input.text === "string"
         )
-          b.row({ kind: "said", id: step.id, text: input.text, at: e.createdAt });
+          say(step.id, input.text, e.createdAt);
+        else if (VISIBLE.has(step.name)) b.row({ kind: "step", id: step.id, step });
         else b.step(step);
+        const id = (input as { id?: unknown } | undefined)?.id;
+        if (step.name === "report_output" && typeof id === "string")
+          reports.set(versionPath(id, step.id), step);
         break;
       }
       case "tool.result": {
@@ -325,9 +422,18 @@ export function threadRows(
 /** The title of the call a working thread has no result for yet: its live line. */
 export function runningTitle(rows: readonly Row[]): string | undefined {
   const last = rows.at(-1);
-  if (last?.kind !== "process") return undefined;
-  const step = last.steps.at(-1);
-  return step?.kind === "tool" && step.status === "running"
+  const step = last?.kind === "process" ? last.steps.at(-1) : last?.kind === "step" && last.step;
+  return step && step.kind === "tool" && step.status === "running"
     ? `${step.title}${step.target ? ` ${step.target}` : ""}`
     : undefined;
+}
+
+/** The newest `activity` text in the thread: what the agent last said it is doing. */
+export function latestActivity(rows: readonly Row[]): string | undefined {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    const said = r?.kind === "process" ? activityOf(r.steps) : undefined;
+    if (said) return said;
+  }
+  return undefined;
 }

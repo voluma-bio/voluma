@@ -1,7 +1,10 @@
 /**
- * One agent's rows (`transcript.ts`) as a thread: prose stays visible; reasoning and runs of tool
- * calls fold closed under a short label, their bodies built on first open; a working thread ends
- * in a live line naming the call it is in. A screen's own rows (`slot` rows) render as it says.
+ * One agent's rows (`transcript.ts`) as a thread: its words stay visible (in the Conversation each
+ * turn's first words carry "The AI" and the time), and so do the calls that change results; reasoning and other runs of tool calls fold closed under a short label, their
+ * bodies built on first open; what the agent was told folds quieter still. A working thread ends
+ * in a live line: the call it is in, or (the Conversation) its newest status line in words. A
+ * screen's own rows (`slot` rows) render as it says, with what main got with your message under
+ * yours.
  */
 import {
   Activity,
@@ -42,8 +45,12 @@ export function TranscriptView({
   links?: AgentLinks;
   /** Renders a `slot` row by its id. */
   slot?: (id: string) => ReactNode;
-  /** While the thread works: what it is doing now, for the live line at the end ("" when it names nothing). */
-  live?: string | null;
+  /**
+   * While the thread works: what it is doing now, for the live line at the end ("" when it names
+   * nothing); `words` when it is a sentence, not a call's title; `quiet` when nothing works yet
+   * (no pulse).
+   */
+  live?: { text: string; words?: boolean; quiet?: boolean } | null;
   empty: string;
 }) {
   return (
@@ -54,19 +61,32 @@ export function TranscriptView({
         <ol className="grid gap-3">
           {rows.map((row) => (
             <li key={row.id} className="min-w-0">
-              {row.kind === "slot" ? slot?.(row.id) : <RowView row={row} links={links} />}
+              {row.kind === "slot" ? (
+                <>
+                  {slot?.(row.id)}
+                  {row.got !== undefined && (
+                    <div className="mt-1">
+                      <Told label="What the AI got with your message" text={row.got} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <RowView row={row} links={links} />
+              )}
             </li>
           ))}
         </ol>
       )}
-      {live !== undefined && live !== null && (
+      {live && (
         <p className="mt-3 flex min-w-0 items-center gap-2 text-meta text-muted-foreground">
           <span
-            className="size-2 shrink-0 rounded-full bg-info motion-safe:animate-pulse"
+            className={`size-2 shrink-0 rounded-full ${
+              live.quiet ? "bg-muted-foreground" : "bg-info motion-safe:animate-pulse"
+            }`}
             aria-hidden
           />
-          <span className="min-w-0 truncate font-mono">
-            {live || <span className="sr-only">Working</span>}
+          <span className={`min-w-0 truncate ${live.words ? "text-ui" : "font-mono"}`}>
+            {live.text || <span className="sr-only">Working</span>}
           </span>
         </p>
       )}
@@ -77,19 +97,7 @@ export function TranscriptView({
 function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: AgentLinks }) {
   switch (row.kind) {
     case "prose":
-      return <Markdown text={row.text} className="text-ui" agents={links} />;
-    case "process":
-      return (
-        <ProcessDisclosure label={row.digest}>
-          <div className="space-y-1">
-            {row.steps.map((s) => (
-              <StepView key={s.id} step={s} links={links} />
-            ))}
-          </div>
-        </ProcessDisclosure>
-      );
-    case "said":
-      return (
+      return row.head ? (
         <div className="grid gap-1">
           <p className="flex items-baseline gap-2 text-meta">
             <span className="font-semibold">The AI</span>
@@ -97,13 +105,30 @@ function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: 
           </p>
           <Markdown text={row.text} className="text-ui" agents={links} />
         </div>
+      ) : (
+        <Markdown text={row.text} className="text-ui" agents={links} />
       );
-    case "brief":
+    case "process":
       return (
         <ProcessDisclosure label={row.label}>
-          <Markdown text={row.text} className="rounded-lg bg-muted px-3 py-2 text-ui" />
+          <div className="space-y-1">
+            {row.steps.map((s) => (
+              <StepView key={s.id} step={s} links={links} />
+            ))}
+          </div>
         </ProcessDisclosure>
       );
+    case "step": {
+      const brief = row.step.name === "start_worker" && firstLine(row.step.input);
+      return (
+        <div>
+          <StepView step={row.step} links={links} />
+          {brief && <p className="truncate pl-[27px] text-meta text-muted-foreground">{brief}</p>}
+        </div>
+      );
+    }
+    case "brief":
+      return <Told label={row.label} text={row.text} />;
     case "divider":
       return (
         <p className="flex items-center gap-3 text-meta text-muted-foreground">
@@ -122,6 +147,27 @@ function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: 
         </p>
       );
   }
+}
+
+/** What a thread was handed, folded quieter than its own steps. */
+function Told({ label, text }: { label: string; text: string }) {
+  return (
+    <ProcessDisclosure label={label} quiet>
+      <Markdown text={text} className="rounded-lg bg-muted px-3 py-2 text-ui" />
+    </ProcessDisclosure>
+  );
+}
+
+/** The first line of a worker's brief: what it is for. */
+function firstLine(input: unknown): string | undefined {
+  const brief = (input as { brief?: unknown } | undefined)?.brief;
+  if (typeof brief !== "string") return undefined;
+  return (
+    brief
+      .split("\n")
+      .map((l) => l.replace(/^[#>*\-\s]+/, "").trim())
+      .find(Boolean) ?? undefined
+  );
 }
 
 const TOOL_ICON: Record<string, LucideIcon> = {

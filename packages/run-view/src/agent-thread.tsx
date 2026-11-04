@@ -3,11 +3,12 @@
  * memoized on the run's events, and a scroll that follows the newest line while the reader is at
  * the bottom. It fills the box its caller gives it. Mount it keyed on the
  * agent, so picking another starts at its own end. A screen puts its own rows in by log position
- * (`slots`, rendered by `slot`).
+ * (`slots`, rendered by `slot`). Main's Conversation (`conversation`) drops the divider between
+ * `main.N` and says its newest status line in the live line, not the running call.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
-import { runningTitle, type Slot, threadRows } from "./transcript";
+import { latestActivity, runningTitle, type Slot, threadRows } from "./transcript";
 import { type AgentLinks, TranscriptView } from "./transcript-view";
 
 /** How close to the bottom still counts as "at the bottom", in px. */
@@ -21,6 +22,9 @@ export function AgentThread({
   links,
   slots,
   slot,
+  nameOf,
+  conversation = false,
+  waiting,
   opensAtEnd = false,
   empty,
   className = "",
@@ -36,6 +40,12 @@ export function AgentThread({
   /** The screen's own rows, by log position. Keep it stable between renders. */
   slots?: readonly Slot[];
   slot?: (id: string) => ReactNode;
+  /** An output's catalog name, for the reports in the thread. Keep it stable between renders. */
+  nameOf?: (id: string) => string;
+  /** The thread is main's Conversation (see the header). */
+  conversation?: boolean;
+  /** Nothing works yet, and why ("Waiting to start · place 2 in line"): a quiet live line. */
+  waiting?: string;
   /** Open an ended thread at its newest line, as a conversation does, not at the top. */
   opensAtEnd?: boolean;
   /** What an empty thread says, when not the default. */
@@ -44,7 +54,10 @@ export function AgentThread({
 }) {
   const key = ids.join(" ");
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is `ids`' content
-  const rows = useMemo(() => threadRows(events, ids, live, slots), [events, key, live, slots]);
+  const rows = useMemo(
+    () => threadRows(events, ids, live, { slots, nameOf, conversation }),
+    [events, key, live, slots, nameOf, conversation],
+  );
 
   // A thread of a live run opens at its newest line and follows it while the reader is at the
   // bottom; an ended one opens at the top. Whether they were at the bottom is read during render,
@@ -54,11 +67,11 @@ export function AgentThread({
   const wasAtBottom = useRef(live || opensAtEnd);
   const el0 = viewport.current;
   if (el0) wasAtBottom.current = el0.scrollHeight - el0.scrollTop - el0.clientHeight < STICK;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the rows or working change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the rows or the live line change
   useLayoutEffect(() => {
     const el = viewport.current;
     if (el && wasAtBottom.current && rows.length > 0) el.scrollTop = el.scrollHeight;
-  }, [rows, working]);
+  }, [rows, working, waiting]);
 
   return (
     <div
@@ -70,7 +83,15 @@ export function AgentThread({
         rows={rows}
         links={links}
         slot={slot}
-        live={working ? (runningTitle(rows) ?? "") : null}
+        live={
+          waiting
+            ? { text: waiting, words: true, quiet: true }
+            : !working
+              ? null
+              : conversation
+                ? { text: latestActivity(rows) ?? "Working", words: true }
+                : { text: runningTitle(rows) ?? "" }
+        }
         empty={empty ?? (working ? "Nothing yet." : "It wrote nothing.")}
       />
     </div>
