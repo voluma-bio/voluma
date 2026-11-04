@@ -88,8 +88,8 @@ export interface SuperviseRunOptions {
   sandbox: Omit<SandboxSettings, "runId">;
   /**
    * The gateway URL and token for the sandbox of that name (`SandboxLayout.name`). Present: the
-   * roles that hold `segment_sam` get the tool and their sandboxes the gateway. Absent: no role
-   * holds `segment_sam`.
+   * roles that hold a gateway tool (`segment_sam`, `segment_plate`) get it and their sandboxes the
+   * gateway. Absent: no role holds them.
    */
   gateway?(sandbox: string): Gateway | undefined;
   config?: Partial<LoopConfig>;

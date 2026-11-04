@@ -476,7 +476,7 @@ async function claimBody(
         lifetimeSeconds: config.sandbox.lifetimeSeconds,
         idleSeconds: config.sandbox.idleSeconds,
       },
-      // The token follows the tool grant: `superviseRun` asks for it only for a sandbox whose role holds `segment_sam`.
+      // The token follows the tool grant: `superviseRun` asks for it only for a sandbox whose role holds a gateway tool.
       gateway: config.gateway
         ? (sandbox) =>
             sandboxGateway(

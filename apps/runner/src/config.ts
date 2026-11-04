@@ -227,7 +227,7 @@ export function runnerConfig() {
     /**
      * The gateway sandboxes reach providers through, and the secrets their tokens are minted
      * with (`GATEWAY_TOKEN_SECRET`, the gateway's own; the first mints); absent: sandboxes have
-     * no network and `segment_sam` is not offered.
+     * no network and `segment_sam` and `segment_plate` are not offered.
      */
     gateway,
     r2,

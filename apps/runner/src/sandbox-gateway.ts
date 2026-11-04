@@ -1,8 +1,9 @@
 /**
  * A worker sandbox's way to providers: the gateway's URL and a token minted for that sandbox.
  * `sandbox` is the name the runner writes in the sandbox's `sandbox` event, which the run page
- * attributes spend by. The token is scoped to Meta (the only provider a sandbox tool uses); a
- * starter's own Meta key rides inside it. It goes on the run's redact list, since the agent can
+ * attributes spend by. The token is scoped to the providers a sandbox tool uses: Meta
+ * (`segment_sam`) and the plate model (`segment_plate`, always on our key); a starter's own Meta
+ * key rides inside it. It goes on the run's redact list, since the agent can
  * read it from the sandbox's environment.
  */
 import { mintGatewayToken } from "@voluma/provider-calls/token";
@@ -23,7 +24,7 @@ export function sandboxGateway(
       runId: claim.runId,
       leaseToken: claim.leaseToken,
       sandbox,
-      providers: ["meta"],
+      providers: ["meta", "plate"],
       lifetimeSeconds: config.sandbox.lifetimeSeconds,
       ...(claim.ownMetaKey && { ownKeys: { meta: claim.ownMetaKey } }),
     },

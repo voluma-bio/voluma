@@ -4,6 +4,7 @@
  *   DATABASE_URL            the API's Postgres; /health answers 503 until its migration ran
  *   GATEWAY_TOKEN_SECRET    `<kid>:<base64 of 32 bytes>[,…]`, the same value the runner mints with
  *   GATEWAY_META_API_KEY, GATEWAY_ANTHROPIC_API_KEY, GATEWAY_OPENAI_API_KEY   our keys (each optional)
+ *   GATEWAY_PLATE_API_KEY   optional: `<token id>:<token secret>` of a Modal proxy token, for the plate model
  *   GATEWAY_<PROVIDER>_BASE_URL   optional: another upstream (tests use local stubs)
  *   GATEWAY_DRAIN_SECONDS   how long SIGTERM waits for calls in flight (default 240)
  *   PORT                    default 8080
