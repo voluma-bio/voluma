@@ -201,22 +201,28 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
 
 /**
  * What the centre shows besides the selected value: `opened`, else while the run goes `standIn`,
- * the nearest published link of the value's chain when the value is pending. One opened from Other
- * outputs stays open after the run ends (until Esc): the whole run opens outputs the same way.
+ * the nearest published link of the value's chain when the value is pending, else (`soFar`) the
+ * output published last that the panes draw (the scan, from intake on), so a run going shows what
+ * it has made as soon as it has. One opened from Other outputs stays open after the run ends (until
+ * Esc): the whole run opens outputs the same way.
  */
 export function inViewOf(
   review: OutputsReview,
   selected: OutputRow | undefined,
   opened: OutputRow | undefined,
   live: boolean,
-): { trailOpen?: OutputRow; standIn?: OutputRow } {
+): { trailOpen?: OutputRow; standIn?: OutputRow; soFar?: boolean } {
   if (opened && opened.id !== selected?.id) return { trailOpen: opened };
-  if (!live || selected?.state.status !== "pending") return {};
-  const standIn = selected.chain
+  if (!live || (selected && selected.state.status !== "pending")) return {};
+  const onChain = selected?.chain
     .flat()
     .map((l) => review.rows.get(l.id))
     .find((r) => r?.state.latest);
-  return standIn ? { standIn } : {};
+  if (onChain) return { standIn: onChain };
+  const drawn = [...review.rows.values()]
+    .filter((r) => r.state.latest && r.state.kind !== "file" && r.state.kind !== "collection")
+    .sort((a, b) => (b.state.latest?.at ?? "").localeCompare(a.state.latest?.at ?? ""))[0];
+  return drawn ? { standIn: drawn, soFar: true } : {};
 }
 
 // ---------------------------------------------------------------------------------------------

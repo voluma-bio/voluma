@@ -64,10 +64,11 @@ Running, "last news <age>" (the newest stored event, on a timer) and the latest 
 its Rests on); "not yet" for nothing published; "N of M in" in the panel head (the scan header
 says only Running), with Needs you only once something does; and "Other outputs so far" under the
 values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
-stays open until Esc. A section's tick waits for every value in it. The centre says the run is going and the
-AI is still setting up (its plan comes in the conversation) until the value has a version, is marked missing, or something
-on its chain has a version; then it shows the nearest such link, the scene bar saying "<value>
-rests on". `studiesQuery` refetches while a run is live, so the Samples tab
+stays open until Esc. A section's tick waits for every value in it. Until the value has a version or is
+marked missing, the centre shows the nearest link on its chain with a version (the scene bar saying
+"<value> is based on"), else the output published last that the panes draw (the scan, from intake
+on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the
+run is going and the AI is still setting up only while nothing drawable is published. `studiesQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item`,
