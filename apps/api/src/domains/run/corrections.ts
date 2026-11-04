@@ -187,8 +187,8 @@ export async function messageRefusal(
   run: MessageTarget,
 ): Promise<{ status: 403 | 409; message: string } | null> {
   if (run.example) return { status: 403, message: "Example runs can't be changed." };
-  // A converted run (it holds the outputs the conversion wrote) keeps the workflow files of its
-  // task-loop days, which the runner can no longer load; it goes with the snapshot fallback's deletion.
+  // A converted run (it holds the outputs the conversion wrote) keeps a task-loop log the runner
+  // cannot resume as a review: see "Let converted runs be reopened" in apps/api/.context/TODO.md.
   const [converted] = await tx
     .select({ id: events.id })
     .from(events)
