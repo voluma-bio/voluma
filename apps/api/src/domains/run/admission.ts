@@ -18,15 +18,13 @@ export type KeyLimits = {
 /**
  * What guards Voluma's key and the runner slots (index.ts). `voluma` has an entry for each
  * pre-created organization that may run on it, each counted on its own; its order is the queue
- * priority (first is served first). The three `*Running` numbers cap runs `running` over every
- * account and organization, enforced by the claim: all runs, runs on callers' own keys, and runs
- * on Voluma's keys. A run over a cap waits `queued`; nothing is refused for it.
+ * priority (first is served first). `appRunning` caps runs `running` over every account and
+ * organization, enforced by the claim, of which at most one is on a caller's own keys. A run over
+ * a cap waits `queued`; nothing is refused for it.
  */
 export type Limits = {
   voluma: ReadonlyMap<string, KeyLimits>;
   appRunning: number;
-  ownKeyRunning: number;
-  volumaRunning: number;
 };
 
 export type Refusal = "concurrent" | "no-key" | "spend";

@@ -52,6 +52,7 @@ import { cancelOpenThreads, cancelReviewWorkers, lockRun } from "./pg-event-log"
 import {
   loadRun,
   loadRuns,
+  ownKeyBusy,
   type Queryable,
   queueOrder,
   readableInputs,
@@ -612,13 +613,10 @@ export function pgRunQueue(
           );
         // The slot caps (`Limits`): counted under the lock, from every runner process, so a
         // deploy overlap of two runners can't take more than the app's total.
-        const [counts] = await tx.execute<{ running: number; ownKey: number }>(sql`
-          SELECT count(*)::int AS running,
-            (count(*) FILTER (WHERE credentials = 'visitor'))::int AS "ownKey"
+        const [counts] = await tx.execute<{ running: number; ownKeyBusy: boolean }>(sql`
+          SELECT count(*)::int AS running, ${ownKeyBusy} AS "ownKeyBusy"
           FROM runs WHERE state = 'running' AND NOT example`);
-        const running = counts?.running ?? 0;
-        const ownKey = counts?.ownKey ?? 0;
-        if (running >= limits.appRunning) return null;
+        if (!counts || counts.running >= limits.appRunning) return null;
         const queued = await tx
           .select()
           .from(runs)
@@ -633,9 +631,8 @@ export function pgRunQueue(
         const usages = new Map<string, Usage>();
         for (const run of queued) {
           if (run.credentials === "visitor") {
-            if (ownKey >= limits.ownKeyRunning) continue;
+            if (counts.ownKeyBusy) continue;
           } else {
-            if (running - ownKey >= limits.volumaRunning) continue;
             const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
             usages.set(run.labId, used);
             const refused = admit("claim", limits, run.labId, used, {

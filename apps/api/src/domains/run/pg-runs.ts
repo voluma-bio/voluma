@@ -168,16 +168,32 @@ function toRun({ run, input, position, calls }: Row, results: Results): Run {
   });
 }
 
+/** True while a run on a caller's own keys is running: the one own-key slot is taken (`queueOrder`, the claim). */
+export const ownKeyBusy = sql`EXISTS (
+  SELECT 1 FROM runs r WHERE r.state = 'running' AND r.credentials = 'visitor' AND NOT r.example
+)`;
+
 /**
- * The order the claim serves queued runs in, and so their places in line. While no own-key run
- * is running, a queued own-key run goes before the Voluma-key runs (so a backlog of them can't
- * starve a guest); then by organization priority (`orgs`, first served first; an org not listed
- * last), then oldest first.
+ * The order the claim serves queued runs in, and so their places in line:
+ *   0. a run that already started (released at a deploy, lease expired, reopened), so work in
+ *      progress finishes before new work begins;
+ *   1. an own-key run, while the own-key slot is free, so a backlog of Voluma-key runs can't starve
+ *      a guest; its starters take turns (the starter claimed longest ago first, never claimed: first);
+ *   2. Voluma-key runs, by organization priority (`orgs`, first served first; an org not listed
+ *      last);
+ *   3. an own-key run, while the slot is taken (the claim skips it, so this is only its place).
+ * Then oldest first.
  */
 export const queueOrder = (orgs: readonly string[]): SQL[] => [
-  sql`(CASE WHEN ${runs.credentials} = 'visitor' AND NOT EXISTS (
-    SELECT 1 FROM runs r WHERE r.state = 'running' AND r.credentials = 'visitor'
-  ) THEN 0 ELSE 1 END)`,
+  sql`(CASE
+    WHEN ${runs.startedAt} IS NOT NULL THEN 0
+    WHEN ${runs.credentials} = 'visitor' THEN (CASE WHEN ${ownKeyBusy} THEN 3 ELSE 1 END)
+    ELSE 2 END)`,
+  sql`(CASE WHEN ${runs.startedAt} IS NULL AND ${runs.credentials} = 'visitor' THEN coalesce(
+    (SELECT max(o.claimed_at) FROM runs o
+      WHERE o.credentials = 'visitor' AND o.started_by = ${runs.startedBy}),
+    '-infinity'::timestamptz
+  ) ELSE '-infinity'::timestamptz END)`,
   sql`coalesce(array_position(ARRAY[${sql.join(
     orgs.map((id) => sql`${id}`),
     sql`, `,

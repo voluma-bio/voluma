@@ -15,7 +15,7 @@
  * DEFAULT_RUN_HARNESS (tasks|agents, default agents): the loop of a run whose start names none.
  * Run limits that guard Voluma's key: RUN_LIMITS_LAB_* and RUN_LIMITS_JUDGES_* with CONCURRENT and
  * SPEND_USD (dollars: the org's total model spend on Voluma's keys, past which a start is refused),
- * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; at most one slot goes to runs on callers' own keys). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * and RUN_LIMITS_APP_RUNNING (runs running at once over every account, default 2; runs on callers' own keys hold at most one). Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -101,10 +101,6 @@ const appRunning = countFromEnv("RUN_LIMITS_APP_RUNNING", 2);
 const limits: Limits = {
   voluma: new Map(keyOrganizations.map((org) => [org.id, org.limits])),
   appRunning,
-  // Runs on callers' own keys hold at most this many of the slots.
-  ownKeyRunning: 1,
-  // Runs on Voluma's keys: all the slots (an idle slot is not reserved); set 1 to keep one for own-key runs.
-  volumaRunning: appRunning,
 };
 
 const auth = createAuth({

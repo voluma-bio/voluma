@@ -135,7 +135,7 @@
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
  *     while the org is under it);
  *   - app-wide, enforced by the claim (a run over a cap just stays `queued`;
- *     nothing is refused): at most 2 runs `running`, of which at most one on a
+ *     nothing is refused): at most `RUN_LIMITS_APP_RUNNING` runs `running`, of which at most one on a
  *     `visitor` run's own keys;
  *   - for `voluma` runs only: a total model spend per org (the summed model
  *     cost of its runs). A start, resume or reopen at or past it is refused
