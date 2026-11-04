@@ -7,15 +7,7 @@
  */
 
 import type { UserSender } from "@voluma/contracts/thread-records";
-import type { BashRuntime } from "./bash-runtime";
-import type { ProviderError } from "./failure-policy";
-import type { ThreadLayout } from "./layout";
-import type { LoopConfig, ModelSetup } from "./loop-config";
-import type { Files } from "./ports/files";
-import type { History } from "./ports/history";
-import type { Publish } from "./ports/publish";
 import type { PayloadOf, Recorder } from "./recorder";
-import type { SandboxSession } from "./sandbox-session";
 import type { ThreadSpec, Threads } from "./threads";
 
 /** The sender of every line the loop itself writes to a thread. */
@@ -34,46 +26,6 @@ export function runLock(): Section {
     tail = result.catch(() => {});
     return result;
   };
-}
-
-/** What the shell hands a loop: the run's parts it built, and the host's settings it passes through. */
-export interface Shared {
-  runId: string;
-  rootThreadId: string;
-  recorder: Recorder;
-  /** The model, thinking level and call function of a thread of `role` (`recorded`: the model a resumed thread started on). */
-  model(role: string, recorded: string | undefined): ModelSetup;
-  selectedOutputs: readonly string[] | undefined;
-  notes: string | undefined;
-  config?: Partial<LoopConfig>;
-  providerError?(error: string): ProviderError | undefined;
-  files: Files;
-  /** The agents' stored conversations (`agents/transcript.ts` renders one). */
-  history: History;
-  /** Moves a file an agent named into a published output version (the agent loop's). */
-  publish: Publish;
-  session: SandboxSession;
-  pool: Threads;
-  /** The claim's background commands (`bash-runtime.ts`), built once for every loop. */
-  bash: BashRuntime;
-  /** Stops a thread's background commands and releases its sandbox (a loop calls it for an agent that has really ended). */
-  release(threadId: string): Promise<void>;
-  /** The run's one lock. */
-  section: Section;
-  signal: AbortSignal;
-}
-
-/**
- * The agent loop's side of a run (`agents/wire.ts`): which sandbox and display name each thread has,
- * read from the log, and the loop itself, run on the shell's parts.
- */
-export interface Wire {
-  /** A thread's sandbox; its `thread.started` is stored before its first sandbox call. */
-  sandboxOf(threadId: string): ThreadLayout;
-  nameOf(threadId: string): string;
-  /** The thread's sandbox outlives its thread's turn: the shell releases it when the loop says so, not at each end. */
-  keepsSandbox(threadId: string): boolean;
-  run(shared: Shared): Promise<void>;
 }
 
 /** How long the main agent gets to end its turn after the run ended. */

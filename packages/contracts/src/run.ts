@@ -22,9 +22,6 @@
  *                                  server writes `correction.ended {cancelled}`
  *   POST /api/review/runs/:id/messages (`messages.ts`) reopens a run that ended `completed`,
  *                                  moving it to `queued` for one claim
- *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runReadSchema`
- *                                  (409 unless the run is `awaiting-keys`; 403 unless
- *                                  the caller is its `startedBy`; 429: see Limits)
  *   GET  /api/run/inputs           → 200 `listInputsResponseSchema`, newest first: inputs a
  *                                  run can start on (an upload only once completed)
  *   POST /api/run/inputs           body `createUploadRequestSchema` → 200
@@ -121,28 +118,23 @@
  * redacted before it is stored or logged. A deploy or a runner restart does not lose them: the
  * run is claimed again with the sealed copy. Reopening a finished own-key run (a message or
  * an approval answer) therefore needs `keys` in that request, which are sealed again. Only a
- * run whose sealed keys are missing or cannot be opened (a rotated secret) moves to
- * `awaiting-keys` and resumes when the browser resends them (`/keys`). After 24 h in
- * `awaiting-keys` it ends `failed` with an `error`. `/keys` moves the run `awaiting-keys` →
- * `queued`, where a claim picks it up. An own-key run's model calls use the starter's
+ * run whose sealed keys cannot be opened (the API's `RUN_KEY_SECRET` was changed) ends
+ * `failed` at its next claim, with an `error` telling its starter to start it again. An own-key run's model calls use the starter's
  * own account, so its outputs are untrusted: never seed an example from one.
  *
  * Limits: each org has its own, given to the run domain by the API's
  * composition root:
- *   - per caller: at most this many runs that haven't ended, per `credentials`
- *     kind (none for an org whose members share one account); another answers
- *     409;
- *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
- *     while the org is under it);
  *   - app-wide, enforced by the claim (a run over a cap just stays `queued`;
  *     nothing is refused): at most `RUN_LIMITS_APP_RUNNING` runs `running`, of which at most one on a
  *     own-key run's own keys;
+ *   - own-key runs that haven't ended, per starter: at most 20; a start past it is
+ *     refused 429;
  *   - for `voluma` runs only: a total model spend per org (the summed model
- *     cost of its runs). A start, resume or reopen at or past it is refused
+ *     cost of its runs). A start or reopen at or past it is refused
  *     (429, a reopen 409); a claim refuses a run that never started and
  *     never one that has.
  * Every run is created `queued`, and only a claim starts it (`runner.ts`). A
- * own-key run skips the org's runs-at-once count but still waits for a claim.
+ * own-key run waits for a claim too.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
@@ -154,7 +146,7 @@ import { workflowPinSchema } from "./workflow";
  * A scan a run reads. `source` says where its files are: an `upload` lives at
  * `inputPrefix(id)`; the `reference` scan is `referencePrefix("scan")`. The
  * server derives the R2 prefix; the browser never needs it. Its key layout
- * is `inputKey` in `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
+ * is `inputKey` in `r2.ts`. `listInputs` lists the caller's uploads and the
  * org's reference scan.
  */
 /**
@@ -188,7 +180,7 @@ export const runStateSchema = z.discriminatedUnion("status", [
    * own-key run is running, own-key runs first; then `voluma` runs by
    * organization priority, then oldest first); 1 starts next. The server computes
    * it at read time and doesn't store it, so the run screen polls `getRun` to see
-   * it move. Under `self`, it still counts other callers' runs (only a count leaks).
+   * it move. It counts other callers' runs (only a count leaks).
    */
   z.object({
     status: z.literal("queued"),
@@ -196,11 +188,6 @@ export const runStateSchema = z.discriminatedUnion("status", [
   }),
   /** The first claim's time: a re-claim after a recovery keeps it. */
   z.object({ status: z.literal("running"), startedAt: z.iso.datetime() }),
-  /**
-   * An own-key run whose sealed keys are missing or unreadable; it resumes when
-   * they're resent. `startedAt` is null if it was never claimed.
-   */
-  z.object({ status: z.literal("awaiting-keys"), startedAt: z.iso.datetime().nullable() }),
   z.object({
     status: z.literal("ended"),
     outcome: z.enum(["completed", "failed", "cancelled"]),
@@ -328,7 +315,7 @@ export const startRunRequestSchema = z.object({
   /** As `runSchema.selectedOutputs`; an id that is not a selectable output of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
-  /** Present: the run uses these (`credentials: "own"`) and skips the org's runs-at-once count. Absent: an account without Voluma's key is refused (403). */
+  /** Present: the run uses these (`credentials: "own"`). Absent: an account without Voluma's key is refused (403). */
   keys: ownKeysSchema.optional(),
   /** One of `GET /run/models`; absent: its default. A choice the run's keys can't take is refused with 400. */
   model: modelRefSchema.optional(),
@@ -360,8 +347,6 @@ export type RunModelsResponse = z.infer<typeof runModelsResponseSchema>;
 
 export const listRunsResponseSchema = z.object({ runs: z.array(runSchema) });
 export const listInputsResponseSchema = z.object({ inputs: z.array(inputSchema) });
-export const resendKeysRequestSchema = z.object({ keys: ownKeysSchema });
-export type ResendKeysRequest = z.infer<typeof resendKeysRequestSchema>;
 
 /** The object store's limit on one PUT (R2: 5 GB); a larger file can't be uploaded. */
 export const MAX_UPLOAD_FILE_BYTES = 5_000_000_000;

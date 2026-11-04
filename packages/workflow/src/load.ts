@@ -322,8 +322,15 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       throw new WorkflowParseError(path, `skill "${unknown}" is not a skill of this workflow`);
     agents[agent.name] = { ...agent, skills: agent.skills ?? skillNames };
   }
-  const { main } = agents;
+  const { main, worker } = agents;
   if (!main) throw new WorkflowParseError(`${rolesDir}/main.md`, "not found");
+  if (!worker) throw new WorkflowParseError(`${rolesDir}/worker.md`, "not found");
+  const other = Object.keys(agents).find((n) => n !== "main" && n !== "worker");
+  if (other)
+    throw new WorkflowParseError(
+      `${rolesDir}/${other}.md`,
+      "the agent loop has only main and worker",
+    );
   const promptText = (name: string) => {
     const text = texts.get(`${rolesDir}/${name}`);
     if (text === undefined) throw new WorkflowParseError(`${rolesDir}/${name}`, "not found");
@@ -334,7 +341,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     commit: await getText(store, `${prefix}${DONE}`),
     skills,
     toolIndex,
-    agents: { ...agents, main },
+    agents: { main, worker },
     outputCatalog,
     suggestedPlan: texts.get(`${own.slice(0, -"/SKILL.md".length)}/references/suggested-plan.md`),
     words: promptText("words.md"),

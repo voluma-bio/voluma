@@ -38,7 +38,7 @@ export interface AgentDefinition {
   model: string;
   /** The role's thinking level; unset: none is requested (a run's own `thinking` wins). */
   thinking?: ModelThinkingLevel;
-  /** Every tool the role holds, base tools included (names in `AGENT_TOOL_NAMES`, `harness/agents/tools/registry.ts`). */
+  /** Every tool the role holds, base tools included (names in `AGENT_TOOL_NAMES`, `harness/tools/registry.ts`). */
   tools: string[];
   /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
   skills: string[];
@@ -57,10 +57,10 @@ export interface WorkflowDefinition {
   /** Every skill's scripts, in `skills` order, each with its docstring's first line. */
   toolIndex: ToolIndexEntry[];
   /**
-   * The role files of `workflows/core/agents/`, the same for every workflow. The loader requires
-   * `main`, the role the run's first thread runs on.
+   * The role files of `workflows/core/agents/`, the same for every workflow: `main` is the role
+   * the run's first thread runs on, `worker` the role of the threads it starts.
    */
-  agents: Record<string, AgentDefinition> & { main: AgentDefinition };
+  agents: { main: AgentDefinition; worker: AgentDefinition };
   /** Its `outputs.yaml`, validated. */
   outputCatalog: OutputCatalog;
   /** The workflow skill's `references/suggested-plan.md`, when it has one: main's first message carries it. */

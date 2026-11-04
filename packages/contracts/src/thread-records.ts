@@ -20,8 +20,6 @@ export interface ThreadBase {
   id: string;
   /** What the thread is in the run (`threadPlace`). */
   place: Exclude<ThreadPlace, "root">;
-  /** The role file the thread runs on (`thread.started`'s `kind`). */
-  role: string;
   /** The id without the run id (`main.2`, `corin`): its sandbox's name. */
   name: string;
   /** How its latest invocation ended; undefined while the log shows it started and not ended. */
@@ -88,7 +86,6 @@ export function threadRecords<T extends ThreadBase>(
           const base: ThreadBase = {
             id: e.threadId,
             place,
-            role: e.payload.kind,
             name: e.payload.name,
             end: undefined,
             starts: (record?.starts ?? 0) + 1,

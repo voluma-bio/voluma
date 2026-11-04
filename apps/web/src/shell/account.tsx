@@ -1,5 +1,5 @@
 /**
- * The brand lockup (the sign-in screen), the rail's mark, and the rail's foot: a guest's Sign in,
+ * The brand lockup (the sign-in screen), the header's mark, and the rail's foot: a guest's Sign in,
  * and Settings (the theme and who is signed in, with Sign in or Sign out). Settings opens by itself
  * when the location's state carries `openSettings` (the old `/settings` page redirects so).
  */
@@ -8,37 +8,31 @@ import { useQuery } from "@tanstack/react-query";
 import { signIn, signOut } from "@voluma/api-client";
 import { userSettingsQuery, useUpdateUserSettings } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
-import { Button, Popover, RailButton, SegmentedControl } from "@voluma/ui";
+import { Button, Popover, RailButton, SegmentedControl, volumaMarkUrl } from "@voluma/ui";
 import { LogIn, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
-// The mark beside the wordmark, as in the mockups' top bar. The mark alone
-// reads as a face at large sizes, so it never appears without the wordmark.
+/** The shared brand mark beside the wordmark on sign-in screens. */
 export function BrandLockup({ className }: { className: string }) {
   return (
     <span className={`flex items-center font-semibold ${className}`}>
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="text-primary">
-        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        <path
-          d="M7 14c2-5 8-5 10 0"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        />
-      </svg>
+      <img src={volumaMarkUrl} alt="" width={224} height={176} className="object-contain" />
       Voluma
     </span>
   );
 }
 
-/** The rail's 24 px mark: the wordmark's initial, since the face mark never appears alone. */
-export function RailMark() {
+/** The header's non-interactive brand mark. */
+export function BrandMark() {
   return (
-    <span className="grid size-6 place-items-center rounded-md bg-primary font-semibold text-primary-foreground text-sm">
-      V
-    </span>
+    <img
+      src={volumaMarkUrl}
+      alt="Voluma"
+      width={224}
+      height={176}
+      className="size-6 object-contain"
+    />
   );
 }
 
@@ -46,7 +40,6 @@ export function RailMark() {
 export function RailSignIn() {
   return (
     <RailButton
-      variant="primary"
       label="Sign in"
       icon={<LogIn />}
       onClick={() => signIn(location.pathname + location.search)}

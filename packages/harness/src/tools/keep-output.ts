@@ -16,7 +16,6 @@
 import { toCheckItemSchema } from "@voluma/contracts/agent-events";
 import { outputRefSchema } from "@voluma/contracts/output-catalog";
 import { z } from "zod";
-import type { Tool } from "../../tools/tool";
 import { keepOutputId } from "../effects";
 import {
   answerOf,
@@ -28,6 +27,7 @@ import {
   type OutputToolDeps,
 } from "./output-shared";
 import { Refusal, result } from "./refusal";
+import type { Tool } from "./tool";
 
 const inputSchema = z.object({
   ids: z

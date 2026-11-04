@@ -37,7 +37,7 @@ Dependencies point down: apps → feature code → packages. `contracts` and
 ## The agent runtime
 
 The harness has one run loop over one shell (`loop-shell.ts`: waking the loop, starting
-threads, stopping them, the root's end): the **agent loop** (`agents/loop.ts`: main and up to 4
+threads, stopping them, the root's end): the **agent loop** (`loop.ts`: main and up to 4
 named workers, messages, published output versions). It is described in
 `packages/harness/.context/CONTEXT.md`; its roles are in `workflows/core/agents/`.
 `runs.harness` and the claim's `harnesses` field remain only for the deploy overlap
@@ -138,7 +138,7 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   (a position in the list) never passes an unseen event; a read that runs out of retries stops the
   claim like a failed write, and the next claim resumes. An API from before this answers 204 and
   no `lastSeq`; the runner then numbers events as it did.
-- **The run loop** (`agents/loop.ts`) is code around the main thread, with no state of its own: each step is a function of `agentLog(events)` and which threads run in this process. A run ends when the root has a completed `thread.ended`; then every thread without an end is stopped (stops are appended first, so the holder check refuses a stopped thread's next write at once). A thread that throws or is refused before it starts, a fatal provider error (a retryable one resumes its thread once first), or an error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness builds exactly the tools a role's file names (`agents/tools/registry.ts`); prompts are `agents/prompts.ts`.
+- **The run loop** (`loop.ts`) is code around the main thread, with no state of its own: each step is a function of `agentLog(events)` and which threads run in this process. A run ends when the root has a completed `thread.ended`; then every thread without an end is stopped (stops are appended first, so the holder check refuses a stopped thread's next write at once). A thread that throws or is refused before it starts, a fatal provider error (a retryable one resumes its thread once first), or an error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness builds exactly the tools a role's file names (`tools/registry.ts`); prompts are `prompts.ts`.
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
   `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
   way whether the run is fresh or recovered: read the run's stored events (paged) and every
@@ -152,7 +152,7 @@ threads: a supervisor (the root, code), the main agent, and below it workers
   5 s), so the lease is renewed soon after the API answers again. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our model key; an own-key run uses the claim's Meta key, in that run's scope
   only. Every sandbox runs on our Modal token. A guest may start only own-key runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The event log holds no plan: the final outputs are the selected catalog entries of `outputs.yaml` (the catalog's `selectable` ones if none were sent), written as the run's opening `outputs.changed` (`openingOutputs`, `agents/wire.ts`) and changed by main with `change_outputs`; main's plan is a note it writes (`/work/main/plan.md`). Prompts are the role file plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash). Every role's tools are what its role file lists (`workflows/core/agents/`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL`. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The event log holds no plan: the final outputs are the selected catalog entries of `outputs.yaml` (the catalog's `selectable` ones if none were sent), written as the run's opening `outputs.changed` (`openingOutputs`, `packages/harness/src/run-agents.ts`) and changed by main with `change_outputs`; main's plan is a note it writes (`/work/main/plan.md`). Prompts are the role file plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash). Every role's tools are what its role file lists (`workflows/core/agents/`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL`. The claim carries no plan. The original workflow-format design: voluma-bio/docs history, `git show 101a8b09:work/mvp-contracts-and-data/design/workflow-format.md` (the work item is archived); the code and `workflows/core/AGENTS.md` are current.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can
@@ -195,8 +195,8 @@ is a 401; a server with guests off answers 404 and the gate shows the sign-in sc
 cookie that is refused is cleared and answered 401, never turned into a guest: the gate then
 re-loads, and lands on a guest or the sign-in screen. `/me` returns `kind: "visitor"`. Unset
 means the sign-in wall, and a guest cookie is ignored. `createAuth` throws when the guest
-organization is a member organization. There is no per-visitor mint limit: every cap is per
-org. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
+organization is a member organization. There is no per-visitor mint limit: the spend limit is per
+org, the upload cap and the 20 unfinished own-key runs per person, the run slots app-wide. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
 share, run by run, so it is for signed-in members; public examples are seeded into the Demo
 organization instead, and every organization reads them (`readableRuns`: `example` rows need no
 org match, so the Judges see them too). They share the Demo workspace
@@ -268,9 +268,12 @@ atomically upserts just the supplied fields. The client exports
 `useUpdateUserSettings(userId)`; the id scopes the query cache, never the API
 request. The shell's identity-keyed QueryClient keeps accounts separate.
 Settings at the foot of the rail (`shell/account.tsx`, a popover) holds the theme (Light /
-Dark) and who is signed in, with Sign in or Sign out. A guest also gets a labelled Sign in on
-the rail itself, above Settings: judges land as guests and are told only to "sign in". There is
-no settings page; `/settings` redirects to `/` with the popover open. It shows
+Dark) and who is signed in, with Sign in or Sign out. A guest also gets an icon-only Sign in
+above Settings, with the same styling as the other rail controls and a tooltip. The top-left
+brand mark sits in the header, outside the rail, and is not a link; Studies is the rail's
+navigation back to the study list. Shared brand assets live in `packages/ui/src/brand/`;
+`volumaMarkUrl` exports the source SVG for the header, sign-in lockup and stories.
+There is no settings page; `/settings` redirects to `/` with the popover open. It shows
 loading and failure; only a successful save changes the selected theme. The shell reads the same query and
 applies it to the document and frame on every route, defaulting to light while
 loading or when settings cannot be loaded. Settings failures never block the app.
