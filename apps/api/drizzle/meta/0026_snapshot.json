@@ -1,5 +1,5 @@
 {
-  "id": "b845dbb7-9b39-41da-8f72-5a2a385925fa",
+  "id": "2f5fd744-f1e7-4b60-96e8-dd11d30f4481",
   "prevId": "987a2ee7-07e9-493c-952d-5e5d900fd700",
   "version": "7",
   "dialect": "postgresql",
@@ -467,22 +467,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "runs_active_state": {
-          "name": "runs_active_state",
-          "columns": [
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"runs\".\"state\" IN ('queued', 'running')",
           "concurrently": false,
           "method": "btree",
           "with": {}

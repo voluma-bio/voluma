@@ -30,6 +30,7 @@
 import { madeFromSchema, toCheckItemSchema } from "@voluma/contracts/agent-events";
 import { agentLog } from "@voluma/contracts/agents";
 import {
+  convertedAs,
   type OutputEntry,
   type OutputKind,
   outputKindSchema,
@@ -117,16 +118,13 @@ interface Plan {
   shape?: string;
 }
 
-/** The shapes the review converter reads from a `.npy` (`detail.as`); a point or line has no array. */
-const CONVERTED_SHAPES = new Set<string>(["labels", "mask", "surface"]);
-
 /** The converter's representation of a listed output, where the catalog fixes it. */
 function detailOf(entry: OutputEntry): Pick<Plan, "detail" | "shape"> {
-  if (entry.kind === "base") return { detail: { as: "image" } };
-  if (entry.kind !== "overlay" || !entry.shape) return {};
-  return CONVERTED_SHAPES.has(entry.shape)
-    ? { detail: { as: entry.shape }, shape: entry.shape }
-    : { shape: entry.shape };
+  const as = convertedAs(entry);
+  return {
+    ...(as && { detail: { as } }),
+    ...(entry.kind === "overlay" && entry.shape && { shape: entry.shape }),
+  };
 }
 
 const zyxSchema = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
