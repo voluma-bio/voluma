@@ -58,6 +58,13 @@ run agent.
   holding bone off the tibia measured 1.28 mm2 with the femur, 0.24 with the tibia and 0.56 with the fibula; with label 6 cleared, the
   same bone as a 0.145 mm3 candidate measured 1.28 / 0.24 / 0.56. Measured as the share of the candidate a big bone's flood took, the
   old `fused` rule flagged OA6-1RK's sesamoids. Peak RSS on OA6-1RK (236M voxels): 4.78 GB, 11 s.
+- Big-bone contacts, 2026-11-04, same measure and tolerance: femur–tibia 0.0034 mm2 on OA6-1RK (3fc56eec's last labels) and
+  0.0007 on 4df02afe; 0.31 mm2 (0.89 in all, direct) on b023b073 (OA6-2RK), whose tibia was set to the threshold bone no other
+  label held after its SAM track ran away (63M voxels) and whose tibial frame then refused the joint ends. Femur–patella: no
+  contact on OA6-1RK; 3.17 mm2 on 4df02afe, where the femur label wraps the patella's cortex (patella 0.70 mm3, under range).
+  `finish_labels.py` on these: OA6-1RK raises no flag and writes the labels (25 s, 4.8 GB peak); 4df02afe 12 open flags,
+  b023b073 13 (joined:1-2 and joined:9-2 among them), neither written. b023b073's intake ran `unlabelled.py --ranges` on its
+  watershed volume, which shows no flag, and never on the labels it published.
 - Classic labels grown from SAM's femur, tibia and patella alone agreed with the reference at Dice 0.92 / 0.90 / 0.92, against
   SAM's 0.97 / 0.95 / 0.94, because the fibula and the small bones were unlabelled and the watershed absorbed them.
 - Disagreement region 2 (4,849 voxels, 0.006 mm³) is 0.1% of the femur's range width and 1.5% of the sesamoid's; region 1 in the

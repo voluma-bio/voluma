@@ -81,5 +81,14 @@ threshold candidate (`unlabelled.py`) as the structure's label: a threshold piec
 own cortex, cut off by the candidate rim. When neither works, the structure is a To check item and its label stays
 unset.
 
+A big bone's track that fails (it runs on along the shaft or into a neighbour, takes far more than the anatomy's volume,
+or ends joined to another big bone through bone) is redone the same way, never replaced by threshold bone: a bone set to
+"the threshold bone no other label holds" takes whatever the other tracks missed, the neighbour's joint end included,
+and the steps that read that bone fail on it. Redo the request with a `subVolume` around the bone, negative points on
+the neighbour it ran into, `otherFrames` on the slices where it ran away, and `direction` toward the bone's own end. Or
+keep the tracks that are right and split the merged mass: `classic_segment.py --within <label>` with seeds from each
+bone's core (`segmentation-check`). When neither works, keep the best labels and raise a To check item naming where
+the bone is in question.
+
 Do not claim a voxel-exact number from one call: keep the call's counts, prompts and labels as evidence, and when a
 measurement must be stable, call twice and report the spread. A third rerun on one problem is a To check item.

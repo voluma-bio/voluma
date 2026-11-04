@@ -20,7 +20,8 @@ an ordinary range flag: that label usually took bone from a neighbour. A label i
 the file does not list, are flagged.
 
 Writes: <out>  the full per-label table (JSON, keyed by label id)
-Prints: one JSON line {stats, labels, volume_mm3, pieces, specks, unsupported, flags}; flags is the sentences for the labels that fail
+Prints: one JSON line {stats, labels, volume_mm3, pieces, specks, unsupported, flags}; flags is {key: sentence} for the labels that fail
+  (keys: volume:<id>, pieces:<id>, unsupported:<id>, touch:<id>, absent:<id>, unknown), the keys `finish_labels.py --accept` takes
 Example: python label_stats.py --labels labels.npy --out stats.json --ranges anatomy.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -81,6 +82,47 @@ def stats_for(labels, label, sp, min_piece_mm3, reach_mm=None):
         'neighbour_voxels': neighbours(sub, mask, label)}
 
 
+def load_ranges(path):
+    """anatomy.json's labels by id ({} without a file)."""
+    return {e['id']: e for e in json.loads(Path(path).read_text())['labels']} if path else {}
+
+
+def check(labels, sp, expected, far_factor=10, min_piece_mm3=0.01):
+    """The per-label table, the flags ({key: sentence}) and the unsupported ids; `expected` is anatomy.json's labels by id."""
+    table, flags, unsupported = {}, {}, []
+    ids = [int(i) for i in np.unique(labels) if i > 0]
+    for lv in ids:
+        e = expected.get(lv)
+        s = stats_for(labels, lv, sp, min_piece_mm3, e.get('touch_mm', DEFAULT_TOUCH_MM) if e and e.get('must_touch') else None)
+        if e:
+            lo, hi = e['volume_mm3']
+            s['name'] = e['name']
+            s['volume_in_range'] = lo <= s['volume_mm3'] <= hi
+            s['pieces_expected'] = e.get('components', 1)
+            s['identity_unsupported'] = s['volume_mm3'] < lo / far_factor
+            if s['identity_unsupported']:
+                unsupported.append(lv)
+                flags[f'unsupported:{lv}'] = (
+                    f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 is under {lo}/{far_factor:g}: this label is not the {e["name"]} (another piece, or a sliver of it). '
+                    'Remove the label, then look for the real one (unlabelled.py candidates, the keyframe)')
+            elif not s['volume_in_range']:
+                flags[f'volume:{lv}'] = f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 outside {lo}-{hi}'
+            if s['pieces'] != s['pieces_expected']:
+                flags[f'pieces:{lv}'] = f'{lv} {e["name"]}: {s["pieces"]} pieces, expected {s["pieces_expected"]}'
+            missing = [t for t in e.get('must_touch', []) if t not in s['within_mm']]
+            if missing:
+                flags[f'touch:{lv}'] = (f'{lv} {e["name"]}: not within {e.get("touch_mm", DEFAULT_TOUCH_MM)} mm of label {missing} '
+                                        f'(within reach: {sorted(s["within_mm"])}); is it on the right bone?')
+        table[lv] = s
+    for lv, e in expected.items():
+        if lv not in table:
+            flags[f'absent:{lv}'] = f'{lv} {e["name"]}: expected but absent'
+    unknown = [lv for lv in ids if expected and lv not in expected]
+    if unknown:
+        flags['unknown'] = f'labels {unknown} are not in the ranges file'
+    return table, flags, unsupported
+
+
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy, with its sidecar beside it')
@@ -93,39 +135,8 @@ if __name__ == '__main__':
     a = ap.parse_args()
     labels = np.load(a.labels)
     sp = sidecar.grid(a.header or str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
-    expected = {}
-    if a.ranges:
-        expected = {e['id']: e for e in json.loads(Path(a.ranges).read_text())['labels']}
-    table, flags, unsupported = {}, [], []
-    ids = [int(i) for i in np.unique(labels) if i > 0]
-    for lv in ids:
-        e = expected.get(lv)
-        s = stats_for(labels, lv, sp, a.min_piece_mm3, e.get('touch_mm', DEFAULT_TOUCH_MM) if e and e.get('must_touch') else None)
-        if e:
-            lo, hi = e['volume_mm3']
-            s['name'] = e['name']
-            s['volume_in_range'] = lo <= s['volume_mm3'] <= hi
-            s['pieces_expected'] = e.get('components', 1)
-            s['identity_unsupported'] = s['volume_mm3'] < lo / a.far_factor
-            if s['identity_unsupported']:
-                unsupported.append(lv)
-                flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 is under {lo}/{a.far_factor:g}: this label is not the {e["name"]} (another piece, or a sliver of it). '
-                             'Remove the label, then look for the real one (unlabelled.py candidates, the keyframe)')
-            elif not s['volume_in_range']:
-                flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 outside {lo}-{hi}')
-            if s['pieces'] != s['pieces_expected']:
-                flags.append(f'{lv} {e["name"]}: {s["pieces"]} pieces, expected {s["pieces_expected"]}')
-            missing = [t for t in e.get('must_touch', []) if t not in s['within_mm']]
-            if missing:
-                flags.append(f'{lv} {e["name"]}: not within {e.get("touch_mm", DEFAULT_TOUCH_MM)} mm of label {missing} '
-                             f'(within reach: {sorted(s["within_mm"])}); is it on the right bone?')
-        table[lv] = s
-    for lv, e in expected.items():
-        if lv not in table:
-            flags.append(f'{lv} {e["name"]}: expected but absent')
-    unknown = [lv for lv in ids if expected and lv not in expected]
-    if unknown:
-        flags.append(f'labels {unknown} are not in the ranges file')
+    table, flags, unsupported = check(labels, sp, load_ranges(a.ranges), a.far_factor, a.min_piece_mm3)
+    ids = list(table)
     Path(a.out).write_text(json.dumps(table, indent=1) + '\n')
     sidecar.emit(stats=a.out, labels=ids, volume_mm3={lv: table[lv]['volume_mm3'] for lv in ids},
                  pieces={lv: table[lv]['pieces'] for lv in ids}, specks={lv: table[lv]['specks']['count'] for lv in ids}, unsupported=unsupported, flags=flags)
