@@ -8,6 +8,8 @@ export type Contrast = { low: number; high: number };
 export type OverlayPlane = { overlay: Overlay; plane: Plane; scale: number };
 
 const OVERLAY_ALPHA = 0.45;
+/** An outlined region's fill; its edge is opaque. */
+const OUTLINED_ALPHA = 0.65;
 
 const rgbCache = new Map<string, [number, number, number]>();
 function rgb(color: string): [number, number, number] {
@@ -45,34 +47,74 @@ export function compose(
   for (const { overlay, plane, scale } of overlays) {
     const rowOf = lookup(rows, imageScale, overlay.offsetZyx[ra], scale, plane.rows);
     const colOf = lookup(cols, imageScale, overlay.offsetZyx[ca], scale, plane.cols);
-    const paint = painter(overlay);
+    // The overlay's value under each pixel, 0 outside its crop.
+    const values = new Float32Array(rows * cols);
     for (let r = 0; r < rows; r++) {
       const pr = rowOf[r]!;
       if (pr < 0) continue;
       for (let c = 0; c < cols; c++) {
         const pc = colOf[c]!;
-        if (pc >= 0) paint(rgba, r * cols + c, plane.data[pr * plane.cols + pc]!);
+        if (pc >= 0) values[r * cols + c] = plane.data[pr * plane.cols + pc]!;
       }
     }
+    blend(rgba, cols, overlay, values);
   }
   return rgba;
 }
 
 /**
- * A resliced picture (`reslice.ts`): the image's values and each overlay's, one per pixel. A
- * pixel off the image (NaN) is left transparent.
+ * A resliced picture (`reslice.ts`), `cols` pixels wide: the image's values and each overlay's,
+ * one per pixel. A pixel off the image (NaN) is left transparent.
  */
 export function composeSampled(
   values: ArrayLike<number>,
+  cols: number,
   contrast: Contrast,
   overlays: { overlay: Overlay; values: ArrayLike<number> }[],
 ): Uint8Array {
   const rgba = grey(values, values.length, contrast);
-  for (const layer of overlays) {
-    const paint = painter(layer.overlay);
-    for (let i = 0; i < values.length; i++) if (rgba[i * 4 + 3]) paint(rgba, i, layer.values[i]!);
-  }
+  for (const layer of overlays) blend(rgba, cols, layer.overlay, layer.values);
   return rgba;
+}
+
+/**
+ * Blends an overlay's values, one per pixel of a picture `cols` wide, into its visible pixels:
+ * each value's colour at its opacity, nothing for 0 or an uncoloured label. An outlined value is
+ * filled stronger, and opaque where a 4-neighbour inside the picture holds another value.
+ */
+function blend(rgba: Uint8Array, cols: number, overlay: Overlay, values: ArrayLike<number>) {
+  const single = typeof overlay.color === "string" ? rgb(overlay.color) : null;
+  const byLabel = typeof overlay.color === "string" ? null : overlay.color;
+  const opacityOf = (value: number) =>
+    typeof overlay.opacity === "number" ? overlay.opacity : (overlay.opacity[value] ?? 1);
+  const outlined = (value: number) =>
+    typeof overlay.outline === "object" ? !!overlay.outline[value] : !!overlay.outline;
+  const rows = values.length / cols;
+  // NaN off a resliced picture counts as no value.
+  const at = (i: number) => values[i]! || 0;
+  for (let i = 0; i < values.length; i++) {
+    const value = at(i);
+    if (!value || !rgba[i * 4 + 3]) continue;
+    const hex = byLabel?.[value];
+    const color = single ?? (hex ? rgb(hex) : null);
+    if (!color) continue;
+    let a = OVERLAY_ALPHA;
+    if (outlined(value)) {
+      const r = Math.floor(i / cols);
+      const c = i - r * cols;
+      const edge =
+        (r > 0 && at(i - cols) !== value) ||
+        (r < rows - 1 && at(i + cols) !== value) ||
+        (c > 0 && at(i - 1) !== value) ||
+        (c < cols - 1 && at(i + 1) !== value);
+      a = edge ? 1 : OUTLINED_ALPHA;
+    }
+    a *= opacityOf(value);
+    const o = i * 4;
+    rgba[o] = rgba[o]! * (1 - a) + color[0] * a;
+    rgba[o + 1] = rgba[o + 1]! * (1 - a) + color[1] * a;
+    rgba[o + 2] = rgba[o + 2]! * (1 - a) + color[2] * a;
+  }
 }
 
 function grey(data: ArrayLike<number>, count: number, contrast: Contrast): Uint8Array {
@@ -88,26 +130,6 @@ function grey(data: ArrayLike<number>, count: number, contrast: Contrast): Uint8
     rgba[i * 4 + 3] = 255;
   }
   return rgba;
-}
-
-/** Blends an overlay's value into pixel `i`: its colour at its opacity, nothing for 0 or an uncoloured label. */
-function painter(overlay: Overlay) {
-  const single = typeof overlay.color === "string" ? rgb(overlay.color) : null;
-  const byLabel = typeof overlay.color === "string" ? null : overlay.color;
-  const opacityOf = (value: number) =>
-    OVERLAY_ALPHA *
-    (typeof overlay.opacity === "number" ? overlay.opacity : (overlay.opacity[value] ?? 1));
-  return (rgba: Uint8Array, i: number, value: number) => {
-    if (!value) return;
-    const hex = byLabel?.[value];
-    const color = single ?? (hex ? rgb(hex) : null);
-    if (!color) return;
-    const a = opacityOf(value);
-    const o = i * 4;
-    rgba[o] = rgba[o]! * (1 - a) + color[0] * a;
-    rgba[o + 1] = rgba[o + 1]! * (1 - a) + color[1] * a;
-    rgba[o + 2] = rgba[o + 2]! * (1 - a) + color[2] * a;
-  };
 }
 
 /** Contrast limits that span the image's values: the 1st to the 99.9th percentile of a coarse level. */

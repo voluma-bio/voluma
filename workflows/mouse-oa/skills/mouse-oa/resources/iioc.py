@@ -439,8 +439,7 @@ def main():
         np.save(out / name, arr)
         sidecar.write(
             out / name,
-            grid_id=frame['grid_id'],
-            spacing_zyx_mm=frame['spacing_zyx_mm'],
+            like=frame,
             inputs=inputs,
             params=params,
             script='iioc.py',

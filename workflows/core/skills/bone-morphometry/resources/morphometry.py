@@ -114,12 +114,11 @@ def crop_box(mask, pad=0):
     return tuple(slice(max(s.start - pad, 0), min(s.stop + pad, n)) for s, n in zip(sl[0], mask.shape))
 
 
-def write_crop_map(path, arr, parent_grid, spacing, box, inputs, params):
+def write_crop_map(path, arr, parent_grid, box, inputs, params):
     np.save(path, arr)
     sidecar.write(
         path,
-        grid_id=parent_grid,
-        spacing_zyx_mm=spacing,
+        like=parent_grid,
         inputs=inputs,
         params=dict(params, unit='mm'),
         offset_zyx=[s.start for s in box],
@@ -222,8 +221,8 @@ def trabecular(a):
     })
     maps = {'thickness': out / 'thickness-mm.npy', 'separation': out / 'separation-mm.npy'}
     p = {'threshold': threshold, 'step': 0.5}
-    write_crop_map(maps['thickness'], th.astype(np.float32), g['grid_id'], g['spacing_zyx_mm'], box, inputs, p)
-    write_crop_map(maps['separation'], sep.astype(np.float32), g['grid_id'], g['spacing_zyx_mm'], box, inputs, p)
+    write_crop_map(maps['thickness'], th.astype(np.float32), g, box, inputs, p)
+    write_crop_map(maps['separation'], sep.astype(np.float32), g, box, inputs, p)
 
     sk, counts = None, {}
     if skeleton:

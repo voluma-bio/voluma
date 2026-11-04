@@ -21,7 +21,14 @@ Levels (OME-Zarr 0.4 on Zarr v2, Blosc zstd, 64-cubed chunks): level 0 is the so
 (rounding up) until every axis is at most ceil(level 0 / 8); the last is one chunk. Images are averaged; labels and masks take the
 mode of each 2x2x2 block, a tie going to the foreground. A one-voxel sheet survives every level (it fills 4 of 8 voxels of a block: a tie), but a one-voxel rod does not
 (2 of 8: the background wins), so do not read rods and other thin structures off coarse levels. A level voxel covers `scaleZyx` source voxels per axis. Integer coordinates are voxel centres: voxel i of level k has its
-centre at source coordinate i*2^k + (2^k-1)/2, which is the translation in each dataset's OME `coordinateTransformations`. Meshes: marching cubes per nonzero label (or one for a mask), or the
+centre at source coordinate i*2^k + (2^k-1)/2, which is the translation in each dataset's OME `coordinateTransformations`. Meshes are for display only; every number is measured on the
+voxels. A label or mask is blurred (Gaussian, SIGMA voxels), marching-cubed at 0.5 on every voxel (step 1) or, when that
+passes MAX_TRIANGLES, every second voxel (step 2), then smoothed (Taubin windowed sinc, each vertex moving at most
+NORMAL_CAP voxels per step along its normal). The surface does not staircase and sits within about a voxel of the voxel
+boundary (1.5 at most on OA6-1RK's bones), so a mesh's outline on a slice does not follow voxel edges. One mesh per nonzero
+label (or one for a mask), wound outward. A one-voxel sheet meshes thin; an object the blur erases entirely (a one-voxel
+rod) meshes from its voxels, unsmoothed; but a speck of a few voxels, or a one-voxel rod, inside a larger object drops out,
+and objects under a few hundred voxels shrink. A surface is the
 height field triangulated over its finite cells, wound so each normal points toward +axis. `mesh*.bin` is float32 vertices as full-resolution source voxel (x, y, z),
 then uint32 indices, little-endian. A cropped mask's levels and meshes are in its crop's voxels; the reader adds the crop's offset.
 """
@@ -44,10 +51,14 @@ from scipy import ndimage as ndi
 from skimage.measure import marching_cubes
 
 CHUNK = 64
-BIG = 1_000_000  # an object of more voxels is meshed at step 2
+BIG = 1_000_000  # a height field of more finite cells is meshed at step 2
+SIGMA = 0.7  # voxels of Gaussian blur on a label before marching cubes: keeps a one-voxel sheet and a two-voxel rod
+MAX_TRIANGLES = 600_000  # a label or mask whose step-1 mesh has more is meshed at step 2 (about 11 MB at step 1)
+TAUBIN = {1: (40, 0.01), 2: (20, 0.05)}  # (iterations, pass band) per marching-cubes step; tuned on OA6-1RK's femur
+NORMAL_CAP = 0.5  # voxels per marching-cubes step that smoothing may move a vertex along its normal
 SLAB = 128  # source planes read per downsampling step (even, so slabs pair up)
 COMPRESSOR = numcodecs.Blosc(cname='zstd', clevel=5, shuffle=numcodecs.Blosc.SHUFFLE)
-VERSION = 1  # bump when the output for the same input changes
+VERSION = 2  # bump when the output for the same input changes
 KINDS = ('image', 'labels', 'mask', 'surface')
 
 
@@ -109,13 +120,29 @@ def write_levels(src, group, mode, dtype=None):
     return shapes
 
 
-def mesh_of(sub, lo, step):
-    """Marching-cubes surface of a bool crop whose corner is voxel `lo` (z, y, x); vertices as full-resolution (x, y, z)."""
+def mesh_of(sub, lo):
+    """Display surface of a bool crop whose corner is voxel `lo` (z, y, x); vertices as full-resolution (x, y, z)."""
+    import pyvista as pv  # only labels and masks need it
+
     crop = np.pad(sub, 1).astype(np.float32)
-    try:
-        verts, faces, _, _ = marching_cubes(crop, 0.5, step_size=step, allow_degenerate=False)
-    except ValueError:  # a slab one or two voxels thick has no step-2 surface
+    field = ndi.gaussian_filter(crop, SIGMA, truncate=3)
+    mesh = None
+    for step in (1, 2):
+        try:
+            mesh = marching_cubes(field, 0.5, step_size=step, allow_degenerate=False)[:3] + (step,)
+        except (ValueError, RuntimeError):  # no surface: thinner than the blur keeps (step 1), or than step 2 samples
+            break
+        if len(mesh[1]) <= MAX_TRIANGLES:
+            break
+    if mesh is None:  # a one-voxel rod: the blur leaves nothing at 0.5, so mesh the voxels themselves, unsmoothed
         verts, faces, _, _ = marching_cubes(crop, 0.5, step_size=1, allow_degenerate=False)
+    else:
+        verts, faces, normals, step = mesh
+        n_iter, pass_band = TAUBIN[step]
+        smooth = pv.PolyData.from_regular_faces(verts, faces).smooth_taubin(n_iter=n_iter, pass_band=pass_band).points
+        # Taubin shrinks what is small next to its pass band (a speck to a point): cap each vertex's move along its normal.
+        along = ((smooth - verts) * normals).sum(1)
+        verts = smooth + (np.clip(along, -NORMAL_CAP * step, NORMAL_CAP * step) - along)[:, None] * normals
     return (verts + np.array(lo) - 1)[:, ::-1], faces  # skimage winds faces inward in (z, y, x); the axis reversal mirrors them outward
 
 
@@ -156,7 +183,7 @@ def write_meshes(arr, kind, out):
         if box is None:
             continue
         sub = np.asarray(labelled[box]) == i
-        verts, faces = mesh_of(sub, [s.start for s in box], 2 if sub.sum() > BIG else 1)
+        verts, faces = mesh_of(sub, [s.start for s in box])
         name = f'mesh-{i}.bin' if kind == 'labels' else 'mesh.bin'
         meshes.append(({'label': i} if kind == 'labels' else {}) | {'path': name} | write_mesh(out / name, verts, faces))
     return meshes

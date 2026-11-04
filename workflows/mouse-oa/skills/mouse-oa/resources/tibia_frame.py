@@ -322,8 +322,7 @@ def main():
         np.save(out / name, arr)
         sidecar.write(
             out / name,
-            grid_id=frame['grid_id'],
-            spacing_zyx_mm=sp,
+            like=frame,
             inputs=[a.hu, a.labels],
             params=params,
             script='tibia_frame.py',

@@ -25,11 +25,13 @@ import { outputsPrefix } from "@voluma/contracts/r2";
 import type {
   Annotation,
   Focus,
+  Grid,
   ReviewAssets,
   Structure,
   Surface,
   Volume,
 } from "@voluma/contracts/review";
+import { affineIn } from "@voluma/contracts/ruler";
 import { type ChainLink, chainOf, type TrailRow, trailOf } from "./outputs-trail";
 
 /** One To check item, on the version it was raised on. */
@@ -86,6 +88,8 @@ export type OutputBlocks = {
   structures: Structure[];
   surfaces: Surface[];
   annotations: Annotation[];
+  /** Every grid the run published, one per grid hash: bases first, then frames (file outputs). */
+  grids: Grid[];
 };
 
 /** A run's own words for an output: the catalog's name, else its id as words. */
@@ -230,6 +234,8 @@ export function reviewAssetsOf(events: readonly RunEvent[]): Record<string, Revi
 }
 
 type Detail = {
+  /** The sidecar's grid hash (not a block's `gridId`, which is its base's output id). */
+  gridId?: string;
   affine?: number[][];
   offsetZyx?: number[];
   axis?: number;
@@ -247,12 +253,6 @@ const IDENTITY: Volume["affine"] = [
   [0, 0, 1, 0],
   [0, 0, 0, 1],
 ];
-const isRow = (r: unknown): r is [number, number, number, number] =>
-  Array.isArray(r) && r.length === 4 && r.every((n) => typeof n === "number");
-const affineOf = (d: Detail): Volume["affine"] =>
-  Array.isArray(d.affine) && d.affine.length === 4 && d.affine.every(isRow)
-    ? (d.affine as Volume["affine"])
-    : IDENTITY;
 const zyx = (p: unknown): [number, number, number] | undefined =>
   Array.isArray(p) && p.length === 3 && p.every((n) => Number.isInteger(n) && n >= 0)
     ? (p as [number, number, number])
@@ -273,6 +273,25 @@ const shapeOfEntry = (catalog: OutputCatalog, id: string) => {
 };
 
 /**
+ * The grids the run published: every base or file output whose detail carries the sidecar's
+ * `gridId` (its hash) and an affine, the first to publish a hash naming it. A base claims its hash
+ * before a file on the same grid (the scan's hu.json), so the scan is never named for its header.
+ */
+function publishedGrids(fold: OutputsFold, catalog: OutputCatalog): Grid[] {
+  const seen = new Set<string>();
+  return (["base", "file"] as const).flatMap((kind) =>
+    fold.outputs.flatMap((o): Grid[] => {
+      const v = o.latest;
+      const d = v && o.kind === kind ? detailOf(v) : undefined;
+      const affine = affineIn(d);
+      if (!v || !affine || typeof d?.gridId !== "string" || seen.has(d.gridId)) return [];
+      seen.add(d.gridId);
+      return [{ id: o.id, name: outputName(catalog, o.id), by: v.by, kind, affine }];
+    }),
+  );
+}
+
+/**
  * Every output's latest version as a block of the scene, on the grid of its base (a block's
  * `gridId` is its base's id). An output whose version can't be drawn (a file, a value, a point
  * with no `points`) has no block.
@@ -283,7 +302,13 @@ export function outputBlocks(
   runId: string,
   assets: Record<string, ReviewAssets>,
 ): OutputBlocks {
-  const blocks: OutputBlocks = { volumes: [], structures: [], surfaces: [], annotations: [] };
+  const blocks: OutputBlocks = {
+    volumes: [],
+    structures: [],
+    surfaces: [],
+    annotations: [],
+    grids: publishedGrids(fold, catalog),
+  };
   const key = (v: OutputVersion, file: string) => `${outputsPrefix(runId)}${v.path}/${file}`;
   for (const o of fold.outputs) {
     const v = o.latest;
@@ -298,7 +323,7 @@ export function outputBlocks(
       name,
       kind,
       shapeZyx: shapeOf(assets, sha256),
-      affine: affineOf(d),
+      affine: affineIn(d) ?? IDENTITY,
       unit: typeof d.unit === "string" ? d.unit : null,
       gridId,
       data: {
