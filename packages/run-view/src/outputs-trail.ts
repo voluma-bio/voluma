@@ -26,10 +26,10 @@ import type {
 
 /** What a link's role says in a row: how the output above uses this one. */
 export const ROLE_WORD: Record<LinkRole, string> = {
-  on: "measured on",
-  context: "beside",
-  base: "drawn on",
-  input: "made from",
+  on: "Measurement region",
+  context: "Visual context",
+  base: "Reference image",
+  input: "Source data",
 };
 
 export type TrailRow = {

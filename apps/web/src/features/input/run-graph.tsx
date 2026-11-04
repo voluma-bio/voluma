@@ -75,8 +75,8 @@ export function RunGraphView({
         {outOfDate > 0 && <span>{outOfDate} out of date</span>}
         {selected && (
           <span>
-            In the spotlight: <span className="text-foreground">{nameOf(selected)}</span>, what it
-            rests on and what rests on it
+            Highlighted: <span className="text-foreground">{nameOf(selected)}</span>, its inputs and
+            the results that use it
           </span>
         )}
       </p>

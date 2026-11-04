@@ -49,7 +49,7 @@ export function Items({
   accepting,
 }: {
   items: OutputItem[];
-  /** The output these items are shown under: its own need no "which this rests on". */
+  /** The output these items are shown under: its own need no dependency explanation. */
   own: string;
   nameOf: (id: string) => string;
   /** The item whose place the panes show. */
@@ -62,7 +62,7 @@ export function Items({
       {items.map((i) => (
         <ItemToCheck
           key={i.key}
-          context={i.output === own ? nameOf(own) : `On ${nameOf(i.output)}, which this rests on`}
+          context={i.output === own ? "Review item" : `Check ${nameOf(i.output)}`}
           title={i.title}
           text=""
           state={i.resolved ? "accepted" : "open"}
@@ -108,7 +108,7 @@ export function Report({
   v: OutputVersion;
   outOfDate: boolean;
   nameOf: (id: string) => string;
-  /** Off where "Rests on" already lists it. */
+  /** Off where "Based on" already lists it. */
   madeFrom?: boolean;
 }) {
   const words = useMemo(() => versionWords(events, v), [events, v]);
@@ -118,7 +118,8 @@ export function Report({
       {v.kept && <p className="m-0 text-muted-foreground text-xs">Kept: {v.kept.reason}</p>}
       {outOfDate && (
         <p className="m-0">
-          Something it was made from has changed since. The AI keeps it or redoes it.
+          An input has changed since this result was calculated. The AI will decide whether to keep
+          or update the result.
         </p>
       )}
       {words && <Markdown text={words} className="text-sm" />}
@@ -148,11 +149,11 @@ export function Report({
       )}
       {madeFrom && v.madeFrom.length > 0 && (
         <>
-          <h5 className={head}>Made from</h5>
+          <h5 className={head}>Based on</h5>
           <ul className="m-0 grid list-none gap-0.5 p-0">
             {v.madeFrom.map((l) => (
               <li key={`${l.id}/${l.version}`} className="flex gap-2 text-sm">
-                <span className="w-20 shrink-0 text-muted-foreground text-xs">
+                <span className="w-28 shrink-0 text-muted-foreground text-xs">
                   {ROLE_WORD[l.role]}
                 </span>
                 <span className="min-w-0 truncate">{nameOf(l.id)}</span>
