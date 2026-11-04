@@ -31,6 +31,8 @@ export type Route = {
   earlyStream?: boolean;
   /** A `timed` route's price: what the service bills per hour of a call. */
   usdPerHour?: number;
+  /** Refuse a query string: the upstream's options (which checkpoints, which stored objects) are ours to choose. */
+  noQuery?: boolean;
 };
 
 export type ProviderDef = {
@@ -96,7 +98,7 @@ export const PROVIDERS: Record<Provider, ProviderDef> = {
     auth: modalProxy,
     // Modal's A10G with 4 CPU cores and 16 GiB, as the README measured it; the container's start
     // and its 120 s idle tail are billed too and are not counted here.
-    routes: [{ method: "POST", path: "/", kind: "timed", usdPerHour: 1.55 }],
+    routes: [{ method: "POST", path: "/", kind: "timed", usdPerHour: 1.55, noQuery: true }],
     ours: true,
   },
 };

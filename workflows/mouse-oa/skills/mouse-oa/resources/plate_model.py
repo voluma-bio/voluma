@@ -52,9 +52,10 @@ SPEC_ID = 'plate-model'  # this script's own numbers
 SPEC_KEYS = ('min_checkpoints', 'flag_spread_um', 'flag_min_um')
 SHARED_ID = 'plate-faces'  # how a proposal samples the plate and what iioc.py accepts, shared with plate_faces.py
 SHARED_KEYS = ('section_step_um', 'point_step_um', 'off_tibia_margin_um', 'min_run_um', 'qc_panels')
-RETRY_STATUS = {502, 503, 504}  # the gateway or Modal restarting: one more try after RETRY_WAIT_S
+RETRY_STATUS = {502, 503, 504}  # the gateway or Modal restarting: one more try after RETRY_WAIT_S, while the deadline allows
 RETRY_WAIT_S = 20
-TIMEOUT_S = 600  # a whole call: about 1 min warm for 30 sections, plus about 25 s when no container is up
+DEADLINE_S = 600  # the whole call, retry included, under the tool's 12 minutes; a call is about 1 min, +25 s when no container is up
+MODEL_UM = 10.5  # the voxel size the model was trained and is served on (serve.py, meta.um_per_voxel)
 
 
 def call_model(hu, mask, vs):
@@ -66,20 +67,27 @@ def call_model(hu, mask, vs):
     buf = io.BytesIO()
     np.savez_compressed(buf, hu=np.ascontiguousarray(hu[:, vs, :], np.float32), mask=np.ascontiguousarray(mask[:, vs, :]))
     body = buf.getvalue()
+    end = time.monotonic() + DEADLINE_S
     for attempt in (1, 2):
         req = urllib.request.Request(f'{url.rstrip("/")}/plate/', data=body, method='POST',
                                      headers={'authorization': f'Bearer {token}', 'content-type': 'application/octet-stream'})
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+            # urllib's timeout is per socket operation; the reply is one read after the model finishes, so it bounds the call
+            with urllib.request.urlopen(req, timeout=end - time.monotonic()) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
             why = f'the plate model answered {e.code}: {e.read(500).decode("utf-8", "replace")}'
             if e.code not in RETRY_STATUS:
                 break
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        except TimeoutError:
+            why = f'the plate model did not answer within {DEADLINE_S} s'
+            break  # the GPU work may still be running: a retry would pay for it twice
+        except (urllib.error.URLError, ConnectionError) as e:
             why = f'the plate model could not be reached: {getattr(e, "reason", e)}'
-        if attempt == 1:
+        if attempt == 1 and end - time.monotonic() > 2 * RETRY_WAIT_S + 120:
             time.sleep(RETRY_WAIT_S)
+        else:
+            break
     sidecar.fail(f'{why}; run plate_faces.py instead')
 
 
@@ -187,6 +195,8 @@ def main():
     tib = np.load(a.mask).astype(bool)
     if tib.shape != h.shape or list(h.shape) != list(grid['shape']):
         sidecar.fail(f'tibia-hu.npy {h.shape} and tibia-mask.npy {tib.shape} must be one grid: pass the files tibia_frame.py wrote together')
+    if abs(vox * 1000 - MODEL_UM) > 0.05:
+        sidecar.fail(f'the grid is {vox * 1000:g} um a voxel and the plate model only knows {MODEL_UM:g} um scans: run plate_faces.py instead')
     has = np.flatnonzero(tib.any((0, 2)))
     if len(has) < 2:
         sidecar.fail('the tibia mask is empty on all but one coronal section: check tibia_frame.py\'s mask')

@@ -183,6 +183,8 @@ export function createGateway(deps: GatewayDeps) {
     const method = req.method ?? "GET";
     const matched = matchRoute(provider, method, upstreamPath);
     if (!matched) throw new Refused(403, `${method} ${upstreamPath} is not allowed`);
+    if (matched.route.noQuery && query !== undefined)
+      throw new Refused(403, `${method} ${upstreamPath} takes no query string`);
 
     const scanner = new BodyScanner();
     const peek =

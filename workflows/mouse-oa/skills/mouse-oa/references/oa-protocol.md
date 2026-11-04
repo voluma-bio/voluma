@@ -65,6 +65,8 @@ What the annotations are (their keys, which are required, and the refusals are i
 schema is `regions-and-landmarks`'):
 
 - **A, for `iioc.py`.** The growth plate's proximal face across the whole width, on at least two coronal sections.
+  Before you call `segment_plate`, confirm on `tibia-frame-qc.jpg` that the grid is the tibia (the plateau on top, the fibula beside the
+  shaft): the model has no femur guard and proposes the femur's growth plate as readily. If the grid is the femur, fix the tibia pick first.
   `segment_plate` proposes it (and annotation C) with the fine-tuned plate model: dense curves on every tenth section where the model finds
   the plate, and no points where it is flagged (its three checkpoints disagree, too few of them found the plate, or a face is off the tibia
   mask). Run `plate_faces.py`, which writes the same files from a density search, only when `segment_plate` is not in your tools or returns

@@ -39,7 +39,8 @@ change it safely.
   every route is a 403 until the gate in [TODO.md](TODO.md) is met.
 - **`plate` is our own service** (`ours`): the growth-plate model on Modal (`training/plate-finetune/serve.py`), one route
   `POST /plate/` with a binary .npz body, our key sent as Modal's `Modal-Key`/`Modal-Secret` from `GATEWAY_PLATE_API_KEY`
-  (`<id>:<secret>`). An own-key token is served with our key there. Its route is `timed`: cost is the call's duration at the
+  (`<id>:<secret>`). A query string is refused (`noQuery`): the sandbox holds the token, and `plate-serve`'s options pick
+  checkpoints and read R2 objects. An own-key token is served with our key there. Its route is `timed`: cost is the call's duration at the
   route's `usdPerHour`, which leaves out Modal's container start and idle tail. A reply over 150 s is Modal's 303 to its
   result; the gateway's `fetch` follows redirects by default, so the caller should see one 200 (not exercised: calls take
   about a minute).
