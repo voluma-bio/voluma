@@ -118,3 +118,7 @@ merged SAM labels with your fixes; `classic_segment.py`'s watershed is the cross
 labels (the script refuses it): it gives every threshold voxel to some label, so bones that touch at threshold always join.
 Report the file it wrote and cite the check record as evidence; checks you ran on another volume (a watershed, an
 earlier merge) are not this volume's. After any later change to the labels, run it again.
+
+A workflow may ask for the merged labels first, as a preview the researcher sees at once: report them with the To check
+item "Not yet checked: finish_labels.py pending", make nothing from them, and report the file `finish_labels.py` writes
+as the next version of the same output.
