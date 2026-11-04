@@ -3,7 +3,7 @@
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
 it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `start_um` below it, and
 there is no thickness fallback. A curve point more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused,
-naming the section, and so is a face that leaves bone at plate level untraced (over a section's bone, points more than `max_gap_um` of the spec apart or the first or last point more than that short of the bone's ends; over the rows with tibia at plate level, sections more than that apart or the first or last more than that short of the rows' ends; a span over columns without bone does not count),
+naming the section, and so is a face with a gap over the plate (on a section, two points more than `max_gap_um` of the spec apart where the tibia lies within that below the line between them and anywhere above it; in V, two sections more than that apart over the rows with tibia within that of the face; where the face ends is not tested),
 and so is a face that jumps between neighbouring traced sections (a median W change, over the U columns both cover on the tibia's footprint
 when they share at least `jump_overlap_um`, of more than `max_jump_um` plus the sections' distance apart). The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
@@ -57,7 +57,7 @@ Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sideca
         <out>/qc-faces-<n>.jpg  the distal face (magenta) and the proximal one (orange) as delivered, the surfaces this script cut with, on every traced
                          section: the sheets to open every one of
 Prints: one JSON line {out, values, objects, qc (the QC images), roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels, eroded_stretches}
-Example: python metaphysis_roi.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
+Example: python metaphysis_roi.py --spec protocol.json --window scan-settings.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -144,7 +144,7 @@ def cortex_depth(bone, dist, max_layers=40):
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-metaphyseal gives the slab's start, length and clearance")
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')

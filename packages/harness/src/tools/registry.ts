@@ -13,6 +13,7 @@ import { keepOutput } from "./keep-output";
 import type { OutputToolDeps } from "./output-shared";
 import { readTool } from "./read";
 import { reportOutput } from "./report-output";
+import { segmentPlateTool } from "./segment-plate";
 import { segmentSamTool } from "./segment-sam";
 import type { Tool } from "./tool";
 
@@ -21,6 +22,7 @@ export const AGENT_TOOL_NAMES = [
   "bash_manage",
   "read",
   "segment_sam",
+  "segment_plate",
   "message",
   "activity",
   "close",
@@ -35,6 +37,7 @@ const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) 
   bash: ({ layout, bash }) => bashTool(layout, bash),
   bash_manage: ({ bash }) => bashManageTool(bash),
   segment_sam: ({ layout }) => segmentSamTool(layout),
+  segment_plate: ({ layout }) => segmentPlateTool(layout),
   read: ({ layout, bucket }, names) =>
     readTool({ layout, bucket, hasSandbox: names.includes("bash") }),
 };

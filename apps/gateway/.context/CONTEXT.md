@@ -35,8 +35,15 @@ change it safely.
   have their own row: two successful SAM operations normally mean six gateway requests.
   Keep the wire names; label these counts "gateway requests" for people. Model-call counts
   in event-derived spend are separate and stay labeled model calls.
-- **Only Meta is enabled** (`ProviderDef.enabled`); Anthropic and OpenAI have definitions but
+- **Meta and the plate model are enabled** (`ProviderDef.enabled`); Anthropic and OpenAI have definitions but
   every route is a 403 until the gate in [TODO.md](TODO.md) is met.
+- **`plate` is our own service** (`ours`): the growth-plate model on Modal (`training/plate-finetune/serve.py`), one route
+  `POST /plate/` with a binary .npz body, our key sent as Modal's `Modal-Key`/`Modal-Secret` from `GATEWAY_PLATE_API_KEY`
+  (`<id>:<secret>`). A query string is refused (`noQuery`): the sandbox holds the token, and `plate-serve`'s options pick
+  checkpoints and read R2 objects. An own-key token is served with our key there. Its route is `timed`: cost is the call's duration at the
+  route's `usdPerHour`, which leaves out Modal's container start and idle tail. A reply over 150 s is Modal's 303 to its
+  result; the gateway's `fetch` follows it with the auth headers, so the caller sees one 200 (a 240-section call: 398 s,
+  redirected, 200). A run's call is about 35 sections and a minute.
 - **The body is the caller's.** `body.ts` reads `model` as a top-level key only,
   and one scanner runs over the whole body as it is forwarded, in constant memory. The first 4 KB
   must hold a top-level `model` (else 403); a repeated `model` key anywhere, or an

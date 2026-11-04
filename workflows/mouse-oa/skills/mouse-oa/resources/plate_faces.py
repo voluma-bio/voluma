@@ -20,11 +20,11 @@ end and on the sections with no span. The spans, the V range and what ended each
 `growth_plate_distal_curves` (annotation C, for metaphysis_roi.py), one curve per proposed section, many points each, none in a
 flagged stretch. Copy both keys into your annotations.json. The flagged stretches are in `plate-faces.json` (`stretches`:
 {"<V>": [{"u": [first U, last U], "why": [tests that fired]}]}): where to look hardest and to retrace, by adding your points to the
-section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold the faces to one rule, flagged or not: the plate is traced where the tibia exists at plate level (the tibia
-within `max_gap_um` of the curve's height there): on each section, points at most `max_gap_um` apart over its bone and the first and last within that of the bone's ends; across V,
-sections at most that far apart over the rows where that tibia exists and the first and last within that of those rows' ends (a surface is linear between points and held constant past them, so an
-untraced stretch is a straight bridge, wrong geometry however the plate looks there; a span over columns without bone, such as the
-notch between the condyles at the front, does not count),
+section's curve in both keys. `iioc.py` and `metaphysis_roi.py` hold the faces to one rule, flagged or not: no gap over the plate wider than `max_gap_um`, on a section
+between two points where the tibia lies within that below the line between them and anywhere above it (a line across empty space between
+two pieces of bone does not count), or in V between two sections over the rows with tibia near the face (a surface is linear between points and held constant
+past them, so an untraced stretch is a straight bridge, wrong geometry however the plate looks there). Where a face ends is not tested:
+carry it to the plate's ends yourself, past every span end, and check them on the QC,
 and no point more than `off_tibia_margin_um` off the tibia mask. Look at every flagged stretch and retrace it wherever it is wrong, and add points wherever a gap
 wider than `max_gap_um` is open; that the points lie on the plate is for you to see, not for the rule. Your points and the proposed ones count alike.
 Where the plate is destroyed, mark the U range where it is gone, on every traced section it reaches, in your annotations as `plate_eroded`:
@@ -44,7 +44,7 @@ Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sid
   qc-plate-<n>.jpg  coronal sections framed on each section's span, every proposed section unless --sections names others: orange proximal
                     face, cyan distal face, white centre across the span; a red tick under each flagged column, where the faces have no line
 Prints: the result record {out, values, annotations, centre, flagged, stretches, qc (the images)}
-Example: python plate_faces.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --out plate/
+Example: python plate_faces.py --spec protocol.json --window scan-settings.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --out plate/
 Exits 2 with one sentence on bad input, before writing anything, and when the search finds the plate on fewer than two sections.
 """
 
@@ -269,7 +269,7 @@ def qc_images(out, h, maps, kept, flagged, spans, sections, panels, window, vox)
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help=f"the workflow's protocol.json: the entry {SPEC_ID} gives the search and flag thresholds")
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--out', required=True, help='output directory (created)')

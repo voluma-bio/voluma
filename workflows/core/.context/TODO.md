@@ -11,8 +11,9 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   sign rule and crop defaults are the mouse tibia protocol's: moving it to `orient-joint` needs the sign rule behind an argument.
 - **Fold the other slice renderers into `quad_view` (left from the quad-view PR).** Boxes as a layer would let `render_slices` (`--boxes`, `--points`; `orient_joint.py` imports its `render()`) and `render_crops` go, with `sam-segmentation` taking its keyframe from a quad pane. The 6-view sheet stays (4 of 4 catches). Also open: `quad_view` draws a point's name in 3D even where the surface hides it; a new mask's surface costs ~9 s cold (marching cubes and smoothing on the aligned grid), later calls reuse the cache.
 - **One `--anatomy` profile (p231 M1), what is left.** The QC windows are done: every mouse QC sheet goes through `viewlib.slice_sheet` and
-  takes `--window anatomy.json` (`viewlib.window_arg` reads the file's `window_hu`, as every renderer's `--window` now does). Still flags:
-  `--names 1=femur,...` (`quad_view`, `render_surfaces`), the required `--threshold-hu` in six scripts, and the speck size, 0.01 mm³ in `unlabelled`
+  takes `--window scan-settings.json`, intake's per-scan choice (`viewlib.window_arg` reads the file's `window_hu`, as every renderer's `--window` now does,
+  and `sidecar.threshold_arg` its `segmentation_threshold_hu` for `--threshold-hu` and `--bone-hu`). Still flags:
+  `--names 1=femur,...` (`quad_view`, `render_surfaces`), and the speck size, 0.01 mm³ in `unlabelled`
   and `label_stats` and 0.005 in `disagree`; `orient_joint`'s lengths are required flags (the anatomy reference gives them). Direction: one
   `--anatomy` argument read through a `sidecar` helper supplies these defaults (flags only override), so a rat knee needs one new
   `anatomy.json`; `label_stats --ranges` already reads this file.
@@ -61,10 +62,20 @@ in the tibia mask (the femur/tibia regrow splits a block touching both along a s
 `~/experiments/plate-data/tracing/pieces/RESULTS-L24.md`. Add a check-first line to `segmentation-check`: look for a piece
 joined to the plateau along a dark seam, and split it with `classic_segment.py --within` before the tibial regions are built.
 
-## Real world mm in the review
+## Real world mm in the review ([#553](https://github.com/voluma-bio/voluma/issues/553))
 
 The review places every image at its voxel 0, unrotated: `Volume.affine` is spacing only (`report-output.ts`
 `detailFromSidecar`; `.npy` sidecars carry no `affine_xyz_to_world_mm`). So a researcher's mark arrives in mm on the image it
 was drawn on, and `marks_to_grid.py --drawn-on` turns them into voxels. When a second reader needs the scan's world mm
 (lab coordinates, Amira), publish each base with its true affine (`hu.json` / `frame.json`) and drop `--drawn-on`'s spacing
 step in the same change.
+
+## HU calibration for a scan without it
+
+A series with valid HU (rescale tags, or Scanco's calibration) is used as it is. One without, `intake.py` refuses ("No valid
+positive-slope HU mapping"), and the kit has nothing for that case. Jimmy (4 Nov): HU calibration should still be part of the
+kit. Add a `scan-intake` script for it. It maps the raw values to HU from what the researcher's files give: the units and
+scaling, or a phantom's known values. Failing that, it uses two references found in the scan: air outside the specimen and
+soft tissue as water. It writes `hu.json` with the calibration marked estimated and its evidence. A To check item says the
+HU are estimated. The measurement scripts then need `--threshold`, unless the units give the lab's 2.16/cm directly (a scan in
+linear attenuation). Keep the rule that a scan with HU is never re-mapped from its histogram.

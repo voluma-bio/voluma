@@ -86,8 +86,9 @@
       "notes": "Separate from the patella core (label 3); inclusion in the patella is a question for the lab. Range is the OA6-1RK reference volume 0.121 mm3 widened (x0.4 to x2.0); one scan only (n=1), not a population range."
     }
   ],
-  "window_hu": [1000, 8000],
+  "reference_window_hu": [1000, 8000],
   "source": "review-07-separated of the OA6-1RK reference run, spacing 0.0105 mm isotropic; n=1 scan",
-  "segmentation_threshold_hu": 2500,
-  "threshold_note": "2500 HU builds masks (orientation, box snapping, clipping to bone, candidates). It is not the BV threshold: measurement scripts derive the lab's 2.16/cm from hu.json."
+  "reference_segmentation_threshold_hu": 2500,
+  "reference_peaks_hu": [-12, 6088],
+  "threshold_note": "The reference window and threshold are OA6-1RK's, a starting point: each run's intake chooses its own in scan-settings.json. The segmentation threshold builds masks (orientation, box snapping, clipping to bone, candidates). It is not the BV threshold: measurement scripts derive the lab's 2.16/cm from hu.json."
 }

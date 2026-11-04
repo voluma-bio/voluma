@@ -34,6 +34,12 @@
     "jump_overlap_um": 500,
     "qc_panels": 6
   },
+  "plate-model": {
+    "min_checkpoints": 2,
+    "flag_spread_um": 50,
+    "flag_min_um": 42,
+    "stray_bone_share": 0.25
+  },
 
   "roi-iioc": {
     "region": "ROI-1",

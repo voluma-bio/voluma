@@ -88,8 +88,8 @@ export interface SuperviseRunOptions {
   sandbox: Omit<SandboxSettings, "runId">;
   /**
    * The gateway URL and token for the sandbox of that name (`SandboxLayout.name`). Present: the
-   * roles that hold `segment_sam` get the tool and their sandboxes the gateway. Absent: no role
-   * holds `segment_sam`.
+   * roles that hold a gateway tool (`segment_sam`, `segment_plate`) get it and their sandboxes the
+   * gateway. Absent: no role holds them.
    */
   gateway?(sandbox: string): Gateway | undefined;
   config?: Partial<LoopConfig>;
@@ -165,6 +165,10 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       gateway: options.gateway !== undefined,
     });
     const convert = convertLayout({ runId, inputId: options.inputId, skills: definition.skills });
+    // Created before the session factory: recovery requests the convert sandbox while the
+    // worker is still constructing, so the factory must not read anything the worker returns.
+    const convertHalt = new AbortController();
+    const convertSignal = AbortSignal.any([cutOff, convertHalt.signal]);
     // The sandboxes of the run: one per thread, and the review-asset converter's.
     const sandboxLayout = (id: string): SandboxLayout =>
       id === CONVERT ? convert : layouts.sandboxOf(id);
@@ -177,7 +181,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
         // Cache identity must follow the run's pinned image, including after a deploy.
         if (id === CONVERT) spec.env = { ...spec.env, VOLUMA_REVIEW_RUNTIME: spec.image };
         // The conversion outlives the loop: it stops on the cut-off or its own halt, not with `ending`.
-        return options.createSandbox(spec, id === CONVERT ? conversion.signal : loopSignal);
+        return options.createSandbox(spec, id === CONVERT ? convertSignal : loopSignal);
       },
       // The convert sandbox writes no event: a failure there shows as the file's `assets.failed`,
       // not as a failed sandbox on the main agent's page.
@@ -195,6 +199,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       recorder,
       sandbox: () => session.get(CONVERT, { note: false }),
       signal: cutOff,
+      halt: convertHalt,
       log: options.log,
     });
     worker = conversion;

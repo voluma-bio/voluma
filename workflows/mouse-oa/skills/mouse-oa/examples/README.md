@@ -29,13 +29,13 @@ furthest on the other side of the plateau. The heights (#7–9) run along the sh
 articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
 middle of the medial and the lateral compartment of the plateau.
 
-`plate_faces.py` proposes both faces of the growth plate for the iioc step, where the search finds the plate (a part of the tibia: its V
+The proposal (`segment_plate`) gives both faces of the growth plate for the iioc step, where it finds the plate (a part of the tibia: its V
 range and each section's U span are in `plate-faces.json`), and the metaphyseal-roi step checks them again. The proposal is where the worker
 starts: the faces must follow the plate over the whole tibia at plate level, past each span end and on the sections with no span, out to the V
 ends. A worker checks its faces against these: each lies on the plate's two edges, a few voxels apart, on every section; every flagged
 stretch (red ticks in `qc-plate-<n>.jpg`, listed in `plate-faces.json`) has been looked at on a zoomed view and retraced where wrong, with points the worker read off the view
-wherever it opens a gap wider than `max_gap_um`. The positions are read by looking: code may write them down, but a detector or interpolator choosing them is not tracing, and
-`iioc.py` and `metaphysis_roi.py` passing (they stop on points or sections more than `max_gap_um` apart over bone, or short of its ends, in U or V, and on points off the tibia) does not mean the face is on the plate.
+wherever it opens a gap wider than `max_gap_um`; every suspect band piece (named in the sheet's title) has been opened, and faces on a stray (the fibula, another bone) taken out with `prune_plate.py`. The positions are read by looking: code may write them down, but a detector or interpolator choosing them is not tracing, and
+`iioc.py` and `metaphysis_roi.py` passing (they stop on points or sections more than `max_gap_um` apart over the plate and on points off the tibia; they do not test where a face ends) does not mean the face is on the plate or reaches its ends.
 The plate is a thin sheet of lower density between denser bone, and it is not
 always visible: a proposal that rides a dark marrow space above it, or a sheet where no plate remains, is wrong. The right face follows the
 same visible plate band end to end, including where it wraps down the condyles at the sides of the arch; it is wrong
@@ -69,7 +69,7 @@ coronal section it sits under the plate and inside the cortex, with marrow and t
 cortex all round: on a coronal section it is a band in the marrow under the plate, nowhere touching the cortical
 wall; on an axial slice it is the marrow space with a clear margin to the cortex. The cortex mask is the wall
 only, and never reaches the fibula.
-The distal face it starts from is the one `plate_faces.py` proposed, checked and retraced where flagged or wrong (see iioc,
+The distal face it starts from is the one the proposal gave, checked and retraced where flagged or wrong (see iioc,
 above); where the plate is eroded and the range marked so, the two faces meet, `metaphysis_roi.py` accepts that, ROI-3 starts below the
 remaining bone, and the result record lists the marked ranges and their share: report them with the To check item.
 The check opens every `qc-faces-<n>.jpg` of the step too: `metaphysis_roi.py` draws the distal face (magenta) and the proximal one (orange)

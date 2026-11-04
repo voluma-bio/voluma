@@ -63,7 +63,7 @@ export const samInput = z
       .tuple([z.number(), z.number()])
       .refine(([lo, hi]) => lo < hi, "window is [low, high] with low < high")
       .describe(
-        "Intensity range mapped to 0-255 (for CT, HU values such as [1000, 8000]); outside it clips.",
+        "Intensity range mapped to 0-255; outside it clips. For CT, the scan's display window in HU (`window_hu` of intake's scan-settings.json).",
       ),
     structures: z
       .array(

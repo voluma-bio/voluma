@@ -1,6 +1,6 @@
 /**
- * What a failed main agent means for the run, shared by both loops: how its provider error reads
- * and whether the run fails, the same main resumes, or a new main takes over. A loop supplies the
+ * What a failed main agent means for the run: how its provider error reads
+ * and whether the run fails, the same main resumes, or a new main takes over. The loop supplies the
  * facts from its log; the actions (resume, replace) are its own.
  */
 import type { ThreadEnd } from "@voluma/contracts/thread-records";

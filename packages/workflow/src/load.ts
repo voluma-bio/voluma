@@ -147,8 +147,9 @@ function parseAgent(
     throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the agent loop`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
-  if (!data.tools.includes("bash") && data.tools.includes("segment_sam")) {
-    throw new WorkflowParseError(path, "segment_sam needs a sandbox, which holding bash gives");
+  const sandboxed = data.tools.find((t) => t === "segment_sam" || t === "segment_plate");
+  if (!data.tools.includes("bash") && sandboxed) {
+    throw new WorkflowParseError(path, `${sandboxed} needs a sandbox, which holding bash gives`);
   }
   return {
     name,
