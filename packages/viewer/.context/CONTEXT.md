@@ -90,8 +90,8 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
 - **Worker.** One module worker reads every plane, and reslices tilted ones (`readSlice`). Decoded 64³ chunks share one LRU cache
   (768 MiB: three panes' level-0 planes and labels, about 410 MB tilted on OA6-1RK); fetches wait for 12 slots, newest first, and a chunk no live request still wants is
   never fetched. A 404 chunk is the fill value (zarr v2 omits empty chunks).
-- **Interaction.** Left drag sets the crosshair; wheel, arrows and Page Up/Down step slices;
-  Ctrl/⌘ + wheel zooms at the pointer; Shift, middle or right drag pans; zoom is relative to the
+- **Interaction.** Left drag sets the crosshair; the wheel (and a trackpad pinch) zooms at the pointer,
+  as in the 3D pane (Jimmy, Nov 4); Shift + wheel, arrows and Page Up/Down step slices; Shift, middle or right drag pans; zoom is relative to the
   pane's fit, so resizing and maximizing keep the framing. In 3D, drag turns the scene freely
   like a ball (over the top, and rolling near the edge; three's `ArcballControls`), Shift, Ctrl/⌘ or right
   drag pans, wheel or middle drag zooms, and the pane's reset button returns to the opening view; a click (not a
