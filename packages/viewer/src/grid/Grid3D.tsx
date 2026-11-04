@@ -17,6 +17,7 @@ import { cx } from "@voluma/ui";
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
+  Box3,
   CylinderGeometry,
   DepthTexture,
   DirectionalLight,
@@ -31,6 +32,7 @@ import {
   type Ray,
   Raycaster,
   Scene,
+  Sphere,
   SphereGeometry,
   Vector2,
   Vector3,
@@ -138,6 +140,15 @@ export function Grid3D({
     const size = toWorld(scene.shapeZyx);
     const center = size.clone().multiplyScalar(0.5);
     const radius = size.length() / 2;
+    // Coarse levels pad each axis independently; thin anisotropic grids can extend well
+    // beyond the source grid. Include every level's box, as positioned by volumeMesh.
+    const bounds = new Box3(toWorld([-0.5, -0.5, -0.5]), size.clone());
+    for (const { shapeZyx: shape, scaleZyx: scale } of scene.image.levels) {
+      bounds.expandByPoint(
+        toWorld([shape[0] * scale[0] - 0.5, shape[1] * scale[1] - 0.5, shape[2] * scale[2] - 0.5]),
+      );
+    }
+    const clip = bounds.getBoundingSphere(new Sphere());
     camera.position
       .copy(center)
       .add(new Vector3(1.2, 2.2, -0.8).normalize().multiplyScalar(radius * 3.6));
@@ -170,6 +181,13 @@ export function Grid3D({
       frame = 0;
       // A hidden pane draws nothing; showing it resizes it, which draws.
       if (!element.clientWidth) return;
+      // Distance bounds forward depth even after panning. Keep near fixed: moving it by
+      // this distance would clip anatomy still in frame when the camera looks off-centre.
+      camera.far = Math.max(
+        camera.near * 2,
+        camera.position.distanceTo(clip.center) + clip.radius * 1.01,
+      );
+      camera.updateProjectionMatrix();
       renderer.setRenderTarget(target);
       renderer.render(s, camera);
       renderer.setRenderTarget(null);
