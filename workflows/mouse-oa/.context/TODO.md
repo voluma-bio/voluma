@@ -18,8 +18,8 @@
   oblique aligned grids (OA7-5L, OA7-6L, OA7-8L, OA8-1R: shaft leaving the grid, plateau sloping steeply across coronal
   sections, no clean plate level). Their tibia labels came from a quick threshold-and-erosion split
   (`~/experiments/plate-data/scans/TIBIA-MASK.md`), not from segmentation, and OA7-8L's took femur pieces, so the cause may be
-  the label rather than the shaft-axis fit. Next: run `tibia_frame.py` on one of them with a checked tibia label; if still
-  oblique, the fit needs to follow the proximal shaft only. Notes per scan: `~/experiments/plate-data/scans/_skipped/<scan>/SKIPPED.md`.
+  the label rather than the shaft-axis fit. The fit now follows the shaft over `--axis-mm` from the joint end, which may already fix them. Next: rerun
+  `tibia_frame.py` on one of them with a checked tibia label and check both QC sheets. Notes per scan: `~/experiments/plate-data/scans/_skipped/<scan>/SKIPPED.md`.
 - **Each region mask is saved twice.** `iioc.py`, `tibial_trabecular.py` and `metaphysis_roi.py` write the full-grid array later
   scripts read (`iioc-tissue.npy`, `iioc-trab-tissue.npy`, `roi3-tissue.npy`, `cortex.npy`) and a cropped copy that is the mask object
   (`roi-iioc.npy`, `roi-iioc-trabecular.npy`, `roi-metaphyseal.npy`, `cortex-object.npy`). The voxels are identical. Direction: the
@@ -62,3 +62,11 @@
 - **`tibia_frame.py`'s femur/tibia check and bridged fragments.** A fragment joined to a bone by a thin bridge counts as part of its largest piece, and can make a correct tibia read as swapped, or hide a swap (review of the tibia-pick PR, synthetic bridges on OA6-2RK). Open each bone by 2-3 voxels before taking its largest piece, on a 2x subsample, which also takes back the check's extra 1 GB of peak memory.
 - **Test where a growth-plate face ends.** `refuse_gaps` tests only gaps over the plate: the tibia mask does not show where the plate ends (the condyles overhang it, the fibula lies beside it), and an outline-based end test passed faces 1 mm short while refusing correct ones (#558's review). Build the plate's extent from the plate itself (an HU band, or `segment_plate`'s voted band) and refuse a face that stops short of it; the same extent would close the 6% of sections where a 500 um mid-section gap still passes the mask-based rule.
 - **`refuse_off_tibia` on lab hand traces.** It stops 12 of the 45 hand traces in `~/experiments/plate-data/scans/*/trace/` (37 with their `ends.json` merged): check whether its margin or those traces are wrong.
+
+- **IIOC height columns vs "the centre of the growth plate's cross-sections" (expert, Nov 4).** On the long axis he said
+  "the measurement of the maximal height of the IIOC and the height of medial and lateral compartment of IIOC may be based
+  on the center of cross-sections of the growth plate". `iioc.py` today places #7 at the U midway between the width points
+  (or `growth_plate_mid_u`) on the section of largest local height (or `height_section_v`), and #8/#9 at the worker's
+  `compartment_midpoint_u` on that section; none is derived from the growth plate's cross-section centres. Ask the lab
+  which centre (per coronal section? the plate's centroid?) and whether the medial/lateral columns are centres of each
+  compartment's plate cross-section; then derive the columns from the plate rather than from worker points.
