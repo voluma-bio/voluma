@@ -42,7 +42,7 @@
 - id: tibia-grid
   kind: base
   name: Tibia long-axis grid
-  description: the tibia resampled onto a grid with its long axis vertical (zero angle to the grid's y in coronal and sagittal), the lab's convention; the regions and surfaces below sit on it
+  description: the tibia resampled onto a grid whose z (W, joint end toward the shaft) is the tibia's fitted long axis, so the shaft is vertical in the coronal and sagittal panes, the lab's convention; the regions and surfaces below sit on it
   from: scan
   planes: { XY: axial, XZ: coronal, YZ: sagittal }
   expect:

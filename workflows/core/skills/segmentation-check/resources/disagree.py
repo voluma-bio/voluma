@@ -12,7 +12,8 @@ so a To check item can point at a region (`focus.volumeId` = that id, `focus.lab
 Refuses volumes of different shapes.
 
 Writes: <out>/disagreement.npy  uint16 region id by rank, on the grid of --labels, with its sidecar
-        <out>/regions.json  per region: id, voxels, volume_mm3, centre_zyx, bbox_zyx, your_labels and classic_labels (voxel counts per label)
+        <out>/regions.json  per region: id, voxels, volume_mm3, centre_zyx, bbox_zyx, your_labels and classic_labels (voxel counts per label),
+                            your_label_pct (the share of each of your labels' voxels the region holds: 80 means most of that label)
         <out>/panel_<id>.jpg  the three-cut panel of each rendered region
         <out>/result.json  with --object-id: {objects: {<id>: the labels volume entry for report_output}}
 Prints: one JSON line {regions, disagreement, panels, result and objects (with --object-id), flagged_voxels, flagged_pct_of_classic_bone, regions_over_floor, regions_total, top}; top is the 8 largest regions
@@ -142,6 +143,7 @@ if __name__ == '__main__':
     sizes[0] = 0
     keep = [int(i) for i in np.argsort(-sizes) if sizes[i] > 0 and sizes[i] * vox >= a.min_mm3]
     objs = ndi.find_objects(pieces)
+    label_voxels = np.bincount(np.asarray(labels).ravel())
     reg = np.zeros(hu.shape, np.uint16)
     regions = []
     for rank, i in enumerate(keep, 1):
@@ -153,7 +155,8 @@ if __name__ == '__main__':
         theirs = {int(k): int(v) for k, v in zip(*np.unique(np.asarray(classic[sl])[m], return_counts=True))}
         regions.append({'id': rank, 'voxels': int(sizes[i]), 'volume_mm3': round(float(sizes[i]) * vox, 4),
                             'centre_zyx': pts.mean(0).round().astype(int).tolist(),
-                            'bbox_zyx': [[int(s.start), int(s.stop)] for s in sl], 'your_labels': yours, 'classic_labels': theirs})
+                            'bbox_zyx': [[int(s.start), int(s.stop)] for s in sl], 'your_labels': yours, 'classic_labels': theirs,
+                        'your_label_pct': {k: round(100 * v / int(label_voxels[k]), 1) for k, v in yours.items() if k}})
     np.save(out / 'disagreement.npy', reg)
     sidecar.write(out / 'disagreement.npy', like=str(sidecar.sidecar_path(a.labels)),
                   inputs=[a.hu, a.labels, a.classic], params={'ids': ids, 'min_mm3': a.min_mm3})
@@ -172,4 +175,4 @@ if __name__ == '__main__':
     sidecar.emit(**extra, regions=str(out / 'regions.json'), disagreement=str(out / 'disagreement.npy'), panels=panels,
                  flagged_voxels=int(f.sum()), flagged_pct_of_classic_bone=round(100 * float(f.sum()) / max(classic_bone, 1), 2),
                  regions_over_floor=len(regions), regions_total=int(n),
-                 top=[{k: r[k] for k in ('id', 'volume_mm3', 'centre_zyx', 'your_labels', 'classic_labels')} for r in regions[:8]])
+                 top=[{k: r[k] for k in ('id', 'volume_mm3', 'centre_zyx', 'your_labels', 'classic_labels', 'your_label_pct')} for r in regions[:8]])

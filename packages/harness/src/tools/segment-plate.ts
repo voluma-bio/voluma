@@ -17,7 +17,7 @@ const input = z
     hu: z
       .string()
       .describe(
-        "tibia-hu.npy, the aligned tibia grid tibia_frame.py wrote (its sidecar beside it).",
+        "tibia-hu.npy, the tibia long-axis grid tibia_frame.py wrote (its sidecar beside it).",
       ),
     mask: z.string().describe("tibia-mask.npy, written with it."),
     out: z.string().describe("Folder for the proposal, created; in your own folder."),
@@ -42,7 +42,7 @@ export function segmentPlateTool(layout: ThreadLayout): Tool<typeof input> {
     name: "segment_plate",
     description:
       "Propose the tibial growth plate's proximal and distal faces with the fine-tuned plate model (mouse-oa, protocol step 2), " +
-      "on the aligned tibia grid tibia_frame.py wrote. Every tenth coronal section goes to the model; three checkpoints each " +
+      "on the tibia long-axis grid tibia_frame.py wrote. Every tenth coronal section goes to the model; three checkpoints each " +
       "find the plate and their faces are combined, column by column. Writes, in `out`, the same files plate_faces.py writes: " +
       "`plate-annotations.json` (annotation A `growth_plate_curves` and C `growth_plate_distal_curves`, with the grid_id; no " +
       "points where it is flagged), `plate-faces.json` (`stretches`, the flagged columns: where the checkpoints disagree, too " +
