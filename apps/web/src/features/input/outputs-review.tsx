@@ -1,18 +1,19 @@
 /**
  * The input review of a run (Q24, mockup C), in the shell's two side panels. The
- * left side's tabs: the conversation with the run's main AI (the default, and the only place
- * anything on the run changes: `main-conversation.tsx`; badged while main waits on your yes) and
- * the inputs (the shared tree, named by `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with
- * the tool bar docked under them, or a file output, the whole run's graph or the run's agents
- * in the panes' place. On the right, Final outputs: the picked value opens in place with what it
+ * left side's tabs: the Conversation, main's whole thread with your side of it (the default, and
+ * the only place anything on the run changes: `main-conversation.tsx`; badged while main waits on
+ * your yes), Labels, the workers (`run-agents.tsx`) and the inputs (the shared tree, named by
+ * `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with the tool bar
+ * docked under them, or a file output or the whole run's graph in the panes' place. On the right, Final outputs: the picked value opens in place with what it
  * rests on. Everything comes from the run's stream as it arrives: the output fold
  * (`outputsFold`), its converted assets and the conversation, so statuses and values update live.
  *
  * The URL keeps `output` (the value picked in Final outputs), `trail` (an output it rests on,
  * near or further back, whose report is open and which the panes show), `item` (the To check
  * item whose place the panes frame; showing one is a history entry), `centre` (`run` for the
- * whole run) and `agent` (the Agents tab's open thread). Over the panes, a chip names what they show and its status. An `output`
- * that is not a final value opens under the first final value resting on it. The panes' layout
+ * whole run) and `agent` (the worker open in the Agents tab). Over the panes, a chip names what
+ * they show and its status. An `output` that is not a final value opens under the first final
+ * value resting on it. The panes' layout
  * is page state: it holds while another output, on another grid, is shown.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -222,8 +223,10 @@ export function OutputsReview({
   const item = selected?.items.find((i) => i.key === params.get("item"));
   // The left side opens on Conversation; the researcher picks another tab.
   const [leftTab, setLeftTab] = useState("conversation");
-  // The agents a name can open: each agent's thread names (`main.2` opens main's thread).
-  const agents = useMemo(() => agentEntries(events, fold, live), [events, fold, live]);
+  // Main is the Conversation; the Agents tab and the names a reply can open are the workers.
+  const entries = useMemo(() => agentEntries(events, fold, live), [events, fold, live]);
+  const main = entries.find((a) => a.place === "main");
+  const agents = useMemo(() => entries.filter((a) => a.place !== "main"), [entries]);
   // The links change only when the set of names does, and `open` reads the latest entries and
   // `select`, so the conversation's replies don't re-render on every event of a live run.
   const nameKey = agents.flatMap((a) => a.names).join("\n");
@@ -594,6 +597,8 @@ export function OutputsReview({
               badgeLabel: "The AI is waiting on you",
               content: (
                 <MainConversation
+                  events={events}
+                  main={main}
                   conversation={said}
                   views={allViews}
                   live={live}
@@ -641,7 +646,6 @@ export function OutputsReview({
                   picked={params.get("agent")}
                   onPick={(name) => select({ agent: name })}
                   onBack={() => select({ agent: null })}
-                  links={agentLinks}
                   live={live}
                   nameOf={nameOf}
                 />

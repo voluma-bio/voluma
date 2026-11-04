@@ -5,7 +5,8 @@
  * with no result yet is `running`.
  *
  * A thread is one or several thread ids: main is `main` plus every `main.N` after a review, in
- * log order, with a divider where each later one starts.
+ * log order, with a divider where each later one starts. A screen can put its own rows into the
+ * thread by log position (`slots`): each closes the fold before it and renders as the screen says.
  */
 
 import { agentLog } from "@voluma/contracts/agents";
@@ -105,14 +106,19 @@ export type Step =
 
 export type Row =
   | { kind: "prose"; id: string; text: string }
-  /** What main told the researcher (its `message` call to them): shown, as in the conversation. */
-  | { kind: "said"; id: string; text: string }
+  /** What main told the researcher (its `message` call to them), with when. */
+  | { kind: "said"; id: string; text: string; at: string }
   | { kind: "process"; id: string; steps: Step[]; digest: string }
   /** What the thread was told: its system prompt, its brief, a message from someone. */
   | { kind: "brief"; id: string; label: string; text: string }
   | { kind: "failure"; id: string; text: string }
   /** Where a later `main.N` thread of the merged main starts. */
-  | { kind: "divider"; id: string; text: string };
+  | { kind: "divider"; id: string; text: string }
+  /** A screen's own row at its place in the log (`Slot`); the screen renders it by id. */
+  | { kind: "slot"; id: string };
+
+/** A row a screen puts into the thread: before the first event whose `seq` is past its own. */
+export type Slot = { id: string; seq: number };
 
 /** "Ran 12 commands, read 2 files, 1 failed": counts across a fold. */
 export function digest(steps: Step[]): string {
@@ -182,13 +188,25 @@ function rowBuilder() {
 }
 
 /**
- * The rows of the threads in `ids` (log order): one worker or check, or main's every thread. On
- * a run that has ended (`live` false) a call still running shows as stopped.
+ * The rows of the threads in `ids` (log order): one worker or check, or main's every thread, with
+ * the screen's `slots` at their places. On a run that has ended (`live` false) a call still
+ * running shows as stopped.
  */
-export function threadRows(events: readonly RunEvent[], ids: readonly string[], live: boolean) {
+export function threadRows(
+  events: readonly RunEvent[],
+  ids: readonly string[],
+  live: boolean,
+  slots: readonly Slot[] = [],
+) {
   const shown = new Set(ids);
   const names = agentLog(events).records;
   const b = rowBuilder();
+  const pending = [...slots].sort((x, y) => x.seq - y.seq);
+  let next = 0;
+  const placeSlots = (upTo: number) => {
+    for (let s = pending[next]; s && s.seq <= upTo; s = pending[++next])
+      b.row({ kind: "slot", id: s.id });
+  };
   const tools = new Map<string, ToolStep>();
   const started = new Set<string>();
   const briefed = new Set<string>();
@@ -200,6 +218,7 @@ export function threadRows(events: readonly RunEvent[], ids: readonly string[], 
     for (const step of tools.values()) if (step.status === "running") step.status = "stopped";
   };
   for (const e of events) {
+    placeSlots(e.seq);
     if (!shown.has(e.threadId)) continue;
     const isMain = names.get(e.threadId)?.place === "main";
     switch (e.type) {
@@ -241,7 +260,8 @@ export function threadRows(events: readonly RunEvent[], ids: readonly string[], 
                 lastCovered = Math.max(lastCovered, to);
               }
             }
-            if (fromYou) label = "Message from you";
+            // The words show as the screen's own row; this is what main was handed with them.
+            if (fromYou) label = "Your message, as the AI got it";
             else if (sender.kind === "thread")
               label = `Message from ${names.get(sender.threadId)?.name ?? "another agent"}`;
             else label = "Update from Voluma";
@@ -270,7 +290,7 @@ export function threadRows(events: readonly RunEvent[], ids: readonly string[], 
           input?.to === "researcher" &&
           typeof input.text === "string"
         )
-          b.row({ kind: "said", id: step.id, text: input.text });
+          b.row({ kind: "said", id: step.id, text: input.text, at: e.createdAt });
         else b.step(step);
         break;
       }
@@ -297,6 +317,7 @@ export function threadRows(events: readonly RunEvent[], ids: readonly string[], 
         break;
     }
   }
+  placeSlots(Number.POSITIVE_INFINITY);
   if (!live) stopRunning();
   return b.done();
 }

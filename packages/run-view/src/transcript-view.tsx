@@ -1,7 +1,7 @@
 /**
  * One agent's rows (`transcript.ts`) as a thread: prose stays visible; reasoning and runs of tool
  * calls fold closed under a short label, their bodies built on first open; a working thread ends
- * in a live line naming the call it is in.
+ * in a live line naming the call it is in. A screen's own rows (`slot` rows) render as it says.
  */
 import {
   Activity,
@@ -22,6 +22,7 @@ import { ActivityRow } from "./chat/activity-row";
 import { Markdown } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
 import { plainError } from "./run-error";
+import { clockOf } from "./run-status";
 import type { Row, Step, ToolStep } from "./transcript";
 
 /** The agents a name in the thread can open: the names that are agents, and what opening one does. */
@@ -33,11 +34,14 @@ const SHOWN_CHARS = 8000;
 export function TranscriptView({
   rows,
   links,
+  slot,
   live,
   empty,
 }: {
   rows: Row[];
   links?: AgentLinks;
+  /** Renders a `slot` row by its id. */
+  slot?: (id: string) => ReactNode;
   /** While the thread works: what it is doing now, for the live line at the end ("" when it names nothing). */
   live?: string | null;
   empty: string;
@@ -50,7 +54,7 @@ export function TranscriptView({
         <ol className="grid gap-3">
           {rows.map((row) => (
             <li key={row.id} className="min-w-0">
-              <RowView row={row} links={links} />
+              {row.kind === "slot" ? slot?.(row.id) : <RowView row={row} links={links} />}
             </li>
           ))}
         </ol>
@@ -70,10 +74,10 @@ export function TranscriptView({
   );
 }
 
-function RowView({ row, links }: { row: Row; links?: AgentLinks }) {
+function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: AgentLinks }) {
   switch (row.kind) {
     case "prose":
-      return <Markdown text={row.text} className="text-ui" />;
+      return <Markdown text={row.text} className="text-ui" agents={links} />;
     case "process":
       return (
         <ProcessDisclosure label={row.digest}>
@@ -86,9 +90,12 @@ function RowView({ row, links }: { row: Row; links?: AgentLinks }) {
       );
     case "said":
       return (
-        <div className="grid gap-1 border-l-2 border-primary pl-3">
-          <p className="text-meta text-muted-foreground">To the researcher</p>
-          <Markdown text={row.text} className="text-ui" />
+        <div className="grid gap-1">
+          <p className="flex items-baseline gap-2 text-meta">
+            <span className="font-semibold">The AI</span>
+            <span className="text-muted-foreground">{clockOf(row.at)}</span>
+          </p>
+          <Markdown text={row.text} className="text-ui" agents={links} />
         </div>
       );
     case "brief":

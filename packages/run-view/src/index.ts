@@ -45,6 +45,7 @@ export {
 } from "./outputs-trail";
 export { plainError, stoppedText } from "./run-error";
 export {
+  clockOf,
   formatDuration,
   formatUsd,
   inputHref,
@@ -68,5 +69,6 @@ export {
   kneeOf,
   needsYouOf,
 } from "./study-inputs";
+export type { Slot } from "./transcript";
 export type { AgentLinks } from "./transcript-view";
 export { useNow } from "./use-now";

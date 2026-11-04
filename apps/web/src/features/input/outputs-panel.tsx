@@ -19,6 +19,7 @@ import type { LinkRole } from "@voluma/contracts/output-catalog";
 import { hasVersion } from "@voluma/contracts/output-fold";
 import {
   type ChainLink,
+  clockOf,
   OUTPUT_STATUS,
   type OutputItem,
   type OutputRow,
@@ -32,7 +33,7 @@ import {
 import { cx, EmptyState, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { type Accepting, clockOf, Items, Report, VersionLine } from "./version-report";
+import { type Accepting, Items, Report, VersionLine } from "./version-report";
 
 export type FinalOutputsProps = {
   review: OutputsReview;

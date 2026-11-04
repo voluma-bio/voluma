@@ -1,15 +1,15 @@
 /**
- * The run's agents, a tab of the side panel: a list (main first, then each worker in start order),
- * or the picked agent's whole thread with a way back to the list. From `agentEntries` (`@voluma/run-view`) on the
- * agent log; the pick is the URL's `agent`. Only the picked thread's rows are built.
+ * The run's workers, a tab of the side panel: a list in start order, or the picked worker's whole
+ * thread with a way back to the list. Main is not here: the Conversation is its thread. From
+ * `agentEntries` (`@voluma/run-view`) on the agent log; the pick is the URL's `agent`. Only the
+ * picked thread's rows are built.
  */
 
 import type { AgentState } from "@voluma/contracts/agents";
 import type { RunEvent } from "@voluma/contracts/events";
-import { type AgentEntry, type AgentLinks, AgentThread } from "@voluma/run-view";
+import { type AgentEntry, AgentThread, clockOf } from "@voluma/run-view";
 import { Button, type Status, StatusGlyph } from "@voluma/ui";
 import { ChevronLeft } from "lucide-react";
-import { clockOf } from "./version-report";
 
 const NOW: Record<AgentState, string> = {
   working: "Working",
@@ -44,7 +44,6 @@ export function RunAgents({
   picked,
   onPick,
   onBack,
-  links,
   live,
   nameOf,
 }: {
@@ -55,13 +54,12 @@ export function RunAgents({
   onPick: (name: string) => void;
   /** Back to the list. */
   onBack: () => void;
-  links: AgentLinks;
   /** The run hasn't ended. */
   live: boolean;
   nameOf: (id: string) => string;
 }) {
   if (agents.length === 0)
-    return <p className="p-4 text-sm text-muted-foreground">No agent has started yet.</p>;
+    return <p className="p-4 text-sm text-muted-foreground">No worker has started yet.</p>;
   const agent = picked === null ? undefined : agents.find((a) => a.names.includes(picked));
   if (!agent)
     return (
@@ -117,7 +115,6 @@ export function RunAgents({
         ids={agent.ids}
         working={live && agent.state === "working"}
         live={live}
-        links={agent.place === "main" ? links : undefined}
       />
     </section>
   );

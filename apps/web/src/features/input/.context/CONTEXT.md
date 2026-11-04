@@ -63,8 +63,8 @@ calls main still holds, `openApprovals`), Labels (`labels-panel.tsx`: what each 
 shown grid's `legend`; a label's volume only from the catalog's one mm³ value measured on that label alone
 (`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
 output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
-Agents (`run-agents.tsx`: the run's agents, then a picked agent's whole thread with All agents to go back), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The side
-opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or an agent's name in a reply opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), and
+Agents (`run-agents.tsx`: the run's workers, then a picked worker's whole thread with All agents to go back; main is not listed, since Conversation is its thread), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The side
+opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or a worker's name in main's thread opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), and
 Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
 reported value resting on an output with open items is not done: its status is "Waiting on a check
 of <output>" (`rowStatus`, the dashed waiting glyph, never a tick; the same rule in Final outputs, Based on, the chip and the whole run), and the open value shows one line
@@ -120,12 +120,17 @@ Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` t
 ### Talking to main (`main-conversation.tsx`, `use-main-message.ts`)
 
 The conversation is the only place anything on the run changes (design review.md, "Corrections",
-"Approvals"). It shows main's messages to the researcher, yours with the marks they carried, the
-views you saved and the calls main holds for your yes (`ApprovalCard`, `@voluma/run-view`: what the
+"Approvals"). It is main's whole thread (Jimmy, Nov 4: the filtered chat hid the AI's working, which
+a researcher needs to trust a number): run-view's `AgentThread` over main's ids, so the system
+prompt, what main was handed and its tool runs fold closed, its replies to you show as "The AI",
+and a worker's name opens it in Agents. The page puts in, by log position (`slots`), what the
+thread doesn't hold: your messages with the marks they carried, the views you saved, a request that
+didn't finish, and the calls main holds for your yes (`ApprovalCard`, `@voluma/run-view`: what the
 call does in code's words, what it changes and what it makes out of date, by catalog name; Yes and No with optional words through
 `answerApproval`; then the answer, and only the outcome's word: `approval.settled`'s text is
-written for main). `conversation()` (contracts)
-gives the items. While the run is live and the last word was yours, "main is on it".
+written for main). `conversation()` (contracts) gives those items; its replies are left to the
+thread. It opens at the newest line. The live line shows while main works, or while the run is
+live and the last word was yours.
 A finished own-key run holds no key, so `RunAlert` shows a key form (`ReopenKeys`) until this browser has one saved, and every message and answer to such a run carries it (`keysToReopen`).
 
 **Editing a mark is a correction, and nothing reaches main until Send.** A new mark, a moved one
