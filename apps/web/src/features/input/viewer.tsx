@@ -7,8 +7,7 @@
  * id. The page learns which grid is shown (`onShown`), since marks and the picture belong to it.
  */
 import { reviewAssetUrl } from "@voluma/api-client";
-import type { OutputState } from "@voluma/contracts/output-fold";
-import type { Focus, ReviewAssets } from "@voluma/contracts/review";
+import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
 import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
 import {
   type Blocks,
@@ -80,9 +79,8 @@ export function SceneViewer({
     planesOf(imageId: string): GridPlanes | undefined;
     /** The planes the catalog fits through surfaces, for Align and GP. */
     fits: readonly PlaneFit[];
-    /** The run's published outputs, whose grids Align lists, and an output's catalog name. */
-    outputs: readonly OutputState[];
-    nameOf(id: string): string;
+    /** Every grid the run published (`outputBlocks`), which Align lists. */
+    grids: readonly Grid[];
     /** A point's note. */
     onNote(id: string, note: string): void;
     /** Saves the view on the grid of image volume `grid`; absent, no Save view. */
@@ -173,7 +171,7 @@ export function SceneViewer({
   }, [marks, selected]);
   // What the shown grid's planes can be aligned to: the other published grids, the catalog's
   // fitted planes.
-  const { fits, outputs, nameOf } = quad;
+  const { fits, grids } = quad;
   const targets = useMemo(
     () =>
       imageId
@@ -182,12 +180,11 @@ export function SceneViewer({
             imageId,
             assets,
             fits,
-            outputs,
-            nameOf,
+            grids,
             assetBase: (sha256) => reviewAssetUrl(runId, sha256, "x").slice(0, -1),
           })
         : undefined,
-    [revision, imageId, assets, fits, outputs, nameOf, runId],
+    [revision, imageId, assets, fits, grids, runId],
   );
 
   // Each grid shown keeps its viewer, hidden while another grid is shown, so going back is

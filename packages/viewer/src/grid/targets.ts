@@ -6,10 +6,9 @@
  * affine (an image volume, or a frame such as intake's joint frame), one per `gridId`. All reach
  * the shown grid through world mm (`@voluma/contracts/ruler`).
  */
-import type { OutputState, OutputVersion } from "@voluma/contracts/output-fold";
-import type { ReviewAssets } from "@voluma/contracts/review";
-import { affineIn, axesOf, directionInGrid, xyzToWorld } from "@voluma/contracts/ruler";
-import { fitNormal } from "./frame";
+import type { Grid, ReviewAssets } from "@voluma/contracts/review";
+import { axesOf, directionInGrid, xyzToWorld } from "@voluma/contracts/ruler";
+import { dot, fitNormal } from "./frame";
 import type { PlaneTarget } from "./QuadViewer";
 import type { Blocks } from "./review";
 
@@ -22,8 +21,7 @@ export function planeTargets({
   assets,
   assetBase,
   fits,
-  outputs,
-  nameOf,
+  grids,
 }: {
   revision: Blocks;
   /** The shown grid's image volume. */
@@ -32,10 +30,8 @@ export function planeTargets({
   /** The URL prefix of a converted file, ending in "/". */
   assetBase(sha256: string): string;
   fits: readonly PlaneFit[];
-  /** The run's published outputs (`OutputsFold.outputs`). */
-  outputs: readonly OutputState[];
-  /** An output's catalog name ("Joint frame"). */
-  nameOf(id: string): string;
+  /** Every grid the run published (`outputBlocks`), the shown one included. */
+  grids: readonly Grid[];
 }): PlaneTarget[] {
   const image = revision.volumes.find((v) => v.id === imageId);
   if (!image) return [];
@@ -70,38 +66,26 @@ export function planeTargets({
       },
     };
   });
-  // One target per published grid, the first output to publish it naming it.
-  const gridOf = (detail: OutputVersion["detail"]) => {
-    const affine = affineIn(detail);
-    return typeof detail?.gridId === "string" && affine
-      ? { gridId: detail.gridId, affine }
-      : undefined;
-  };
-  const seen = new Set([gridOf(outputs.find((o) => o.id === imageId)?.latest?.detail)?.gridId]);
-  // A base output names its grid; a file on a grid a base already names (the scan's hu.json) adds
-  // nothing, so bases claim their gridId first.
-  const targetsOf = (kind: "base" | "file") =>
-    outputs.flatMap((o): PlaneTarget[] => {
-      const v = o.latest;
-      const grid = v && o.kind === kind ? gridOf(v.detail) : undefined;
-      if (!v || !grid || seen.has(grid.gridId)) return [];
-      seen.add(grid.gridId);
-      const name = nameOf(o.id);
-      return [
-        {
-          id: `grid:${o.id}`,
-          name: `the ${name.charAt(0).toLowerCase()}${name.slice(1)}`,
-          tag: v.by,
-          load: async () => {
-            const [x, y, z] = axesOf(grid.affine);
-            const inGrid = (a: readonly [number, number, number]) =>
-              directionInGrid(image.affine, a);
-            return { axes: [inGrid(z), inGrid(y), inGrid(x)] as const };
-          },
-        },
-      ];
-    });
-  const grids = targetsOf("base");
-  // Frames a task oriented for (file outputs) come before the plane fits, other grids after them.
-  return [...targetsOf("file"), ...planes, ...grids];
+  // A grid whose axes are the shown grid's (any run published before the harness wrote poses
+  // gives every grid the scan's) would only do what Reset does.
+  const [ix, iy, iz] = axesOf(image.affine);
+  const same = (g: Grid) =>
+    axesOf(g.affine).every((a, k) => Math.abs(dot(a, [ix, iy, iz][k]!)) > 1 - 1e-9);
+  const targetOf = (g: Grid): PlaneTarget => ({
+    id: `grid:${g.id}`,
+    name: `the ${g.name.charAt(0).toLowerCase()}${g.name.slice(1)}`,
+    tag: g.by,
+    load: async () => {
+      const [x, y, z] = axesOf(g.affine);
+      const inGrid = (a: readonly [number, number, number]) => directionInGrid(image.affine, a);
+      return { axes: [inGrid(z), inGrid(y), inGrid(x)] as const };
+    },
+  });
+  const other = grids.filter((g) => g.id !== imageId && !same(g));
+  // Frames a task oriented for come before the plane fits, other grids after them.
+  return [
+    ...other.filter((g) => g.kind === "file").map(targetOf),
+    ...planes,
+    ...other.filter((g) => g.kind === "base").map(targetOf),
+  ];
 }
