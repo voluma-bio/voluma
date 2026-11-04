@@ -60,13 +60,21 @@ effect catches up.
 
 `outputs-review.tsx` lays out the shell's two `SidePanel`s around the centre. Left: Conversation (default; badged with the
 calls main still holds, `openApprovals`) and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree`
-over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`); a value resting on one keeps its own status and says "rests on a To check") and
-Whole run. The value picked opens in place under its row: its version line and Report, its open
-To check items (with those of what it rests on), and Rests on (direct links, ordered measured
-on, beside, made from, drawn on) with Further back (the rest of `trailOf`, nearest first, each
-saying which row it feeds). A row there opens its report under it and frames the panes on it;
-the value's items carried by that row shrink to one line. Reports and items are
-`version-report.tsx`.
+over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), Agents (icon) and
+Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
+reported value resting on an output with open items is not done: its status is "Waiting on a check
+of <output>" (`waitsOn`, the dashed waiting glyph, never a tick), and the open value shows one line
+per such output, "N to check on <output>", which opens that output under it. The value picked opens
+in place under its row: its version line and Report, its own open items, those lines, and Rests on
+(direct links, ordered measured on, beside, made from, drawn on) with Further back (the rest of
+`trailOf`, nearest first, each saying which row it feeds). A row there opens under it its open
+items first, then its report, and frames the panes on it. Show on an item opens the output it is
+about (as `trail` unless it is the value) and frames the panes on its region; it is a history entry,
+so Back returns to the item before. Reports and items are `version-report.tsx`.
+
+The centre has no bar of its own: a chip over the panes' top-left corner (`SceneChip`) names the
+output in view, its value and its status (the waiting one a button to the checks), with the saved
+views menu; the whole run and the agents get a bar with the way back.
 
 While the run goes, Final outputs adds what a run going shows and nothing after it ends: on top,
 Running, "last news <age>" (the newest stored event, on a timer) and the latest `activity` sentence
@@ -76,7 +84,7 @@ its Rests on); "not yet" for nothing published; "N of M in" in the panel head (t
 says only Running), with Needs you only once something does; and "Other outputs so far" under the
 values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
 stays open until Esc. A section's tick waits for every value in it. Until the value has a version or is
-marked missing, the centre shows the nearest link on its chain with a version (the scene bar saying
+marked missing, the centre shows the nearest link on its chain with a version (the scene chip saying
 "<value> is based on"), else the output published last whose whole scene has blocks to draw (the scan, from intake
 on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the
 run is going and the AI is still setting up only while nothing drawable is published. `studiesQuery` refetches while a run is live, so the Samples tab
@@ -98,7 +106,7 @@ labelled choices, with no command-key bindings. Point notes have no editor or di
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.
 Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
-(`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
+(`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene chip's
 "Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
 `outputs-trail.ts`.
 

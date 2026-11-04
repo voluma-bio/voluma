@@ -75,6 +75,7 @@ import {
   pngWithin,
   type ShownMark,
   SNAPSHOT_WIDTH,
+  type VoxelBox,
   type Zyx,
 } from "./scene";
 import { tokenColor } from "./token-color";
@@ -230,8 +231,11 @@ export function QuadViewer({
   planes?: GridPlanes;
   layout: QuadLayout;
   onLayout(layout: QuadLayout): void;
-  /** A voxel to centre the crosshair on: each new object moves it there once. */
-  focus?: { at: Zyx };
+  /**
+   * A voxel to centre the crosshair on and, given a box, a region every pane frames: each new
+   * object moves them there once.
+   */
+  focus?: { at: Zyx; box?: VoxelBox };
   /** What the viewer should say it doesn't show. */
   notes?: string[];
   /** The tools, on the left of the docked bar. */
@@ -257,9 +261,6 @@ export function QuadViewer({
   const [point, setPoint] = useState<Zyx>(
     () => focus?.at ?? (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
   );
-  useEffect(() => {
-    if (focus) setPoint(focus.at);
-  }, [focus]);
   const [contrast, setContrast] = useState<Contrast | null>(null);
   const [contrastError, setContrastError] = useState<string>();
   const [status, setStatus] = useState<Partial<Record<QuadView, PaneStatus>>>({});
@@ -275,6 +276,12 @@ export function QuadViewer({
   const handles = useRef(
     Object.fromEntries(VIEW_ORDER.map((v) => [v, { current: null as PaneHandle | null }])),
   ).current;
+  useEffect(() => {
+    if (!focus) return;
+    setPoint(focus.at);
+    const { box } = focus;
+    if (box) for (const v of VIEW_ORDER) handles[v]?.current?.frame(box);
+  }, [focus]);
   const latestMark = useRef({ onMark, onEdit, onPick, orientation, plate });
   latestMark.current = { onMark, onEdit, onPick, orientation, plate };
   const area = useRef<HTMLDivElement>(null);

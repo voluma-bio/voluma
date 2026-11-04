@@ -26,6 +26,7 @@ export {
   rowsToCheck,
   shownOf,
   undrawn,
+  waitsOn,
 } from "./outputs-model";
 export {
   type ChainLink,

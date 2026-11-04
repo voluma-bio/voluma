@@ -9,6 +9,9 @@ import type { MarkShape } from "@voluma/contracts/agent-events";
 
 export type Zyx = readonly [number, number, number];
 
+/** An inclusive box of source voxels: a region to frame. */
+export type VoxelBox = { min: Zyx; max: Zyx };
+
 /**
  * A mark on the grid in source voxels (z, y, x): a voxel (optionally with a probe reading),
  * an inclusive box, a line, an angle (its vertex between two ends), or a closed outline on
@@ -162,6 +165,12 @@ export type PaneHandle = {
    */
   view(): PaneView | null;
   show(view: PaneView): void;
+  /**
+   * Frames `box`: a slice pane centres on it and zooms until it fills about four fifths of the
+   * pane (never out past the grid's fit), 3D looks at it from the side it faces now. A slice pane
+   * with no size yet frames once it gets one.
+   */
+  frame(box: VoxelBox): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
    * copied in the same task: WebGL clears its buffer once the browser composites it. The marks

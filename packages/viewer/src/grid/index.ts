@@ -13,7 +13,8 @@ export {
 } from "./QuadViewer";
 export {
   type Blocks,
-  labelsMiddle,
+  labelsBox,
+  middleOf,
   type ReviewGrid,
   reviewGrid,
 } from "./review";
@@ -29,6 +30,7 @@ export type {
   PaneView,
   ProbeValue,
   ShownMark,
+  VoxelBox,
   Zyx,
 } from "./scene";
 export { type PlaneFit, planeTargets } from "./targets";

@@ -14,10 +14,11 @@ import {
   type GridMark,
   type GridPlanes,
   type GridScene,
-  labelsMiddle,
+  labelsBox,
   type MarkEdit,
   type MarkPlane,
   type MarkTool,
+  middleOf,
   type PlaneFit,
   planeTargets,
   type QuadLayout,
@@ -27,6 +28,7 @@ import {
   reviewGrid,
   type ShownMark,
   tokenColor,
+  type VoxelBox,
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -107,30 +109,31 @@ export function SceneViewer({
       }),
     [runId, revision, subject.shown, assets, labels, focus],
   );
-  // A focused label has no extent in the run's data: find its middle on the grid. Keyed by
-  // what it reads, since `grid` is rebuilt whenever Labels is toggled.
+  // A focused label has no extent in the run's data: find it on the grid. Keyed by what it
+  // reads, since `grid` is rebuilt whenever Labels is toggled.
   const focusLabels = grid.state === "ready" ? grid.focusLabels : undefined;
   const labelsKey = focusLabels && `${focusLabels.source.base}|${focusLabels.labels.join()}`;
   const latestLabels = useRef(focusLabels);
   latestLabels.current = focusLabels;
-  const [labelsFocus, setLabelsFocus] = useState<{ for: string; at?: Zyx }>();
+  const [labelsFocus, setLabelsFocus] = useState<{ for: string; box?: VoxelBox }>();
   useEffect(() => {
     const wanted = latestLabels.current;
     if (!labelsKey || !wanted) return;
     const abort = new AbortController();
-    labelsMiddle(wanted, abort.signal)
-      .then((at) => setLabelsFocus({ for: labelsKey, at }))
+    labelsBox(wanted, abort.signal)
+      .then((box) => setLabelsFocus({ for: labelsKey, box }))
       .catch(() => {});
     return () => abort.abort();
   }, [labelsKey]);
-  // A new object per item selection or found voxel, so the crosshair moves then and not when
-  // Labels is toggled.
-  const at =
-    grid.state === "ready"
-      ? (grid.focus ?? (labelsFocus?.for === labelsKey ? labelsFocus?.at : undefined))
-      : undefined;
-  const atKey = at?.join();
-  const target = useMemo(() => (at ? { at } : undefined), [focus, atKey]);
+  // Where the item is and the region the panes frame. A new object per item selection or found
+  // region, so the panes move then and not when Labels is toggled.
+  const labelsFound = labelsFocus?.for === labelsKey ? labelsFocus?.box : undefined;
+  const region =
+    grid.state !== "ready"
+      ? undefined
+      : (grid.focus ?? (labelsFound && { at: middleOf(labelsFound), box: labelsFound }));
+  const regionKey = region && [region.at, region.box?.min, region.box?.max].join("|");
+  const target = useMemo(() => region, [focus, regionKey]);
   // The crosshair goes to whichever came last: the item's place or a picked mark.
   const imageId = grid.state === "ready" ? grid.imageId : undefined;
   const image = revision.volumes.find((v) => v.id === imageId);
@@ -316,7 +319,7 @@ type View = {
   name: string;
   scene: GridScene;
   notes: string[];
-  focus: { at: Zyx } | undefined;
+  focus: { at: Zyx; box?: VoxelBox } | undefined;
 };
 type Kept = View & { ready: boolean };
 

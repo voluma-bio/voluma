@@ -55,6 +55,7 @@ import {
   type PaneView,
   planeAxes,
   type ShownMark,
+  type VoxelBox,
   type Zyx,
 } from "./scene";
 import { type PaneCamera, type Probe, useSliceGestures } from "./slice-gestures";
@@ -66,6 +67,9 @@ import { tokenColor } from "./token-color";
  */
 export const axisToken = (axis: Axis) =>
   axis === 0 ? "--plane-axial" : axis === 1 ? "--plane-sagittal" : "--plane-coronal";
+
+/** The least a framed region spans, in source voxels of the finest spacing, so a point frames a neighbourhood. */
+const FRAME_MIN_VOXELS = 48;
 
 /** How far out the tilt handles sit, of the pane's half size. */
 const HANDLE_REACH = 0.85;
@@ -144,6 +148,8 @@ export function SlicePane({
   const view = useRef<PaneCamera | null>(null);
   // A saved view shown before the pane had a size: applied when it gets one.
   const pending = useRef<{ zoom: number; center: [number, number] } | null>(null);
+  // A region framed before the pane had a size: framed when it gets one.
+  const pendingBox = useRef<VoxelBox | null>(null);
   const [level, setLevel] = useState(scene.image.levels.length - 1);
   // A tilted pane's fine picture covers this window of pane mm; panning near its edge bumps
   // `reframe`, which loads a new one.
@@ -349,11 +355,39 @@ export function SlicePane({
       if (!v) return pending.current;
       return { zoom: v.zoom / v.fit, center: [v.center[0], v.center[1]] };
     };
+    // Centres on the box and zooms until its outline on this plane fills about four fifths of
+    // the pane: at least FRAME_MIN_VOXELS of the finest spacing across, never out past the fit.
+    const frameBox = (box: VoxelBox) => {
+      const v = view.current;
+      const { width, height } = element.getBoundingClientRect();
+      if (!v || !width || !height) {
+        pendingBox.current = box;
+        return;
+      }
+      pendingBox.current = null;
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (const z of [box.min[0] - 0.5, box.max[0] + 0.5])
+        for (const y of [box.min[1] - 0.5, box.max[1] + 0.5])
+          for (const x of [box.min[2] - 0.5, box.max[2] + 0.5]) {
+            const [px, py] = latest.current.toPane([z, y, x]);
+            xs.push(px);
+            ys.push(py);
+          }
+      const least = FRAME_MIN_VOXELS * Math.min(...s);
+      const across = Math.max(Math.max(...xs) - Math.min(...xs), least);
+      const down = Math.max(Math.max(...ys) - Math.min(...ys), least);
+      v.zoom = Math.max(v.fit, Math.min(width / across, height / down) * 0.8);
+      v.center = [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...ys) + Math.min(...ys)) / 2];
+      state.render();
+      pickLevel();
+    };
     handle.current = {
       view: now,
       layers: () => layer.layers(renderer.domElement, paint),
       show(saved: PaneView) {
         if (!("zoom" in saved)) return;
+        pendingBox.current = null;
         if (!view.current) {
           pending.current = saved;
           return;
@@ -363,6 +397,7 @@ export function SlicePane({
         state.render();
         pickLevel();
       },
+      frame: frameBox,
     };
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
@@ -379,8 +414,11 @@ export function SlicePane({
           latest.current.toPane(scene.shapeZyx.map((n) => (n - 1) / 2) as unknown as Zyx),
       };
       view.current.fit = fitted;
-      state.render();
-      pickLevel();
+      if (pendingBox.current) frameBox(pendingBox.current);
+      else {
+        state.render();
+        pickLevel();
+      }
     });
     observer.observe(element);
     return () => {

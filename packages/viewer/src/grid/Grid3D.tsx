@@ -310,6 +310,17 @@ export function Grid3D({
         touched = true;
         place(new Vector3(...position), new Vector3(...target), new Vector3(...up));
       },
+      // From the side it looks from now, close enough that the box's sphere fills the view.
+      frame(box) {
+        touched = true;
+        const lo = toWorld(box.min.map((n) => n - 0.5) as unknown as Zyx);
+        const hi = toWorld(box.max.map((n) => n + 0.5) as unknown as Zyx);
+        const middle = lo.clone().add(hi).multiplyScalar(0.5);
+        const reach = Math.max(hi.distanceTo(lo) / 2, 24 * Math.min(sx, sy, sz));
+        const direction = camera.position.clone().sub(pivot).normalize();
+        const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        place(middle.clone().add(direction.multiplyScalar(reach * 3.2)), middle, up);
+      },
     };
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
