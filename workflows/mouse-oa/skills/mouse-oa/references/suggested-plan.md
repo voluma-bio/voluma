@@ -82,7 +82,7 @@ segmentation a later step needs (the growth plate traced closely) is that step's
   medial: the fibula is lateral. On a view of the aligned grid that shows the fibula beside the tibia (an axial
   slice just below the plateau), check that +U is medial, as `tibia_frame.py`'s `medial_side`
   says (it turns the grid to put the fibula label at -U), and record it before you name a compartment. Where it says
-  `unknown`, the fibula label was missing: name the medial and lateral fields of the annotations from the side you saw.
+  `unknown`, there was no fibula label or it lay within 0.3 mm of the tibia's centre: name the medial and lateral fields of the annotations from the side you saw.
 - **Makes:** `tibia-grid` (the aligned frame; protocol step 1), `growth-plate-proximal-face` (step 2: the proposal
   (`segment_plate`) gives both faces where it finds the plate; you trace the plate over the whole tibia from there and open every
   `qc-faces` sheet),

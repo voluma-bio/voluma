@@ -3,8 +3,8 @@
 Puts the shaft's long axis on W, 0 degrees off in both the coronal (W-U) and the sagittal (W-V) plane, takes the epiphyseal
 long cross-axis as U, turned so that `--fibula-label` (lateral) lies at -U: +U medial and, the grid being right-handed,
 +V anterior on a right knee (on a left knee +V is posterior; `anterior_side` checks V against `--patella-label`). Without a
-fibula label the first guess's sign rule on scan y stands and `medial_side` says `unknown`. The frame's `axes` note
-repeats both), and resamples the HU volume and the bone mask onto that
+fibula label, or with the fibula within 0.3 mm of the tibia's centre along U, the first guess's sign rule on scan y
+stands and `medial_side` says `unknown`. The frame's `axes` note repeats both sides. It then resamples the HU volume and the bone mask onto that
 frame, cropped around the joint end. The growth plate is not levelled: its roll stays as the anatomy has it. The axis is fitted
 on the shaft between `--axis-mm` from the joint end: a first guess from scan-z slices (`--shaft-frac`), then, up to five
 times, the scan's mask is sampled on the provisional grid's W sections over that range (sampled from the scan, so the range
@@ -33,7 +33,7 @@ Prints: one JSON line {out, values, objects, hu, mask, frame, qc, qc_sagittal, g
         medial_side, fibula_u_mm, anterior_side, patella_v_mm, ...}
         medial_side: "+U" when the grid was turned to put the fibula at -U; "unknown" without a fibula label or with the
         fibula within 0.3 mm of the tibia's centre along U: then find the fibula on the QC yourself. anterior_side: "+V" or
-        "-V" from where the patella lies along V (anterior), "unknown" without one.
+        "-V" from where the patella lies along V (anterior), "unknown" without a patella label or with it within 0.3 mm. Both offsets are measured on the final grid.
         axis_residual_deg: the axis's angle to W on the final grid, at full resolution; positive coronal = the shaft's lower
         end (toward +W) at larger U than its top, positive sagittal the same with V. axis_w: the --axis-mm range as W indices
         of the output grid; its end may lie past the grid's last W index (the fit samples the scan, not the crop).
@@ -300,12 +300,13 @@ def main():
         basis = tilted(basis, *np.tan(np.radians(a.tilt_deg)))
     low, shape_xyz, w_range = crop(basis)
     shape_zyx = tuple(int(i) for i in shape_xyz[::-1])
+    fibula_u_mm = offset_mm(labels, a.fibula_label, basis[:, 0], origin, sp[0])  # on the final grid, for the record
     patella_v_mm = offset_mm(labels, a.patella_label, basis[:, 1], origin, sp[0])
     anterior = side(patella_v_mm, 'V')
     sides = (f'{medial} medial (the fibula lies {fibula_u_mm:+.2f} mm along U)' if medial != 'unknown' else
              'medial side unknown (no fibula label, or the fibula is within 0.3 mm of the tibia\'s centre along U): find the fibula on the QC')
     sides += (f', {anterior} anterior (the patella lies {patella_v_mm:+.2f} mm along V)' if anterior != 'unknown' else
-              ', anterior side unknown (no patella label to tell)')
+              ', anterior side unknown (no patella label, or the patella is within 0.3 mm of the tibia\'s centre along V)')
     frame = fr.make(
         g['grid_id'],
         sp,
