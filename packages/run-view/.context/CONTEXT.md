@@ -18,7 +18,8 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   run has one; `main` and every `main.N` of a review are one entry, a divider where each later
   one starts), then every worker or check in start order, from `workersOf` and `agentLog`'s
   `place`, never a thread's `kind` or `role`. `threadRows` derives rows for the picked thread
-  only, from durable events (the stream sends no token deltas): prose in the open; reasoning and
+  only, from durable events (the stream sends no token deltas): prose in the open, and main's
+  `message` calls to the researcher too ("To the researcher", as the conversation shows them); reasoning and
   runs of tool calls fold closed under a digest, their bodies built on first open
   (`ProcessDisclosure`, `ActivityRow`); a call with no result is running, and the live line names
   it; on an ended run it reads stopped. Tool arguments and output show their last 8000
