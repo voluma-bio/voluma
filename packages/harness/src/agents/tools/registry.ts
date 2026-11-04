@@ -7,6 +7,7 @@ import type { ThreadLayout } from "../../layout";
 import type { Files } from "../../ports/files";
 import { bashTool } from "../../tools/bash";
 import { bashManageTool } from "../../tools/bash-manage";
+import { segmentPlateTool } from "../../tools/segment-plate";
 import { segmentSamTool } from "../../tools/segment-sam";
 import type { Tool } from "../../tools/tool";
 import { type AgentsApi, coordinationTools } from "./coordination";
@@ -21,6 +22,7 @@ export const AGENT_TOOL_NAMES = [
   "bash_manage",
   "read",
   "segment_sam",
+  "segment_plate",
   "message",
   "activity",
   "close",
@@ -35,6 +37,7 @@ const factories: Record<string, (deps: AgentToolDeps, names: readonly string[]) 
   bash: ({ layout, bash }) => bashTool(layout, bash),
   bash_manage: ({ bash }) => bashManageTool(bash),
   segment_sam: ({ layout }) => segmentSamTool(layout),
+  segment_plate: ({ layout }) => segmentPlateTool(layout),
   read: ({ layout, files }, names) =>
     readTool({ layout, files, hasSandbox: names.includes("bash") }),
 };

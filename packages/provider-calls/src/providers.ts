@@ -12,7 +12,9 @@ export type RouteKind =
   /** Meta's upload: the reply's file id is recorded on the row. */
   | "file-upload"
   /** Meta's delete: only for a file id this run uploaded. */
-  | "file-delete";
+  | "file-delete"
+  /** A call to a service billed by its time: priced at the route's `usdPerHour` of the call's duration. */
+  | "timed";
 
 export type Route = {
   method: "POST" | "DELETE";
@@ -27,6 +29,8 @@ export type Route = {
    * for callers that understand the `gateway-error` event; the others keep real statuses.
    */
   earlyStream?: boolean;
+  /** A `timed` route's price: what the service bills per hour of a call. */
+  usdPerHour?: number;
 };
 
 export type ProviderDef = {
@@ -39,9 +43,22 @@ export type ProviderDef = {
   /** The headers that carry our key (the caller's own auth headers are stripped). */
   auth(key: string): Record<string, string>;
   routes: readonly Route[];
+  /**
+   * Our own service, not a provider a starter has a key for: an own-key token is served with our
+   * key, where for any other provider it has only its own keys.
+   */
+  ours?: boolean;
 };
 
 const bearer = (key: string) => ({ authorization: `Bearer ${key}` });
+
+/**
+ * Modal proxy auth: our key is `<token id>:<token secret>` of a workspace proxy token.
+ */
+const modalProxy = (key: string) => {
+  const [id = "", secret = ""] = key.split(":", 2);
+  return { "modal-key": id, "modal-secret": secret };
+};
 
 export const PROVIDERS: Record<Provider, ProviderDef> = {
   meta: {
@@ -71,6 +88,16 @@ export const PROVIDERS: Record<Provider, ProviderDef> = {
     baseUrl: "https://api.openai.com",
     auth: bearer,
     routes: [{ method: "POST", path: "/v1/responses", kind: "model" }],
+  },
+  // The growth-plate model (`training/plate-finetune/serve.py`), served on Modal as `plate-serve`.
+  plate: {
+    enabled: true,
+    baseUrl: "https://haowjy--plate-serve-plate-predict.us-east.modal.run",
+    auth: modalProxy,
+    // Modal's A10G with 4 CPU cores and 16 GiB, as the README measured it; the container's start
+    // and its 120 s idle tail are billed too and are not counted here.
+    routes: [{ method: "POST", path: "/", kind: "timed", usdPerHour: 1.55 }],
+    ours: true,
   },
 };
 

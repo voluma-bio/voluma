@@ -8,7 +8,7 @@ import { openingOutputs } from "@voluma/contracts/final-outputs";
 import { renderFinalOutputs } from "@voluma/contracts/output-files";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import type { ThreadLayout } from "../layout";
-import { runLayout } from "../layout";
+import { GATEWAY_TOOLS, runLayout } from "../layout";
 import type { Shared, Wire } from "../loop-shell";
 import { FileNotFound } from "../ports/publish";
 import type { Recorder } from "../recorder";
@@ -28,15 +28,15 @@ interface AgentsWireOptions {
   inputPrefix: string;
   recorder: Recorder;
   definition: WorkflowDefinition;
-  /** Whether a gateway is configured (`segment_sam` is held only where it can be used). */
+  /** Whether a gateway is configured (the gateway tools are held only where they can be used). */
   gateway: boolean;
 }
 
 export function agentsWire(o: AgentsWireOptions): Wire {
   const { recorder, definition } = o;
-  /** Each role's tools: its file's list, less `segment_sam` where no gateway is configured. */
+  /** Each role's tools: its file's list, less the gateway tools where no gateway is configured. */
   const toolsOf = (role: "main" | "worker") =>
-    (definition.agents[role]?.tools ?? []).filter((t) => t !== "segment_sam" || o.gateway);
+    (definition.agents[role]?.tools ?? []).filter((t) => !GATEWAY_TOOLS.includes(t) || o.gateway);
   const layout = runLayout({
     runId: o.runId,
     inputPrefix: o.inputPrefix,

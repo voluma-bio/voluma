@@ -9,7 +9,7 @@
  */
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
-export const PROVIDER_NAMES = ["meta", "anthropic", "openai"] as const;
+export const PROVIDER_NAMES = ["meta", "anthropic", "openai", "plate"] as const;
 export type Provider = (typeof PROVIDER_NAMES)[number];
 
 export type TokenSecret = { kid: string; key: Buffer };

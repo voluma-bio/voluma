@@ -135,6 +135,7 @@ Variables:
 | `DATABASE_URL` | Neon's direct connection string, `sslmode=require`, the same value as on `voluma-api` (`sync: false`) |
 | `GATEWAY_TOKEN_SECRET` | `<kid>:<base64 of 32 random bytes>`, e.g. `k1:$(openssl rand -base64 32)`. Comma-separate to rotate: the first mints, all open. The runner reads it from here (`fromService`), so a rotated value reaches it at the next Blueprint sync |
 | `GATEWAY_META_API_KEY` | our Meta key (SAM) |
+| `GATEWAY_PLATE_API_KEY` | `<token id>:<token secret>` of a Modal workspace proxy token (Modal dashboard, Settings, Proxy Auth Tokens), for the plate model `segment_plate` calls (`plate-serve` on Modal). Unset: every `segment_plate` call is a 403 and the worker falls back to `plate_faces.py` |
 | `GATEWAY_ANTHROPIC_API_KEY`, `GATEWAY_OPENAI_API_KEY` | not in the yaml: those providers are disabled in code |
 | `PORT` | not set: Render's injected 10000 (the code's default is 8080) |
 | `HOST` | not set (all interfaces); `pnpm dev` sets 127.0.0.1 |
