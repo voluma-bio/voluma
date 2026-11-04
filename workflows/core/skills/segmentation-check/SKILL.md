@@ -12,9 +12,9 @@ SAM proposes; whoever reports the labels owns them. Code checks gate and eyes co
 `unlabelled.py` first, both with `--ranges anatomy.json`, then look at what they flag and at the 3D sheet
 (`visual-check`). Looking alone has passed a fragment carrying the wrong label. A labels volume is finished when you have made every correction below that you
 can make, and each flag you looked at and could not correct, and each disagreement the CT could not settle, is a To
-check item that names its region: then clear the specks (`drop_specks.py`, the loose fragments a clipped label leaves,
-which show as dots off the bone in 3D), measure from the cleaned volume, and report it. The workflow's `anatomy.json`
-holds the label table, the expected volumes and pieces, and which labels must touch which.
+check item that names its region: then finish it with `finish_labels.py` (section 6), measure from the file it
+writes, and report that file with its check record. The workflow's `anatomy.json` holds the label table, the expected
+volumes and pieces, which labels must touch which, and which sit apart from which.
 
 ## 1. Each label
 
@@ -40,10 +40,12 @@ a bone's cortex passed both, with a strip of bone no label covers between it and
 | Flag | It means | The correction |
 |---|---|---|
 | `<label> is joined to <bone> through bone` | a small structure the anatomy puts across joint space (`apart_from`) shares bone with a big bone over a patch above the tolerance, directly or through bone no label covers: one label holds the other's bone | open the patch at the voxel given; give each bone's voxels to its own label (`classic_segment.py --within` with seeds, `relabel.py` for a piece apart), or redo the structure's SAM track (`sam-segmentation`, "When a track fails") or write your own cleanup and show it on a crop sheet; then run it again. A joint mineralization or sesamoid ends apart from the bone; no fused-osteophyte allowance. If the CT shows no gap at threshold there, keep the labels and raise a To check item naming the patch |
+| `<bone> is joined to <bone> through bone`, two big bones (the femur and the tibia or the patella) | one big track took the other bone's bone, or one label is threshold bone the others left over; the next step's frame trips over it (the tibia's joint end reads as a femur's) | split it: `classic_segment.py --within <label>` with seeds from each bone's core, the joined piece included; or redo the big-bone request (`sam-segmentation`, "When a track fails"). Never set a bone to the threshold bone the other labels left. If the CT shows bone bridging the joint at threshold (OA can), keep the labels and raise a To check item naming the patch |
 | `candidate <n> ... joined through bone to a big bone` | bone no label covers that touches a big bone over a patch above the tolerance: the big label missed part of its own bone (or other anatomy touches it) | open it; the bone's own bone goes to that label (`relabel.py --pieces`); never name it a small structure while it is fused |
 
 The tolerance (`--contact-mm2`, 0.011 mm2: 100 voxel faces at 10.5 um) is partial volume closing a narrow joint gap:
-good structures measure at most 0.006 mm2, as labels or as candidates, and bone cut off a label 0.24 to 1.28 mm2.
+good structures measure at most 0.006 mm2, as labels or as candidates, and bone cut off a label 0.24 to 1.28 mm2; good
+femur and tibia labels at most 0.0034 mm2, and a tibia that was threshold remainder 0.31 mm2.
 `fused_to` on each candidate gives its largest contact patch with each label it touches.
 
 ## 2. Find, name, or declare absent
@@ -98,3 +100,13 @@ checks, the quad view and the 3D sheet again.
 The title gives the place, the question and the label kept ("Joint face, slices 140-170: bone A or bone B? Kept A").
 Point its focus at the disagreement volume and the region's label, so the researcher's view opens there: the volume is
 always reported (section 3).
+
+## 6. Finish and report
+
+`finish_labels.py` is the last step before the labels are reported, run on the volume you would report: it clears the
+specks (the loose fragments a clipped label leaves, dots off the bone in 3D), runs the checks of sections 1 and 2 on the
+cleaned volume, and writes it with a check record (`<out stem>-check.json`) only when no flag is open. A flag stays
+open until the labels no longer raise it or you pass `--accept <key>=<why>`: the title of the To check item that holds
+it when the CT cannot settle it, or why it is no fault (a structure the scan's notes put outside the field, section 2).
+Report the file it wrote and cite the check record as evidence; checks you ran on another volume (a watershed, an
+earlier merge) are not this volume's. After any later change to the labels, run it again.

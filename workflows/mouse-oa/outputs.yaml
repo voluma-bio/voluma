@@ -107,6 +107,8 @@
     - Every label is one structure, and every piece present is labelled or raised as a To check
       item, checked on the 3D sheet and the label checks, as
       /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (segmentation) describes.
+    - The file reported is the one finish_labels.py wrote, with its check record cited as evidence;
+      each flag the record accepts names the To check item that holds it, or why it is no fault.
 
 - id: disagreement
   kind: overlay

@@ -59,7 +59,8 @@ segmentation a later step needs (the growth plate traced closely) is that step's
   `bone-labels` (with the structures in it), `bone-threshold` (the segmentation threshold of `scan-settings`), `disagreement`, and the label volumes #1–3 (protocol
   step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason
   and the view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`,
-  `anatomy.md` "Segmentation notes").
+  `anatomy.md` "Segmentation notes"). The labels reported are the file `finish_labels.py` writes, its check record
+  the evidence (`segmentation-check`, section 6).
 - **Leaves:** every step reads `scan`, and steps 2 to 7 read the tibia or the femur from `bone-labels`. A new
   `scan` puts everything out of date and a new `bone-labels` all of steps 2 to 7, so settle the labels here, on
   the 3D sheet, before anyone measures.
