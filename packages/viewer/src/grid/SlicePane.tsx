@@ -882,6 +882,16 @@ export function SlicePane({
   // A tilted pane counts along the grid axis nearest its normal, primed.
   const counted = whole ? axis : nearestAxis(basis.normal);
   const at = Math.round(point[counted]);
+  const count = scene.shapeZyx[counted]!;
+  /** Go to slice `to` (from 0) of the counted axis. */
+  const goTo = (to: number) => {
+    const by = to - point[counted];
+    if (whole) return step(Math.round(by));
+    // A turned pane steps along its normal: convert the counted axis's change into that
+    // (the normal's component can be small or negative).
+    const s = scene.spacingZyx;
+    step((by * s[counted]!) / (Math.min(...s) * basis.normal[counted]!));
+  };
   const sliceHelp = useId();
   return (
     // biome-ignore lint/a11y/useSemanticElements: an interactive image surface, not a form fieldset.
@@ -898,28 +908,43 @@ export function SlicePane({
       {/* The slice as a slider down the pane's left edge, the last slice at the top and its number
           above (as in Amira); the arrows and the wheel move the same way. */}
       <span
-        className={cx(CHIP, "top-2 left-2 tabular-nums")}
+        className={cx(CHIP, "pointer-events-auto top-2 left-2 flex items-baseline tabular-nums")}
         title={whole ? undefined : "Counted along the scan's nearest axis"}
       >
-        {at + 1}
-        {!whole && "′"} / {scene.shapeZyx[counted]}
+        {/* Typed and copied like text; Enter (or leaving it) goes to the slice. */}
+        <input
+          key={at}
+          aria-label="Go to slice"
+          inputMode="numeric"
+          defaultValue={at + 1}
+          size={String(count).length}
+          onPointerDown={(event) => event.stopPropagation()}
+          onFocus={(event) => event.target.select()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              event.currentTarget.value = String(at + 1);
+              event.currentTarget.blur();
+            }
+          }}
+          onBlur={(event) => {
+            const n = Number.parseInt(event.target.value, 10);
+            if (Number.isNaN(n) || n - 1 === at) event.target.value = String(at + 1);
+            else goTo(Math.min(Math.max(n, 1), count) - 1);
+          }}
+          className="w-auto rounded-sm bg-transparent text-right outline-none hover:bg-viewer-well focus:bg-viewer-well"
+        />
+        {!whole && "′"}&nbsp;/ {count}
       </span>
       <input
         type="range"
         aria-label="Slice"
-        aria-valuetext={`Slice ${at + 1} of ${scene.shapeZyx[counted]}`}
+        aria-valuetext={`Slice ${at + 1} of ${count}`}
         title="Drag or scroll"
         min={0}
-        max={scene.shapeZyx[counted]! - 1}
+        max={count - 1}
         value={at}
-        onChange={(event) => {
-          const by = Number(event.target.value) - point[counted];
-          if (whole) return step(Math.round(by));
-          // A turned pane steps along its normal: convert the counted axis's change into that
-          // (the normal's component can be small or negative).
-          const s = scene.spacingZyx;
-          step((by * s[counted]!) / (Math.min(...s) * basis.normal[counted]!));
-        }}
+        onChange={(event) => goTo(Number(event.target.value))}
         onPointerDown={(event) => event.stopPropagation()}
         className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [direction:rtl] [writing-mode:vertical-lr]"
       />
