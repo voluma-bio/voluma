@@ -88,7 +88,7 @@ export const DisabledWithReason: Story = {
 export const IconOnly: Story = {
   render: () => (
     <div className="flex items-center gap-2">
-      <IconButton label="Full view" shortcut="F">
+      <IconButton label="Full view">
         <Maximize2 />
       </IconButton>
       <IconButton label="Next item" shortcut="J" variant="secondary">

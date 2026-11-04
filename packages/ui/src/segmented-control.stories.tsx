@@ -8,7 +8,7 @@ import { SegmentedControl } from "./segmented-control";
  * key, or why it can't be picked now, shows on hover.
  * **Why:** one look for mode switches that were drawn ad hoc. **Where:** the matrix's Status /
  * Values, a list's Comfortable / Compact, the Agents stream filter, the input review's marking
- * tools (each with its key; icons only on the outputs review's tool bar, named in the tooltip).
+ * tools (visible text labels, with no command shortcuts).
  */
 function Demo({
   initial,
@@ -63,24 +63,22 @@ export const TwoModes: Story = {};
 export const ThreeModes: Story = {
   args: { initial: "Compact", options: ["Comfortable", "Compact", "Only to check"] },
 };
-export const WithShortcuts: Story = {
+export const MarkingTools: Story = {
   args: {
     initial: "Navigate",
-    options: ["Navigate", "Point", "Box", "Line", "Lasso"],
-    shortcuts: ["Escape", "p", "b", "l", "o"],
+    options: ["Navigate", "Point", "Ruler", "Angle", "Outline", "Freehand line", "Probe"],
   },
 };
 export const Icons: Story = {
   args: {
     initial: "Navigate",
-    options: ["Navigate", "Point, with a note", "Ruler", "Angle", "Outline", "Probe"],
-    shortcuts: ["v", "p", "l", "a", "o", "i"],
+    options: ["Navigate", "Point", "Ruler", "Angle", "Outline", "Probe"],
     icons: true,
   },
 };
 export const HeldOff: Story = {
   args: {
-    ...WithShortcuts.args,
+    ...MarkingTools.args,
     reason: "A message carries up to 20 marks. Delete one to add another.",
   },
 };

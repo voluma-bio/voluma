@@ -55,9 +55,12 @@ where it is used.
 - **One shell on every page**: the navigation rail at the left, one panel on each side, and the
   page's work in the centre. A side holds one panel, with tabs when it
   has more than one thing to show. Both sides resize by dragging, keep their width across pages,
-  and fold to 28 px icon strips. Workspace panels push the centre aside; they never float.
+  and fold to 28 px strips with named Show controls. Workspace panels push the centre aside; they never float.
   Transient menus, popovers (including Settings and Run details) and dialogs are the exception.
 - **No divider lines in lists or between side blocks.** Spacing separates them.
+- **Actions use visible controls, not character-key command shortcuts.** Preserve standard
+  keyboard navigation, focused slice stepping and scoped Escape cancellation. One Escape does
+  one action and restores focus; deleting a mark has a visible, session-only Undo.
 
 ## The review
 

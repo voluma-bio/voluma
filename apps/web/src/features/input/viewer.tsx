@@ -8,7 +8,15 @@
  */
 import { reviewAssetUrl } from "@voluma/api-client";
 import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
-import { Button, EmptyState, ErrorState, Menu, MenuItem, SegmentedControl } from "@voluma/ui";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Menu,
+  MenuRadioGroup,
+  MenuRadioItem,
+  SegmentedControl,
+} from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
@@ -68,13 +76,8 @@ export function SceneViewer({
   /** A mark picked: it moves the crosshair once its grid is shown, then `onJumped`. */
   jump?: { at: Zyx; gridKey: string; output: string };
   onJumped: () => void;
-  /** A new mark, on the image volume `volumeId`; returns its id. */
-  onMark: (
-    mark: GridMark,
-    volumeId: string,
-    gridKey: string,
-    plane?: MarkPlane | null,
-  ) => string | undefined;
+  /** A new mark, on the image volume `volumeId`. */
+  onMark: (mark: GridMark, volumeId: string, gridKey: string, plane?: MarkPlane | null) => void;
   /** The mounted output and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
   /** How the labels and the output's own regions are drawn (the Segmentation panel). */
@@ -90,8 +93,6 @@ export function SceneViewer({
     fits: readonly PlaneFit[];
     /** Every grid the run published (`outputBlocks`), which Align lists. */
     grids: readonly Grid[];
-    /** A point's note. */
-    onNote(id: string, note: string): void;
     /** Saves the view on the grid of image volume `grid`; absent, no Save view. */
     onSave?(state: QuadState, grid: string): void;
     /** A saved view to show on its grid: each new object is applied once. */
@@ -101,8 +102,8 @@ export function SceneViewer({
      * of yours on the grid's image `volumeId`), with the pane's frame.
      */
     onEdit?(edit: MarkEdit, volumeId: string, gridKey: string, plane: MarkPlane): void;
-    /** A mark of yours clicked at an end. */
-    onPick?(id: string): void;
+    /** A mark selected in a pane, or undefined to clear the selection. */
+    onPick?(id?: string): void;
     /** The shown grid's view and picture, for a message. */
     ref?: Ref<SceneHandle>;
   };
@@ -280,7 +281,6 @@ export function SceneViewer({
               tool={on ? tool : null}
               marks={shown.get(k.key) ?? NO_MARKS}
               onMark={on ? (mark, plane) => onMark(mark, k.imageId, k.key, plane) : undefined}
-              onNote={quad.onNote}
               onReady={report(k.key)}
               targets={k.imageId === live?.imageId ? targets : undefined}
               onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
@@ -351,7 +351,9 @@ function ToolBar({
   onTool: (tool: MarkTool | null) => void;
 }) {
   const value = tool ?? "navigate";
-  const more = TOOLS.filter((t) => !NAMED.has(t.value));
+  const more = TOOLS.filter(
+    (t): t is (typeof TOOLS)[number] & { value: MarkTool } => !NAMED.has(t.value),
+  );
   const picked = more.find((t) => t.value === value);
   return (
     <>
@@ -360,7 +362,6 @@ function ToolBar({
         options={TOOLS.filter((t) => NAMED.has(t.value)).map((t) => ({
           value: t.value,
           label: t.short,
-          shortcut: t.keys[0],
         }))}
         value={value}
         onValueChange={(v) => onTool(v === "navigate" ? null : v)}
@@ -368,7 +369,7 @@ function ToolBar({
       <Menu
         align="start"
         trigger={
-          <Button size="sm" variant="ghost" aria-pressed={!!picked}>
+          <Button size="sm" variant={picked ? "secondary" : "ghost"}>
             {picked ? (
               <>
                 {picked.icon}
@@ -381,18 +382,17 @@ function ToolBar({
           </Button>
         }
       >
-        {more.map((t) => (
-          <MenuItem
-            key={t.value}
-            icon={t.icon}
-            onSelect={() => onTool(t.value === "navigate" ? null : t.value)}
-          >
-            <span className="flex items-baseline justify-between gap-3">
-              <span>{t.label}</span>
-              <kbd className="font-mono text-fg-subtle text-xs uppercase">{t.keys[0]}</kbd>
-            </span>
-          </MenuItem>
-        ))}
+        <MenuRadioGroup
+          label="More tools"
+          value={picked?.value ?? ""}
+          onValueChange={(v) => onTool(v as MarkTool)}
+        >
+          {more.map((t) => (
+            <MenuRadioItem key={t.value} value={t.value}>
+              {t.label}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
       </Menu>
     </>
   );

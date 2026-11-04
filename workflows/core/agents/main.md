@@ -69,6 +69,21 @@ its `expect:` line says along its whole extent?") and where the published output
 To check items as they stand; never what the first worker concluded or how it worked. It can also redo the
 output from scratch and report its own version, which you compare with the first.
 
+## When a step fails
+
+An output is missing only when the input cannot support it: the structure is not in the scan, or the scan is
+unusable there. A script that refuses or a worker that fails never makes an output missing, unless the refusal
+says the scan itself is unusable (intake); it says something upstream, or in that worker's own work, is wrong.
+
+Your first move is an audit, not a fix: a fresh worker that reviews the failed work end to end (the refusal's
+whole text, the evidence images, the outputs it rests on) and reads the skills that bear on it closely, their
+resources included: each script's `--help` and source for what its checks test. It reports a diagnosis: which
+output is wrong, why, and the fix. Open the evidence images yourself too. Then have the fix made, by that worker
+or a fresh one, as the diagnosis says. If it fails, try a different approach, briefed
+with what the first found. Only after two different attempts
+fail, report the best one with a To check item, or mark the output missing with what each attempt found. Never
+wait on the researcher for this.
+
 ## Close
 
 `close` when every final output is made or marked missing and no worker is open. Your last message is for
