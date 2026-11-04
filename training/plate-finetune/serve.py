@@ -94,17 +94,20 @@ class Plate:
         s3 = boto3.client("s3", endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
                           aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"], aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
                           region_name="auto")
-        return [np.load(io.BytesIO(s3.get_object(Bucket=os.environ["R2_BUCKET"], Key=k)["Body"].read())) for k in keys]
+        try:
+            return [np.load(io.BytesIO(s3.get_object(Bucket=os.environ["R2_BUCKET"], Key=k)["Body"].read())) for k in keys]
+        except s3.exceptions.NoSuchKey:
+            raise HTTPException(404, f"no object at {keys}") from None
 
     @modal.fastapi_endpoint(method="POST", requires_proxy_auth=True)
     async def predict(self, request: Request):
         t0 = time.time()
         q = request.query_params
         names = q.get("ckpt", DEFAULT).split(",")
-        unknown = [n for n in names if n not in CHECKPOINTS]
-        how = q.get("vote", "abstain")
-        if unknown or how not in ("off", "all", "abstain"):
-            raise HTTPException(400, f"unknown checkpoint {unknown} (have {list(CHECKPOINTS)}) or vote {how!r} (off | all | abstain)")
+        if unknown := [n for n in names if n not in CHECKPOINTS]:
+            raise HTTPException(400, f"unknown checkpoint {unknown}; have {list(CHECKPOINTS)}")
+        if (how := q.get("vote", "abstain")) not in ("off", "all", "abstain"):
+            raise HTTPException(400, f"vote is off, all or abstain, not {how!r}")
         hu, tibia = self.grid(request, await request.body())
         if hu.ndim != 3 or hu.shape != tibia.shape:
             raise HTTPException(400, f"hu {hu.shape} and mask {tibia.shape} must be one (W, V, U) grid")
