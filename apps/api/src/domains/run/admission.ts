@@ -60,7 +60,7 @@ export function admit(
   spent: number,
   run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
-  if (run.credentials === "visitor") return null;
+  if (run.credentials !== "voluma") return null;
   if (!mayUseVolumaKey(limits, labId)) return "no-key";
   if (!run.started && spent >= (limits.voluma.get(labId) ?? 0)) return "spend";
   return null;

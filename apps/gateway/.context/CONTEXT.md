@@ -15,7 +15,7 @@ change it safely.
 - `src/gateway.ts` is the whole request path; `src/main.ts` reads env, builds the handle (it must
   use `drizzle(client, { casing: "snake_case" })`), waits for the migration, cuts stale rows, drains.
 - A request is `/<provider>/<upstream path>` with the gateway token as `Authorization: Bearer` or
-  `x-api-key`. Order: open token, provider allowed, key (a visitor token has only its own keys),
+  `x-api-key`. Order: open token, provider allowed, key (an own-key token has only its own keys),
   exact route, model (top level of the first 4 KB of the body) and its price, admit, forward,
   stream back, settle. The close listener is attached first, so a caller who leaves during the
   peek or admission settles the row `failed` at $0 and nothing is forwarded.

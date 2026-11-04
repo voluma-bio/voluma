@@ -11,7 +11,7 @@
  * Every route on a run carries the lease token (400 when missing); a stale one is a 409
  * `lease-lost`, checked in the write's own transaction. Every read and
  * write is keyed by the path's run (event ids and thread ids are unique within a run only), so
- * the lease scopes it. A claim returns a visitor run's keys once (pg-queue.ts).
+ * the lease scopes it. A claim returns an own-key run's keys once (pg-queue.ts).
  */
 import {
   type appendEventResponseSchema,

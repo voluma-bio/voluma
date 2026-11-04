@@ -222,15 +222,29 @@
     {
       "idx": 31,
       "version": "7",
-      "when": 1793760201236,
-      "tag": "0031_fail_awaiting_keys",
+      "when": 1793762343390,
+      "tag": "0031_credentials_own",
       "breakpoints": true
     },
     {
       "idx": 32,
       "version": "7",
-      "when": 1793760225067,
-      "tag": "0032_ended_runs_have_no_keys",
+      "when": 1793762426498,
+      "tag": "0032_credentials_own_again",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793763462477,
+      "tag": "0033_fail_awaiting_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793763467012,
+      "tag": "0034_ended_runs_have_no_keys",
       "breakpoints": true
     }
   ]

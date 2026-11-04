@@ -81,8 +81,8 @@
  *     An input exists before any run and can serve several, so it carries its
  *     own `labId`.
  *   - `startRun` reads the input under the same rule: an `inputId` the caller
- *     can't read answers 404, so a visitor can't start a run on another
- *     visitor's input by guessing its id.
+ *     can't read answers 404, so a guest can't start a run on another
+ *     guest's input by guessing its id.
  *
  * Workflows: a study names a workflow from the server's catalog, never raw
  * pins, so a caller can't make the server import an arbitrary repo. The server
@@ -92,10 +92,10 @@
  * Starting work. The rules below hold for every call that creates a run or
  * makes one run again: `startRun`, a reopen by a message (`messages.ts`), `/keys`, and any added later.
  *
- * Who pays (`credentials`): `visitor` when the request that creates the run
- * carries `keys`, else `voluma`. It never changes afterwards, and a `visitor`
+ * Who pays (`credentials`): `own` when the request that creates the run
+ * carries `keys`, else `voluma`. It never changes afterwards, and an own-key
  * run never falls back to Voluma's model credentials. An account without Voluma's key
- * (`Me.volumaKey` false: a guest) may only start `visitor` runs: a start without `keys` is
+ * (`Me.volumaKey` false: a guest) may only start own-key runs: a start without `keys` is
  * refused 403 (`no-key`), as is a reopen of a run on Voluma's key. Every run's sandbox
  * is on Voluma's Modal account; `keys` is the model key alone.
  *
@@ -109,32 +109,32 @@
  * `thinking`, else the list's default) and recorded; every role of the run uses it, at the
  * nearest level its model supports. A run without `thinking` predates this.
  *
- * Visitor keys are the caller's own, kept in their browser. The server keeps them
+ * An own key is the caller's own, kept in their browser. The server keeps them
  * for the run's life only, encrypted (AES-256-GCM under the API's `RUN_KEY_SECRET`) in
  * the run's row, and nulls them when the run ends or is cancelled; the runner holds them in
  * memory. Never in logs or in any response (log no request body on these routes).
  * The only channel that carries them past the server is the hand-off to the runner (the
- * runner contract). Text from a visitor's providers (errors, SDK messages) has the key values
+ * runner contract). Text from the starter's providers (errors, SDK messages) has the key values
  * redacted before it is stored or logged. A deploy or a runner restart does not lose them: the
- * run is claimed again with the sealed copy. Reopening a finished `visitor` run (a message or
+ * run is claimed again with the sealed copy. Reopening a finished own-key run (a message or
  * an approval answer) therefore needs `keys` in that request, which are sealed again. Only a
  * run whose sealed keys cannot be opened (the API's `RUN_KEY_SECRET` was changed) ends
- * `failed` at its next claim, with an `error` telling its starter to start it again. A `visitor` run's model calls use the visitor's
+ * `failed` at its next claim, with an `error` telling its starter to start it again. An own-key run's model calls use the starter's
  * own account, so its outputs are untrusted: never seed an example from one.
  *
  * Limits: each org has its own, given to the run domain by the API's
  * composition root:
  *   - app-wide, enforced by the claim (a run over a cap just stays `queued`;
  *     nothing is refused): at most `RUN_LIMITS_APP_RUNNING` runs `running`, of which at most one on a
- *     `visitor` run's own keys;
- *   - `visitor` runs that haven't ended, over every account: at most 100; a start past it is
+ *     own-key run's own keys;
+ *   - own-key runs that haven't ended, over every account: at most 100; a start past it is
  *     refused 429;
  *   - for `voluma` runs only: a total model spend per org (the summed model
  *     cost of its runs). A start or reopen at or past it is refused
  *     (429, a reopen 409); a claim refuses a run that never started and
  *     never one that has.
  * Every run is created `queued`, and only a claim starts it (`runner.ts`). A
- * `visitor` run waits for a claim too.
+ * own-key run waits for a claim too.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
@@ -177,7 +177,7 @@ export const workflowIdSchema = z.string().min(1);
 export const runStateSchema = z.discriminatedUnion("status", [
   /**
    * 1-based place in the app-wide queue, in the order claims take runs (while no
-   * `visitor` run is running, `visitor` runs first; then `voluma` runs by
+   * own-key run is running, own-key runs first; then `voluma` runs by
    * organization priority, then oldest first); 1 starts next. The server computes
    * it at read time and doesn't store it, so the run screen polls `getRun` to see
    * it move. It counts other callers' runs (only a count leaks).
@@ -256,8 +256,8 @@ export const runSchema = z.object({
   selectedOutputs: selectedOutputsSchema.optional(),
   /** Free text the user added at the start; the workflow's main thread reads it. */
   notes: z.string().max(4000).optional(),
-  /** Who pays for models and sandboxes; see the header. */
-  credentials: z.enum(["voluma", "visitor"]),
+  /** Who pays for models and sandboxes; see the header. Readers test only `"voluma"`. */
+  credentials: z.enum(["voluma", "own"]),
   /**
    * The model every role of the run uses, chosen by the API when the run is created (see the
    * header). Absent on runs made before the choice existed: the runner then uses its own
@@ -302,11 +302,11 @@ export type RunRead = z.infer<typeof runReadSchema>;
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
 const keyField = z.string().min(1).max(512);
 /**
- * A visitor's own credentials: a Meta API key. Their sandboxes run on Voluma's Modal
+ * The starter's own credentials: a Meta API key. Their sandboxes run on Voluma's Modal
  * account. Sent only in requests, never returned; see the header.
  */
-export const visitorKeysSchema = z.object({ metaApiKey: keyField });
-export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
+export const ownKeysSchema = z.object({ metaApiKey: keyField });
+export type OwnKeys = z.infer<typeof ownKeysSchema>;
 
 export const startRunRequestSchema = z.object({
   studyId: studyIdSchema,
@@ -315,8 +315,8 @@ export const startRunRequestSchema = z.object({
   /** As `runSchema.selectedOutputs`; an id that is not a selectable output of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
-  /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. Absent: an account without Voluma's key is refused (403). */
-  keys: visitorKeysSchema.optional(),
+  /** Present: the run uses these (`credentials: "own"`) and skips the org's runs-at-once count. Absent: an account without Voluma's key is refused (403). */
+  keys: ownKeysSchema.optional(),
   /** One of `GET /run/models`; absent: its default. A choice the run's keys can't take is refused with 400. */
   model: modelRefSchema.optional(),
   /** One of `GET /run/models` `thinking.choices`; absent: its default. */

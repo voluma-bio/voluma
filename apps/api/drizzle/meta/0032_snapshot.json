@@ -1,6 +1,6 @@
 {
-  "id": "7fe0492e-def8-440a-8216-ba0ff79d52f1",
-  "prevId": "bb927432-fbb2-435e-ba2b-c22e8e92eaea",
+  "id": "43ca774e-dcd6-496f-bdd2-02cdcb845eb7",
+  "prevId": "ffc7fc1b-5ae6-4868-a0c2-5a0548121a7e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -62,8 +62,8 @@
       "uniqueConstraints": {
         "events_run_seq": {
           "name": "events_run_seq",
-          "nullsNotDistinct": false,
-          "columns": ["run_id", "seq"]
+          "columns": ["run_id", "seq"],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -410,9 +410,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "runs_started_by": {
           "name": "runs_started_by",
@@ -425,9 +425,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "runs_active_state": {
           "name": "runs_active_state",
@@ -440,10 +440,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"runs\".\"state\" IN ('queued', 'running')",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"runs\".\"state\" IN ('queued', 'running')",
+          "concurrently": false
         },
         "runs_sealed_keys": {
           "name": "runs_sealed_keys",
@@ -456,10 +456,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"runs\".\"sealed_keys\" IS NOT NULL",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"runs\".\"sealed_keys\" IS NOT NULL",
+          "concurrently": false
         },
         "runs_study": {
           "name": "runs_study",
@@ -472,21 +472,16 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "runs_ended_no_keys": {
-          "name": "runs_ended_no_keys",
-          "value": "\"runs\".\"state\" <> 'ended' OR \"runs\".\"sealed_keys\" IS NULL"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.studies": {
@@ -562,9 +557,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -774,9 +769,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "provider_calls_open": {
           "name": "provider_calls_open",
@@ -795,9 +790,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -810,10 +805,10 @@
   },
   "enums": {},
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

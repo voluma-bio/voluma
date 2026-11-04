@@ -54,7 +54,7 @@
 - **The example on Studies.** Its sample counts as Done (#454), but its progress mark and the Samples tree's glyph are still amber To check, which nobody can act on. A neutral "Example" mark would read better.
 - **Example studies hold only reference inputs.** Reading a study reads every input in it. `seed:example` and `import:run` should assert that an example study has only the reference input.
 - **Mark and view caps count characters.** `MAX_MARK_BYTES` and `MAX_VIEW_BYTES` (`runs.ts`) measure `JSON.stringify(...).length`, so a note of multi-byte characters can be up to 3× the cap; `browserLimit` (256 KB) still bounds the request. Measure UTF-8 bytes.
-- **Delete `readOldDump` in `src/ops/import-run.ts`** once no run dump written before the
+- **Delete `readOldDump` in `src/ops/import-run.ts`** once no run dump written before `credentials: "visitor"` became `"own"` or the
   `studyMembers` key remains (those have `studyScans` for the study rows and `studyInputs` for
   the input rows, e.g. `r2:dev/runs/732a2eea…`).
 - **Delete the `scans` alias** in `createStudyRequestSchema` (`packages/contracts/src/study.ts`)

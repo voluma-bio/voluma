@@ -158,7 +158,7 @@ function toRun({ run, input, position, calls }: Row, results: Results): Run {
 
 /** True while a run on a caller's own keys is running: the one own-key slot is taken (`queueOrder`, the claim). */
 export const ownKeyBusy = sql`EXISTS (
-  SELECT 1 FROM runs r WHERE r.state = 'running' AND r.credentials = 'visitor' AND NOT r.example
+  SELECT 1 FROM runs r WHERE r.state = 'running' AND r.credentials <> 'voluma' AND NOT r.example
 )`;
 
 /**
@@ -178,13 +178,13 @@ export const ownKeyBusy = sql`EXISTS (
  */
 export const queueOrder = (orgs: readonly string[]): SQL[] => [
   sql`(CASE
-    WHEN ${runs.credentials} = 'visitor' AND ${ownKeyBusy} THEN 3
+    WHEN ${runs.credentials} <> 'voluma' AND ${ownKeyBusy} THEN 3
     WHEN ${runs.startedAt} IS NOT NULL THEN 0
-    WHEN ${runs.credentials} = 'visitor' THEN 1
+    WHEN ${runs.credentials} <> 'voluma' THEN 1
     ELSE 2 END)`,
-  sql`(CASE WHEN ${runs.startedAt} IS NULL AND ${runs.credentials} = 'visitor' THEN coalesce(
+  sql`(CASE WHEN ${runs.startedAt} IS NULL AND ${runs.credentials} <> 'voluma' THEN coalesce(
     (SELECT max(o.claimed_at) FROM runs o
-      WHERE o.credentials = 'visitor' AND o.started_by = ${runs.startedBy}),
+      WHERE o.credentials <> 'voluma' AND o.started_by = ${runs.startedBy}),
     '-infinity'::timestamptz
   ) ELSE '-infinity'::timestamptz END)`,
   sql`coalesce(array_position(ARRAY[${sql.join(

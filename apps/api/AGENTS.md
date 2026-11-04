@@ -69,7 +69,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   transaction under the lock: any refusal throws an `HTTPException` (status and text, where it is decided) and rolls the whole call back, and
   `startRuns` admits the call once (its runs share an org and a kind of key). Every browser
   write (start, create, cancel) goes through `attempt`: a refusal rolls it back and reaches the
-  client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
+  client (`onError` answers `{error}`), and `attempt` drops the own keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run, and readable from every organization (`readableRuns`/`readableStudies` test `example` before the org); `import:run` restores
   a dump's original study, study members and inputs, refusing conflicting shared rows. Only legacy dumps
