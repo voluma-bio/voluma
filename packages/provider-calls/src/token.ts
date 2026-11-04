@@ -25,7 +25,7 @@ export type TokenClaims = {
   ownKeys?: Partial<Record<Provider, string>>;
   /**
    * The old name of `ownKeys`, still what a minted token carries so a gateway from before the
-   * rename reads it. Step 2 of the `visitor` → `own` rename mints `ownKeys` and deletes this.
+   * rename reads it. Step 2 of the `visitor` → `own` rename mints `ownKeys`; step 3 deletes this.
    */
   visitorKeys?: Partial<Record<Provider, string>>;
 };

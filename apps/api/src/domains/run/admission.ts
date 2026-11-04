@@ -3,7 +3,7 @@
  * it. `usage` reads every count from one query; `admit` judges a run at a stage with them.
  * Examples are seeded, not work, so no count includes them.
  */
-import { type Run, usesOwnKey } from "@voluma/contracts/run";
+import type { Run } from "@voluma/contracts/run";
 import { sql } from "drizzle-orm";
 import type { Tx } from "./pg-runs";
 
@@ -77,7 +77,7 @@ export function admit(
   u: Usage,
   run: { credentials: Run["credentials"]; started?: boolean },
 ): Refusal | null {
-  if (usesOwnKey(run.credentials)) return null;
+  if (run.credentials !== "voluma") return null;
   const org = limits.voluma.get(labId);
   if (!org) return "no-key";
   if (stage === "claim" && u.running >= org.concurrent) return "concurrent";

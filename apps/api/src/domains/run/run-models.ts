@@ -7,13 +7,7 @@
  * (`RUN_MODEL_OVERRIDE`, read in `index.ts`): every run on Voluma's keys gets it whatever was
  * picked; own-key runs keep their pick, since their Meta key can't call DeepSeek.
  */
-import {
-  ownKeyMayUse,
-  type Run,
-  type RunThinking,
-  runThinkingSchema,
-  usesOwnKey,
-} from "@voluma/contracts/run";
+import { ownKeyMayUse, type Run, type RunThinking, runThinkingSchema } from "@voluma/contracts/run";
 import { HTTPException } from "hono/http-exception";
 
 const WONDER = { model: "meta/muse-wonder-1.0", label: "Muse Wonder 1.0" };
@@ -69,7 +63,7 @@ export function pickModel(
     throw new HTTPException(400, {
       message: `${requested} is not a model you can pick here. Choose one of: ${CHOICES.map((c) => c.label).join(", ")}.`,
     });
-  if (choice.needsVolumaKey && usesOwnKey(credentials))
+  if (choice.needsVolumaKey && credentials !== "voluma")
     throw new HTTPException(400, {
       message: `${choice.label} runs only on Voluma's key, not your own. Choose another model or use Voluma's key.`,
     });

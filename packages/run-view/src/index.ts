@@ -1,7 +1,7 @@
 /**
  * What a run looks like, shared by every web feature that shows one (features may not import each
  * other): the outputs review's model and trail, the run's events (`RunStoreProvider`), the status
- * chip and link of a `Run`, the study panel, and a visitor's keys. Unlike `@voluma/ui` this reads
+ * chip and link of a `Run`, the study panel, and a starter's keys. Unlike `@voluma/ui` this reads
  * the contracts. An app that renders it must let Tailwind input this package
  * (`@source "<path to>/packages/run-view/src";`).
  */

@@ -188,7 +188,7 @@ Roll forward only past migration 0017 (run-keyed events): seeded copies reuse ev
 `events(id)` can't be unique again.
 
 The runner service (`pnpm --filter @voluma/runner start`) claims whatever is queued, so
-pointing a local one at staging (`VOLUMA_API_URL`) takes an own-key run and their keys. Run
+pointing a local one at staging (`VOLUMA_API_URL`) takes the starter's keys. Run
 it locally only against `pnpm dev`.
 
 An agent checks staging as a signed-in user with `POST /api/auth/password` (`WORKOS_TEST_EMAIL`,

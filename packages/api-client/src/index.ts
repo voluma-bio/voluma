@@ -264,7 +264,7 @@ export async function cancelRun(id: string): Promise<RunRead> {
   );
 }
 
-/** Resends a visitor run's keys after the runner lost them (state `awaiting-keys`). */
+/** Resends an own-key run's keys after the runner lost them (state `awaiting-keys`). */
 export async function resendKeys(id: string, keys: OwnKeys): Promise<RunRead> {
   const body: ResendKeysRequest = { keys };
   return read(

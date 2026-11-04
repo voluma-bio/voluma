@@ -1,12 +1,17 @@
 # TODO
 
-- **Step 2 of `credentials: "visitor"` → `"own"`, once step 1 is live on API, runner and gateway.**
-  Migration `UPDATE runs SET credentials = 'own' WHERE credentials = 'visitor'` (idempotent); the
-  API writes `own` (`pg-queue.ts`) and the `schema.ts` enum and SQL literals (`pg-runs.ts`, `pg-queue.ts`)
-  say `own`; the contracts enum drops `visitor` and `usesOwnKey` is deleted; the runner mints the
-  gateway token's `ownKeys` and the gateway and `TokenClaims` drop `visitorKeys`; `provider-calls`
-  compares `=== "own"`. First parse every staging run's stream and every `run.json` under
-  `r2:dev/runs/` with the new `runSchema`. The localStorage key `voluma.visitor-keys.<userId>` keeps its name.
+- **Steps 2 and 3 of `credentials: "visitor"` → `"own"`.** Every reader tests `!== "voluma"`
+  (SQL `<> 'voluma'`), so only writers and the enum move. Step 1 (live: API, runner AND gateway)
+  accepts both values, writes `visitor`, and the runner mints the gateway token's `visitorKeys`.
+  **Step 2**, merged only once step 1 is live on all three: the API writes `own`
+  (`pg-queue.ts`), the `schema.ts` enum says `own`, a migration
+  `UPDATE runs SET credentials = 'own' WHERE credentials = 'visitor'` (idempotent), and the
+  runner mints `ownKeys`; the read enum in contracts still accepts `visitor`, because an old API
+  instance still inserts it during the deploy overlap. **Step 3**, after step 2 is live: re-run the
+  migration, drop `visitor` from the contracts enum, and drop `TokenClaims.visitorKeys` and the
+  gateway's fallback. Before steps 2 and 3, parse every staging run's stream and every `run.json`
+  under `r2:dev/runs/` with the new `runSchema`. The localStorage key
+  `voluma.visitor-keys.<userId>` keeps its name.
 - **A new guest cookie is a fresh upload cap: accepted until after the Nov 4 demo (Jimmy, 3 Nov).**
   The per-person cap (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and
   guests cost nothing to mint, so clearing cookies gives 50 GB more. After the demo: a combined cap

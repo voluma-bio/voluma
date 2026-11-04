@@ -9,7 +9,7 @@
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import { runQuery } from "@voluma/api-client/query";
-import { type OwnKeys, type Run, type RunRead, usesOwnKey } from "@voluma/contracts/run";
+import type { OwnKeys, Run, RunRead } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { failedThreads } from "@voluma/contracts/threads";
 import {
@@ -208,7 +208,7 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
         "Not recorded yet"
       ),
     ],
-    ["Keys", usesOwnKey(run.credentials) ? "The starter's own" : "Voluma's"],
+    ["Keys", run.credentials !== "voluma" ? "The starter's own" : "Voluma's"],
     ["Failed agents", failed > 0 ? String(failed) : "None"],
     [
       "Gateway requests",
@@ -307,7 +307,7 @@ export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string;
   if (
     state.status === "ended" &&
     state.outcome === "completed" &&
-    usesOwnKey(run.credentials) &&
+    run.credentials !== "voluma" &&
     run.cannotMessage === null
   )
     return <ReopenKeys userId={userId} />;
