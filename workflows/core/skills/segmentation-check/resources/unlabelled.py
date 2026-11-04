@@ -7,7 +7,7 @@ each candidate with `render_crops.py --component-at <centre>`, name it from the 
 
 Writes: <out>  uint16 volume on the grid of --labels, each candidate its id (1 = largest), with its sidecar
 Prints: one JSON line {candidates, count, top}; top is the 12 largest, each {id, voxels, volume_mm3, centre_zyx, bbox_zyx}
-Example: python unlabelled.py --hu hu.npy --labels labels.npy --out cand.npy --threshold-hu 2500
+Example: python unlabelled.py --hu hu.npy --labels labels.npy --out cand.npy --threshold-hu scan-settings.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -20,7 +20,7 @@ if __name__ == '__main__':
     ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
     ap.add_argument('--out', required=True, help='candidate volume .npy to write')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels at or above this are bone')
+    ap.add_argument('--threshold-hu', type=sidecar.threshold_arg, required=True, help='voxels at or above it are bone: the scan\'s segmentation threshold: its scan-settings.json, or a number in HU')
     ap.add_argument('--min-mm3', type=float, default=0.01, help='mm3: smallest candidate kept')
     ap.add_argument('--rim-mm', type=float, default=0.02, help='mm: bone this close to any label is not a candidate (at least 1 voxel)')
     a = ap.parse_args()

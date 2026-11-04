@@ -1,0 +1,47 @@
+# The plate fine-tune: SAM 3.1 trained on micro-CT knee sections. Not a package: scripts run from this directory
+# (`uv run python export.py ...`). SAM 3 is Meta's code at a pinned commit, installed from GitHub, never vendored.
+[project]
+name = "plate-finetune"
+version = "1.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "sam3 @ git+https://github.com/facebookresearch/sam3@f1647e8d0c1d280991f4d1b7d974c2704537fe66",
+  "torch==2.10.0",
+  "torchvision==0.25.0",
+  "numpy==1.26.4",
+  "scipy==1.17.1",
+  "scikit-image==0.26.0",
+  "pillow==12.3.0",
+  "pycocotools==2.0.11",
+  "peft==0.21.2",
+  "hydra-core==1.3.8",
+  "omegaconf==2.3.1",
+  "einops==0.8.2",
+  "torchmetrics==1.9.0",
+  "setuptools==78.1.0",  # sam3.model_builder imports pkg_resources, which setuptools 81 removed
+]
+
+[dependency-groups]
+# Moving data and weights: the R2 dataset (dataset_r2.py), Hugging Face (upload_weights.py), the Modal launcher and server
+# (modal_train.py, serve.py; the Modal image installs this group too).
+release = ["boto3", "fastapi[standard]", "huggingface-hub", "modal==1.6.3"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.ruff]
+line-length = 140
+extend-exclude = [".venv", "data", "runs", "preds"]
+
+[tool.ruff.lint]
+# RUF046: int(round(x)) is not redundant on numpy scalars; RUF007: zip pairs read as clearly as pairwise.
+extend-ignore = ["RUF046", "RUF007"]

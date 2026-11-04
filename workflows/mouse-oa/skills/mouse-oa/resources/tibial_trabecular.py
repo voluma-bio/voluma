@@ -23,7 +23,7 @@ Writes: <out>/iioc-trab-tissue.npy  ROI-2, bool, on the aligned grid, with its s
         <out>/roi2.json  the result record: `objects` holds roi-iioc-trabecular and under-plate-boundary
         <out>/qc-coronal.jpg  six coronal sections: ROI-2 (cyan) inside ROI-1 (green)
 Prints: one JSON line {out, values, objects, qc, tissue, upper_boundary}
-Example: python tibial_trabecular.py --spec protocol.json --window anatomy.json --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
+Example: python tibial_trabecular.py --spec protocol.json --window scan-settings.json --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -61,7 +61,7 @@ def compartment(parent, gp, ann, vox, shell_mm, growth_mm, upper_shift=0.0):
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc-trabecular gives the clearances")
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--iioc-tissue', type=sidecar.existing, required=True, help='iioc-tissue.npy from iioc.py (ROI-1), with its sidecar beside it')
     ap.add_argument('--growth-plate-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py')
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py (for the QC image)')

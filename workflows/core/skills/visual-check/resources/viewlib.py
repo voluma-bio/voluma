@@ -32,14 +32,14 @@ def colour(label):
 
 
 def window_arg(s):
-    """`type=` of a `--window` option: 'lo,hi' in HU, or the path of a workflow's anatomy.json (its `window_hu`). Returns (lo, hi)."""
+    """`type=` of a `--window` option: 'lo,hi' in HU, or the path of a json file with `window_hu` (intake's scan-settings.json). Returns (lo, hi)."""
     try:
         if s.endswith('.json'):
             lo, hi = json.loads(Path(s).read_text())['window_hu']
         else:
             lo, hi = (float(x) for x in s.split(','))
     except (OSError, ValueError, KeyError, TypeError) as e:
-        raise argparse.ArgumentTypeError(f'{s!r} is not "lo,hi" in HU or a json file with "window_hu": [lo, hi] ({type(e).__name__})') from e
+        raise argparse.ArgumentTypeError(f'{s!r} is not "lo,hi" in HU or a json file with "window_hu": [lo, hi], such as intake\'s scan-settings.json ({type(e).__name__})') from e
     if not lo < hi:
         raise argparse.ArgumentTypeError(f'{s!r}: the low end must be below the high end')
     return lo, hi

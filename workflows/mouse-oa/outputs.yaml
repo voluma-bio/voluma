@@ -58,6 +58,18 @@
     - Every fact names the file in /inputs it came from; a heading with nothing under it says
       "nothing stated".
 
+- id: scan-settings
+  kind: file
+  name: Scan settings
+  description:
+    "scan-settings.json from scan-intake: this scan's display window and segmentation threshold,
+    chosen from its histogram, which every later render and mask uses"
+  mediaType: application/json
+  expect:
+    - The threshold's outline follows the cortex edge and keeps thin trabeculae, and leaves out soft
+      tissue and the growth plate's cartilage, on zoomed slices through the joint and the
+      metaphysis rendered in the chosen window.
+
 - id: bone-pieces
   kind: file
   name: Bone pieces
@@ -344,8 +356,8 @@
   kind: value
   name: Bone threshold
   section: Segmentation
-  description: the HU threshold that separates bone from soft tissue in the segmentation (review
-    derives the bone inside a region from it)
+  description: the HU threshold that separates bone from soft tissue in this scan's segmentation,
+    chosen at intake (scan-settings); not the BV threshold, which is the lab's fixed 2.16/cm
   unit: "[hnsf'U]"
   "on": [bone-labels]
   selectable: true

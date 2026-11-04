@@ -26,9 +26,10 @@ first, from a threshold, before any segmentation exists: `orient_joint.py` (`--h
 How it chooses: at the threshold, the bones are the largest 3D piece and the largest other piece near it, and the
 largest smaller piece near the joint is the reference object. Each shaft seeds an axis; the plane the two axes span
 is the bending plane; slices stack along its normal, and the keyframe is the slice through the joint. "Bone A" is
-the shaft nearer the reference object. The threshold, the three sizes (how wide a shaft gets, how near the joint
-the reference object sits, the smallest piece worth considering) and the display window come from the workflow's
-anatomy reference; the sizes have no defaults because they scale with the animal.
+the shaft nearer the reference object. The threshold and the display window are the scan's
+(`scan-settings.json`, `scan-intake`); the three sizes (how wide a shaft gets, how near the joint the reference
+object sits, the smallest piece worth considering) come from the workflow's anatomy reference and have no defaults,
+because they scale with the animal.
 
 A field that holds only the ends of the bones has no shaft. The script then takes the leg axis through the two
 pieces' centroids and reports no bend, or stops with "No shaft in the field" naming the test that failed. When it
@@ -41,7 +42,8 @@ Open `keyframe.jpg` (`visual-check`). It must cut **both long bones through the 
 when there is one. Read the scan notes (intake's `scan-notes.md`) first: when it says the structure the reference object
 stands for is outside the field, the piece taken for it is something else, harmless to the cut but setting the side
 of the slice and which bone is A. If a bone is missing, cut off, or the joint space is not in the slice, do not run
-SAM: read `bend_deg` and `skew_vox` in the output, and try another `--threshold-hu`.
+SAM: read `bend_deg` and `skew_vox` in the output. When the threshold is the cause, choose it again as `scan-intake` says
+and write a new `scan-settings.json` before you rerun, so every mask uses the threshold you report.
 
 Labels and points made on a wrong frame are wrong on the scan grid too: a corrected frame reruns what was made on it.
 

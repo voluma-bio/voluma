@@ -70,6 +70,8 @@ export function toolTitle(name: string, input: unknown): { title: string; target
       return { title: s("text") ?? "Activity" };
     case "segment_sam":
       return { title: "Segmented with SAM" };
+    case "segment_plate":
+      return { title: "Proposed the growth plate with the plate model" };
     default: {
       const json = JSON.stringify(input);
       const text = json && json !== "{}" ? `${name} ${json}` : name;
