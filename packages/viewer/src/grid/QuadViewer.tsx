@@ -778,7 +778,7 @@ export function QuadViewer({
             }
           >
             {gridName && (
-              <MenuItem onSelect={reset}>
+              <MenuItem disabled={!lie} onSelect={reset}>
                 <span className="flex items-baseline justify-between gap-3">
                   <span>Along the {gridName.charAt(0).toLowerCase() + gridName.slice(1)}</span>
                   <span className="text-xs text-fg-subtle">Measured on</span>
