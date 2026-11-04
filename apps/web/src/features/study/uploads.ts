@@ -165,8 +165,8 @@ export function useUploads() {
           }
         }
         const created = job.created;
-        // Only new PUTs need a live URL; a complete-only retry works after expiry.
-        if (job.paths.length > 0 && Date.parse(created.expiresAt) <= Date.now()) {
+        // The server refuses to complete an upload past its URLs' lifetime too.
+        if (Date.parse(created.expiresAt) <= Date.now()) {
           return settle({
             kind: "error",
             message: "This upload expired. Remove the scan and drop it again.",
