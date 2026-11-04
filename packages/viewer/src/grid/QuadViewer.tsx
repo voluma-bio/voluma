@@ -202,6 +202,17 @@ const lower = (name: string) => name.charAt(0).toLowerCase() + name.slice(1);
 const GAP = 4;
 const clampSplit = (f: number) => Math.min(0.8, Math.max(0.2, f));
 
+let webgl: boolean | undefined;
+/** Whether panes can draw: three.js needs WebGL 2, and without it every pane throws. */
+function hasWebGL() {
+  if (webgl === undefined) {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    webgl = !!gl;
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+  return webgl;
+}
+
 export function QuadViewer({
   scene,
   gridName,
@@ -602,6 +613,23 @@ export function QuadViewer({
     normals.map((c) => ({ ...c, token: planeToken(c.axis) }));
   // The pane in the top-left corner: the one filling the views, else slot 0.
   const corner = layout.full ?? layout.views[0];
+
+  if (!hasWebGL())
+    return (
+      <section
+        className="grid h-full place-items-center bg-background p-6 text-sm"
+        aria-label="Views"
+      >
+        <div className="grid max-w-md gap-2">
+          <h2 className="font-medium text-foreground">The scan can't be drawn in this browser</h2>
+          <p className="text-muted-foreground">
+            The slices and 3D view need graphics acceleration (WebGL), which is turned off here. In
+            Chrome, turn on Settings › System › "Use graphics acceleration when available", then
+            relaunch Chrome.
+          </p>
+        </div>
+      </section>
+    );
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background" aria-label="Views">
