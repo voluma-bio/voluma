@@ -28,9 +28,29 @@ import { parse } from "yaml";
 import { convertRun, type FileCheck, type NewEvent, type RunReport } from "./convert-task-run";
 import { r2FromEnv } from "./r2-dir";
 
-const MIGRATION_TAIL = `
+/**
+ * The ended task runs the tail may touch. A run that holds a listed run's first `revision.started`
+ * but none of the `convert:<runId>:` events its INSERT writes had a guard that did not match (its
+ * log moved on): it stays an untouched task run, which the refusal in `corrections.ts` keeps closed,
+ * rather than becoming an agent run with no outputs.
+ */
+function migrationTail(listed: { firstId: string; runId: string }[]): string {
+  const pairs = listed
+    .map((l) => `(${quote(l.firstId)}, ${quote(`convert:${l.runId}:%`)})`)
+    .join(", ");
+  const unconverted = listed.length
+    ? `
+    AND "id" NOT IN (
+      SELECT o."run_id" FROM "events" o
+      JOIN (VALUES ${pairs}) AS p("first_id", "marker") ON o."id" = p."first_id" AND o."type" = 'revision.started'
+      WHERE NOT EXISTS (SELECT 1 FROM "events" c WHERE c."run_id" = o."run_id" AND c."id" LIKE p."marker")
+    )`
+    : "";
+  const TASK_RUNS = `SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended'${unconverted}`;
+  return `
 -- Every database, whatever its runs hold. Task runs are those with no harness or "tasks"; only
--- ended ones are touched, since a live task-loop run still needs its task events.
+-- ended ones are touched, since a live task-loop run still needs its task events, and a listed run
+-- whose INSERT did not apply is left alone.
 -- A payload holding \\u0000 makes the jsonb casts and ->> below fail, which aborts the migration; the
 -- staging runs hold it only in tool.result, which no statement here reads.
 -- reply -> agent.message
@@ -38,30 +58,30 @@ UPDATE "events"
 SET "type" = 'agent.message',
     "payload" = jsonb_build_object('from', 'main', 'to', 'researcher', 'text', "payload"->>'text')::json
 WHERE "type" = 'reply'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended');
+  AND "run_id" IN (${TASK_RUNS});
 --> statement-breakpoint
 -- person.message loses its task fields (a Go and marks name a task's blocks); a message left with no text was only that.
 UPDATE "events"
 SET "payload" = ("payload"::jsonb - 'taskId' - 'itemId' - 'go' - 'marks')::json
 WHERE "type" = 'person.message'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
+  AND "run_id" IN (${TASK_RUNS})
   AND CASE WHEN "type" = 'person.message' THEN "payload"::jsonb ?| ARRAY['taskId', 'itemId', 'go', 'marks'] END;
 --> statement-breakpoint
 DELETE FROM "events"
 WHERE "type" = 'person.message'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
+  AND "run_id" IN (${TASK_RUNS})
   AND CASE WHEN "type" = 'person.message' THEN btrim(coalesce("payload"->>'text', '')) END = '';
 --> statement-breakpoint
 -- The task loop's own events, and the outputs backups only its corrections wrote.
 DELETE FROM "events"
 WHERE "type" IN ('attempt.opened', 'task', 'checkpoint', 'output', 'plan.changed', 'revision.started', 'ask', 'answer', 'check.accepted', 'review.completed', 'outputs.backed-up', 'outputs.restored', 'outputs.discarded')
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended');
+  AND "run_id" IN (${TASK_RUNS});
 --> statement-breakpoint
 -- The root thread names its loop.
 UPDATE "events"
 SET "payload" = ("payload"::jsonb || '{"harness": "agents"}'::jsonb)::json
 WHERE "type" = 'thread.started'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
+  AND "run_id" IN (${TASK_RUNS})
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NULL;
 --> statement-breakpoint
 -- A task or check thread is a worker, any other child the main agent; the task fields go.
@@ -71,17 +91,18 @@ SET "payload" = (
   || jsonb_build_object('role', CASE WHEN "payload"->>'task' IS NOT NULL OR "payload"->>'attemptId' IS NOT NULL THEN 'worker' ELSE 'main' END)
 )::json
 WHERE "type" = 'thread.started'
-  AND "run_id" IN (SELECT "id" FROM "runs" WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended')
+  AND "run_id" IN (${TASK_RUNS})
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'parentThreadId' END IS NOT NULL
   AND CASE WHEN "type" = 'thread.started' THEN "payload"->>'role' END IS NULL;
 --> statement-breakpoint
 -- Runs pinned to a workflow directory the repo has since renamed read the bundled catalog of its new name.
 UPDATE "runs"
 SET "workflows" = replace("workflows"::text, 'workflows/workflow-mouse-oa', 'workflows/mouse-oa')::json
-WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended' AND "workflows"::text LIKE '%workflows/workflow-mouse-oa%';
+WHERE "id" IN (${TASK_RUNS}) AND "workflows"::text LIKE '%workflows/workflow-mouse-oa%';
 --> statement-breakpoint
-UPDATE "runs" SET "harness" = 'agents' WHERE ("harness" IS NULL OR "harness" = 'tasks') AND "state" = 'ended';
+UPDATE "runs" SET "harness" = 'agents' WHERE "id" IN (${TASK_RUNS});
 `;
+}
 
 const { values } = parseArgs({
   options: {
@@ -214,7 +235,7 @@ FROM (
 CROSS JOIN (VALUES
   ${rows}
 ) AS v("n", "id", "thread_id", "type", "payload", "created_at")
-ON CONFLICT DO NOTHING;
+ON CONFLICT ("run_id", "id") DO NOTHING;
 `;
 }
 
@@ -251,6 +272,7 @@ const catalog = outputCatalogSchema.parse(
 const runs = await loadRuns();
 const ids = runs.map((r) => r.id);
 const statements: string[] = [];
+const listed: { firstId: string; runId: string }[] = [];
 const reports: string[] = [];
 for (const run of runs) {
   const { events, report } = convertRun({
@@ -260,13 +282,16 @@ for (const run of runs) {
     catalog,
     check: await fileCheckOf(run.id),
   });
-  statements.push(insertOf(run, events, ids));
+  const insert = insertOf(run, events, ids);
+  statements.push(insert);
+  const first = run.events.find((e) => e.type === "revision.started");
+  if (insert && first) listed.push({ firstId: first.id, runId: run.id });
   reports.push(reportOf(report, run.events.length));
   console.log(`${run.id}: ${report.published.length} published, ${report.missing.length} missing`);
 }
 await writeFile(
   values.out,
-  `-- Step 1 of retiring the task loop: gives every stored task-loop run the agent loop's outputs,\n-- then the tail (see apps/api/src/ops/convert-task-runs.ts). Generated; do not edit.\n${statements.filter(Boolean).join("--> statement-breakpoint\n")}${statements.some(Boolean) ? "--> statement-breakpoint\n" : ""}${MIGRATION_TAIL}`,
+  `-- Step 1 of retiring the task loop: gives every stored task-loop run the agent loop's outputs,\n-- then the tail (see apps/api/src/ops/convert-task-runs.ts). Generated; do not edit.\n${statements.filter(Boolean).join("--> statement-breakpoint\n")}${statements.some(Boolean) ? "--> statement-breakpoint\n" : ""}${migrationTail(listed)}`,
 );
 await writeFile(
   values.report,

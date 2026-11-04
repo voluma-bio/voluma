@@ -37,7 +37,7 @@ New event ids are `convert:<runId>:<output>`; `seq` continues after the run's la
 
 The per-run INSERT applies to the run with that id, or to a copy of its log under another id (a
 `seed:example` example): the same first `revision.started`, the same event count and the same last event id and seq, on an ended run (a run that gained
-events since the fetch is left as it is). Every other
+events since the fetch gets no INSERT, and the tail leaves it alone too: it stays an unchanged task run, shown as before and closed to messages, until a regenerated migration converts it). Every other
 database (a worktree's) gets only the tail: `reply`, `thread.started`, `person.message`, the deletes of the task-only types,
 `harness` set to `agents` on ended task runs (a task run not `ended` is left alone) and their root thread, and the pinned path
 `workflows/workflow-mouse-oa` renamed to `workflows/mouse-oa` (the web bundles the catalog by that path). Those runs keep their
@@ -46,8 +46,9 @@ conversation and lose their task outputs.
 A converted run's `pi_messages` and its R2 snapshot are the task loop's. `messageRefusal` refuses a
 message to a run whose `harness` is not `agents` (409), so no task run gains events before the deploy.
 A converted run, once `agents`, could be reopened on the task loop's snapshot, which has no
-`outputs.yaml`: delete its `runs/<id>/workflow/.snapshot-done` marker (after the deletion PR is live) so a
-reopen re-snapshots.
+`outputs.yaml`, so `messageRefusal` also refuses (409) a run holding its `convert:<runId>:outputs` event. Remove
+that refusal in the deletion PR, once its snapshot fallback is live and the 7 old `runs/<id>/workflow/.snapshot-done`
+markers are deleted so a reopen re-snapshots.
 
 `\u0000` in a `reply`, `person.message` or `thread.started` payload would fail the tail's casts and
 abort the deploy; staging holds none (only two `tool.result` rows).
