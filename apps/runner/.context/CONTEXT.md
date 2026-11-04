@@ -373,6 +373,8 @@ text's class (the unit test there pins the texts) and reads `interrupted` from t
 - *fatal* (any other 4xx: auth, `404 model_not_found`, an empty account): fails the run at once, on any thread
   (`failureKind`).
 - Main's other failures are `mainFailureAction`:
+  - a failure recorded before the latest `run.reopened` (an earlier request's): a fresh `main.<n>`, handed over
+    from it, whatever the error, so each researcher request gets its own attempt; the bounds below hold within a request.
   - *transient* (the set Pi retries, before the headers): fails the run.
   - *interrupted*: the same thread is resumed with its history as it was plus one runtime message ("The model
     provider failed during your last reply; continue."), unless the end before it on that thread was an interrupted

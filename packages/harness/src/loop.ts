@@ -824,6 +824,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       replied: m.replied,
       endBefore: m.endBefore,
       previousFailed: mains.at(-2)?.end?.status === "failed",
+      failedBeforeRequest: m.endedAt < (d.written.get(d.span) ?? -1),
     });
     if (action === "fail")
       throw new Error(`the AI stopped on an error from its provider: ${m.end?.error ?? ""}`);
