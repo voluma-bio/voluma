@@ -114,6 +114,7 @@ const auth = createAuth({
   // Who may sign in (auth.ts). No domain reads an organization id.
   organizations: keyOrganizations.map(({ id }) => id),
   // Guests (auth.ts): a request with no credential is a guest in this organization.
+  mayUseVolumaKey: (labId) => limits.voluma.has(labId),
   guest: guestOrganizationId ? { organizationId: guestOrganizationId } : null,
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),

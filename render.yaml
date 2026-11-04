@@ -187,8 +187,8 @@ services:
           envVarKey: GATEWAY_TOKEN_SECRET
       - key: RUNNER_CONCURRENCY
         value: "2"
-      # No RUNNER_MODEL or RUNNER_THINKING: each role takes its role file's model alias and
-      # thinking level (deploy.md).
+      # No RUNNER_MODEL or RUNNER_THINKING (the runner refuses to boot with either): a run
+      # carries its model and thinking level (deploy.md).
       - key: VOLUMA_META_API_KEY
         sync: false
       - key: MODAL_TOKEN_ID

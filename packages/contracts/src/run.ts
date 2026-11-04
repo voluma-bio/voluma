@@ -149,6 +149,15 @@ import { workflowPinSchema } from "./workflow";
  * is `inputKey` in `r2.ts`. `listInputs` lists the caller's uploads and the
  * org's reference scan.
  */
+/**
+ * Whether a person's own Meta key (and the scan it carries) may go to this model: Standard-mode
+ * Meta only, since a `-contributor` model lets Meta train on what it is sent. The one rule
+ * behind the API's `needsVolumaKey` marks, its refusal of a pick, and the runner's check.
+ */
+export function ownKeyMayUse(model: string): boolean {
+  return model.startsWith("meta/") && !model.endsWith("-contributor");
+}
+
 /** The levels a person may pick at `/new`: ones every offered model supports (or is mapped to). */
 export const runThinkingSchema = z.enum(["low", "medium", "high"]);
 export type RunThinking = z.infer<typeof runThinkingSchema>;

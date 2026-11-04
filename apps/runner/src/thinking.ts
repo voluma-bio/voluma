@@ -1,6 +1,6 @@
 /**
- * The thinking-level check shared by the runner's boot (`RUNNER_THINKING`) and a run's start (a
- * role file's `thinking`). Pi clamps a requested effort a model lacks to a neighbour, so each
+ * The thinking-level check of a run's start, for each role's level (the run's, else its role file's).
+ * Pi clamps a requested effort a model lacks to a neighbour, so each
  * non-off level is checked against every model it may reach. Unset and `off` both send no
  * requested effort through Pi Agent; they do not require a model that can disable reasoning.
  */
