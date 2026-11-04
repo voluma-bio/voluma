@@ -4,9 +4,12 @@
 
 Per section: the band mask's connected pieces, each piece's skeleton reduced to its longest geodesic path, its ends continued
 along their last stretch to the cortex (at most EXT_MAX voxels); pieces that do not overlap in U, longest first, joined left to
-right into one polyline. The region is labels.label_section on that line, the rule that built the region labels. A perfect band
-(the traced one) scores the label floor, ~11 µm, through this step. Writes <out>/<scan>.npz (V, mask: the region) and
-<out>/<scan>-lines.json ({V: [[w, u], ...]}); a section with no line has an empty region.
+right into one polyline, the skeleton line. With --cut midline (the default, and the band recipe's) each point of that line then
+moves to the midpoint of the band's two faces in its column (faces.midline); in the 3-seed vote that scored 1-8 µm better than
+the skeleton line on each of the six scored scans (L33). The region is labels.label_section on the line, the rule that built the region labels. A
+perfect band (the traced one) scores the label floor, ~11 µm, through the skeleton line. Writes <out>/<scan>.npz (V, mask: the
+region) and <out>/<scan>-lines.json ({V: [[w, u], ...]}, the line the region was cut on); a section with no line has an empty
+region.
 """
 import argparse
 import json
@@ -21,6 +24,7 @@ from skimage.morphology import skeletonize
 import cutline
 import labels
 import scans
+from faces import band_faces, midline
 
 MIN_PIECE = 12     # voxels of path: shorter pieces are noise
 EXT_MAX = 10       # voxels an end is continued along its direction to reach the cortex
@@ -107,14 +111,17 @@ def line_of(band, env):
     return np.vstack(keep) if keep else None
 
 
-def band_regions(band, vs, tibia, pieces=None, not_visible=None):
+def band_regions(band, vs, tibia, pieces=None, not_visible=None, cut="midline"):
     """band[n, W, U] predictions on sections vs -> (region[n, W, U], {V: line (m, 2) [w, u]}); a section with no line has an empty
-    region. tibia: the scan's mask (W, V, U); pieces, not_visible: the reviewed plateau pieces and not-visible ranges, when known."""
+    region. tibia: the scan's mask (W, V, U); pieces, not_visible: the reviewed plateau pieces and not-visible ranges, when known;
+    cut: "midline" (the faces' midline) or "skeleton"."""
     region = np.zeros_like(band)
     lines = {}
     for i, v in enumerate(vs):
         p = line_of(band[i], cutline.envelope(tibia[:, v, :])) if band[i].any() else None
         if p is not None and len(p) > 1:
+            if cut == "midline":
+                p = midline(p, *band_faces(band[i], p))
             region[i] = labels.label_section(v, p, [], (not_visible or {}).get(v, ()), tibia, pieces).region
             lines[v] = p
     return region, lines
@@ -124,13 +131,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred", required=True, type=Path, help="predict.py output of a band model")
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--cut", choices=("midline", "skeleton"), default="midline", help="cut on the faces' midline or on the skeleton line")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     for f in sorted(a.pred.glob("*.npz")):
         scan = f.stem
         z = np.load(f)
         region, lines = band_regions(z["mask"], [int(v) for v in z["V"]], scans.load_tibia_mask(scan), scans.load_pieces(scan),
-                                     labels.not_visible_ranges(scan))
+                                     labels.not_visible_ranges(scan), a.cut)
         np.savez_compressed(a.out / f"{scan}.npz", V=z["V"], mask=region)
         (a.out / f"{scan}-lines.json").write_text(json.dumps({v: p.tolist() for v, p in lines.items()}))
         print(scan, len(lines), "lines of", len(z["V"]), "sections", flush=True)

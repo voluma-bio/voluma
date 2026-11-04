@@ -19,6 +19,7 @@ import scans
 
 FLAT = 1.0
 OFF_UM = 50
+MID_MAX = 4   # voxels: a cut-line point moves to the faces' midpoint only when that is this close
 
 
 def band_faces(band, line):
@@ -34,6 +35,17 @@ def band_faces(band, line):
             r = min(np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1), key=lambda r: abs((r[0] + r[-1]) / 2 - w))
             top[u], bot[u] = r[0], r[-1]
     return top, bot
+
+
+def midline(line, top, bot):
+    """The cut line (n, 2) [w, u] with each point's W moved to the midpoint of the faces (band_faces) in its column, where both
+    faces exist there and the midpoint is within MID_MAX voxels of the point."""
+    out = line.copy()
+    for k, (w, u) in enumerate(line):
+        c = int(round(u))
+        if 0 <= c < len(top) and not np.isnan(top[c]) and abs((top[c] + bot[c]) / 2 - w) <= MID_MAX:
+            out[k, 0] = (top[c] + bot[c]) / 2
+    return out
 
 
 def section_faces(band, line, curves, n_u):

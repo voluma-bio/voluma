@@ -11,10 +11,14 @@ depend on it. We fine-tune Meta's SAM 3.1 image model with a text prompt, two wa
 
 - **Region (recipe A):** prompt "epiphysis", target the IIOC region above the cut line. The cut line is the region's lower edge.
 - **Band:** prompt "growth plate", target the plate itself: per column from the traced proximal face to the distal face, plus
-  the cut line dilated by 1 voxel. The cut line is the band's skeleton, chained across the bone (`band_to_region.py`).
+  the cut line dilated by 1 voxel. The cut line is the band's skeleton, chained across the bone, then moved to the midpoint of
+  the band's two faces (`band_to_region.py`).
 
 Both train LoRA (rank 16) on the ViT attention plus the neck, decoder and heads (the ViT and text encoder stay frozen), 3000
 steps, batch 1, and keep the checkpoint with the lowest validation loss. Three seeds per recipe; a vote combines them.
+
+**The release recipe is the band model**: the three band seeds, each predicted at detector threshold 0.3, each section's cut
+line taken from the midline between the band's faces, the three regions voted.
 
 ## Current scores
 
@@ -28,19 +32,29 @@ through the same line extraction scores about 11 µm.
 |---|---|---|---|
 | Region, per seed (mean ± sd of 3) | 33.4 ± 5.5 | 53.5 ± 38.0 | 55 / 54 / 32 |
 | Region, 3-seed vote | 33.8 | 33.1 | 34 |
-| Band, per seed (mean ± sd of 3) | 90.2 ± 74.4 | 46.4 ± 36.0 | 83 / 152 / 39 |
-| **Band, 3-seed vote, an empty seed abstains** | **16.7** | **22.1** | 39 |
+| Band, per seed (mean ± sd of 3) | 16.1 ± 2.1 | 20.0 ± 3.4 | 39 / 26 / 32 |
+| Band, 3-seed vote, cut on the skeleton line | 17.6 | 19.8 | 38 |
+| **Band, 3-seed vote, cut on the faces' midline (the recipe)** | **16.4** | **18.7** | 33 |
 
-Caveats, from the L32 write-up:
-- The band model is sharper where it fires but sometimes returns nothing: 14 of 261 section-predictions were empty (region: 2),
-  and each scores 1050 µm. That is why its per-seed numbers look bad and its abstain vote looks good.
-- The abstain vote rule was chosen after seeing those empty sections. Treat 16.7 µm as a lead to confirm on a scan none of these
-  choices saw, not a settled result. On validation scan OA8-21L the band vote is worse than the region vote (66 vs 38 µm).
-- The band's two faces land within 1–2 voxels of the traced faces (median error 10–23 µm per scan and seed); thickness is good to
-  about ±1 voxel and comes out about one voxel thick where the plate is thin.
+Band rows: threshold 0.3, and the per-seed row uses the midline cut. These band numbers come from L33, which fixed the
+threshold, the vote and the midline cut on the validation scans before it scored the test scans. Each test scan was scored once.
+Caveats:
+- The midline here uses the band's own faces. L33 chose faces snapped on the band probability, and on the test scans those
+  scored 15.9 and 19.7 µm. We left the snap out: it moved the faces by less than a voxel, and on the test scans its faces were
+  no closer to the traced ones than the plain faces (mean error 23.6 vs 20.7 µm on OA8-19L, 25.3 vs 25.6 on OA6-9RK). The plain
+  faces' midline was also better on validation (33.9 vs 34.6 µm in L33's scoring).
+- At threshold 0.5 a band seed returned nothing on 14 of 261 section-predictions, and each such section scores 1050 µm. At 0.3 no
+  seed is empty on any of the six scans. So `vote.py --abstain` (an empty seed abstains) now gives the same result as the plain
+  vote. The earlier headline, L32's abstain vote at 0.5 (16.7 and 22.1 µm), had that rule chosen after seeing the test scans.
+- On validation scan OA8-21L the band vote is still worse than the region vote (52.5 vs 38 µm). The cause is end sections with
+  a partial plate, where the band runs through bone that is not plate (OA8-21L V58, V75).
+- The band sometimes marks a stray piece of other bone, and the line extraction joins it to the plate. The cut-line score only
+  covers the label's columns, so it barely sees this. None of the stray-piece rules L33 tried helped on validation.
+- The band's two faces land within 1–2 voxels of the traced faces (median error 11–26 µm per scan and seed). A few sections per
+  scan have a face more than 50 µm off. Thickness is good to about ±1 voxel. Where the plate is thin, the band comes out about one
+  voxel thicker than traced.
 - One checkpoint predicts a whole scan in about a minute on an RTX 3090 (0.19 s per section, 5.2 GB); a 3-seed vote costs 3×.
-
-Not yet carried: the L33 post-processing of band predictions ([.context/TODO.md](.context/TODO.md)).
+  One seed alone scores close to the vote (per-seed row), and the vote's worst case is lower.
 
 ## Inputs
 
@@ -85,8 +99,8 @@ MODAL_GPU=A10,L40S uv run --group release modal run --detach modal_train.py --da
 # 3. predict the labelled test and validation sections
 for s in 0 1 2; do
   uv run python predict.py --scan OA8-19L OA6-9RK OA6-11RK OA7-2R OA8-21L OA6-5RK --ckpt runs/band-s$s/ckpt-bestval.pt \
-    --text "growth plate" --out preds/band-s$s --sections-from data/region
-  uv run python band_to_region.py --pred preds/band-s$s --out preds/band-s$s-region   # band only: line, then region
+    --text "growth plate" --threshold 0.3 --out preds/band-s$s --sections-from data/region
+  uv run python band_to_region.py --pred preds/band-s$s --out preds/band-s$s-region   # band only: line, midline, region
 done
 
 # 4. vote and score
@@ -96,13 +110,19 @@ uv run python score.py --data data/region --out scores/band \
 uv run python faces.py --band preds/band-s0 --lines preds/band-s0-region --out scores/band/faces-s0.json
 ```
 
-The region recipe is the same with `--data data/region`, `--text epiphysis`, no `band_to_region.py`, and `vote.py` without
+`band_to_region.py --cut skeleton` gives the skeleton-line row of the table. The region recipe is the same with
+`--data data/region`, `--text epiphysis`, `--threshold 0.5` (the default), no `band_to_region.py`, and `vote.py` without
 `--abstain` (the two rules differ by at most 0.3 µm for it).
 
 How this was checked against the experiment scripts it replaces: the re-export matches the L29 and L32 exports byte for byte
 (images, annotations, metadata; label arrays equal), predictions with band seed 0 on the same GPU are identical, region seed 2
 (trained and first predicted on Modal) differs in 50–90 voxels per scan on an RTX 3090 and scores within 0.4 µm, and the
-line extraction, both votes, the scorer and the face errors reproduce the L29 and L32 tables exactly.
+line extraction, both votes, the scorer and the face errors reproduce the L29 and L32 tables exactly. The band rows above were
+re-run with this code on the same RTX 3090 as L33. The masks at 0.3 equal L33's on all 18 scan-seed pairs but one, which
+differs in 152 of 46,813 voxels (OA8-21L, seed 0). Every test number reproduces L33's to the 0.1 µm. On validation, the midline
+vote is 29.0 vs L33's 32.1 µm on OA6-11RK and 29.9 vs 29.5 on OA6-5RK. That is because `faces.band_faces` finds the line's row in a
+column by interpolation, where L33 took the median of the rows the path crosses there. With L33's rule this code gives L33's
+validation numbers too (OA8-21L 52.5 vs 52.3 µm, the scan with the mask difference).
 
 ## Files
 
