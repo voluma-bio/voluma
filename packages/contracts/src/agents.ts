@@ -22,8 +22,8 @@ export interface AgentRecord extends ThreadBase {
   /** `main` or `worker`; the agent model gives every thread one. */
   place: "main" | "worker";
   /**
-   * Its first `thread.started` was written while the run was reviewing: a main like that is the
-   * review main (its prompt has the researcher skill and `review.md`). Derived, not stored.
+   * A main whose first `thread.started` was written while the run was reviewing: the review main
+   * (its prompt has the researcher skill and `review.md`). Always false for a worker. Derived, not stored.
    */
   review: boolean;
   /** Log positions of its latest start and of its latest end (-1: none). */
@@ -149,10 +149,11 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   const fold = threadRecords<AgentRecord>((started, base, prev) => {
     // A cut-off start continues the turn it resumes; any other start begins a new one.
     const continues = prev !== undefined && prev.end === undefined;
+    const place = base.place === "main" ? "main" : "worker";
     return {
       ...base,
-      place: base.place === "main" ? "main" : "worker",
-      review: prev?.review ?? reviewing,
+      place,
+      review: prev?.review ?? (place === "main" && reviewing),
       parentThreadId: started.parentThreadId,
       spawnedBy: prev?.spawnedBy ?? started.spawnedBy,
       from: prev?.from ?? started.from,
