@@ -17,6 +17,7 @@ import { type OutputCatalog, unitAsWritten } from "@voluma/contracts/output-cata
 import {
   itemKey,
   type OutputState,
+  type OutputStatus,
   type OutputsFold,
   type OutputVersion,
   outputsIn,
@@ -32,6 +33,7 @@ import type {
   Volume,
 } from "@voluma/contracts/review";
 import { affineIn } from "@voluma/contracts/ruler";
+import type { Status } from "@voluma/ui";
 import { type ChainLink, chainOf, type TrailRow, trailOf } from "./outputs-trail";
 
 /** One To check item, on the version it was raised on. */
@@ -181,14 +183,39 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
 /** The items of `row`'s trail still open: the value's own and those of what it rests on. */
 export const openItemsOf = (row: OutputRow): OutputItem[] => row.items.filter((i) => !i.resolved);
 
+/** Each output status on the shared status marks, in the design's words. */
+export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
+  pending: { status: "waiting", word: "Pending" },
+  reported: { status: "done", word: "Reported" },
+  "to-check": { status: "check", word: "To check" },
+  missing: { status: "stopped", word: "Missing" },
+  "out-of-date": { status: "paused", word: "Out of date" },
+};
+
 /**
- * The outputs `row` rests on that have open items, nearest first: a value whose own status is fine
- * waits on a person checking these. The items are drawn and decided under each of them, never
- * under the values resting on it.
+ * An output's status as every place on the run page shows it. `waits` are the outputs it rests on
+ * that have open items, nearest first; their items are drawn and decided under each of them, never
+ * under what rests on them. A reported output with any is not done: it waits on those checks. While
+ * the run goes, nothing published yet reads "not yet".
  */
-export const waitsOn = (row: OutputRow): string[] => [
-  ...new Set(openItemsOf(row).flatMap((i) => (i.output === row.id ? [] : [i.output]))),
-];
+export function rowStatus(
+  row: OutputRow,
+  live: boolean,
+  nameOf: (id: string) => string,
+): { status: Status; word: string; waits: string[] } {
+  const waits = [
+    ...new Set(openItemsOf(row).flatMap((i) => (i.output === row.id ? [] : [i.output]))),
+  ];
+  if (live && row.state.status === "pending")
+    return { ...OUTPUT_STATUS.pending, word: "not yet", waits };
+  if (row.state.status === "reported" && waits.length > 0)
+    return {
+      status: "waiting",
+      word: `Waiting on a check of ${waits.map(nameOf).join(", ")}`,
+      waits,
+    };
+  return { ...OUTPUT_STATUS[row.state.status], waits };
+}
 
 /**
  * What "only To check" lists: the rows whose own items are open, plus a row for each open item no

@@ -6,10 +6,9 @@
  * A box picks its output. Data from `runGraph` (`outputs-trail.ts`).
  */
 import type { OutputsFold } from "@voluma/contracts/output-fold";
-import { madeFromIt, type OutputRow, runGraph } from "@voluma/run-view";
+import { madeFromIt, OUTPUT_STATUS, type OutputRow, rowStatus, runGraph } from "@voluma/run-view";
 import { cx, StatusGlyph } from "@voluma/ui";
 import { useMemo } from "react";
-import { OUTPUT_STATUS } from "./outputs-panel";
 
 const COL_W = 176;
 const COL_GAP = 56;
@@ -23,13 +22,15 @@ export function RunGraphView({
   selected,
   onPick,
   rows,
+  live,
 }: {
   fold: OutputsFold;
   /** The output in the spotlight. */
   selected: string | undefined;
   onPick: (id: string) => void;
-  /** Names and values, by output id. */
+  /** Names, values and statuses, by output id. */
   rows: ReadonlyMap<string, OutputRow>;
+  live: boolean;
 }) {
   const nameOf = (id: string) => rows.get(id)?.name ?? id;
   const graph = useMemo(() => runGraph(fold), [fold]);
@@ -126,9 +127,12 @@ export function RunGraphView({
             ))}
             {graph.nodes.map((n) => {
               const at = place.get(n.id)!;
-              const { status, word } = OUTPUT_STATUS[n.state.status];
+              const row = rows.get(n.id);
+              const { status, word } = row
+                ? rowStatus(row, live, nameOf)
+                : OUTPUT_STATUS[n.state.status];
               const dim = lit && !lit.has(n.id);
-              const value = rows.get(n.id)?.value;
+              const value = row?.value;
               return (
                 <button
                   key={n.id}

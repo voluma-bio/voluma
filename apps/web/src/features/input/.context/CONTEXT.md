@@ -66,7 +66,7 @@ tab, the side opens on Conversation once it has something to read or send (a mes
 and on Labels before that, so an empty conversation never takes the column. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), Agents (icon) and
 Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
 reported value resting on an output with open items is not done: its status is "Waiting on a check
-of <output>" (`waitsOn`, the dashed waiting glyph, never a tick), and the open value shows one line
+of <output>" (`rowStatus`, the dashed waiting glyph, never a tick; the same rule in Final outputs, Based on, the chip and the whole run), and the open value shows one line
 per such output, "N to check on <output>", which opens that output under it. The value picked opens
 in place under its row: its version line and Report, its own open items, those lines, and Rests on
 (direct links, ordered measured on, beside, made from, drawn on) with Further back (the rest of
@@ -75,9 +75,11 @@ items first, then its report, and frames the panes on it. Show on an item opens 
 about (as `trail` unless it is the value) and frames the panes on its region; it is a history entry,
 so Back returns to the item before. Reports and items are `version-report.tsx`.
 
-The centre has no bar of its own: a chip over the panes' top-left corner (`SceneChip`) names the
-output in view, its value and its status (the waiting one a button to the checks), with the saved
-views menu; the whole run and the agents get a bar with the way back. Delete mark and Undo delete
+The centre has no bar of its own: a chip (`SceneChip`) names the output in view, its value and its
+status (the waiting one a button to the checks), with the saved views menu. On the panes it sits in
+the top-left pane's corner (`QuadViewer`'s `heading`), under the viewer's notes, which stay in the
+flow above the panes; over a file, a list, an empty centre or a grid still preparing it sits above,
+in the flow. The whole run and the agents get a bar with the way back. Delete mark and Undo delete
 get a row above the panes only while one of yours is picked or a deletion can be undone.
 
 While the run goes, Final outputs adds what a run going shows and nothing after it ends: on top,

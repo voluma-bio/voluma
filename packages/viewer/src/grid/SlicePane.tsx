@@ -442,6 +442,14 @@ export function SlicePane({
     // Runs once: the scene's grid is fixed for the pane's life (the viewer remounts on a new grid).
   }, []);
 
+  // A region waiting to be framed is dropped once the crosshair leaves it (a mark picked, a click
+  // in another pane): framing it later would show a place nobody is looking at.
+  useEffect(() => {
+    const box = pendingBox.current;
+    if (box && point.some((v, a) => v < box.min[a]! - 0.5 || v > box.max[a]! + 0.5))
+      pendingBox.current = null;
+  }, [point]);
+
   // A turned plane keeps the crosshair where it was on screen: the picture turns about it.
   const turned = useRef(basis);
   useEffect(() => {

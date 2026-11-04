@@ -35,11 +35,11 @@ import {
   outputName,
   outputsReview,
   reviewAssetsOf,
+  rowStatus,
   rowsToCheck,
   shownOf,
   undrawn,
   useEvents,
-  waitsOn,
 } from "@voluma/run-view";
 import {
   Button,
@@ -84,7 +84,7 @@ import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
 import { MainConversation } from "./main-conversation";
 import { gridKeyOf, useLocalMarks, useMarking, type YourMark } from "./marking";
-import { FinalOutputs, statusOf } from "./outputs-panel";
+import { FinalOutputs } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
@@ -463,7 +463,27 @@ export function OutputsReview({
     return () => window.removeEventListener("keydown", onKey);
   }, [select]);
 
+  // What the centre shows, its value and status: over the panes' top-left corner, else above.
+  const heading = (
+    <SceneChip
+      live={live}
+      root={selected}
+      standIn={!!standIn}
+      soFar={!!soFar}
+      inView={inView}
+      trailOpen={!!trailOpen}
+      onBack={() => select({ trail: null, item: null })}
+      nameOf={nameOf}
+      onWaitsOn={(id) => select({ trail: id, item: null, centre: null })}
+      views={inView ? views.of(inView.id) : []}
+      viewShown={views.shown}
+      viewError={views.error}
+      onView={views.open}
+    />
+  );
   let panes: React.ReactNode;
+  // Only the panes carry the chip over their corner; a file, a list or an empty centre has it above.
+  let overPanes = false;
   if (live && inView?.state.status !== "missing" && !inView?.state.latest)
     panes = (
       <Centered>
@@ -503,7 +523,8 @@ export function OutputsReview({
         </EmptyState>
       </Centered>
     );
-  else
+  else {
+    overPanes = true;
     panes = (
       <OutputScene
         runId={run.id}
@@ -516,6 +537,7 @@ export function OutputsReview({
         marking={marking}
         display={display}
         onLegend={setLegend}
+        heading={heading}
         quad={{
           layout,
           onLayout,
@@ -530,6 +552,7 @@ export function OutputsReview({
         }}
       />
     );
+  }
 
   return (
     <>
@@ -634,26 +657,18 @@ export function OutputsReview({
           {centre && <CentreBar centre={centre} onBack={() => select({ centre: null })} />}
           <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
             {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
-            <div className="relative h-full [&[hidden]]:hidden" hidden={!!centre}>
-              {panes}
-              <SceneChip
-                live={live}
-                root={selected}
-                standIn={!!standIn}
-                soFar={!!soFar}
-                inView={inView}
-                trailOpen={!!trailOpen}
-                onBack={() => select({ trail: null, item: null })}
-                nameOf={nameOf}
-                onWaitsOn={(id) => select({ trail: id, item: null, centre: null })}
-                views={inView ? views.of(inView.id) : []}
-                viewShown={views.shown}
-                viewError={views.error}
-                onView={views.open}
-              />
+            <div className="flex h-full flex-col [&[hidden]]:hidden" hidden={!!centre}>
+              {!overPanes && <div className="flex shrink-0 p-2">{heading}</div>}
+              <div className="min-h-0 flex-1">{panes}</div>
             </div>
             {centre === "run" && (
-              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
+              <RunGraphView
+                fold={fold}
+                selected={inView?.id}
+                rows={review.rows}
+                live={live}
+                onPick={show}
+              />
             )}
             {centre === "agents" && (
               <RunAgents
@@ -737,7 +752,7 @@ export function OutputsReview({
               // The panes show the output the item is about, framed on its place.
               select(
                 { item: i.key, trail: i.output === selected?.id ? null : i.output, centre: null },
-                { push: true },
+                { push: params.get("item") !== i.key },
               );
               setPicked((n) => n + 1);
             }}
@@ -802,13 +817,12 @@ function SceneChip({
   onView: (view: SavedView) => void;
 }) {
   if (!inView || (!root && !soFar)) return null;
-  const { status, word } = statusOf(inView, live, nameOf);
-  // A reported value waits on the checks of what it rests on: named, each one click away.
-  const waits = !trailOpen && inView.state.status === "reported" ? waitsOn(inView) : [];
+  // A value waiting on the checks of what it rests on names each, one click away.
+  const { status, word, waits } = rowStatus(inView, live, nameOf);
   const quiet = "shrink-0 text-muted-foreground text-xs";
   // Two lines, so it stays within the top-left pane: what is shown, then its status.
   return (
-    <header className="absolute top-2 left-2 z-20 grid max-w-[calc(50%-3rem)] min-w-48 gap-0.5 rounded-md bg-card px-2 py-1 text-sm shadow-sm inset-ring inset-ring-border">
+    <header className="grid min-w-0 gap-0.5 rounded-md bg-card px-2 py-1 text-sm shadow-sm inset-ring inset-ring-border">
       <div className="flex min-w-0 items-center gap-2">
         {trailOpen ? (
           <button
@@ -824,7 +838,9 @@ function SceneChip({
         ) : (
           standIn && root && <span className={quiet}>{root.name} is based on</span>
         )}
-        <h2 className="min-w-0 truncate font-semibold">{inView.name}</h2>
+        <h2 className="min-w-0 truncate font-semibold" title={inView.name}>
+          {inView.name}
+        </h2>
         {inView.value && (
           <span className="shrink-0 font-mono tabular-nums">
             {inView.value.text}
@@ -858,7 +874,7 @@ function SceneChip({
           </Menu>
         )}
       </div>
-      {waits.length > 0 ? (
+      {status === "waiting" && waits.length > 0 ? (
         // One button per output it waits on, opening that output's checks.
         waits.map((id) => (
           <button
@@ -899,6 +915,7 @@ function OutputScene({
   marking,
   display,
   onLegend,
+  heading,
   quad,
 }: {
   runId: string;
@@ -911,6 +928,7 @@ function OutputScene({
   marking: ReturnType<typeof useMarking>;
   display: LabelDisplay;
   onLegend: (legend: LegendEntry[] | undefined) => void;
+  heading: React.ReactNode;
   quad: NonNullable<React.ComponentProps<typeof SceneViewer>["quad"]>;
 }) {
   const missing = undrawn(blocks, shown);
@@ -950,6 +968,7 @@ function OutputScene({
             onShown={marking.setShown}
             display={display}
             onLegend={onLegend}
+            heading={heading}
             quad={quad}
           />
         </Suspense>

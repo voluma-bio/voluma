@@ -16,46 +16,23 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { LinkRole } from "@voluma/contracts/output-catalog";
-import { hasVersion, type OutputStatus } from "@voluma/contracts/output-fold";
+import { hasVersion } from "@voluma/contracts/output-fold";
 import {
   type ChainLink,
+  OUTPUT_STATUS,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
   openItemsOf,
   ROLE_WORD,
+  rowStatus,
   rowsToCheck,
   type TrailRow,
-  waitsOn,
 } from "@voluma/run-view";
-import { cx, EmptyState, type Status, StatusGlyph } from "@voluma/ui";
+import { cx, EmptyState, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { type Accepting, clockOf, Items, Report, VersionLine } from "./version-report";
-
-/** Each output status on the shared status marks, in the design's words. */
-export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
-  pending: { status: "waiting", word: "Pending" },
-  reported: { status: "done", word: "Reported" },
-  "to-check": { status: "check", word: "To check" },
-  missing: { status: "stopped", word: "Missing" },
-  "out-of-date": { status: "paused", word: "Out of date" },
-};
-
-/**
- * A row's status; while the run goes, nothing published yet reads "not yet". A reported value
- * resting on an output with open items is not done: it waits on that check, named.
- */
-export const statusOf = (row: OutputRow, live: boolean, nameOf: (id: string) => string) => {
-  if (live && row.state.status === "pending") return { ...OUTPUT_STATUS.pending, word: "not yet" };
-  const waits = row.state.status === "reported" ? waitsOn(row) : [];
-  if (waits.length > 0)
-    return {
-      status: "waiting" as const,
-      word: `Waiting on a check of ${waits.map(nameOf).join(", ")}`,
-    };
-  return OUTPUT_STATUS[row.state.status];
-};
 
 export type FinalOutputsProps = {
   review: OutputsReview;
@@ -232,8 +209,7 @@ function ValueRow({
   bar?: boolean;
   onSelect: () => void;
 }) {
-  const { status, word } = statusOf(row, live, nameOf);
-  const waits = row.state.status === "reported" ? waitsOn(row) : [];
+  const { status, word, waits } = rowStatus(row, live, nameOf);
   const ref = useScrolledTo(selected);
   return (
     <button
@@ -254,7 +230,7 @@ function ValueRow({
       <span className={cx("min-w-0 truncate", row.state.outOfDate && "line-through")}>
         {row.name}
       </span>
-      {waits.length > 0 && (
+      {status === "waiting" && waits.length > 0 && (
         <span className="min-w-0 truncate text-muted-foreground text-xs">
           waits on {waits.map(nameOf).join(", ")}
         </span>
@@ -299,7 +275,7 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
   const latest = row.state.latest;
   // Its own open items; those of what it rests on are drawn and decided there, one line each here.
   const own = row.items.filter((i) => !i.resolved && i.output === row.id);
-  const waits = waitsOn(row).map((id) => ({
+  const waits = rowStatus(row, props.live, nameOf).waits.map((id) => ({
     id,
     count: openItemsOf(row).filter((i) => i.output === id).length,
   }));
@@ -335,7 +311,7 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
           </VersionLine>
         ) : (
           <p className="m-0 text-muted-foreground text-xs">
-            {row.state.missingReason ?? statusOf(row, props.live, nameOf).word}
+            {row.state.missingReason ?? rowStatus(row, props.live, nameOf).word}
           </p>
         )}
         {row.provisional && (
@@ -449,7 +425,13 @@ function TrailItem({
   const { open, nameOf } = props;
   const isOpen = row.id === open;
   const latest = row.state?.latest;
-  const status = row.state ? OUTPUT_STATUS[row.state.status] : OUTPUT_STATUS.pending;
+  // Its own row when it has one, so an output resting on open checks waits here too.
+  const full = props.review.rows.get(row.id);
+  const status = full
+    ? rowStatus(full, props.live, nameOf)
+    : row.state
+      ? OUTPUT_STATUS[row.state.status]
+      : OUTPUT_STATUS.pending;
   const ref = useScrolledTo(isOpen);
   const items = props.review.rows.get(row.id)?.items.filter((i) => i.output === row.id) ?? [];
   return (
