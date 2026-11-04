@@ -49,6 +49,9 @@ export async function spentUsd(tx: Tx, labId: string): Promise<number> {
   return row?.spent ?? 0;
 }
 
+/** Whether the org is configured to run on Voluma's keys; `admit` refuses `no-key` by the same map, and the heartbeat and `Me.volumaKey` ask this. */
+export const mayUseVolumaKey = (limits: Limits, labId: string) => limits.voluma.has(labId);
+
 /**
  * Why `run` may not go on at `stage`, or null. An own-key run is never refused (it costs
  * Voluma only runner time, which the claim's slot caps queue). A reopen

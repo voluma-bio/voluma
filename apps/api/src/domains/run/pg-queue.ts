@@ -25,6 +25,7 @@ import type { Caller, Reader } from "../../domain";
 import {
   admit,
   type Limits,
+  mayUseVolumaKey,
   type Refusal,
   refusalError,
   refusalMessage,
@@ -665,7 +666,7 @@ export function pgRunQueue(
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
         // An org dropped from config stops its running Voluma-key runs here (its queued ones fail at claim).
-        if (run.credentials === "voluma" && !limits.voluma.has(run.labId)) {
+        if (run.credentials === "voluma" && !mayUseVolumaKey(limits, run.labId)) {
           await fail(tx, runId, refusalError["no-key"]);
           return { stop: true };
         }
