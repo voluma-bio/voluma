@@ -177,7 +177,8 @@ export function createGateway(deps: GatewayDeps) {
     if (!claims) throw new Refused(401, "invalid or expired token");
     if (!claims.providers.includes(provider)) throw new Refused(403, `no access to ${provider}`);
     // An own-key token holds the starter's keys and nothing falls back to ours.
-    const key = claims.ownKeys ? claims.ownKeys[provider] : keys[provider];
+    const ownKeys = claims.ownKeys ?? claims.visitorKeys;
+    const key = ownKeys ? ownKeys[provider] : keys[provider];
     if (!key) throw new Refused(403, `no ${provider} key for this token`);
     const method = req.method ?? "GET";
     const matched = matchRoute(provider, method, upstreamPath);
@@ -216,7 +217,7 @@ export function createGateway(deps: GatewayDeps) {
         route: `${method} ${matched.fileId ? `${matched.route.path}{id}` : upstreamPath}`,
         model,
         instance,
-        own: claims.ownKeys !== undefined,
+        own: ownKeys !== undefined,
       });
     } catch (error) {
       log(`admit failed: ${error instanceof Error ? error.message : error}`);
