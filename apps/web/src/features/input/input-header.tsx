@@ -95,18 +95,19 @@ export function InputHeading({
   const now = where(run, waitingOnYou);
   const newest = study?.inputs.find((s) => s.member.inputId === run.input.id)?.runs[0];
   const earlier = newest && newest.id !== run.id;
-  // One line: the breadcrumb ends in this sample, then where its run stands, then Run details.
+  // One line: the breadcrumb ends in this sample, then where its run stands, which opens Run details.
   return (
     <InputBreadcrumb study={study} title={title}>
       <h1 className="sr-only">{title}</h1>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
         {group && <span>Group: {group}</span>}
         {earlier && <span className="font-medium text-foreground">Earlier run</span>}
-        <StatusMark status={now.status} label={now.text} />
+        <RunDetails run={run} workflow={workflowLabel(run, study)}>
+          <StatusMark status={now.status} label={now.text} />
+        </RunDetails>
         {toCheck > 0 && <StatusMark status="check" label={`${toCheck} to check`} />}
         {now.detail && <span>{now.detail}</span>}
       </div>
-      <RunDetails run={run} workflow={workflowLabel(run, study)} />
     </InputBreadcrumb>
   );
 }
@@ -145,7 +146,16 @@ export function InputBreadcrumb({
   );
 }
 
-function RunDetails({ run, workflow }: { run: Run; workflow: string }) {
+/** Where the run stands (`children`) is the button that opens its details. */
+function RunDetails({
+  run,
+  workflow,
+  children,
+}: {
+  run: Run;
+  workflow: string;
+  children: ReactNode;
+}) {
   const live = run.state.status !== "ended";
   return (
     <Popover
@@ -154,9 +164,10 @@ function RunDetails({ run, workflow }: { run: Run; workflow: string }) {
       // Wide enough for a usual model id ("deepseek/deepseek-v4-pro") on one line beside its role.
       className="w-96"
       trigger={
-        <Button variant="ghost" size="sm" className="shrink-0">
-          Run details
-          <ChevronDown className="size-3.5" aria-hidden />
+        <Button variant="ghost" size="sm" className="-ml-2 shrink-0">
+          {children}
+          <span className="sr-only">, run details</span>
+          <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
         </Button>
       }
     >
