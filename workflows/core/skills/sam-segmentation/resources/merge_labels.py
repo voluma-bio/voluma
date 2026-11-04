@@ -14,8 +14,10 @@ winning gave a leaking small piece 0.3 mm3 of OA6-1RK's patella (`.context/evide
 contested voxel is counted in the output by big label and by where it went, and `big_lost` totals what each big label
 gave away against its size, so a leak shows: a small label with a large contested count against its volume, or a big
 label that lost much, is a To check item. A big label with no own voxels is lost whole to the small side, which
-`big_lost` shows. Refused: a temp or final label that is also a label in `--big`, a label in `--small` that `--map`
-does not mention, volumes of different shape or grid id.
+`big_lost` shows. Refused, before anything is written: a small temp label that takes more than `--max-big-share` of a big
+label's voxels after the nearest rule (that track followed the bone: on OA6-2RK a "small structure" track took 31% of SAM's
+tibia, splitting it midway), a temp or final label that is also a label in `--big`, a label in `--small` that `--map` does not
+mention, volumes of different shape or grid id.
 
 Writes: <out>  the merged labels (.npy, the grid of --big), with its sidecar (the map)
 Prints: one JSON line {labels, merged: {temp label: {final, voxels, contested: {big label: {to_small, to_big}}}}, big_lost: {big label: {voxels, of}}, volume_mm3: {label id: volume of the result}}
@@ -27,12 +29,32 @@ import numpy as np
 import sidecar
 from scipy import ndimage
 
+# Share of a big label a temp takes after the nearest rule. OA6-2RK rehearsal (4df02afe), bone-clipped tracks on the scan grid:
+# real small structures take at most 2.8% of any big bone (temp 63, label 6's piece, of the tibia; OA6-1RK's temp 63, which held
+# 17% of the patella, takes almost none of it: patella Dice 0.942 against 0.941 when big wins, core/.context/evidence.md); the
+# two tracks that followed a bone take 31% of the tibia and 19% of the fibula (temp 64) and 42% of the fibula (temp 65)
+MAX_BIG_SHARE = 0.10
+
+
+def distance_at(own, points, spacing):
+    """mm from each voxel in `points` (index arrays into `own`) to the nearest voxel of `own`. The feature transform alone takes
+    12 bytes per voxel where scipy's distance transform takes about 48 (8.7 GB on a track that followed OA6-2RK's tibia); the
+    distance is then the one scipy computes from it, at the points only."""
+    ft = ndimage.distance_transform_edt(~own, sampling=spacing, return_distances=False, return_indices=True)
+    d = (ft[(slice(None), *points)] - np.array(points)).astype(np.float64)
+    del ft
+    d *= np.asarray(spacing, np.float64)[:, None]
+    return np.sqrt(np.add.reduce(d * d, axis=0))
+
+
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
     ap.add_argument('--big', type=sidecar.existing, required=True, help='scan-grid labels of the big bones (clipped)')
     ap.add_argument('--small', type=sidecar.existing, required=True, help='scan-grid labels of the small request (trimmed, mapped back)')
     ap.add_argument('--map', nargs='+', required=True, metavar='temp:final', help='temporary label : label it goes back to (0 drops it)')
     ap.add_argument('--out', required=True, help='merged labels .npy to write')
+    ap.add_argument('--max-big-share', type=float, default=MAX_BIG_SHARE,
+                    help='a small temp label that takes more than this share of a big label\'s voxels after the nearest rule is refused')
     a = ap.parse_args()
     try:
         mapping = {int(t): int(f) for t, f in (m.split(':') for m in a.map)}
@@ -58,6 +80,7 @@ if __name__ == '__main__':
         sidecar.fail(f'{a.small} holds labels {stray} that --map does not mention: map each to its final label (or to 0 to drop it)')
     spacing = g_big['spacing_zyx_mm']
     claiming = [t for t, label in mapping.items() if label > 0]
+    sizes = dict(zip(big_ids.tolist(), big_sizes.tolist()))
     boxes = ndimage.find_objects(small)
     out = big.copy()
     report = {temp: {'final': label, 'voxels': int((small == temp).sum()), 'contested': {}} for temp, label in mapping.items()}
@@ -73,31 +96,47 @@ if __name__ == '__main__':
         mine = np.isin(sm, temps)
         own_small = mine & (b == 0)
         out[box][own_small] = label
+        contested = [(int(bl), np.nonzero(mine & (b == bl))) for bl in np.unique(b[mine & (b > 0)])]
         # the label's box holds all its own voxels, so the small side's distance is exact inside it
-        d_small = ndimage.distance_transform_edt(~own_small, sampling=spacing) if own_small.any() else None
-        for big_label in np.unique(b[mine & (b > 0)]):
-            at = np.nonzero(mine & (b == big_label))
+        d_small = [distance_at(own_small, at, spacing) for _, at in contested] if own_small.any() else None
+        for (big_label, at), d_s in zip(contested, d_small or [None] * len(contested), strict=True):
             to_small = np.zeros(len(at[0]), bool)
-            if d_small is not None:
-                d_s = d_small[at]
+            if d_s is not None:
                 # a big own voxel farther than the farthest contested voxel's small distance cannot win a contest
                 reach = [int(np.ceil(d_s.max() / sp)) + 1 for sp in spacing]
                 crop = tuple(slice(max(0, l + int(i.min()) - r), l + int(i.max()) + 1 + r) for l, i, r in zip(lo, at, reach))
                 own_big = (big[crop] == big_label) & ~np.isin(small[crop], claiming)
                 if own_big.any():
-                    d_big = ndimage.distance_transform_edt(~own_big, sampling=spacing)
-                    to_small = d_s < d_big[tuple(l + i - c.start for l, i, c in zip(lo, at, crop))]
+                    to_small = d_s < distance_at(own_big, tuple(l + i - c.start for l, i, c in zip(lo, at, crop)), spacing)
                 else:
                     to_small[:] = True
                 out[tuple(l + i[to_small] for l, i in zip(lo, at))] = label
-            lost[int(big_label)] = lost.get(int(big_label), 0) + int(to_small.sum())
+            lost[big_label] = lost.get(big_label, 0) + int(to_small.sum())
             v = sm[at]
             for temp in temps:
                 n_temp = v == temp
                 if n_temp.any():
-                    report[temp]['contested'][int(big_label)] = {'to_small': int((n_temp & to_small).sum()), 'to_big': int((n_temp & ~to_small).sum())}
-    sizes = dict(zip(big_ids.tolist(), big_sizes.tolist()))
+                    report[temp]['contested'][big_label] = {'to_small': int((n_temp & to_small).sum()), 'to_big': int((n_temp & ~to_small).sum())}
     big_lost = {b: {'voxels': v, 'of': sizes[b]} for b, v in sorted(lost.items())}
+    taken = {}  # (final label, big label) -> voxels taken, summed over the temps: a track sent as two temps is one track
+    for temp, r in report.items():
+        for b, c in r['contested'].items():
+            taken.setdefault((r['final'], b), []).append((temp, c['to_small']))
+    followed = [(temps, b, sum(n for _, n in temps)) for (_, b), temps in sorted(taken.items())
+                if sum(n for _, n in temps) > a.max_big_share * sizes[b]]
+    if followed:
+        # the temps that carry the take (a quarter of it or more), not every temp that touched the bone
+        drop = ' '.join(f'{t}:0' for t in sorted({t for temps, _, n in followed for t, m in temps if m * 4 >= n}))
+        said = '; '.join(f'temps of label {next(r["final"] for t, _ in temps for r in [report[t]])} take {n} of big label {b}\'s {sizes[b]} '
+                         f'voxels ({n / sizes[b]:.0%}: ' + ', '.join(f'{t} {m / sizes[b]:.1%}' for t, m in temps) + ')'
+                         for temps, b, n in followed)
+        sidecar.fail(f'{said} after the nearest rule: a small-structure track that takes more than {a.max_big_share:.0%} of a big bone '
+                     f'followed that bone, not a small structure. Drop the track(s) that carry it ({drop} in --map) and redo that structure: a new segment_sam '
+                     'request with a tight box on the piece itself (snap_boxes.py), negative points on the big bone inside the box, and '
+                     'direction or otherFrames where it drifts; or write your own cleanup of the track (keep what lies across the joint '
+                     'space from the bone, drop what overlaps its label) and show it on a crop sheet. Never label the bare threshold '
+                     'candidate instead (sam-segmentation, "When a track fails"). The bone the big track missed is then unlabelled bone '
+                     'fused to it, for segmentation-check')
     vox = float(np.prod(spacing))
     np.save(a.out, out)
     sidecar.write(a.out, like=sidecar.sidecar_path(a.big), inputs=[a.big, a.small], params={'map': {str(k): v for k, v in mapping.items()}})

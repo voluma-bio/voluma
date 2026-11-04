@@ -41,5 +41,6 @@ holds rules, not experiment logs.
   it). 3D renders need pyvista on an off-screen VTK. Keep recipe numbers (box padding, trim rule) in one
   script each, so a recipe change touches one file.
 - **Anatomy keys the generic checks read** (a workflow's `skills/<skill>/references/anatomy.json`, per label): `volume_mm3`, `components`, `must_touch`
-  (ids of labels it must come within `touch_mm` of, default 0.05 mm).
-  `label_stats.py` reads them; a new animal or workflow fills them in rather than changing the script.
+  (ids of labels it must come within `touch_mm` of, default 0.05 mm), `apart_from` (ids of the bones a small structure sits
+  across joint space from; `unlabelled.py` refuses one joined to them through bone).
+  `label_stats.py` and `unlabelled.py` read them; a new animal or workflow fills them in rather than changing the script.

@@ -136,7 +136,7 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   the planes are turned (`offGrid`) is the largest turn taking a grid pane onto its pane, so a pane
   spun in its own plane counts; the words ("Turned 3.6°") and Reset follow the panes' own on-grid
   test, so a pane a hair off the grid says "Turned 0.0°" rather than hiding behind the grid's
-  name. On the grid's axes the tool bar names the grid (`gridName`, "Aligned tibia grid").
+  name. On the grid's axes the tool bar names the grid (`gridName`, "Tibia long-axis grid"), and Align lists the grid itself first ("Along the tibia long-axis grid", marked Measured on), which does what Reset does.
 - **Align.** Targets come from the caller (`planeTargets`, `targets.ts`): a plane fitted (least
   squares, `fitNormal`) through the vertices of every published surface whose catalog entry has
   `fitsPlane` (mouse-oa: both growth-plate faces, so "GP"), and every other image grid's axes.

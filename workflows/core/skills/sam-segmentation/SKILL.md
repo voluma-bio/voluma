@@ -63,7 +63,23 @@ workflow's anatomy reference: which structures to prompt, how they group, and wh
   when you report it.
 - **Map back and merge** (`to_scan.py`, `merge_labels.py`): a voxel both requests claim goes to the nearer
   side's own voxels, and the merge reports each piece's contested voxels by big label and where they went, and what each big
-  label lost (`big_lost`); a piece with a large contested count, or a big label that lost much, is a To check item. Clip once more: that is `labels.npy`.
+  label lost (`big_lost`); a piece with a large contested count, or a big label that lost much, is a To check item. It
+  refuses a small track that takes more than a tenth of a big bone after that rule: that track followed the bone. Drop it, redo the
+  structure (below), and give the bone the big track missed to that bone (`segmentation-check`). Clip once more: that is `labels.npy`.
+
+## When a track fails
+
+A small-structure track that leaks onto a bone, is refused by `merge_labels.py`, or ends joined to a bone (a contact
+patch with a big bone over the tolerance, `segmentation-check`) is a prompt to fix, not a structure to replace. Redo it:
+a new request for that structure alone, with a box snapped tight to the piece (the box is 2D, on the oriented stack: map
+the scan-grid candidate there first with `map_points.py --pieces`, then `snap_boxes.py --index <promptFrame>` on its box),
+negative points on the bone inside the box, `direction` (`forward` or `backward` along the stack from the prompted slice)
+set so the track does not run on past the piece's slices, and `otherFrames` on the slices where it drifted. Or write
+your own cleanup of the track in your `$WORK` folder (for example, drop what overlaps the bone's label and keep the
+part across the joint space) and show the result on a crop sheet before you keep it. Never fall back to a bare
+threshold candidate (`unlabelled.py`) as the structure's label: a threshold piece next to a bone is often the bone's
+own cortex, cut off by the candidate rim. When neither works, the structure is a To check item and its label stays
+unset.
 
 Do not claim a voxel-exact number from one call: keep the call's counts, prompts and labels as evidence, and when a
 measurement must be stable, call twice and report the spread. A third rerun on one problem is a To check item.
