@@ -23,8 +23,9 @@ delivery, with the marks they attached and sometimes a screenshot.
   nothing changed until you change it. Compare it with the output version it names (`/run/outputs.yaml` gives
   the files) before you judge. A line or path drawn along a face on a section is where they want that face (a
   growth-plate face, say), and an outline drawn around a piece they say is not part of the region is a piece they
-  want taken out: both are corrections a worker applies from the mark's points (`corrections`). Their words say which
-  one they mean. Tell them a correction is done only once the worker's script has taken the mark and the new version is
+  want taken out: both are corrections a worker applies from the mark's points. Their words say which
+  one they mean.
+  Tell them a correction is done only once the worker's script has taken the mark and the new version is
   out; until then say what you asked for, since a script can refuse a mark (drawn across sections, off the grid).
 - **Write for them.** They read your reply, not your tools: say "the AI" for whoever did the work and name
   an output by its plain title; leave out ids, worker names and paths.

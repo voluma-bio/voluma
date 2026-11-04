@@ -96,3 +96,41 @@ describe("agentLog main cursor", () => {
     expect(ids(l)).toEqual([]);
   });
 });
+
+describe("agentLog review main", () => {
+  const log = () => {
+    const events: RunEvent[] = [];
+    const add = (type: string, id: string, threadId: string, payload: object) =>
+      events.push({
+        id,
+        runId: "run1",
+        threadId,
+        createdAt: new Date(Date.UTC(2026, 9, 28, 0, 0, events.length)).toISOString(),
+        seq: events.length,
+        type,
+        payload,
+      } as RunEvent);
+    const started = (id: string, name: string) =>
+      add("thread.started", id, name, {
+        name,
+        parentThreadId: "root",
+        workflows: [],
+        kind: "supervisor",
+        role: "main",
+      });
+    return { events, add, started };
+  };
+
+  it("marks a main first started while reviewing, and keeps it across its resumes", () => {
+    const b = log();
+    b.started("main", "main");
+    b.add("thread.ended", "e0", "root", { status: "completed" });
+    b.add("run.reopened", "r1", "root", {});
+    b.started("main:resumed", "main");
+    b.started("main.2", "main.2");
+    b.started("main.2:resumed", "main.2");
+    const { records } = agentLog(b.events);
+    expect(records.get("main")?.review).toBe(false);
+    expect(records.get("main.2")?.review).toBe(true);
+  });
+});

@@ -65,7 +65,7 @@ import { failureKind, mainFailureAction, type ProviderError } from "./failure-po
 import { LOOP_DEFAULTS, type LoopConfig, type ModelSetup } from "./loop-config";
 import { loopShell, RUNTIME, type Section, type Step } from "./loop-shell";
 import { agentLivenessNudge, cutOffText, PROVIDER_FAILED_RESUME } from "./messages";
-import { skillMarker } from "./prompts";
+import { type Handover, NO_SUMMARY, skillMarker } from "./prompts";
 import type { Recorder } from "./recorder";
 import type { RunFiles } from "./run-files";
 import { threadIdOf } from "./thread-id";
@@ -93,10 +93,10 @@ interface AgentIdentity {
   blind?: string;
   /** A worker's limit: the only outputs it may report (`start_worker`'s `outputs`). */
   outputs?: string[];
-  /** Which main this is: 1 for the first, 2 for its replacement. */
-  n: number;
-  /** A replacement main in review: its first message is this (what it needs to take over), in place of the run-start prompt. */
-  takeover?: string;
+  /** The review main (`AgentRecord.review`): its system prompt carries the researcher skill and `review.md`. */
+  review?: boolean;
+  /** A review main that has stored no message: its first message is the handover, in place of the run-start prompt. */
+  handover?: Handover;
 }
 
 /** What the wiring decides about an agent's thread: its prompts, model and tools. */
@@ -131,6 +131,12 @@ interface AgentLoopOptions {
   restoreMainPlan(): Promise<void>;
   /** Renders the agent's conversation for `/work/<name>/transcript.md` (`transcript.ts`). */
   prepareTranscript(agent: { id: string; name: string }): Promise<() => Promise<void>>;
+  /**
+   * The summary of a finished main's stored conversation for the review main that starts from it
+   * (`prompts.ts` `HANDOVER_INSTRUCTION`); throws when it cannot be written. `forThread` is the
+   * review main's id, which makes the id of the call's usage record.
+   */
+  handoverSummary(previous: { id: string }, forThread: string): Promise<string>;
   /** The wiring's half of building a thread: prompts, model, tools (which act through `api`). */
   setup(agent: AgentIdentity, api: AgentsApi): AgentSetup;
   /** Runs an approved call's tool, not gated, as main's thread (`tools/registry.ts` `approvedTool`). */
@@ -225,7 +231,6 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
           role: "worker",
           brief,
           skills,
-          n: 1,
           ...(from && { from }),
           ...(blind && { blind }),
           ...(outputs && { outputs }),
@@ -255,13 +260,10 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     id: r.id,
     name: r.name,
     role: r.place,
-    n:
-      r.place === "main"
-        ? [...d.records.values()].filter((x) => x.place === "main").indexOf(r) + 1
-        : 1,
     ...(r.place === "worker" && briefOf(d, r)),
     ...(r.from && { from: r.from }),
     ...(r.blind && { blind: r.blind }),
+    ...(r.review && { review: true }),
   });
 
   /**
@@ -315,15 +317,16 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   async function resume(r: AgentRecord, text: string, sender: UserSender) {
     const d = derive();
     if (stateOf(r) === "closed") throw new Error(`${r.id} is closed and is never resumed`);
-    const agent = identityOf(d, r);
-    const takeover = r.place === "main" ? await takeoverOf(d, r.id, agent.n) : {};
+    const mains = [...d.records.values()].filter((x) => x.place === "main");
+    const previous = mains[mains.indexOf(r) - 1];
+    const handed = r.review && previous ? await handoverOf(r.id, previous) : undefined;
     await begin(
-      { ...agent, ...takeover },
+      { ...identityOf(d, r), ...handed?.agent },
       `${r.id}:started:${r.starts + 1}`,
       r.parentThreadId ?? root,
       {
         input: { text, sender },
-        ...(takeover.takeover !== undefined && { covers: d.lastEventId }),
+        ...(handed && { covers: handed.covers }),
       },
     );
   }
@@ -340,30 +343,64 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   }
 
   /**
-   * A replacement main in review that has stored no message: its first message is the takeover
-   * text, in place of the run-start prompt (so a replacement cut off before its first message
-   * is stored starts the same way again).
+   * A review main's handover, unless it has stored a message (it was cut off before its first one:
+   * the handover is made again, so it starts the same way). The main before it is summarized after
+   * its conversation is written to `/work/main/transcript.md`; a summary that fails is logged, not
+   * the run's failure. The delivery is read after the summary, which can take a minute, and
+   * `covers` is the log position it holds.
    */
-  async function takeoverOf(d: AgentLog, id: string, n: number) {
-    if (n < 2 || !d.reviewing || userTexts(id).length > 0) return {};
-    return { takeover: await deliveryOf(d, id, true) };
+  async function handoverOf(id: string, previous: AgentRecord) {
+    if (userTexts(id).length > 0) return undefined;
+    let summary = NO_SUMMARY;
+    try {
+      // The transcript is the fallback for a missing summary: its failure is not the run's.
+      await (await o.prepareTranscript({ id: previous.id, name: "main" }))();
+    } catch (error) {
+      if (o.signal?.aborted) throw error;
+      console.error(`handover: no transcript of ${previous.id}:`, error);
+    }
+    try {
+      summary = (await o.handoverSummary(previous, id)) || NO_SUMMARY;
+    } catch (error) {
+      if (o.signal?.aborted) throw error;
+      console.error(`handover: no summary of ${previous.id}:`, error);
+    }
+    const d = derive();
+    const delivery = await deliveryOf(d, id, true);
+    return { agent: { handover: { summary, delivery } }, covers: d.lastEventId };
   }
 
   /**
    * The next main (`main`, `main.2`, ...), skipping a name whose thread this process found
-   * unresumable. A replacement in review gets the takeover prompt: its first message holds the
-   * notices it would otherwise be delivered, and covers them.
+   * unresumable. In review it is a review main, started from the main before it: its first message
+   * is the handover, which holds the notices it would otherwise be delivered, and covers them.
    */
   async function startMain(d: AgentLog) {
-    let n = [...d.records.values()].filter((r) => r.place === "main").length + 1;
+    const mains = [...d.records.values()].filter((r) => r.place === "main");
+    let n = mains.length + 1;
     const nameOf = (k: number) => (k === 1 ? "main" : `main.${k}`);
     while (threads.stale(threadIdOf(runId, nameOf(n)))) n++;
     const id = threadIdOf(runId, nameOf(n));
+    const previous = mains.at(-1);
+    const handed = d.reviewing && previous ? await handoverOf(id, previous) : undefined;
+    // End the main before it, or a ping or a finished command would resume it beside the review main.
+    // A failed one stays failed: `mainFailed` reads that to replace a failing main only once.
+    const before = previous && stateOf(previous);
+    if (handed && previous && before !== "closed") {
+      if (before !== "failed")
+        await recorder.append(
+          previous.id,
+          "thread.ended",
+          { status: "closed" },
+          `${previous.id}:handed-over`,
+        );
+      await o.release(previous.id);
+    }
     return begin(
-      { id, name: nameOf(n), role: "main", n, ...(await takeoverOf(d, id, n)) },
+      { id, name: nameOf(n), role: "main", ...(d.reviewing && { review: true }), ...handed?.agent },
       startedId(id),
       root,
-      { ...(n > 1 && { covers: d.lastEventId }) },
+      { ...(handed ? { covers: handed.covers } : n > 1 && { covers: d.lastEventId }) },
     );
   }
 
@@ -558,24 +595,18 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       );
 
   /**
-   * The skills a delivery to `threadId` carries, as the blocks main reads: `researcher` with the
-   * first person notice the thread is told, `corrections` with the first person notice or
-   * out-of-date output in review. Derived from what the thread's stored messages hold, so a
-   * delivery cut off before it was stored sends them again. `all`: a takeover, which tells the
-   * thread what the old one had been told too.
+   * The `researcher` skill block a delivery to `threadId` carries, with the first person notice the
+   * thread is told: main mid-run gets it here, the review main has it in its system prompt.
+   * Derived from what the thread's stored messages hold, so a delivery cut off before it was
+   * stored sends it again.
    */
-  function skillsFor(d: AgentLog, threadId: string, all: boolean): string[] {
-    const person = (all ? d.notices : d.undelivered).some((n) => n.kind === "person");
-    const wanted = [
-      ...(person ? ["researcher"] : []),
-      ...(d.reviewing && (person || outOfDateIds().length > 0) ? ["corrections"] : []),
-    ];
-    if (wanted.length === 0) return [];
-    const texts = userTexts(threadId);
-    return wanted.flatMap((name) => {
-      const block = o.skillBlock(name);
-      return block && !texts.some((t) => t.includes(skillMarker(name))) ? [block] : [];
-    });
+  function skillsFor(d: AgentLog, threadId: string): string[] {
+    if (d.records.get(threadId)?.review || !d.undelivered.some((n) => n.kind === "person"))
+      return [];
+    const block = o.skillBlock("researcher");
+    return block && !userTexts(threadId).some((t) => t.includes(skillMarker("researcher")))
+      ? [block]
+      : [];
   }
 
   /** A screenshot that cannot be staged is dropped from the delivery: the notice still carries the text. */
@@ -590,15 +621,15 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
   }
 
   /**
-   * What main is told in its next delivery, as one text. `takeover`: the text of a replacement
-   * main's first message: the notices it would be delivered, the researcher's messages the one
-   * before had not answered, and the skills its predecessor had.
+   * What main is told in its next delivery, as one text. `handover`: the delivery inside a review
+   * main's first message: the notices it would be delivered and the researcher's messages the main
+   * before it had not answered.
    */
-  async function deliveryOf(d: AgentLog, threadId: string, takeover = false): Promise<string> {
+  async function deliveryOf(d: AgentLog, threadId: string, handover = false): Promise<string> {
     await o.runFiles.refresh();
     const events = recorder.events();
     const cut = d.cursor ? (d.written.get(d.cursor) ?? -1) : -1;
-    const owed = takeover
+    const owed = handover
       ? [...d.unansweredPerson.filter((n) => !d.undelivered.includes(n)), ...d.undelivered]
       : d.undelivered;
     const screenshots = new Map<string, string>();
@@ -614,7 +645,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       outOfDate: outOfDateIds(),
       pending: pendingFinal(events),
       reviewing: d.reviewing,
-      skills: skillsFor(d, threadId, takeover),
+      skills: handover ? [] : skillsFor(d, threadId),
     });
   }
 
@@ -634,6 +665,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const [outstanding] = handed.get(m.id) ?? [];
     // A start whose message is not stored yet has already taken these notices; its `onStored` nudge steps the loop again.
     if (m.inputPending) return false;
+    // So has a start whose first message is not stored yet: it carries them (a review main's handover holds its delivery).
+    if (userTexts(m.id).length === 0) return false;
     if (running && (!covers || (outstanding && d.cursor !== outstanding))) return false;
     const text = await deliveryOf(d, m.id);
     const sender: UserSender = { kind: "runtime", covers };
@@ -791,6 +824,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       replied: m.replied,
       endBefore: m.endBefore,
       previousFailed: mains.at(-2)?.end?.status === "failed",
+      failedBeforeRequest: m.endedAt < (d.written.get(d.span) ?? -1),
     });
     if (action === "fail")
       throw new Error(`the AI stopped on an error from its provider: ${m.end?.error ?? ""}`);
@@ -809,7 +843,7 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     checkFatal(d);
     const jobFailure = jobs.failure();
     if (jobFailure !== undefined) throw jobFailure;
-    // Review with a main that was stopped (`stopAll` after its grace): nothing would act on the researcher, so another takes over.
+    // Review with a main that was stopped (`stopAll` after its grace): nothing would act on the researcher, so another takes over, from the one before it.
     if (!d.main || (d.reviewing && stateOf(d.main) === "closed")) {
       await startMain(d);
       return "acted";
@@ -818,6 +852,16 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     if (await resumeCutOff(d)) return "acted";
     if (stateOf(d.main) === "failed") {
       await mainFailed(d, d.main);
+      return "acted";
+    }
+    // The run finished and the researcher wrote: a review main takes over from the run main. A run reviewing on a run main (started before review mains) gets one here too.
+    if (
+      d.reviewing &&
+      !d.main.review &&
+      !threads.running(d.main.id) &&
+      (d.undelivered.length > 0 || d.unansweredPerson.length > 0)
+    ) {
+      await startMain(d);
       return "acted";
     }
     if (await jobs.leave(d)) return "acted";

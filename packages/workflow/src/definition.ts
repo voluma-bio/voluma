@@ -69,6 +69,11 @@ export interface WorkflowDefinition {
   words: string;
   /** `agents/environment.md`: what the sandbox is, appended to every role's system prompt. */
   environment: string;
+  /**
+   * `core/review.md`: appended to the review main's system prompt (`packages/harness/src/prompts.ts`). Absent in
+   * a snapshot cut before it existed.
+   */
+  review?: string;
 }
 
 /** A file that could not be read into a definition; names where. */

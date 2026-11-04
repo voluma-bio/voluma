@@ -255,7 +255,7 @@ interface DeliveryParts {
   pending: string[];
   /** The researcher is reviewing: an out-of-date output may also be left to them. */
   reviewing: boolean;
-  /** Skill texts due with this delivery (`researcher`, `corrections`). */
+  /** Skill texts due with this delivery (`researcher`). */
   skills: string[];
 }
 

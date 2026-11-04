@@ -21,6 +21,11 @@ export type AgentState = "working" | "idle" | "closing" | "closed" | "failed" | 
 export interface AgentRecord extends ThreadBase {
   /** `main` or `worker`; the agent model gives every thread one. */
   place: "main" | "worker";
+  /**
+   * A main whose first `thread.started` was written while the run was reviewing: the review main
+   * (its prompt has the researcher skill and `review.md`). Always false for a worker. Derived, not stored.
+   */
+  review: boolean;
   /** Log positions of its latest start and of its latest end (-1: none). */
   startedAt: number;
   endedAt: number;
@@ -144,9 +149,11 @@ export function agentLog(events: readonly RunEvent[]): AgentLog {
   const fold = threadRecords<AgentRecord>((started, base, prev) => {
     // A cut-off start continues the turn it resumes; any other start begins a new one.
     const continues = prev !== undefined && prev.end === undefined;
+    const place = base.place === "main" ? "main" : "worker";
     return {
       ...base,
-      place: base.place === "main" ? "main" : "worker",
+      place,
+      review: prev?.review ?? (place === "main" && reviewing),
       parentThreadId: started.parentThreadId,
       spawnedBy: prev?.spawnedBy ?? started.spawnedBy,
       from: prev?.from ?? started.from,
