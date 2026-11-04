@@ -25,7 +25,8 @@ else (the fibula head, say): it is harmless to the cut but sets the side of the 
 ## Label table
 
 `anatomy.json` has `labels[]` with `id`, `name`, `volume_mm3 [lo, hi]`, `components` (expected number of 3D pieces) and
-`notes`; `label_stats.py --ranges` reads it.
+`notes`; `label_stats.py --ranges` reads it. Labels 5-12 carry `apart_from: [1, 2, 3, 4]`: each sits across joint space
+or cartilage from the big bones, so `unlabelled.py --ranges` refuses one joined to them through bone.
 
 | Id | Name | OA6-1RK reference (mm3, pieces) | Range in anatomy.json |
 |---|---|---|---|

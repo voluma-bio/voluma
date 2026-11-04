@@ -76,9 +76,10 @@ def edt_into(view, inside):
 
 def grow(shape, build, fill_elevation):
     """Seeded watershed, 6-connected: the basins of the seeds flood the mask over the elevation. `build(seeds, mask)` fills an
-    int32 seed view and an int8 mask view, `fill_elevation(view)` a float64 view.
+    int32 seed view and an int8 mask view, `fill_elevation(view)` a float64 view. Returns an int32 view: assign it into the
+    caller's volume, which casts it.
     skimage's `watershed` casts every input to float64/int32 and pads again: about 26 bytes per voxel, 7 GB on a whole scan
-    against a 4 GiB sandbox. This builds the padded arrays once (13 bytes per voxel), builders' temporaries freed before the
+    against an 8 GiB sandbox. This builds the padded arrays once (13 bytes per voxel), builders' temporaries freed before the
     float64 image exists, and calls skimage's raveled core, which is private: re-check it when skimage is bumped in requirements.txt."""
     padded = tuple(n + 2 for n in shape)
     inner = (slice(1, -1),) * 3
@@ -92,7 +93,7 @@ def grow(shape, build, fill_elevation):
     neighbours = np.array([strides[0], -strides[0], strides[1], -strides[1], strides[2], -strides[2]], dtype=np.intp)
     watershed_raveled(image.ravel(), np.flatnonzero(out), neighbours, flood.ravel(), strides, 0.0, out.ravel(), False)
     del image, flood
-    return out[inner].astype(np.uint8)
+    return out[inner]
 
 
 if __name__ == '__main__':
