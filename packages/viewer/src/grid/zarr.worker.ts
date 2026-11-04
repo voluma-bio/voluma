@@ -21,7 +21,10 @@ export type PlaneResponse =
   | { id: number; error: string };
 
 type Chunk = { data: Values; stride: number[] };
-const CACHE_BYTES = 384 * 1024 ** 2;
+// Three panes' level-0 planes and their labels, so a crosshair move re-reads the other panes'
+// chunks from here, not the network: on OA6-1RK (877×520×517, 64³ int16 chunks, uint8 labels)
+// about 250 MB untilted and 410 MB tilted 30°; on an 855³ scan 440 and 710 MB.
+const CACHE_BYTES = 768 * 1024 ** 2;
 const MAX_FETCHES = 12;
 
 const arrays = new Map<string, Promise<zarr.Array<zarr.DataType, zarr.Readable>>>();
