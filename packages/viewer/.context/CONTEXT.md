@@ -9,13 +9,23 @@ with it (Review imports it lazily).
 
 The run publishes the geometry; the browser aligns nothing. Blocks share a grid when their
 volumes share `gridId`, and a block on another grid is listed under the viewer ("On another grid,
-not shown here"), never resampled onto this one.
+not shown here"), never resampled onto this one. One exception: a grid with no labels of its own
+(the aligned tibia grid) shows the scan grid's context label meshes in 3D, moved rigidly through
+the two volumes' affines (`GridMesh.placement`, a matrix applied to the geometry; no slice overlay).
+It does so only when both affines carry a pose (an origin or a rotation): a spacing-only diagonal,
+a resampled grid's included, places nothing correctly. The harness publishes spacing-only affines
+today (`report-output.ts` `detailFromSidecar`), so until that carries `affine_xyz_to_world_mm`
+(#570) nothing is borrowed (`packages/harness/.context/TODO.md`).
 
 - **Which grid.** The grid most of the focused item's `on` blocks and `volumeId` sit on; else the
   grid most of the output's shown blocks sit on; else the scan's grid, the first image volume's. The grid's image is
   its `image` volume with `.npy` data; spacing is the norms of its affine's columns.
-- **What is drawn.** The named structures on the grid (a named labels volume brings all its
-  structures): a labels volume as one ivory overlay (`--bone`, or `--label-n` with Labels on), a
+- **What is drawn.** Context first: the labels volume on the grid that the most label structures
+  point into (the run's bone labels), every label as one overlay in `--label-n` (`--bone` with
+  Labels off), its meshes at 0.3 opacity when the output has meshes of its own. Then the named
+  structures on the grid (a named labels volume brings all its structures and is then drawn
+  opaque in its own colours, the output as a whole) in `--output`, outlined on slices (a pixel
+  whose 4-neighbour differs is opaque, `compose.ts`): a label of a labels volume, a
   cropped mask as an overlay at its `offsetZyx`, each with its meshes; named surfaces as meshes
   and their triangle intersections with each slice. Named rulers and points map from world mm
   through the image's affine into source voxels. Rulers use `--ruler`, with endpoints in 3D and
@@ -26,7 +36,7 @@ not shown here"), never resampled onto this one.
 - **Assets.** From the run's `assets.ready`/`assets.failed` events by the file's sha256
   (`reviewAssetsOf`, run-view): absent is "Preparing…", `failed` is its error. For the image that
   replaces the viewer; for an overlay it is a note under the heading.
-- **Display.** Every shown block draws at full opacity. The Labels toggle changes bone colours
+- **Display.** The Labels toggle (on by default) changes the context's colours
   without moving the camera or crosshair. A new scene on the same grid redraws in place.
 - **Focus.** A To check item's focused blocks are drawn in `--check-outline`; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
   drawn even when no structure brings it. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they
@@ -56,20 +66,26 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   (`planes`, from the base's catalog entry); without it they are uncoloured. Its views stay
   mounted and move between CSS grid cells, so a chip swap, a layout change or full screen never
   remounts a pane; the layout is the caller's, the seams the viewer's.
-  Rows run down, so z runs down in every slice pane and in 3D's opening view (`camera.up` = −z).
+  Rows run down, so z runs down in every slice pane and in 3D's opening view (`camera.up` = −z;
+  −y when that view looks within 10° of z).
 - **Levels.** A pane opens on the coarsest level and loads the level whose voxel still covers at
   least one device pixel at its zoom; the coarse picture shows meanwhile unless the finer one lands
   within 80 ms. Overlays load at the image level's scale (nearest: a label never blends).
-- **Worker.** One module worker reads every plane. Decoded 64³ chunks share one LRU cache
-  (384 MiB); fetches wait for 12 slots, newest first, and a chunk no live request still wants is
+- **Worker.** One module worker reads every plane, and reslices tilted ones (`readSlice`). Decoded 64³ chunks share one LRU cache
+  (768 MiB: three panes' level-0 planes and labels, about 410 MB tilted on OA6-1RK); fetches wait for 12 slots, newest first, and a chunk no live request still wants is
   never fetched. A 404 chunk is the fill value (zarr v2 omits empty chunks).
 - **Interaction.** Left drag sets the crosshair; wheel, arrows and Page Up/Down step slices;
   Ctrl/⌘ + wheel zooms at the pointer; Shift, middle or right drag pans; zoom is relative to the
   pane's fit, so resizing and maximizing keep the framing. In 3D, drag turns the scene freely
   like a ball (over the top, and rolling near the edge; three's `ArcballControls`), Shift, Ctrl/⌘ or right
   drag pans, wheel or middle drag zooms, and the pane's reset button returns to the opening view; a click (not a
-  drag) on a mesh moves the crosshair to the voxel under it. Loading never moves the crosshair or
-  camera; a new `focus` voxel (a check's) moves the crosshair. A pane with no size (hidden) draws
+  drag) on a mesh moves the crosshair to the voxel under it. 3D opens on the grid's centre, at a
+  fixed distance, from the side of the output's own meshes (`GridMesh.own`, set by `review.ts`;
+  never context or a focused check), so they sit in front of the see-through context; within 5%
+  of the radius of the centre, or with none, from a default side. Only visible own meshes count.
+  The camera turns there each time an output's own meshes have loaded, until a gesture or a
+  restored view (`show`) has touched it.
+  Otherwise loading never moves the crosshair or camera; a new `focus` voxel (a check's) moves the crosshair. A pane with no size (hidden) draws
   nothing; showing it resizes it, which draws, so a caller may keep a viewer mounted and hidden.
 - **Marks.** With `tool` set, left clicks and drags mark instead of moving the crosshair, and
   `onMark` gets a `GridMark`: the contract's `MarkShape` (`agent-events.ts`, read-only); the caller
@@ -94,7 +110,8 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   the screen's pixel ratio, skipping duplicate widths); null if none fits or any shown pane is
   loading, refining or failed. The caller freezes its marks and grid identity at invocation.
 - **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
-- **3D.** The image as a volume rendering, no slice planes: the coarsest level at once, then the
+- **3D.** The meshes; the image is volume-rendered only when the scene has none (the scan before
+  segmentation, not loaded otherwise), no slice planes: the coarsest level at once, then the
   finest level of at most 16 M voxels (`volume.ts`), as an 8-bit 3D texture between the window
   limits, ray-marched with gradient lighting in `--bone`. The meshes render first into a target
   with depth and each ray stops at it, so a structure inside the bone shows where it is.
@@ -103,11 +120,15 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
 
 - **Where a pane lies.** Each slice pane has a basis in the grid's mm, (z, y, x): `right`, `down`,
   `normal` (`frame.ts`). On the grid's axes a pane reads whole slices from zarr as above. Tilted,
-  it is resliced on the CPU (`reslice.ts`) from one whole level shared with the 3D pane
-  (`holdLevel`, at most 16 M voxels): the image trilinear, overlays nearest. A whole level is
-  read once while anyone holds it and dropped when the last pane holding it unmounts or untilts;
-  nothing outlives the viewer. So a tilted pane is
-  softer than an untilted one at high zoom. Its counter is primed (′) on the nearest axis and steps
+  each picture is resliced in the worker (`reslice.ts`) from only the chunks the plane crosses:
+  the image trilinear, overlays nearest, at their own level and offset. Two layers: the coarsest
+  level over the grid's whole outline (at most 1024 samples a side), at once, and over it the
+  zoom's level (`levelFor` in device pixels, as untilted) in a window around the view, always
+  sampled one level voxel apart (`windowAround`): the view grown by half its size each way, capped
+  at 1024 samples a side but never under a quarter of the view each way. Panning or zooming out to
+  within an eighth of a view of the window's edge loads a new window; the coarse layer shows
+  meanwhile. A failed coarse picture is the pane's error only when the fine one fails too. A new depth or turn reloads both,
+  from the chunk cache when it can. Its counter is primed (′) on the nearest axis and steps
   the grid's finest spacing along its normal; marks within half a step of the plane count as on it.
 - **Turning by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
   other two planes' lines; dragging one tilts those two planes about this pane's normal (this pane

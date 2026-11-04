@@ -21,6 +21,7 @@ import { agentLog, openApprovals } from "@voluma/contracts/agents";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
 import { outputsFold } from "@voluma/contracts/output-fold";
+import { toVoxel } from "@voluma/contracts/ruler";
 import type { RunRead } from "@voluma/contracts/run";
 import {
   type AgentLinks,
@@ -56,7 +57,6 @@ import {
   type PlaneFit,
   QUAD_START,
   type QuadLayout,
-  voxelOf,
   type Zyx,
 } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
@@ -259,7 +259,7 @@ export function OutputsReview({
     if (!a || image?.data?.format !== "npy" || !gridKey) return;
     if (assets[image.data.sha256]?.state !== "ready") return;
     aimedFor.current = inViewId;
-    const end = voxelOf(image, a.kind === "point" ? a.position : a.a);
+    const end = toVoxel(image.affine, a.kind === "point" ? a.position : a.a);
     const at = end.map((n, i) => Math.max(0, Math.min(image.shapeZyx[i]! - 1, Math.round(n))));
     jumpTo({ at: at as unknown as Zyx, gridKey, output: inViewId });
   }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
