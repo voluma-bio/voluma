@@ -70,7 +70,6 @@ export function useSavedViews(
     if (newest) setShown(newest.id);
   }, [all]);
   return {
-    of: (output: string) => all.filter((v) => v.output === output),
     shown,
     error,
     restore,

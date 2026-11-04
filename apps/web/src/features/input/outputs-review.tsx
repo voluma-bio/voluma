@@ -48,8 +48,6 @@ import {
   EmptyState,
   INPUT_WORD,
   LoadingState,
-  Menu,
-  MenuItem,
   SidePanel,
   StatusGlyph,
   StatusMark,
@@ -69,16 +67,7 @@ import {
   type Zyx,
 } from "@voluma/viewer/grid";
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
-import {
-  Bookmark,
-  Bot,
-  ChevronDown,
-  ChevronLeft,
-  Layers,
-  ListTree,
-  MessageSquare,
-  Workflow,
-} from "lucide-react";
+import { Bot, ChevronLeft, Layers, ListTree, MessageSquare, Workflow } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
@@ -92,7 +81,7 @@ import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
 import { RunNews } from "./run-news";
 import { Samples } from "./samples-tab";
-import { type SavedView, savedViews, useSavedViews } from "./saved-views";
+import { savedViews, useSavedViews } from "./saved-views";
 import { useAnswers, useMainMessage } from "./use-main-message";
 import type { Accepting } from "./version-report";
 import type { SceneHandle } from "./viewer";
@@ -476,10 +465,6 @@ export function OutputsReview({
       onBack={() => select({ output: selected?.id, trail: null, item: null })}
       nameOf={nameOf}
       onWaitsOn={(id) => select({ trail: id, item: null, centre: null })}
-      views={inView ? views.of(inView.id) : []}
-      viewShown={views.shown}
-      viewError={views.error}
-      onView={views.open}
     />
   );
   let panes: React.ReactNode;
@@ -548,6 +533,17 @@ export function OutputsReview({
           grids: blocks.grids,
           onSave: views.save && ((state, grid) => views.save!(inView, state, grid)),
           restore: views.restore,
+          views: allViews.map((v) => ({
+            id: v.id,
+            title: v.title,
+            detail: `${nameOf(v.output)} · ${v.time}`,
+            shown: v.id === views.shown,
+            open: () => {
+              if (v.output !== inView?.id) show(v.output);
+              views.open(v);
+            },
+          })),
+          viewError: views.error,
           onEdit,
           onPick: marking.select,
           ref: scene,
@@ -799,7 +795,7 @@ function CentreBar({ onBack }: { onBack: () => void }) {
 
 /**
  * Over the panes' top-left corner: the output in view, its value and its status (a value resting on
- * an output with open checks waits on it, one click from them), and its saved views.
+ * an output with open checks waits on it, one click from them).
  */
 function SceneChip({
   live,
@@ -811,10 +807,6 @@ function SceneChip({
   onBack,
   nameOf,
   onWaitsOn,
-  views,
-  viewShown,
-  viewError,
-  onView,
 }: {
   live: boolean;
   root: OutputRow | undefined;
@@ -828,12 +820,6 @@ function SceneChip({
   nameOf: (id: string) => string;
   /** Opens an output the value rests on, under it, with its checks. */
   onWaitsOn: (id: string) => void;
-  /** The views saved of the output in view, oldest first. */
-  views: SavedView[];
-  /** The saved view the panes were last set to. */
-  viewShown: string | undefined;
-  viewError: string | undefined;
-  onView: (view: SavedView) => void;
 }) {
   if (!inView || (!root && !soFar)) return null;
   // A value waiting on the checks of what it rests on names each, one click away.
@@ -866,32 +852,6 @@ function SceneChip({
             <span className="text-muted-foreground"> {inView.value.unit}</span>
           </span>
         )}
-        {views.length > 0 && (
-          <Menu
-            align="start"
-            trigger={
-              <Button
-                size="sm"
-                variant="ghost"
-                className="ml-auto h-6 shrink-0 px-1.5"
-                title={views.find((v) => v.id === viewShown)?.title ?? "Saved views"}
-              >
-                <Bookmark aria-hidden />
-                <span className="sr-only">Saved views</span>
-                <ChevronDown aria-hidden />
-              </Button>
-            }
-          >
-            {views.map((v) => (
-              <MenuItem key={v.id} onSelect={() => onView(v)}>
-                <span className="flex items-baseline justify-between gap-3">
-                  <span>{v.title}</span>
-                  <span className="text-xs text-fg-subtle">{v.time}</span>
-                </span>
-              </MenuItem>
-            ))}
-          </Menu>
-        )}
       </div>
       {status === "waiting" && waits.length > 0 ? (
         // One button per output it waits on, opening that output's checks.
@@ -912,11 +872,6 @@ function SceneChip({
         ))
       ) : (
         <StatusMark status={status} label={word} className="text-xs" />
-      )}
-      {viewError && (
-        <span className="text-destructive text-xs" role="alert">
-          {viewError}
-        </span>
       )}
     </header>
   );

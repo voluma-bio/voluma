@@ -72,9 +72,9 @@ where it is used.
   else by the grid's axes (XY, YZ, XZ), which the chip's menu also shows. The slice number sits
   small in the pane's corner; a scale bar shows only where the run published the grid's
   geometry. The whole-run graph shows in place of the panes when the researcher asks for it.
-- **The viewer's bar names what a reviewer uses**: Navigate, Point and Ruler, Planes, Contrast
-  and Save view in words; the measuring tools under More tools; the 1, 2 and 4 pane layouts as
-  icons with tooltips.
+- **The viewer's bar is icons with tooltips** (Jimmy, Nov 4): every marking tool (its tooltip
+  says how to use it), Planes, Contrast and the 1, 2 and 4 pane layouts; Views, the one menu in
+  words, saves the view and lists every saved one.
 - **Up front is what the researcher reviews.** Statuses, values, To check, the AI's
   words, QC images and the viewer's controls show. How long something took, tries, counts, cost,
   tokens and ids sit behind an info button (`InfoButton`) or Run details, with the numbers someone

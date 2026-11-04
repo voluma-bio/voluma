@@ -28,6 +28,7 @@ import {
   QuadViewer,
   type QuadViewerHandle,
   reviewGrid,
+  type SavedViewEntry,
   type ShownMark,
   tokenColor,
   type VoxelBox,
@@ -105,6 +106,10 @@ export function SceneViewer({
     onSave?(state: QuadState, grid: string): void;
     /** A saved view to show on its grid: each new object is applied once. */
     restore?: { grid: string; state: QuadState };
+    /** The run's saved views, under Views on the shown viewer's bar. */
+    views?: readonly SavedViewEntry[];
+    /** Why a view couldn't be saved or opened, among the shown viewer's notes. */
+    viewError?: string;
     /**
      * With Navigate, an end dragged in a slice: of your mark, or of a published ruler (a new mark
      * of yours on the grid's image `volumeId`), with the pane's frame.
@@ -306,7 +311,7 @@ export function SceneViewer({
               layout={quad.layout}
               onLayout={quad.onLayout}
               focus={k.focus}
-              notes={k.notes}
+              notes={on && quad.viewError ? [...k.notes, quad.viewError] : k.notes}
               heading={on ? heading : undefined}
               tool={on ? tool : null}
               marks={shown.get(k.key) ?? NO_MARKS}
@@ -315,6 +320,7 @@ export function SceneViewer({
               targets={k.imageId === live?.imageId ? targets : undefined}
               onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
               restore={quad.restore?.grid === k.imageId ? quad.restore.state : undefined}
+              views={on ? quad.views : undefined}
               onEdit={
                 on && quad.onEdit
                   ? (edit, plane) => quad.onEdit?.(edit, k.imageId, k.key, plane)
