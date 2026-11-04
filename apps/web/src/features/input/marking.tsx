@@ -13,7 +13,7 @@ import {
   markPoints,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { Angle, Crosshair, Lasso, MousePointer2, Pipette, Ruler, Spline } from "lucide-react";
+import { Angle, Crosshair, Hand, Lasso, Pipette, Ruler, Spline } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -104,7 +104,7 @@ type Tool = {
 
 /** The marking tools, every one an icon on the viewer's bar. */
 export const TOOLS: Tool[] = [
-  { value: "navigate", label: "Navigate", icon: <MousePointer2 /> },
+  { value: "navigate", label: "Navigate", icon: <Hand /> },
   { value: "point", label: "Point", letter: "P", icon: <Crosshair /> },
   { value: "line", label: "Ruler", letter: "R", icon: <Ruler /> },
   { value: "angle", label: "Angle", letter: "A", icon: <Angle /> },
