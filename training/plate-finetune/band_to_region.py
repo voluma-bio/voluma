@@ -5,7 +5,7 @@
 Per section: the band mask's connected pieces, each piece's skeleton reduced to its longest geodesic path, its ends continued
 along their last stretch to the cortex (at most EXT_MAX voxels); pieces that do not overlap in U, longest first, joined left to
 right into one polyline, the skeleton line. With --cut midline (the default, and the band recipe's) each point of that line then
-moves to the midpoint of the band's two faces in its column (faces.midline); in the 3-seed vote that scored 1-8 µm better than
+moves to the midpoint of the band's two faces in its column (midline); in the 3-seed vote that scored 1-8 µm better than
 the skeleton line on each of the six scored scans (L33). The region is labels.label_section on the line, the rule that built the region labels. A
 perfect band (the traced one) scores the label floor, ~11 µm, through the skeleton line. Writes <out>/<scan>.npz (V, mask: the
 region) and <out>/<scan>-lines.json ({V: [[w, u], ...]}, the line the region was cut on); a section with no line has an empty
@@ -24,10 +24,10 @@ from skimage.morphology import skeletonize
 import cutline
 import labels
 import scans
-from faces import band_faces, midline
 
 MIN_PIECE = 12     # voxels of path: shorter pieces are noise
 EXT_MAX = 10       # voxels an end is continued along its direction to reach the cortex
+MID_MAX = 4        # voxels: a band run is a face pair, and a line point moves to its midpoint, only this close to the line
 
 
 def skeleton_path(comp):
@@ -111,20 +111,50 @@ def line_of(band, env):
     return np.vstack(keep) if keep else None
 
 
-def band_regions(band, vs, tibia, pieces=None, not_visible=None, cut="midline"):
-    """band[n, W, U] predictions on sections vs -> (region[n, W, U], {V: line (m, 2) [w, u]}); a section with no line has an empty
-    region. tibia: the scan's mask (W, V, U); pieces, not_visible: the reviewed plateau pieces and not-visible ranges, when known;
-    cut: "midline" (the faces' midline) or "skeleton"."""
+def band_faces(band, line):
+    """A band section (W, U) and its cut line (n, 2) [w, u] -> (top, bottom) per U column: the first and last row W of the band's
+    run nearest the line, when that run's centre is within MID_MAX voxels of the line; NaN otherwise, outside the line's U extent
+    and in columns without band (a stray run in a gap between line pieces is not a face)."""
+    n_u = band.shape[1]
+    top, bot = np.full(n_u, np.nan), np.full(n_u, np.nan)
+    line = line[np.argsort(line[:, 1])]
+    c = np.arange(max(int(np.ceil(line[0, 1])), 0), min(int(np.floor(line[-1, 1])), n_u - 1) + 1)
+    for u, w in zip(c, np.interp(c, line[:, 1], line[:, 0])):
+        rows = np.flatnonzero(band[:, u])
+        if len(rows):
+            r = min(np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1), key=lambda r: abs((r[0] + r[-1]) / 2 - w))
+            if abs((r[0] + r[-1]) / 2 - w) <= MID_MAX:
+                top[u], bot[u] = r[0], r[-1]
+    return top, bot
+
+
+def midline(line, top, bot):
+    """The cut line (n, 2) [w, u] with each point's W moved to the midpoint of the faces (band_faces) in its column, where both
+    faces exist there and the midpoint is within MID_MAX voxels of the point."""
+    out = line.copy()
+    for k, (w, u) in enumerate(line):
+        c = int(round(u))
+        if 0 <= c < len(top) and not np.isnan(top[c]) and abs((top[c] + bot[c]) / 2 - w) <= MID_MAX:
+            out[k, 0] = (top[c] + bot[c]) / 2
+    return out
+
+
+def band_regions(band, vs, tibia, cut="midline"):
+    """band[n, W, U] predictions on sections vs -> (region[n, W, U], {V: line (m, 2) [w, u]}, {V: (top, bottom)}): the region, the
+    line it was cut on and the band's faces on the skeleton line (band_faces, what the midline is built from); a section with no
+    line has an empty region and no entry. tibia: the scan's mask (W, V, U); cut: "midline" (the faces' midline) or "skeleton".
+    Reviewer data (plateau pieces, not-visible ranges) stays out, as a new scan has none: the scorer applies the label's ignore."""
     region = np.zeros_like(band)
-    lines = {}
+    lines, faces = {}, {}
     for i, v in enumerate(vs):
         p = line_of(band[i], cutline.envelope(tibia[:, v, :])) if band[i].any() else None
-        if p is not None and len(p) > 1:
+        if p is not None:
+            faces[v] = band_faces(band[i], p)
             if cut == "midline":
-                p = midline(p, *band_faces(band[i], p))
-            region[i] = labels.label_section(v, p, [], (not_visible or {}).get(v, ()), tibia, pieces).region
+                p = midline(p, *faces[v])
+            region[i] = labels.label_section(v, p, [], (), tibia, None).region
             lines[v] = p
-    return region, lines
+    return region, lines, faces
 
 
 def main():
@@ -137,8 +167,7 @@ def main():
     for f in sorted(a.pred.glob("*.npz")):
         scan = f.stem
         z = np.load(f)
-        region, lines = band_regions(z["mask"], [int(v) for v in z["V"]], scans.load_tibia_mask(scan), scans.load_pieces(scan),
-                                     labels.not_visible_ranges(scan), a.cut)
+        region, lines, _ = band_regions(z["mask"], [int(v) for v in z["V"]], scans.load_tibia_mask(scan), a.cut)
         np.savez_compressed(a.out / f"{scan}.npz", V=z["V"], mask=region)
         (a.out / f"{scan}-lines.json").write_text(json.dumps({v: p.tolist() for v, p in lines.items()}))
         print(scan, len(lines), "lines of", len(z["V"]), "sections", flush=True)

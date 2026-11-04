@@ -34,16 +34,22 @@ def build(ckpt=None, lora_rank=0, device="cuda"):
     return model.to(device)
 
 
+def trainable(name):
+    """The parameters that train: everything but the ViT trunk and text encoder, plus the LoRA tensors in the trunk."""
+    return not name.startswith(FROZEN) or "lora_" in name
+
+
 def load_trainable(model, state):
-    """Overwrite the model's trainable tensors with a checkpoint's (serve.py swaps checkpoints this way on one model)."""
-    bad = model.load_state_dict(state["trainable"], strict=False)
-    assert not bad.unexpected_keys, bad.unexpected_keys
+    """Overwrite the model's trainable tensors with a checkpoint's, which must hold exactly those: serve.py swaps checkpoints this
+    way on one model, and a tensor the checkpoint lacked would keep the previous checkpoint's value."""
+    want, have = {n for n, _ in model.named_parameters() if trainable(n)}, set(state["trainable"])
+    assert have == want, f"checkpoint lacks {sorted(want - have)[:3]} and has extra {sorted(have - want)[:3]}"
+    model.load_state_dict(state["trainable"], strict=False)
 
 
 def set_trainable(model):
-    """Freeze ViT trunk + text encoder (LoRA tensors stay trainable)."""
     for n, p in model.named_parameters():
-        p.requires_grad = (not n.startswith(FROZEN)) or "lora_" in n
+        p.requires_grad = trainable(n)
 
 
 def save(model, path, lora_rank):

@@ -55,7 +55,8 @@ line the prediction implies, then the mean over sections. A section with no pred
 | **band, 3-seed vote (recommended)** | **16.4** | **18.7** | 33 |
 
 The band rows use threshold 0.3 and the midline cut. Both, and the vote, were fixed on the validation scans before the test scans
-were scored. A perfect band scores about 11 µm through the same line extraction (the label floor). The band's two faces land
+were scored. The face rule was revisited after test scoring: the midline uses the band's own faces rather than the
+probability-snapped faces chosen on validation, and the plain faces also score better on validation (33.9 vs 34.6 µm). A perfect band scores about 11 µm through the same line extraction (the label floor). The band's two faces land
 within 1–2 voxels of the traced faces (median error 11–26 µm per scan and seed).
 
 ## Intended use

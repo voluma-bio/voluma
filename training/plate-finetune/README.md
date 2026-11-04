@@ -1,7 +1,8 @@
 # Plate fine-tune: SAM 3.1 trained to find the growth plate in micro-CT knee sections
 
-This directory trains and scores the model behind Voluma's growth-plate cut line. It is offline training code: no Voluma app
-imports it and no run snapshots it. Every method we tried, including the ones not carried here, is in [METHODS.md](METHODS.md).
+This directory trains and scores the model behind Voluma's growth-plate cut line, and holds its Modal inference app
+(`serve.py`, deployed by hand). No Voluma app imports it and no run snapshots it. Every method we tried, including the ones
+not carried here, is in [METHODS.md](METHODS.md).
 
 ## What the model does
 
@@ -37,12 +38,14 @@ through the same line extraction scores about 11 µm.
 | **Band, 3-seed vote, cut on the faces' midline (the recipe)** | **16.4** | **18.7** | 33 |
 
 Band rows: threshold 0.3, and the per-seed row uses the midline cut. These band numbers come from L33, which fixed the
-threshold, the vote and the midline cut on the validation scans before it scored the test scans. Each test scan was scored once.
+threshold, the vote and the midline cut on the validation scans before it scored the test scans. Each test scan was scored once
+by L33; the face rule below was changed after that.
 Caveats:
-- The midline here uses the band's own faces. L33 chose faces snapped on the band probability, and on the test scans those
-  scored 15.9 and 19.7 µm. We left the snap out: it moved the faces by less than a voxel, and on the test scans its faces were
-  no closer to the traced ones than the plain faces (mean error 23.6 vs 20.7 µm on OA8-19L, 25.3 vs 25.6 on OA6-9RK). The plain
-  faces' midline was also better on validation (33.9 vs 34.6 µm in L33's scoring).
+- The midline here uses the band's own faces, not the faces snapped on the band probability that L33 chose on validation. We
+  revisited that choice after the test scans were scored. The plain faces' midline also scores better on validation (33.9 vs
+  34.6 µm in L33's scoring), and the snap moved the faces by less than a voxel. On the test scans the snapped faces' midline
+  scored 15.9 and 19.7 µm against the plain faces' 16.4 and 18.7, and its faces were no closer to the traced ones (mean error
+  23.6 vs 20.7 µm on OA8-19L, 25.3 vs 25.6 on OA6-9RK).
 - At threshold 0.5 a band seed returned nothing on 14 of 261 section-predictions, and each such section scores 1050 µm. At 0.3 no
   seed is empty on any of the six scans. So `vote.py --abstain` (an empty seed abstains) now gives the same result as the plain
   vote. The earlier headline, L32's abstain vote at 0.5 (16.7 and 22.1 µm), had that rule chosen after seeing the test scans.
@@ -63,11 +66,12 @@ Three paths, from the environment:
 | Variable | What |
 |---|---|
 | `PLATE_SCANS` | the prepared scans: one directory per scan with `tgrid/tibia-hu.npy` and `tgrid/tibia-mask.npy` (axes W, V, U), `tgrid/tibia-frame.json`, `trace/annotations.json` (traced plate faces), optional `trace/ends.json` and `review.json` |
-| `PLATE_PIECES` | `<scan>.npy` per scan with reviewed plateau pieces (ossicles, fragments; bool, W, V, U); a scan without one has none. Export only |
+| `PLATE_PIECES` | `<scan>.npy` per scan with reviewed plateau pieces (ossicles, fragments; bool, W, V, U); a scan without one has none. `export.py` only |
 | `SAM31_WEIGHTS` | Meta's `sam3.1_multiplex.pt` from [facebook/sam3.1](https://huggingface.co/facebook/sam3.1) (gated: accept the SAM License there), revision `daa63191845a41281374e725f4c9e51c7a824460`, sha256 `0567debeec80ba4ac6369540c6c248025283cb3ff2b92827509e57e2b3541cb6` |
 
-The scans are the Yao lab's and are not public. The exported training sets are (next section), so training, prediction on the
-exported sections and scoring need only those and the SAM 3.1 weights; export and prediction on whole scans need the scans.
+The scans are the Yao lab's and are not public. The exported training sets (next section) are in Voluma's R2 bucket and need
+Voluma's R2 credentials. With them and the SAM 3.1 weights you can train; prediction (`predict.py` reads the scan's HU grid),
+band-to-region, scoring and `faces.py` (the tibia mask, the traced faces) and export all need the lab's scans.
 
 ## Data and weights
 
@@ -78,14 +82,14 @@ exported sections and scoring need only those and the SAM 3.1 weights; export an
   `region` is byte-identical to the L29 export and `band` to the L32 one.
 - **Checkpoints** (about 175 MB each: our trained tensors only, loaded on top of the SAM 3.1 weights): not published yet.
   `upload_weights.py` pushes them with [MODEL_CARD.md](MODEL_CARD.md) to a Hugging Face model repo once the account is chosen.
-  Until then they are on Modal volume `plate-finetune` under `/runs/l29-a-s{0,1,2}` (region) and `/runs/l32-band-s{1,2}` (band),
-  and band seed 0 on the training machine.
+  Until then they are on Modal volume `plate-finetune` under `/runs/l29-a-s{0,1,2}` (region) and `/runs/l32-band-s{0,1,2}`
+  (band).
 
 ## Reproduce
 
 ```sh
 uv sync                                     # Python 3.12, torch 2.10 (CUDA 12.8), SAM 3 at the pinned commit
-export PLATE_SCANS=... PLATE_PIECES=... SAM31_WEIGHTS=...
+export PLATE_SCANS=... PLATE_PIECES=... SAM31_WEIGHTS=...   # PLATE_PIECES: export.py only
 
 # 1. training sets (or pull them from R2, above)
 uv run python export.py --split splits/v1.json --out data/region     # ~3 min, CPU
@@ -99,7 +103,7 @@ MODAL_GPU=A10,L40S uv run --group release modal run --detach modal_train.py --da
 # 3. predict the labelled test and validation sections
 for s in 0 1 2; do
   uv run python predict.py --scan OA8-19L OA6-9RK OA6-11RK OA7-2R OA8-21L OA6-5RK --ckpt runs/band-s$s/ckpt-bestval.pt \
-    --text "growth plate" --threshold 0.3 --out preds/band-s$s --sections-from data/region
+    --text "growth plate" --out preds/band-s$s --sections-from data/region   # threshold 0.3, the prompt's default
   uv run python band_to_region.py --pred preds/band-s$s --out preds/band-s$s-region   # band only: line, midline, region
 done
 
@@ -111,7 +115,7 @@ uv run python faces.py --band preds/band-s0 --lines preds/band-s0-region --out s
 ```
 
 `band_to_region.py --cut skeleton` gives the skeleton-line row of the table. The region recipe is the same with
-`--data data/region`, `--text epiphysis`, `--threshold 0.5` (the default), no `band_to_region.py`, and `vote.py` without
+`--data data/region`, `--text epiphysis` (threshold 0.5, its default), no `band_to_region.py`, and `vote.py` without
 `--abstain` (the two rules differ by at most 0.3 µm for it).
 
 How this was checked against the experiment scripts it replaces: the re-export matches the L29 and L32 exports byte for byte
@@ -120,15 +124,22 @@ How this was checked against the experiment scripts it replaces: the re-export m
 line extraction, both votes, the scorer and the face errors reproduce the L29 and L32 tables exactly. The band rows above were
 re-run with this code on the same RTX 3090 as L33. The masks at 0.3 equal L33's on all 18 scan-seed pairs but one, which
 differs in 152 of 46,813 voxels (OA8-21L, seed 0). Every test number reproduces L33's to the 0.1 µm. On validation, the midline
-vote is 29.0 vs L33's 32.1 µm on OA6-11RK and 29.9 vs 29.5 on OA6-5RK. That is because `faces.band_faces` finds the line's row in a
+vote is 29.0 vs L33's 32.1 µm on OA6-11RK and 29.9 vs 29.5 on OA6-5RK. That is because `band_faces` finds the line's row in a
 column by interpolation, where L33 took the median of the rows the path crosses there. With L33's rule this code gives L33's
 validation numbers too (OA8-21L 52.5 vs 52.3 µm, the scan with the mask difference).
+
+Two later changes, re-scored on the same masks (3 seeds, 6 scans; every test number and the validation mean unchanged):
+`band_to_region` no longer takes the reviewed plateau pieces, so the scored path and the served one are the same code (the
+region differs only in voxels the labels ignore; every score is equal); and `band_faces` reports no face where the band run
+nearest the line has its centre more than `MID_MAX` (4) voxels from it, so a stray run in a gap between line pieces is not a
+face. That moves the midline in a few columns: regions change by 1–20 voxels in some sections, and the OA6-5RK vote goes from
+29.9 to 30.2 µm. Band seed 0's face errors on OA7-2R drop from 16.8/18.9 to 14.7/14.7 µm.
 
 ## Serving on Modal
 
 `serve.py` puts the model behind one web endpoint on a Modal GPU. Voluma runs don't call it yet; wiring it into runs is in
 [.context/TODO.md](.context/TODO.md). It runs the same code as the scripts above (`predict_vol`, `band_to_region.band_regions`,
-`faces.band_faces`, `vote.vote`), so its output follows any change to them.
+`vote.vote`), so its output follows any change to them.
 
 Deploy (from this directory; the app name defaults to `plate-serve`):
 
@@ -147,9 +158,9 @@ without them gets 401.
 
 ```sh
 U=https://<workspace>--plate-serve-dev-plate-predict.us-east.modal.run
-# a grid in R2 (keys must start with dev/), the release recipe: 3 band seeds at threshold 0.3, voted
+# a grid in R2 (.npy keys under dev/plate-serve/), the release recipe: 3 band seeds at threshold 0.3, voted
 curl -s -H "Modal-Key: $KEY" -H "Modal-Secret: $SECRET" --data '' -L -o out.npz \
-  "$U?hu_key=dev/plate-serve-test/OA8-19L/tibia-hu.npy&mask_key=dev/plate-serve-test/OA8-19L/tibia-mask.npy&sections=34,46,64"
+  "$U?hu_key=dev/plate-serve/OA8-19L/tibia-hu.npy&mask_key=dev/plate-serve/OA8-19L/tibia-mask.npy&sections=34,46,64"
 # or the grid in the body: an .npz with hu and mask, here one checkpoint and no vote
 curl -s -H "Modal-Key: $KEY" -H "Modal-Secret: $SECRET" --data-binary @grid.npz -L -o out.npz "$U?ckpt=band-s0&vote=off"
 ```
@@ -158,16 +169,17 @@ Use `-L` and don't force `-X POST` when sending a body: a request longer than 15
 which curl follows with GET only when the method isn't forced.
 
 - **Input:** the tibia grid in the training convention (`scans.py`): `hu` the HU volume and `mask` the tibia mask, same shape,
-  axes (W, V, U), 10.5 µm voxels. A coronal section is `hu[:, V, :]`: rows W with the joint side at low W, columns U.
+  axes (W, V, U), 10.5 µm voxels. A coronal section is `hu[:, V, :]`: rows W with the joint side at low W, columns U. Both
+  numeric (or bool), 3-D, at most 2^28 voxels; a body or R2 object at most 2 GiB. A malformed grid or option answers 400.
 - **Options** (query string): `ckpt`, a comma list from `region-s0..2` (recipe A, `l29-a-s*`) and `band-s0..2` (`l32-band-s*`),
   default the three band seeds; `vote` = `abstain` (default), `all` or `off`, as `vote.py`; `sections`, a comma list of V,
-  default every section; `threshold`, default 0.3 for band checkpoints and 0.5 for region ones.
+  default every section; `threshold` in (0, 1), default 0.3 for band checkpoints and 0.5 for region ones.
 - **Output:** an .npz. `V`; per checkpoint `<name>.mask` (the detector's mask), `<name>.region` (the IIOC region; for a band
   model, cut on the faces' midline), `<name>.cut` (the region's cut-side boundary voxels, what `score.py` measures), and for a
-  band model `<name>.top` and `<name>.bottom` (face row W per column U, NaN where there is none); with a vote, `vote.region` and
+  band model `<name>.top` and `<name>.bottom` (face row W per column U on the skeleton line the cut was built from, NaN where
+  there is none); with a vote, `vote.region` and
   `vote.cut`. Masks are (n, W, U) bool. `meta` is a JSON string with each checkpoint's recipe and threshold, the band cut lines
-  `{name: {V: [[w, u], ...]}}`, the GPU and the timings. Plateau pieces and a reviewer's not-visible ranges are unknown on a new
-  scan, so a band region is cut without them; `band_to_region.py` uses them when the scan has them.
+  `{name: {V: [[w, u], ...]}}`, the GPU and the timings.
 
 Measured on OA8-19L (A10 or A10G; Modal picks A10 or L40S):
 
@@ -204,7 +216,7 @@ breaks a tie differently on 2 of 14 sections, moving the region by 8 voxels.
 | band training set | `band.py` | |
 | train | `train.py`, `modal_train.py` | `model.py` (build, LoRA, checkpoints), `losses.py` (ignore voxels in the mask loss), `train_config.yaml` |
 | predict | `predict.py` | |
-| band to line to region | `band_to_region.py` | |
+| band to line to region | `band_to_region.py` (also the band's faces and their midline) | |
 | vote, score | `vote.py`, `score.py`, `faces.py` | |
 | serve | `serve.py` (Modal web endpoint) | |
 | publish | `dataset_r2.py`, `upload_weights.py` | |
