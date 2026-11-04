@@ -63,10 +63,8 @@ calls main still holds, `openApprovals`), Labels (`labels-panel.tsx`: what each 
 shown grid's `legend`; a label's volume only from the catalog's one mm³ value measured on that label alone
 (`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
 output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
-and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The tab the side
-opens on is settled once and never switched under you: Conversation while the run goes, else, once the stream
-has closed with the whole log (`useRunStream`'s return), Conversation if it holds a message or a saved view and
-Labels if not, so an empty conversation never takes the column. Using the Labels panel picks it. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), Agents (icon) and
+Agents (`run-agents.tsx`: the run's agents, then a picked agent's whole thread with All agents to go back), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The side
+opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or an agent's name in a reply opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), and
 Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
 reported value resting on an output with open items is not done: its status is "Waiting on a check
 of <output>" (`rowStatus`, the dashed waiting glyph, never a tick; the same rule in Final outputs, Based on, the chip and the whole run), and the open value shows one line
@@ -82,7 +80,7 @@ The centre has no bar of its own: a chip (`SceneChip`) names the output in view,
 status (the waiting one a button to the checks), with the saved views menu. On the panes it sits in
 the top-left pane's corner (`QuadViewer`'s `heading`), under the viewer's notes, which stay in the
 flow above the panes; over a file, a list, an empty centre or a grid still preparing it sits above,
-in the flow. The whole run and the agents get a bar with the way back. Delete mark and Undo delete
+in the flow. The whole run gets a bar with the way back. Delete mark and Undo delete
 get a row above the panes only while one of yours is picked or a deletion can be undone.
 
 While the run goes, Final outputs adds what a run going shows and nothing after it ends: on top,
@@ -100,16 +98,16 @@ run is going and the AI is still setting up only while nothing drawable is publi
 (`samples-tab.tsx`) keeps up.
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item`,
-`centre` (`run` for the whole run, `agents`) and `agent` (the agent's thread name open in the agents view; none opens main, else the agent working now, else the first). An `output` that isn't a listed value opens under
+`centre` (`run` for the whole run) and `agent` (the agent's thread name open in the Agents tab; none lists them). With no `output`, review opens on the output of the first open check (the bone labels when the checks are about what the values rest on), else the first final output with an open item, else the first. An `output` that isn't a listed value opens under
 the first value resting on it (`show`, also what a click in the whole run does). A published ruler or point in view (an item's own focus wins) puts the slices through its first end once on selecting it, through the one-shot `marking.jump` (not the To check `focus`, so later events and your own panning are left alone), where a Navigate drag can take it; the end is drawn as a dot and shows a grab cursor. The panes'
 layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
 (both sides folded) plus that pane: the page keeps only which view fills and derives the rest
 from the shell, so leaving Full view by any means gives the panes back. The whole run folds Final
 outputs while it is up and unfolds it after (the shell's `useFoldWhile`); showing a panel only
 changes its visibility, not the centre. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
-run or agents, an open row, only within its focused workspace and never while typing elsewhere.
+run, an open row, only within its focused workspace and never while typing elsewhere.
 Visible Whole run / Back to the views controls switch the centre. The panes stay mounted (hidden) under the
-whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate, Point and Ruler named on
+whole run. The Agents tab's thread has a header (state, worked clock, outputs reported) over run-view's `AgentThread` (see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread in the Agents tab. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate, Point and Ruler named on
 the bar, and Angle, Outline, Freehand line (an open path, tag L) and Probe under More tools (`viewer.tsx`). These are
 labelled choices, with no command-key bindings. Point notes have no editor or display; old stored
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.

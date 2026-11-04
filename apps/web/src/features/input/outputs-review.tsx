@@ -31,6 +31,7 @@ import {
   isLive,
   type OutputItem,
   type OutputRow,
+  openItemsOf,
   outputBlocks,
   outputName,
   outputsReview,
@@ -98,14 +99,13 @@ import type { SceneHandle } from "./viewer";
 // three.js and the zarr reader load only once there is an output to show.
 const SceneViewer = lazy(() => import("./viewer").then((m) => ({ default: m.SceneViewer })));
 
-type Centre = "run" | "agents";
+type Centre = "run";
 
 export function OutputsReview({
   run,
   stale,
   refetchRun,
   reopen,
-  logLoaded,
 }: {
   run: RunRead;
   /** The last poll failed: what is shown may be out of date. */
@@ -114,8 +114,6 @@ export function OutputsReview({
   refetchRun: () => void;
   /** Reconnects the run's stream, to catch what a write of yours added to the log. */
   reopen: () => void;
-  /** The stream has closed once: an ended run's whole log is in. */
-  logLoaded: boolean;
 }) {
   const me = useOutletContext<Me>();
   const study = useQuery({
@@ -182,8 +180,8 @@ export function OutputsReview({
       ),
     [setParams],
   );
-  // The value open in place: the URL's, else the first final output with an open item, else the
-  // first. An output that is not in the list opens under the first value resting on it.
+  // The value open in place: the URL's, else the output of the first open check, else the first
+  // final output with an open item, else the first. An output that is not in the list opens under the first value resting on it.
   const finals = review.sections.flatMap((s) => s.rows);
   // With only To check on, the outputs behind the values are rows of their own and open in place.
   const behind = onlyToCheck ? rowsToCheck(review).behind : [];
@@ -192,7 +190,9 @@ export function OutputsReview({
     (id: string) => listed.find((r) => r.trail.some((t) => t.id === id)),
     [listed],
   );
-  const asked = params.get("output") ?? "";
+  // With none asked, review opens where the first open check is: its own output, so a check on
+  // what values rest on (the bone labels) opens there, not on the first value above it.
+  const asked = params.get("output") ?? finals.flatMap(openItemsOf)[0]?.output ?? "";
   const askedRow = listed.find((r) => r.id === asked);
   const under = !askedRow && asked ? restingOn(asked) : undefined;
   const selected =
@@ -217,24 +217,26 @@ export function OutputsReview({
   );
   const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
-  const centre: Centre | undefined =
-    centreParam === "run" || centreParam === "agents" ? centreParam : undefined;
+  const centre: Centre | undefined = centreParam === "run" ? centreParam : undefined;
   const item = selected?.items.find((i) => i.key === params.get("item"));
+  // The left side opens on Conversation; the researcher picks another tab.
+  const [leftTab, setLeftTab] = useState("conversation");
   // The agents a name can open: each agent's thread names (`main.2` opens main's thread).
   const agents = useMemo(() => agentEntries(events, fold, live), [events, fold, live]);
   // The links change only when the set of names does, and `open` reads the latest entries and
   // `select`, so the conversation's replies don't re-render on every event of a live run.
   const nameKey = agents.flatMap((a) => a.names).join("\n");
-  const latest = useRef({ agents, select });
-  latest.current = { agents, select };
+  const latest = useRef({ agents, select, setLeftTab });
+  latest.current = { agents, select, setLeftTab };
   const agentLinks = useMemo<AgentLinks>(
     () => ({
       names: new Set(nameKey ? nameKey.split("\n") : []),
-      open: (name) =>
+      open: (name) => {
+        latest.current.setLeftTab("agents");
         latest.current.select({
-          centre: "agents",
           agent: latest.current.agents.find((a) => a.names.includes(name))?.name ?? name,
-        }),
+        });
+      },
     }),
     [nameKey],
   );
@@ -245,7 +247,6 @@ export function OutputsReview({
 
   const toCheck = review.open.size;
   const said = useMemo(() => conversation(events), [events]);
-  const [pickedTab, setLeftTab] = useState<string>();
   const [display, setDisplay] = useState<LabelDisplay>(LABELS_START);
   const [legend, setLegend] = useState<Legend>();
   const volumes = useMemo(() => labelVolumes(catalog, review.rows), [catalog, review.rows]);
@@ -285,13 +286,6 @@ export function OutputsReview({
     jumpTo({ at: at as unknown as Zyx, gridKey, output: inViewId });
   }, [inViewId, inViewLoaded, item, blocks, assets, jumpTo]);
   const allViews = useMemo(() => savedViews(events), [events]);
-  // Which tab the left side opens on is settled once, never switched under you: Conversation
-  // while the run goes (the AI writes there) or when the loaded log has something in it (a
-  // message, a saved view), else Labels. Using a tab picks it.
-  const [firstTab, setFirstTab] = useState<string | undefined>(live ? "conversation" : undefined);
-  if (firstTab === undefined && logLoaded)
-    setFirstTab(said.length > 0 || allViews.length > 0 ? "conversation" : "labels");
-  const leftTab = pickedTab ?? firstTab ?? "labels";
   const views = useSavedViews(run, allViews, reopen);
   const scene = useRef<SceneHandle>(null);
   const sent = useCallback(() => {
@@ -600,20 +594,30 @@ export function OutputsReview({
               label: "Labels",
               icon: <Layers />,
               content: (
-                // Any use of the panel picks it, so the side never switches away under you.
-                <div
-                  className="contents"
-                  onPointerDownCapture={() => setLeftTab((t) => t ?? "labels")}
-                  onKeyDownCapture={() => setLeftTab((t) => t ?? "labels")}
-                >
-                  <LabelsPanel
-                    legend={legend}
-                    display={display}
-                    onDisplay={setDisplay}
-                    volumes={volumes}
-                    inView={inView?.name}
-                  />
-                </div>
+                <LabelsPanel
+                  legend={legend}
+                  display={display}
+                  onDisplay={setDisplay}
+                  volumes={volumes}
+                  inView={inView?.name}
+                />
+              ),
+            },
+            {
+              id: "agents",
+              label: "Agents",
+              icon: <Bot />,
+              content: (
+                <RunAgents
+                  events={events}
+                  agents={agents}
+                  picked={params.get("agent")}
+                  onPick={(name) => select({ agent: name })}
+                  onBack={() => select({ agent: null })}
+                  links={agentLinks}
+                  live={live}
+                  nameOf={nameOf}
+                />
               ),
             },
             {
@@ -664,7 +668,7 @@ export function OutputsReview({
               )}
             </div>
           )}
-          {centre && <CentreBar centre={centre} onBack={() => select({ centre: null })} />}
+          {centre && <CentreBar onBack={() => select({ centre: null })} />}
           <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
             {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
             <div className="flex h-full flex-col [&[hidden]]:hidden" hidden={!!centre}>
@@ -678,17 +682,6 @@ export function OutputsReview({
                 rows={review.rows}
                 live={live}
                 onPick={show}
-              />
-            )}
-            {centre === "agents" && (
-              <RunAgents
-                events={events}
-                agents={agents}
-                picked={params.get("agent")}
-                onPick={(name) => select({ agent: name })}
-                links={agentLinks}
-                live={live}
-                nameOf={nameOf}
               />
             )}
           </div>
@@ -717,17 +710,6 @@ export function OutputsReview({
                   To check <span className="font-semibold">{toCheck}</span>
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant={centre === "agents" ? "secondary" : "ghost"}
-                aria-pressed={centre === "agents"}
-                onClick={() => select({ centre: centre === "agents" ? null : "agents" })}
-                title="Agents on this run"
-              >
-                <Bot aria-hidden />
-                {/* Its icon alone: the panel's title and To check come first in the head. */}
-                <span className="sr-only">Agents on this run</span>
-              </Button>
               <Button
                 size="sm"
                 variant={centre === "run" ? "secondary" : "ghost"}
@@ -774,11 +756,11 @@ export function OutputsReview({
   );
 }
 
-/** Above the whole run or the agents: what the centre shows, and the way back to the views. */
-function CentreBar({ centre, onBack }: { centre: Centre; onBack: () => void }) {
+/** Above the whole run: what the centre shows, and the way back to the views. */
+function CentreBar({ onBack }: { onBack: () => void }) {
   return (
     <header className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-card px-3 text-sm">
-      <h2 className="font-semibold">{centre === "run" ? "The whole run" : "Agents on this run"}</h2>
+      <h2 className="font-semibold">The whole run</h2>
       <span className="flex-1" />
       <Button size="sm" variant="ghost" onClick={onBack} aria-keyshortcuts="Escape">
         <ChevronLeft aria-hidden />
