@@ -44,7 +44,7 @@ import {
   versionPath,
   versionPrefix,
 } from "@voluma/contracts/r2";
-import type { Volume } from "@voluma/contracts/review";
+import { type Volume, volumeSchema } from "@voluma/contracts/review";
 import { toWorld } from "@voluma/contracts/ruler";
 import { z } from "zod";
 import { briefOf } from "../deliveries";
@@ -188,10 +188,13 @@ async function pointsOf(
 
 /**
  * What the review converter reads of a `.npy` that the sidecar beside it (`<name>.json`,
- * `workflows/core/skills/*\/resources/sidecar.py`) states: `dtype`; `gridId` of the grid it lives
- * on; `affine` (voxel (x, y, z) to mm, diagonal from `spacing_zyx_mm`: the sidecar knows no
- * rotation), read from the caller's latest published copy when an earlier report moved it away; a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is
- * refused for a missing sidecar.
+ * `workflows/core/skills/*\/resources/sidecar.py`) states, read from the caller's latest published
+ * copy when an earlier report moved it away: `dtype`; `gridId` of the grid it lives on; `affine`
+ * (voxel (x, y, z) to world mm), the sidecar's `affine_xyz_to_world_mm`, else diagonal from
+ * `spacing_zyx_mm` (the grid's own affine, when it has been published, replaces it in `gridAffine`);
+ * a cropped array's `offsetZyx`; a surface's `axis`; a base's `unit`. Nothing is refused for a
+ * missing sidecar, and an affine the contract refuses (not spaced-rigid) is logged and dropped for
+ * the diagonal one.
  */
 async function detailFromSidecar(
   deps: OutputToolDeps,
@@ -222,19 +225,25 @@ async function detailFromSidecar(
     Array.isArray(v) &&
     v.length === 3 &&
     v.every((n) => typeof n === "number" && Number.isFinite(n))
-      ? (v as number[])
+      ? (v as [number, number, number])
       : undefined;
   const spacing = triple(side.spacing_zyx_mm);
   const offset = triple(side.offset_zyx);
-  return {
-    ...(spacing && {
-      affine: [
+  const pose = volumeSchema.shape.affine.safeParse(side.affine_xyz_to_world_mm);
+  if (side.affine_xyz_to_world_mm !== undefined && !pose.success)
+    console.warn(
+      `report_output: ${key} has an affine_xyz_to_world_mm the review refuses (${pose.error.issues[0]?.message}); publishing its spacing only`,
+    );
+  const affine: Volume["affine"] | undefined = pose.success
+    ? pose.data
+    : spacing && [
         [spacing[2], 0, 0, 0],
         [0, spacing[1], 0, 0],
         [0, 0, spacing[0], 0],
         [0, 0, 0, 1],
-      ],
-    }),
+      ];
+  return {
+    ...(affine && { affine }),
     ...(offset && { offsetZyx: offset }),
     ...(dtype && { dtype }),
     ...(gridId && { gridId }),
@@ -242,6 +251,24 @@ async function detailFromSidecar(
       typeof side.surface_axis === "number" && { axis: side.surface_axis }),
     ...(kind === "base" && unit && { unit }),
   };
+}
+
+/**
+ * The affine of grid `gridId` once a block on it is published: the one that block carries. A block
+ * takes its grid's affine over its own sidecar's, so every block on a grid has the one affine the
+ * first block on it was published with (the review converts an annotation to world mm through its
+ * base's affine and back through the image's, so two affines on one grid would misplace it). The
+ * first block on a grid is its base or image volume in practice, since an overlay needs its base
+ * published; on a run from before sidecars carried `affine_xyz_to_world_mm`, that is a diagonal one,
+ * which keeps every later block on that grid diagonal too. Read inside the run's section.
+ */
+function gridAffine(deps: OutputToolDeps, gridId: string): Volume["affine"] | undefined {
+  for (const output of foldOf(deps).byId.values())
+    for (const v of output.versions) {
+      const d = v.detail as { gridId?: unknown; affine?: Volume["affine"] } | undefined;
+      if (d?.gridId === gridId && d.affine) return d.affine;
+    }
+  return undefined;
 }
 
 /**
@@ -524,6 +551,14 @@ export function reportOutput(
           const version = nextVersion(deps, input.id);
           const path = versionPath(input.id, ctx.toolCallId);
           const value = input.value;
+          const gridId = typeof sidecar.gridId === "string" ? sidecar.gridId : undefined;
+          const pinned = gridId && gridAffine(deps, gridId);
+          const detail = {
+            ...sidecar,
+            ...(pinned && { affine: pinned }),
+            ...points,
+            ...plan.detail,
+          };
           const payload: OutputEvent = {
             outputId: input.id,
             version,
@@ -536,9 +571,7 @@ export function reportOutput(
             ...(evidence.length > 0 && { evidence }),
             ...(input.toCheck && { toCheck: input.toCheck }),
             ...((input.provisional || plan.provisional) && { provisional: true }),
-            ...((plan.detail || Object.keys(sidecar).length > 0 || "points" in points) && {
-              detail: { ...sidecar, ...points, ...plan.detail },
-            }),
+            ...(Object.keys(detail).length > 0 && { detail }),
           };
           await recorder.append(ctx.threadId, "output.published", payload, id);
           deps.changed();

@@ -212,7 +212,7 @@ def main():
     params = dict(meta, **{k: p[k] for k in ('start_um', 'length_um', 'cortex_clearance_um', 'cortex_search_factor')})
     for name, arr in (('roi3-tissue.npy', roi), ('cortex.npy', cortex)):
         np.save(out / name, arr)
-        sidecar.write(out / name, grid_id=g['grid_id'], spacing_zyx_mm=g['spacing_zyx_mm'], inputs=inputs, params=params)
+        sidecar.write(out / name, like=g, inputs=inputs, params=params)
     like = sidecar.sidecar_path(a.mask)
     meta = {'inputs': inputs, 'params': params}
     placed = {

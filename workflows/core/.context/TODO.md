@@ -62,13 +62,13 @@ in the tibia mask (the femur/tibia regrow splits a block touching both along a s
 `~/experiments/plate-data/tracing/pieces/RESULTS-L24.md`. Add a check-first line to `segmentation-check`: look for a piece
 joined to the plateau along a dark seam, and split it with `classic_segment.py --within` before the tibial regions are built.
 
-## Real world mm in the review ([#553](https://github.com/voluma-bio/voluma/issues/553))
+## A base with no affine ([#553](https://github.com/voluma-bio/voluma/issues/553))
 
-The review places every image at its voxel 0, unrotated: `Volume.affine` is spacing only (`report-output.ts`
-`detailFromSidecar`; `.npy` sidecars carry no `affine_xyz_to_world_mm`). So a researcher's mark arrives in mm on the image it
-was drawn on, and `marks_to_grid.py --drawn-on` turns them into voxels. When a second reader needs the scan's world mm
-(lab coordinates, Amira), publish each base with its true affine (`hu.json` / `frame.json`) and drop `--drawn-on`'s spacing
-step in the same change.
+A new run publishes each `.npy` with its grid's `affine_xyz_to_world_mm` (`sidecar.write` records it from the grid's header;
+`report-output.ts` `gridAffine` keeps one affine per grid), and marks reach the agents as voxels of the image they were drawn
+on. Left: a base whose sidecar has neither the affine nor `spacing_zyx_mm` still reads as identity in the review
+(`packages/run-view/src/outputs-model.ts`, `affineOf`), so a mark or point on it is placed in raw voxels without an error;
+refuse those instead. Runs published before this change keep spacing-only affines on every grid, and the viewer reads both.
 
 ## HU calibration for a scan without it
 

@@ -1,16 +1,14 @@
-"""A researcher's mark (mm on the image it was drawn on) onto a grid: a section's curve, or a seed in an outline.
+"""A researcher's mark (voxels on the image it was drawn on) onto a grid: a section's curve, or a seed.
 
-A mark arrives in mm, (x, y, z), as your delivery prints it: "drawn on tibia-grid v1 ... at (2.11, 1.81, 2.13)–(2.38, 1.81, 2.11)– ... mm".
-`--world` takes that line as it is: it reads the bracketed triples after whichever of " at " and " to " comes last (a moved
-mark, "from (...) to (...) mm", gives its new place), so numbers in the tag, the version or the length are not read as points.
-The review's mm are not the scan's world mm: they are voxel index (x, y, z) times spacing on the image the mark was drawn on, from
-that image's voxel 0, unrotated (the review places every image so; `packages/harness/src/tools/report-output.ts`
-`detailFromSidecar`). So `--drawn-on` is the header of that image, the output the delivery names after "drawn on" (its sidecar,
-the `.json` beside its `.npy`, from `/run/outputs.yaml`): its spacing turns the mm into that image's voxels. `--grid` is the
-header of the grid you work on: the scan's `hu.json`, or a frame's `frame.json` (an aligned stack such as the tibia's
-`tibia-frame.json`). When both are the same grid (same `grid_id`), that is all; when not (drawn on the scan, worked on the tibia
-grid), both headers need `affine_xyz_to_world_mm`, which carries the voxels from one grid to the other through the scan's world
-mm: then pass the drawn-on grid's `hu.json` or `frame.json` rather than an array sidecar.
+A mark arrives as voxels [z, y, x] of the image it was drawn on, as your delivery prints it: "drawn on tibia-grid v1 ... at
+voxels [201.4, 172.4, 210.9]–[201.4, 172.4, 236.2]– ...". `--voxels` takes that line as it is: it reads the bracketed triples
+after whichever of " at voxels " and " to voxels " comes last (a moved mark, "from voxels [...] to voxels [...]", gives its new
+place), so numbers in the tag, the version, the image mm or the length are not read as points. `--drawn-on` is the header of that image's grid, the output the
+delivery names after "drawn on" (its sidecar, the `.json` beside its `.npy`, from `/run/outputs.yaml`; or its `hu.json` or
+`frame.json`). `--grid` is the header of the grid you work on: the scan's `hu.json`, or a frame's `frame.json` (an aligned
+stack such as the tibia's `tibia-frame.json`). When both are the same grid (same `grid_id`), the voxels are used as they
+are; when not (drawn on the scan, worked on the tibia grid), both headers need `affine_xyz_to_world_mm`, which carries the
+voxels from one grid to the other through the scan's world mm.
 
 Two modes, give exactly one:
 
@@ -40,8 +38,8 @@ for the bone and this one for the piece (`segmentation-check`).
 Writes: <out>  --curve only: the annotations copy, or the curve alone
 Prints: one JSON line: --curve {grid_id, axis, section, points, cols_replaced, kept_points, moved_vox, vox_from_key, off_section_vox, out};
         --seed {grid_id, seed_zyx, label, apart, piece_voxels, pieces: [{label, apart, piece_voxels, inside_voxels}], off_plane_vox}
-Example: python marks_to_grid.py --curve --world "at (2.11, 1.81, 2.13)–(2.38, 1.81, 2.11)–(2.64, 1.81, 2.10) mm" --drawn-on tibia-frame.json --grid tibia-frame.json --into annotations.json --key growth_plate_curves --out annotations-marked.json
-         python marks_to_grid.py --seed --world "(...)–(...)–(...)" --drawn-on hu.json --grid hu.json --labels labels.npy
+Example: python marks_to_grid.py --curve --voxels "at voxels [202.9, 172.4, 201.0]–[201.0, 172.4, 226.7]–[200.0, 172.4, 251.4]" --drawn-on tibia-frame.json --grid tibia-frame.json --into annotations.json --key growth_plate_curves --out annotations-marked.json
+         python marks_to_grid.py --seed --voxels "[...]–[...]–[...]" --drawn-on hu.json --grid hu.json --labels labels.npy
 Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
@@ -54,28 +52,27 @@ from matplotlib.path import Path as Polygon
 from scipy import ndimage as ndi
 
 NUMBER = r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'
-TRIPLE = re.compile(rf'\(\s*({NUMBER})\s*,\s*({NUMBER})\s*,\s*({NUMBER})\s*\)')
+TRIPLE = re.compile(rf'\[\s*({NUMBER})\s*,\s*({NUMBER})\s*,\s*({NUMBER})\s*\]')
 TURN_BACK_VOX = 5.0  # how far a path may step back along the section before it counts as turning back (hand tremor on a steep step)
 MIN_PIECE_VOX = 50  # an apart part smaller than this is noise, never the piece an outline is drawn around
 SPLICE_MARGIN_VOX = 1.0  # old points this close to the mark's ends are replaced too, so the seam has no near-duplicate column
 
 
-def world_points(text):
-    """The (x, y, z) mm triples in `text`, in order, after whichever of ' at ' and ' to ' comes last: the tag comes before both."""
-    cut = max(text.rfind(' at '), text.rfind(' to '))
+def mark_points(text):
+    """The [z, y, x] voxel triples in `text`, in order, after whichever of ' at voxels ' and ' to voxels ' comes last."""
+    cut = max(text.rfind(' at voxels '), text.rfind(' to voxels '))
     if cut >= 0:
-        text = text[cut + 4:]
+        text = text[cut + len(' at voxels '):]
     found = TRIPLE.findall(text)
     if not found:
-        sidecar.fail('--world holds no (x, y, z) point: pass the mark\'s points as your delivery prints them, "(2.11, 1.81, 2.13)–..."')
+        sidecar.fail('--voxels holds no [z, y, x] point: pass the mark\'s points as your delivery prints them, "[201.4, 172.4, 210.9]–..."')
     return np.array(found, float)
 
 
-def to_grid(xyz, drawn_on, header):
-    """The review's mm (x, y, z) on the image `drawn_on` describes -> fractional voxel indices (z, y, x) of the grid `header` describes."""
+def to_grid(zyx, drawn_on, header):
+    """Voxels (z, y, x) on the grid `drawn_on` describes -> fractional voxel indices (z, y, x) of the grid `header` describes."""
     d = sidecar.grid(drawn_on)
     g = sidecar.grid(header)
-    zyx = xyz[:, ::-1] / np.asarray(d['spacing_zyx_mm'], float)
     if d['grid_id'] == g['grid_id']:
         return g, zyx
     for path, h in ((drawn_on, d), (header, g)):
@@ -230,7 +227,7 @@ def main():
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument('--curve', action='store_true', help='the mark is a line or path along a face on one section: write it as that section\'s curve')
     mode.add_argument('--seed', action='store_true', help='the mark is an outline around a piece: print a labelled voxel inside it')
-    ap.add_argument('--world', required=True, help='the mark\'s points in mm, as your delivery prints them')
+    ap.add_argument('--voxels', required=True, help='the mark\'s points, voxels [z, y, x] of the image it was drawn on, as your delivery prints them')
     ap.add_argument('--drawn-on', type=sidecar.existing, required=True,
                     help='header of the image the mark was drawn on (the output after "drawn on" in the delivery): its sidecar, hu.json or frame.json')
     ap.add_argument('--grid', type=sidecar.existing, required=True, help='header of the grid to map onto: hu.json or a frame.json')
@@ -247,7 +244,7 @@ def main():
         sidecar.fail('--into and --key go together: the annotations file and the curve key of the face the mark lies on')
     if a.seed and not a.labels:
         sidecar.fail('--seed needs --labels, the labels the piece is in')
-    g, zyx = to_grid(world_points(a.world), a.drawn_on, a.grid)
+    g, zyx = to_grid(mark_points(a.voxels), a.drawn_on, a.grid)
     (curve if a.curve else seed)(a, g, zyx)
 
 

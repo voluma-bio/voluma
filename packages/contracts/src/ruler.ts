@@ -18,6 +18,22 @@ export const toWorld = (
   return [row(m[0]), row(m[1]), row(m[2])];
 };
 
+/**
+ * World mm (x, y, z) to a grid voxel `[z, y, x]` (fractional) through the grid's affine: its
+ * columns are orthogonal (the contract's spaced-rigid rule), so each index is a projection.
+ */
+export const toVoxel = (
+  m: Volume["affine"],
+  world: readonly number[],
+): [number, number, number] => {
+  const [dx, dy, dz] = [world[0]! - m[0][3], world[1]! - m[1][3], world[2]! - m[2][3]];
+  const along = (j: 0 | 1 | 2) => {
+    const [a, b, c] = [m[0][j], m[1][j], m[2][j]];
+    return (a * dx + b * dy + c * dz) / (a * a + b * b + c * c);
+  };
+  return [along(2), along(1), along(0)];
+};
+
 /** Distance in mm between two world points. */
 export const distanceMm = (
   [ax, ay, az]: readonly [number, number, number],
