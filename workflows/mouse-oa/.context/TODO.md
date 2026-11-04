@@ -1,5 +1,13 @@
 # mouse-oa TODO
 
+- **Align the femur before placing a-d (the lab expert's order).** "Alignment by the tibia first. Alignment by tibial
+  shaft to growth plate and articular surface as first parameters. Additional parameters for femoral indices would be
+  measured after alignment of femur." Today `femoral_frame.py` builds `femur-frame.json` after the points, from the same
+  label, and the worker places a-d on scan-grid renders. Next: build the frame first (a frame-only mode: its distal sample
+  for the ML fit now comes from the landmarks' mean, so it needs a points-free distal end, e.g. the end facing the tibia),
+  have the worker place and check a-d on views of the femur-aligned stack (`quad_view.py --plane ...:frame=femur-frame.json`;
+  `pick.py` takes scan-grid renders today, so it needs a frame input or a map back with `frame.to_scan_points`), then
+  measure as now on the scan grid. Not done before the Nov 4 demo: no production run could rehearse a reordered step.
 - **A labels fix after the tracing voids the tracing.** `iioc.py` stops where ROI-1's side runs through bone the tibia label
   left out; fixing the labels and rerunning `tibia_frame.py` makes a new `grid_id` (the frame's origin and crop come from the
   mask), and every traced curve, eroded mark and width point is refused on it. Next: `tibia_frame.py --frame <tibia-frame.json>`
