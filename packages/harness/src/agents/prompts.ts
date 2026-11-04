@@ -41,14 +41,16 @@ export function systemPromptOf({
 }
 
 /**
- * `review.md`, or in a snapshot cut before it existed the `corrections` skill's text, which it moved.
- * Delete the fallback once no run predates `review.md` (`packages/harness/.context/TODO.md`).
+ * `review.md`, or in a snapshot cut before it existed the `corrections` skill's text, which it moved
+ * (a snapshot before that has neither: a short opening). Delete the fallback once no run predates
+ * `review.md` (`packages/harness/.context/TODO.md`).
  */
 function reviewText(definition: AgentsDefinition): string {
-  const text = definition.review ?? definition.skills.find((s) => s.name === "corrections")?.text;
-  if (text === undefined)
-    throw new Error("this run's snapshot has no review.md and no corrections skill");
-  return text;
+  return (
+    definition.review ??
+    definition.skills.find((s) => s.name === "corrections")?.text ??
+    "# Review\n\nThe run is finished and the researcher is reviewing it. Your first message is the handover from the main before you; the full conversation of that main is in `/work/main/transcript.md`."
+  );
 }
 
 /** What a review main starts from (`handoverText`). */

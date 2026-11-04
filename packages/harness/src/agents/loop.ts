@@ -372,8 +372,14 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
    */
   async function handoverOf(id: string, previous: AgentRecord) {
     if (userTexts(id).length > 0) return undefined;
-    await (await o.prepareTranscript({ id: previous.id, name: "main" }))();
     let summary = NO_SUMMARY;
+    try {
+      // The transcript is the fallback for a missing summary: its failure is not the run's.
+      await (await o.prepareTranscript({ id: previous.id, name: "main" }))();
+    } catch (error) {
+      if (o.signal?.aborted) throw error;
+      console.error(`handover: no transcript of ${previous.id}:`, error);
+    }
     try {
       summary = (await o.handoverSummary(previous, id)) || NO_SUMMARY;
     } catch (error) {
@@ -398,8 +404,8 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
     const id = threadIdOf(runId, nameOf(n));
     const previous = mains.at(-1);
     const handed = d.reviewing && previous ? await handoverOf(id, previous) : undefined;
-    // The main before it was idle (it closed the run): end it, or an idle ping would resume it beside the review main.
-    if (handed && previous && stateOf(previous) === "idle") {
+    // End the main before it, or a ping or a finished command would resume it beside the review main.
+    if (handed && previous && stateOf(previous) !== "closed") {
       await recorder.append(
         previous.id,
         "thread.ended",
@@ -866,7 +872,12 @@ export async function agentLoop(o: AgentLoopOptions): Promise<void> {
       return "acted";
     }
     // The run finished and the researcher wrote: a review main takes over from the run main. A run reviewing on a run main (started before review mains) gets one here too.
-    if (d.reviewing && !d.main.review && !threads.running(d.main.id)) {
+    if (
+      d.reviewing &&
+      !d.main.review &&
+      !threads.running(d.main.id) &&
+      (d.undelivered.length > 0 || d.unansweredPerson.length > 0)
+    ) {
       await startMain(d);
       return "acted";
     }

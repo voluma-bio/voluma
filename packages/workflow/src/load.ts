@@ -71,7 +71,7 @@ const frontmatterSchema = z.strictObject({
 /** Both loops' role folders are snapshotted; the pin picks one when the snapshot is read. */
 const ROLE_DIRS = [`${CORE}/agents`, `${CORE}/roles`];
 const rolesDirOf = (harness: Harness) => ROLE_DIRS[harness === "agents" ? 1 : 0] as string;
-/** Files of `roles/` appended to every role's prompt, not roles. */
+/** Prompt texts of `roles/`, not roles: `words.md` and `environment.md` go in every role's prompt, `review.md` in a review main's. */
 const PROMPT_TEXTS = ["words.md", "environment.md", "review.md"];
 const agentSchema = z.strictObject({
   name: z.string().min(1),

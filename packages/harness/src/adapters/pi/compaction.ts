@@ -378,7 +378,8 @@ const textOf = (reply: AssistantMessage) =>
  * One summary call: `request` then `instruction`. A reply that stopped at the length limit is asked
  * for again with twice the room (reasoning counts inside the output limit on some providers and can
  * use all of it; the thread's reasoning setting stays, as changing it would miss the cache), and
- * both calls' usage is billed. `onStarted` fires when a response's headers arrived.
+ * both calls' usage is billed. `onAttempt` fires as each call begins and `onStarted` when its
+ * response's headers arrived, so a caller's flag describes the call whose reply it gets.
  */
 async function summaryReply(
   t: SummaryTarget,
@@ -386,8 +387,10 @@ async function summaryReply(
   instruction: string,
   signal?: AbortSignal,
   onStarted?: () => void,
+  onAttempt?: () => void,
 ): Promise<AssistantMessage> {
   const call = async (maxTokens: number) => {
+    onAttempt?.();
     const stream = await t.streamFn(
       t.model,
       normalizeContext({
@@ -539,6 +542,9 @@ export function compactor(args: {
       signal,
       () => {
         started = true;
+      },
+      () => {
+        started = false;
       },
     );
     if (started && reply.stopReason === "error" && reply.errorMessage) {
