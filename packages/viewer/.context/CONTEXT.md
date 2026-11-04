@@ -56,7 +56,7 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   (`planes`, from the base's catalog entry); without it they are uncoloured. Its views stay
   mounted and move between CSS grid cells, so a chip swap, a layout change or full screen never
   remounts a pane; the layout is the caller's, the seams the viewer's.
-  Rows run down, so z runs down in every slice pane and in 3D (`camera.up` = −z).
+  Rows run down, so z runs down in every slice pane and in 3D's opening view (`camera.up` = −z).
 - **Levels.** A pane opens on the coarsest level and loads the level whose voxel still covers at
   least one device pixel at its zoom; the coarse picture shows meanwhile unless the finer one lands
   within 80 ms. Overlays load at the image level's scale (nearest: a label never blends).
@@ -65,7 +65,9 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   never fetched. A 404 chunk is the fill value (zarr v2 omits empty chunks).
 - **Interaction.** Left drag sets the crosshair; wheel, arrows and Page Up/Down step slices;
   Ctrl/⌘ + wheel zooms at the pointer; Shift, middle or right drag pans; zoom is relative to the
-  pane's fit, so resizing and maximizing keep the framing. In 3D, orbit controls; a click (not a
+  pane's fit, so resizing and maximizing keep the framing. In 3D, drag turns the scene freely
+  like a ball (over the top, and rolling near the edge; three's `ArcballControls`), Shift, Ctrl/⌘ or right
+  drag pans, wheel or middle drag zooms, and the pane's reset button returns to the opening view; a click (not a
   drag) on a mesh moves the crosshair to the voxel under it. Loading never moves the crosshair or
   camera; a new `focus` voxel (a check's) moves the crosshair. A pane with no size (hidden) draws
   nothing; showing it resizes it, which draws, so a caller may keep a viewer mounted and hidden.
@@ -107,9 +109,19 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   nothing outlives the viewer. So a tilted pane is
   softer than an untilted one at high zoom. Its counter is primed (′) on the nearest axis and steps
   the grid's finest spacing along its normal; marks within half a step of the plane count as on it.
-- **Tilting by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
-  other two planes' lines; dragging one turns those two planes about this pane's normal (this pane
-  stays still).
+- **Turning by hand.** With Navigate, hovering a slice pane shows a handle near each end of the
+  other two planes' lines; dragging one tilts those two planes about this pane's normal (this pane
+  stays still, `tilt`). Spinning turns the image of the pane you look at in place, about the
+  crosshair, and the other two planes follow (`spin`: all three panes turned about that pane's
+  normal), as in DataViewer or Amira, so the tibia's shaft can be stood upright in the coronal and
+  then the sagittal view: Alt + left drag in the pane, a dial about the crosshair; `,` / `.` turn the
+  pane under the pointer (else the focused one) 1° anticlockwise / clockwise, 0.1° with Shift (not
+  `[` `]`: `]` folds the shell's right side); or the tool bar's Turn the planes popover, ±1° and
+  ±5° per plane. Every turn keeps each pane a rotation of its grid pane, never a mirror. How far
+  the planes are turned (`offGrid`) is the largest turn taking a grid pane onto its pane, so a pane
+  spun in its own plane counts; the words ("Turned 3.6°") and Reset follow the panes' own on-grid
+  test, so a pane a hair off the grid says "Turned 0.0°" rather than hiding behind the grid's
+  name. On the grid's axes the tool bar names the grid (`gridName`, "Aligned tibia grid").
 - **Align.** Targets come from the caller (`planeTargets`, `targets.ts`): a plane fitted (least
   squares, `fitNormal`) through the vertices of every published surface whose catalog entry has
   `fitsPlane` (mouse-oa: both growth-plate faces, so "GP"), and every other image grid's axes.
