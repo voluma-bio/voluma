@@ -116,7 +116,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - Operator CLIs (seed, archive, export and import a run, `r2:put`, `upload:scan`) live in
   `src/ops/`, not in a domain.
 - **Limits come from env** (`RUN_LIMITS_*`, read in `index.ts`; they guard Voluma's key, `admission.ts`); the workflow catalog
-  (`@voluma/workflow/bundled`) is code, and each workflow's `outputs.yaml` is read from the checkout at start (`@voluma/workflow/catalog-file`). `seed:example --from <runId> [--remote]` makes an example run (it copies the source's `evidence/`, `review/`, `scratch/person/` and `outputs/` under the example's prefix)
+  (`@voluma/workflow/bundled`) is code, and each workflow's `outputs.yaml` is read from the checkout at start (`@voluma/workflow/catalog-file`). `seed:example --from <runId> [--remote]` makes an example run (it copies the source's `review/`, `scratch/person/` and `outputs/` under the example's prefix)
   (`src/ops/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
@@ -159,10 +159,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   when event IDs repeat or there are no fold events. Cache misses load only those
   events; hits load no event payloads. A single-run read of a run of any state throws on events that don't parse; lists
   leave out a completed run that doesn't and keep another with empty results. The event log remains the only durable human-decision state.
-- `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
-  files (`evidenceKey`) from the store (`files.ts` maps a missing object to 404 and a failed read to 502), after `RunRecords.readable`.
-  No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`,
-  a day). The leading bytes pick the type: JPEG, PNG, GIF and WebP inline, anything else an attachment,
+- `runs.ts` also serves `GET /runs/:runId/outputs/*`: a file under the run's `outputs/` prefix from the store
+  (`files.ts` maps a missing object to 404 and a failed read to 502), after `RunRecords.readable`.
+  The leading bytes pick the type: JPEG, PNG, GIF and WebP inline, anything else an attachment,
   always `nosniff`, since the stored content type is whatever the sandbox mount wrote. HEAD is
   a 405 before storage is opened.
 - The domains get one `ObjectStore` (`@voluma/object-store`; the R2

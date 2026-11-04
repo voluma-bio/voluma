@@ -433,7 +433,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         while (!historyError && !signal?.aborted) {
           if (overflowRetryable(agent.state.messages)) {
             const recovered = await compacting.recover(agent.state.messages, signal).catch((e) => {
-              // The summary's own provider failure ends the thread as that failure; the run loop treats it by the thread's place (`run-loop.ts`).
+              // The summary's own provider failure ends the thread as that failure; the supervisor treats it by the thread's place (`supervise-run.ts`).
               const text = e instanceof Error ? e.message : String(e);
               throw new ThreadFailure(text, compacting.interrupted(text));
             });

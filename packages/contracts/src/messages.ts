@@ -33,8 +33,8 @@
  * `run.ts`'s. Only this route's body limit is raised, to `MESSAGE_BODY_BYTES`; the snapshot is at
  * most `MAX_MESSAGE_SNAPSHOT_BYTES` decoded, and the server checks the decoded size and the PNG
  * signature, not only the string. The server writes it to `runs/<runId>/scratch/person/<id>.png`
- * (the sandbox's `/scratch/person/<id>.png`, which the main agent's and a worker's `read` can
- * open) and puts that key in `snapshotKey`.
+ * (the harness copies it to `/work/main/person/<id>.png`, which the main agent's and a worker's
+ * `read` can open) and puts that key in `snapshotKey`.
  *
  * Idempotent: the caller keeps `id` across retries. A retry with the same `id` stores nothing new
  * and answers 200 with the original event id and the run's current state. The server stamps

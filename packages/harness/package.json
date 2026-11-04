@@ -11,7 +11,6 @@
     "./error-text": "./src/error-text.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
-    "./live": "./src/live.ts",
     "./sandbox-specs": "./src/sandbox-specs.ts",
     "./adapters/http/hand-off": "./src/adapters/http/hand-off.ts",
     "./model-usage": "./src/model-usage.ts",

@@ -326,9 +326,9 @@ export async function deleteMark(runId: string, markId: string): Promise<void> {
 }
 
 /**
- * Sends the main agent a message (and optional marks, a PNG snapshot, or Go) about a finished run;
+ * Sends the main agent a message (and optional marks, a view snapshot, or Go) about a finished run;
  * reopens a run that ended `completed`. Keep `body.id` across retries. Refusals and limits:
- * `messages.ts`. The chat comes back on the run's event stream: the `person.message` and `reply` events.
+ * `messages.ts`. The conversation comes back on the run's event stream: the `person.message` event and the agent's replies.
  */
 export async function sendRunMessage(
   runId: string,
@@ -361,15 +361,6 @@ export async function answerApproval(
     ),
   );
 }
-
-/**
- * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,
- * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG, PNG, GIF and WebP come back as
- * images; anything else is an attachment. 404: unreadable run or no such file; 503: no file
- * storage configured. Only files under the run's own prefix, not the reference run's keys.
- */
-export const reviewFileUrl = (runId: string, sha256: string) =>
-  `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
 
 /**
  * Where the browser reads a file under a run's outputs: `path` is relative to

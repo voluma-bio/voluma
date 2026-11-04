@@ -50,7 +50,14 @@ export const workflowDirSchema = z
   .refine((d) => d !== CORE, "core is not a workflow");
 
 /** Keys of the Agent Skills format that Voluma does not read; any other key must be one it does. */
-const SKILL_KEYS = ["license", "compatibility", "metadata", "allowed-tools", "type"] as const;
+const SKILL_KEYS = [
+  "license",
+  "compatibility",
+  "metadata",
+  "allowed-tools",
+  "type",
+  "harness", // OVERLAP: snapshots cut before the task loop was deleted; see `rolesDirOf`
+] as const;
 const frontmatterSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -61,6 +68,18 @@ const frontmatterSchema = z.strictObject({
 
 /** The role files, the same for every workflow. */
 const ROLES_DIR = `${CORE}/agents`;
+/**
+ * OVERLAP, delete with the `harness` skill key above once no run snapshotted before the task loop
+ * was deleted can still be resumed (TODO in packages/workflow/.context/TODO.md): such a snapshot
+ * keeps the roles in `core/roles/` and holds a `core/agents/` of task-loop roles to ignore.
+ */
+const OLD_ROLES_DIR = `${CORE}/roles`;
+async function rolesDirOf(store: ObjectStore, prefix: string, existing: boolean) {
+  return existing && (await store.head(`${prefix}${OLD_ROLES_DIR}/main.md`))
+    ? OLD_ROLES_DIR
+    : ROLES_DIR;
+}
+
 /** Files of `agents/` appended to every role's prompt, not roles. */
 const PROMPT_TEXTS = ["words.md", "environment.md"];
 const agentSchema = z.strictObject({
@@ -190,12 +209,13 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   workflowDirSchema.parse(dir);
   const existing = await snapshot(dir, options);
   const { store, prefix } = options;
+  const rolesDir = await rolesDirOf(store, prefix, existing);
   const texts = new Map<string, string>();
   for (const { key } of (await store.list(prefix)).objects) {
     const path = key.slice(prefix.length);
     if (
       /(^|\/)SKILL\.md$|(^|\/)outputs\.yaml$|\/references\/suggested-plan\.md$/.test(path) ||
-      (path.startsWith(`${ROLES_DIR}/`) && /^[^/]+\.md$/.test(path.slice(ROLES_DIR.length + 1))) ||
+      (path.startsWith(`${rolesDir}/`) && /^[^/]+\.md$/.test(path.slice(rolesDir.length + 1))) ||
       scriptOf(path)
     )
       texts.set(path, await getText(store, key));
@@ -288,7 +308,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
 
   const found: Record<string, ParsedAgent> = {};
   for (const [path, text] of texts) {
-    if (!path.startsWith(`${ROLES_DIR}/`) || PROMPT_TEXTS.some((f) => path.endsWith(`/${f}`)))
+    if (!path.startsWith(`${rolesDir}/`) || PROMPT_TEXTS.some((f) => path.endsWith(`/${f}`)))
       continue;
     const agent = parseAgent(path, text, options.knownTools, existing);
     found[agent.name] = agent;
@@ -296,17 +316,17 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   const skillNames = skills.map((s) => s.name);
   const agents: Record<string, AgentDefinition> = {};
   for (const agent of Object.values(found)) {
-    const path = `${ROLES_DIR}/${agent.name}.md`;
+    const path = `${rolesDir}/${agent.name}.md`;
     const unknown = agent.skills?.find((n) => !skillNames.includes(n));
     if (unknown)
       throw new WorkflowParseError(path, `skill "${unknown}" is not a skill of this workflow`);
     agents[agent.name] = { ...agent, skills: agent.skills ?? skillNames };
   }
   const { main } = agents;
-  if (!main) throw new WorkflowParseError(`${ROLES_DIR}/main.md`, "not found");
+  if (!main) throw new WorkflowParseError(`${rolesDir}/main.md`, "not found");
   const promptText = (name: string) => {
-    const text = texts.get(`${ROLES_DIR}/${name}`);
-    if (text === undefined) throw new WorkflowParseError(`${ROLES_DIR}/${name}`, "not found");
+    const text = texts.get(`${rolesDir}/${name}`);
+    if (text === undefined) throw new WorkflowParseError(`${rolesDir}/${name}`, "not found");
     return text.trim();
   };
   return {

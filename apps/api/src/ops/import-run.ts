@@ -9,7 +9,7 @@
  * pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
- * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
+ * `operator.ts`). Files are not copied: they stay in R2 under the run's prefixes, shared by every database.
  */
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";

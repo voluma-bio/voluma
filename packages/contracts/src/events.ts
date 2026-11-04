@@ -19,7 +19,7 @@
  * resume: skipping it would shift every later `seq`. The runner reads them all before it
  * decides anything, so its view is the stored log.
  *
- * Ids that become R2 key segments (`runId`, `toolCallId`, evidence paths) are checked
+ * Ids that become R2 key segments (`runId`, `toolCallId`, version paths) are checked
  * with the `r2.ts` schemas here, so an accepted event can't fail later when a
  * key is built.
  *
@@ -126,8 +126,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z
       .object({
         /**
-         * The thread's name: `supervisor`, `main`, `main.2`, `segmentation.worker`. It is the thread's folder under `/scratch` and its sandbox's
-         * name, and the same on every start of the thread.
+         * The thread's name: `supervisor`, `main`, `main.2`, `segmentation.worker`. It is its sandbox's name (a worker's folder under
+         * `/work` is the name; main's is `main`), and the same on every start of the thread.
          */
         name: nonEmpty,
         /** Null on a run's root thread. */
@@ -167,6 +167,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         from: nonEmpty.optional(),
         /** The worker (its `name`) this one must not see: the two exchange messages with main only. */
         blind: nonEmpty.optional(),
+        /**
+         * OVERLAP: written `"agents"` on the root thread because a runner built before the task
+         * loop was deleted pins `harness ?? "tasks"` when it resumes a run (TODO: drop with the
+         * claim's `harness`, `packages/contracts/.context/TODO.md`).
+         */
+        harness: z.literal("agents").optional(),
       })
       .refine((p) => p.parentThreadId !== null || p.workflows !== undefined, {
         path: ["workflows"],
@@ -282,7 +288,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * Authoritative end of a tool call. Live output while it ran was never
-   * stored (`stream.ts`); this and `toolOutputKey` are the record.
+   * stored (`stream.ts`); this and the spilled file are the record.
    */
   const toolResult = event(
     "tool.result",
@@ -293,9 +299,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         /** What the model saw: head and tail only when `truncated`. */
         output: z.string(),
         /**
-         * When true the full output is at `toolOutputKey(runId, threadName, toolCallId)`: under
-         * the calling thread's own folder of the run's scratch, `threadName` being its id
-         * without the run id.
+         * When true the full output is at `/work/<folder>/.tool-output/<toolCallId>` in the
+         * calling thread's own folder (`ThreadLayout.toolOutputPath`).
          */
         truncated: z.boolean(),
         /**

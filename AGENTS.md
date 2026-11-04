@@ -101,8 +101,11 @@ all: select the raw payload and pick fields in JS, because Postgres errors on `\
 in the document. Before step 2, parse every staging run's
 events, and every `run.json` under `r2:dev/runs/`, with the new `runEventSchema`: fetch each run's log from
 `GET /api/run/runs/:id/stream` with `VOLUMA_DEBUG_TOKEN` (agents can't reach
-staging's database), leaving out its `event: live` frames, which are not stored events. A query for the fields you think changed is not enough: it
+staging's database); the stream's `event: end` frame is not a stored event. A query for the fields you think changed is not enough: it
 missed the recorded plans that took the runs list down after #177.
+A run's workflow snapshot in R2 (`workflowSnapshotPrefix`, read by `loadWorkflow`) is stored data too:
+a change to the role files or skill frontmatter it parses must still load the snapshots of live runs
+and of every run a person can reopen, or carry a marked shim that does.
 
 ## Working in parallel
 

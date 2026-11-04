@@ -35,8 +35,17 @@ Readers that take an output's status from `fold.byId` by its own id (`hasVersion
 One fold helper, `stateOf(fold, id)`, that resolves the label to its map first and is the only way
 readers get a state, would end that class (`chainOf` needed the same step, #489).
 
-## Drop the deploy-overlap leftovers of the task loop
+## Drop the deploy-overlap leftovers of the task loop (2026-11-03)
 
-Once no runner or API built before "Delete the task loop" is live: delete `harness: z.literal("agents")` from
-`claimSchema.run` (`src/runner.ts`, filled by `ingest.ts`) and the claim's `harnesses`, together with the
-`runs.harness` column. The API's TODO (`apps/api/.context/TODO.md`) lists the rest.
+Once no runner or API built before "Delete the task loop" is live, and no run started by such a runner
+can be resumed: delete from `claimSchema.run` (`src/runner.ts`, filled by `ingest.ts`) `harness`, `tasks`
+and `review` (an older runner requires all three), the claim's `harnesses`, and `harness` on the root
+`thread.started` (`src/events.ts`, written by `supervise-run.ts`; an older runner pins
+`first.payload.harness ?? "tasks"`), together with the `runs.harness` column. The API's TODO
+(`apps/api/.context/TODO.md`) lists the rest.
+
+## Drop `thread.started.kind` (later step)
+
+`kind` repeats `role` now that only `main` and `worker` exist (the root writes `supervisor`). A stored
+event field, so two steps: make it optional and stop writing it, then, once no stored event or live
+runner needs it, delete it. Along with it, `ThreadBase.role` and `ThreadLayout.role` duplicate `place`.

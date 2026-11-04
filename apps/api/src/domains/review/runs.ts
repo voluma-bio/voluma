@@ -1,7 +1,6 @@
 /**
  * The review's run routes, for users only. Reads are scoped by `readerOf`, so a run the
  * caller can't read is 404.
- *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
  *   GET /runs/:runId/outputs/*      a file under its outputs (`outputsPrefix`): an output
  *                                   version's files and evidence
  *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
@@ -35,7 +34,6 @@ import {
   sendRunMessageRequestSchema,
 } from "@voluma/contracts/messages";
 import {
-  evidenceKey,
   messageSnapshotKey,
   outputsPrefix,
   relativePathSchema,
@@ -195,23 +193,6 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     c.header("Cache-Control", cacheControl);
     return c.body(stream);
   }
-
-  app.get("/runs/:runId/files/:sha256", async (c) => {
-    // Hono runs GET for HEAD and drops the body without cancelling the storage read.
-    if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });
-    const { runId, sha256 } = c.req.param();
-    if (!sha256Schema.safeParse(sha256).success) return c.json({ error: "not found" }, 404);
-    if (!(await runs.readable(readerOf(c.var.user), runId)))
-      return c.json({ error: "not found" }, 404);
-    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
-    // The stored content type is whatever the sandbox's mount wrote, so the bytes decide.
-    // Content-addressed: the bytes never change. A day, so a revoked reader's copy doesn't linger.
-    return serveFile(
-      c,
-      await openFile(store, evidenceKey(runId, sha256), c.req.raw.signal),
-      "private, max-age=86400, immutable",
-    );
-  });
 
   app.get("/runs/:runId/outputs/*", async (c) => {
     if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });

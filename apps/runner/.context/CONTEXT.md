@@ -9,7 +9,7 @@ only `createSandbox(spec, signal)` (Modal) and the gateway's URL and token. Tags
 | Layout | Mounts | Network | Name |
 |---|---|---|---|
 | agent thread (main too, when its file grants `bash`) | `/inputs`, `/workflow`, `/outputs`, `/run` read-only; its own `/work/<folder>` writable; the other agents' folders read-only | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist, only if the role holds `segment_sam`; else none | the agent's name |
-| `convertLayout` | `/evidence`, `/outputs`, `/workflow` read-only, `/review` writable | none | `convert` |
+| `convertLayout` | `/outputs`, `/workflow` read-only, `/review` writable | none | `convert` |
 
 `VOLUMA_GATEWAY_IPV4` selects a single-address CIDR policy instead of SNI, never both (Modal
 unions them). It must be an exclusive inbound IPv4, not a resolved shared Render/Cloudflare IP.
@@ -272,20 +272,20 @@ calls against the run's cap. Run `sandboxes:clean --run <id>` after, as for any 
 To try `voluma-sam` without a live Meta call, point `VOLUMA_GATEWAY_URL` at a stub gateway in front
 of a stub Meta that replays a saved response. Modal must reach it over HTTPS (its host is the
 worker's allowlist), so host it in a Modal sandbox on an encrypted tunnel. The reference scan's
-input is DICOM: put the `.npy` under the run's `scratch/` prefix first.
+input is DICOM: put the `.npy` under the run's `work/<runId>/main/` prefix first.
 
 To run the real runner against a stub model provider (a fake that returns 503s or canned replies),
 set every `VOLUMA_<PROVIDER>_API_KEY` in that runner's environment to a dummy value, not a real key. A
 model call the stub misses then fails closed with a 401 instead of reaching the provider. A resumed
 thread takes its model from the log, so a base-URL override set for one model can miss it.
 
-# Runner: `view_image` shows the model files the sandbox wrote
+# Runner: `read` shows the model files the sandbox wrote
 
-`packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files from the run's bucket (a path outside
-the mounts, such as the sandbox's `/tmp`, through the thread's sandbox: `tools/read-whole.ts`) and returns them as
-image content; a `ToolResult` may carry `images`, which the Pi adapter turns into image blocks. An image over
-1 MiB or 2000 px a side is downscaled with sharp (EXIF orientation applied, fit to 2000 px, JPEG, quality lowered until under 1 MiB) and the
-result line says from what size. The `tool.result` event holds only text (path, type, size, sha256).
+`packages/harness/src/agents/tools/read.ts` reads up to 4 text or PNG/JPEG files from the run's mounts (a path
+outside them, such as the sandbox's `/tmp`, through the thread's sandbox: `tools/read-whole.ts`) and returns the
+images as image content; a `ToolResult` may carry `images`, which the Pi adapter turns into image blocks. An image over
+1 MiB or 2000 px a side is cut at the panes its `.view.json` names or downscaled with sharp (`tools/image-fit.ts`: EXIF
+orientation applied, fit to 2000 px, JPEG, quality lowered until under 1 MiB). The `tool.result` event holds only text.
 
 **Stored history keeps images by reference.** `adapters/pi/image-refs.ts` wraps the History port
 (`supervise-run.ts`): a message is stored with each image block replaced by `{type: "imageRef", key, sha256, mimeType}`,

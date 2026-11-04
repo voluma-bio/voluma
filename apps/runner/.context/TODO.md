@@ -3,7 +3,6 @@
 - **An output appended after the drain's final scan** (a thread stuck past the 5 s wind-down after a failure) gets no `assets.*` event. Narrow.
 
 - **Validate the input review cache on real Modal/R2 mounts ([#325](https://github.com/voluma-bio/voluma/pull/325)).** Andrew deferred this test and authorized merge after a fresh clean review on 2026-10-31; local OA6-1RK checks do not establish deployed mount behavior. After credentials and paid-resource approval are available, verify cold/warm reuse across independent mounts, concurrent and interrupted publication, cancellation, prefix permissions, and mounted-storage performance. Use a unique `dev/` prefix, preserve existing inputs, and clean up only the probe's objects and sandboxes.
-- **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The parent-directory race is reproduced and fixed locally; a real-Modal count would confirm it was the only cause. Do not lower `-P 32` without that measurement.
 
 From the round-2 review of #40 (`voluma-bio/docs` history: `git show 101a8b09:work/mvp-contracts-and-data/research/review-pr40-round2.md`):
 
@@ -17,6 +16,4 @@ From the skillset move (`workflows/` in this repo):
 
 - **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message), and the runner's boot line prints `RUNNER_THINKING`, but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.
 
-- **A correction's output backup (`runs/<id>/corrections/<reopen id>/`) is deleted only by the next claim after it, and a restored one stays.** A go's first claim copies the whole `/outputs` (`outputs-backup.ts`); the first claim of the next reopen after the correction finished deletes it, but a backup that was restored (the correction failed) is kept, and a run never reopened again keeps its last one. Delete restored backups too. Objects over 5 GB would need a multipart copy (`r2-outputs.ts` uses one `CopyObject`).
-- **Per-attempt output folders** would end the restore: an attempt writes `/outputs/<task>/<attempt>/`, so an abandoned attempt never touches the kept one's files and nothing is copied or put back. Too large for the corrections PR (every path that names an output file, the sandbox mount, the prompts, the converter); revisit after the Nov 4 demo.
 - **Every Meta request hashes every inline image** (`meta-images.ts`, `fileIdFor`): about 54 ms of event-loop time per 40 images of 1 MiB, plus short-lived copies. Cache the hash per image if it ever competes with the lease timers.

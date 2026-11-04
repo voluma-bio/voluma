@@ -140,7 +140,7 @@ async function runAgents(
       const main = forAgent("main", "main", false);
       const file = `person/${snapshotKey.split("/").pop()}`;
       try {
-        await o.publish.copy(snapshotKey, `${main.scratch.prefix}${file}`, { signal: o.signal });
+        await o.publish.copy(snapshotKey, `${main.own.prefix}${file}`, { signal: o.signal });
       } catch (error) {
         if (error instanceof FileNotFound) return undefined;
         throw error;

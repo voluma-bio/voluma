@@ -1,7 +1,7 @@
 /**
  * Runs one run to the end: the harness's own wiring of the workflow's roles, thread pool, tools,
  * sandboxes and agent loop, so a host supplies only what holds keys and machines
- * (the stored record, evidence, a model, a way to create a sandbox, the gateway's token). Each
+ * (the stored record, a model, a way to create a sandbox, the gateway's token). Each
  * role's tools, system prompt and first messages come from the workflow definition, each thread's
  * sandbox from its layout (`specOf`), and the review-asset conversion runs in one more sandbox of
  * the same session. Resume and a first run are the same call; the recorder is built on the stored
@@ -28,7 +28,7 @@ import { errorText } from "./error-text";
 import type { ProviderError } from "./failure-policy";
 import { convertLayout, type SandboxLayout } from "./layout";
 import type { LoopConfig, ModelSetup } from "./loop-config";
-import { runLock, type Wire } from "./loop-shell";
+import { runLock } from "./loop-shell";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Publish } from "./ports/publish";
@@ -213,6 +213,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       name: ROOT_NAME,
       parentThreadId: null,
       kind: "supervisor",
+      harness: "agents", // overlap with older runners, see `threadStarted` in contracts
       workflows: options.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
       sandboxImage: options.sandbox.image,
     });

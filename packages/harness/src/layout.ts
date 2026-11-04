@@ -16,7 +16,6 @@
  * Every sandbox gets `WORK`, its own folder `/work/<folder>` (`ThreadLayout.dir`).
  */
 import {
-  evidencePrefix,
   inputReviewPrefix,
   outputsPrefix,
   relativePathSchema,
@@ -31,7 +30,6 @@ import type { SandboxMount } from "./ports/sandbox";
 const INPUTS = "/inputs";
 export const OUTPUTS = "/outputs";
 export const WORKFLOW = "/workflow";
-export const EVIDENCE = "/evidence";
 export const REVIEW = "/review";
 const INPUT_REVIEW = "/input-review";
 const RUN = "/run";
@@ -47,7 +45,7 @@ export interface ThreadLayout {
   /** What the thread's sandbox mounts. */
   mounts: SandboxMount[];
   /** The thread's writable folder mount. */
-  scratch: SandboxMount;
+  own: SandboxMount;
   /** The thread's own working folder, `/work/<folder>`: `WORK`, the command workdir, its spill folder. */
   dir: string;
   /** The sandbox's env: the run's `PYTHONPATH` and `WORK` (`dir`). */
@@ -130,8 +128,8 @@ function lookup(table: readonly SandboxMount[], path: string, access: "read" | "
 }
 
 /**
- * The review-asset converter's sandbox, outside the threads and the same for every loop: reads
- * the evidence, the published versions (`/outputs`, the agent loop's) and the workflow, writes the
+ * The review-asset converter's sandbox, outside the threads: reads
+ * the published versions (`/outputs`) and the workflow, writes the
  * run's review prefix and the input's conversion cache, no network. The converter imports
  * `sidecar` through the run's PYTHONPATH.
  */
@@ -143,7 +141,6 @@ export function convertLayout(o: {
   return {
     name: "convert",
     mounts: [
-      { path: EVIDENCE, prefix: evidencePrefix(o.runId), access: "read-only" },
       { path: OUTPUTS, prefix: outputsPrefix(o.runId), access: "read-only" },
       { path: WORKFLOW, prefix: workflowSnapshotPrefix(o.runId), access: "read-only" },
       { path: REVIEW, prefix: reviewAssetPrefix(o.runId), access: "read-write" },
@@ -213,7 +210,7 @@ export function runLayout({ runId, inputPrefix, skills }: RunLayoutOptions): Run
         role,
         name,
         mounts,
-        scratch: own,
+        own,
         dir,
         env: { PYTHONPATH: pythonPath, WORK: dir },
         tools,

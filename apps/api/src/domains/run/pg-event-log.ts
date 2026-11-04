@@ -45,7 +45,7 @@ export const eventLock = (tx: Tx, runId: string) =>
  * append takes the event lock before it shares the run row (`assertLease`), so a transaction
  * that holds the row and then asks for the event lock can deadlock with it. Exceptions: the
  * gateway's `admitCall` (`packages/provider-calls/src/calls.ts`) locks the row alone and never
- * takes the event lock after it; `FOR SHARE` reads (`assertLease`, `pg-snapshots.ts`) are separate.
+ * takes the event lock after it; `FOR SHARE` reads (`assertLease`) are separate.
  */
 export async function lockRun(tx: Tx, runId: string, where?: SQL) {
   await eventLock(tx, runId);

@@ -2,7 +2,7 @@
  * Which model-call errors are the provider's and cannot be cured by a fresh thread, read from the
  * error text (shapes and status: `@voluma/harness/context-overflow`). Pi's own retries
  * (`model-fetch.ts`) are the only ones, and they cover only the request up to its response
- * headers. What the run loop (`run-loop.ts`) does with the result:
+ * headers. What the supervisor (`supervise-run.ts`) does with the result:
  * - `"fatal"`: no later call can succeed (a 4xx, an empty account). Fails the run on any thread.
  * - `"transient"`: Pi retried it and gave up, before any reply. Fails the run on the main agent.
  * - `undefined`: not the provider's, or an error whose text says nothing. Whether the reply had

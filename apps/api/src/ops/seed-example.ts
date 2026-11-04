@@ -6,21 +6,15 @@
  * The example gets the source's events and history under its own run id (event ids, thread ids
  * and payloads are copied verbatim: rows are keyed by run), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference input. It belongs to its own study of one input
- * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence, review assets, message snapshots (`scratch/person/`) and `outputs/` objects in R2 are copied
- * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
+ * (`study-<exampleId>`, `example: true`), replaced with it. The source's review assets, message snapshots (`scratch/person/`) and `outputs/` objects in R2 are copied
+ * under the example's own prefix (the output route builds a key from the run being read, so an
  * example can't point at another run's files). Re-seeding the same `--id` replaces the
  * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: a visitor run's
  * outputs are untrusted (`@voluma/contracts/run`), and an example's input is shown to everyone.
  */
 import { parseArgs } from "node:util";
 import { runIdSchema } from "@voluma/contracts/ids";
-import {
-  evidencePrefix,
-  outputsPrefix,
-  reviewAssetPrefix,
-  runPrefix,
-  scratchPrefix,
-} from "@voluma/contracts/r2";
+import { outputsPrefix, reviewAssetPrefix, runPrefix, scratchPrefix } from "@voluma/contracts/r2";
 import { deletePrefix } from "@voluma/object-store";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -68,26 +62,20 @@ const { store, bucket } = r2FromEnv();
 console.log(`example ${exampleId} -> bucket ${bucket}, prefix ${runPrefix(exampleId)}`);
 
 // Copies every object under one of the source run's prefixes to the same place under the
-// example's. Evidence is content-addressed and never overwritten, so a repeat copy is harmless.
+// example's.
 // `review/` holds the volumes and meshes the copied `assets.ready` events point at, and
 // `scratch/person/` the view snapshots of the copied messages (`messageSnapshotKey`). `outputs/` is
 // copied so the example is a whole run for the walkthrough's clone flow. These are emptied first,
 // so a re-seed leaves no object of the previous one; a seed that fails partway leaves the example's
 // 3D view broken until it is rerun.
-async function copyPrefix(
-  prefixOf: (runId: string) => string,
-  { replace = false } = {},
-): Promise<number> {
+async function copyPrefix(prefixOf: (runId: string) => string): Promise<number> {
   const fromPrefix = prefixOf(source);
-  if (replace) {
-    await deletePrefix(store, prefixOf(exampleId));
-  }
+  await deletePrefix(store, prefixOf(exampleId));
   const { objects } = await store.list(fromPrefix);
   for (const object of objects) {
     await store.copy(object.key, `${prefixOf(exampleId)}${object.key.slice(fromPrefix.length)}`);
   }
-  const copied = objects.length;
-  return copied;
+  return objects.length;
 }
 
 // Read and check everything, then upload to R2, then write the database in one short transaction.
@@ -121,10 +109,9 @@ const sourceEvents = await db
   .orderBy(asc(events.seq));
 const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({ ...event, runId: exampleId }));
 
-const copied = await copyPrefix(evidencePrefix);
-const copiedReview = await copyPrefix(reviewAssetPrefix, { replace: true });
-const copiedSnapshots = await copyPrefix((id) => `${scratchPrefix(id)}person/`, { replace: true });
-const copiedOutputs = await copyPrefix(outputsPrefix, { replace: true });
+const copiedReview = await copyPrefix(reviewAssetPrefix);
+const copiedSnapshots = await copyPrefix((id) => `${scratchPrefix(id)}person/`);
+const copiedOutputs = await copyPrefix(outputsPrefix);
 
 await db.transaction(async (tx) => {
   await tx.delete(piMessages).where(eq(piMessages.runId, exampleId));
@@ -182,6 +169,6 @@ await db.transaction(async (tx) => {
 });
 
 console.log(
-  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence, ${copiedReview} review asset, ${copiedSnapshots} snapshot and ${copiedOutputs} output objects copied`,
+  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copiedReview} review asset, ${copiedSnapshots} snapshot and ${copiedOutputs} output objects copied`,
 );
 await client.end();
