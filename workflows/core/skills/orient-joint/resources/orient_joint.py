@@ -276,7 +276,7 @@ if __name__ == '__main__':
     ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='hu.npy of the scan')
     ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json from scan-intake')
     ap.add_argument('--out', required=True, help='output directory (created)')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in HU (the workflow\'s anatomy reference gives it)')
+    ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in HU (the scan\'s, in scan-settings.json from intake)')
     ap.add_argument('--shaft-radius-mm', type=float, required=True, help='mm: the widest a shaft gets')
     ap.add_argument('--ref-radius-mm', type=float, required=True, help='mm: how near the joint the reference object sits')
     ap.add_argument('--min-object-mm3', type=float, required=True, help='mm3: the smallest 3D piece worth considering')

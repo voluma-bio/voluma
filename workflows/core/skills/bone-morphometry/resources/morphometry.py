@@ -417,7 +417,7 @@ def main():
                        description='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] of an ROI, two QC images and the thickness and separation maps. '
                        'Writes <out>/morphometry.json, qc.jpg, qc-maps.jpg, thickness-mm.npy, separation-mm.npy.')
     t.add_argument('--qc-axis', type=int, default=1, choices=[0, 1, 2], help='axis the QC slices are cut across')
-    t.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help="QC display window in HU, or the workflow's anatomy.json (default: automatic)")
+    t.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help="QC display window in HU, or the scan's scan-settings.json (default: automatic)")
     t.set_defaults(fn=trabecular)
     c = sub.add_parser('cortical', parents=[proto], formatter_class=fmt, help='Ct.Th in a slab at a depth below a reference surface',
                        description='Ct.Th: mean largest-contained-sphere diameter over the cortical voxels of a slab at a depth below a '

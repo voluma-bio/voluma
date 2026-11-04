@@ -283,7 +283,7 @@ def main():
     ap.add_argument('--sections', metavar='V,V,...', help='V indices of the sections to snap (default: every section with both faces)')
     ap.add_argument('--face', choices=('proximal', 'distal', 'both'), default='both', help='the face(s) to snap; the other stays as it is and only limits the separation')
     ap.add_argument('--snap-unsure', action='store_true', help='keep the snapped points on the low-confidence and moved-far stretches (default: your curve is put back there)')
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help='QC display window in HU, or the workflow\'s anatomy.json (default: from the scan)')
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help='QC display window in HU, or the scan\'s scan-settings.json (default: from the scan)')
     a = ap.parse_args()
     side = sidecar.sidecar_path(a.hu_aligned)
     if not side.exists():

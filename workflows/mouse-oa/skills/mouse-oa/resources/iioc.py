@@ -55,7 +55,7 @@ Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sid
   and the four rulers, in the shapes `report_output` takes)   qc-coronal.jpg, qc-heights.jpg  QC images
   qc-faces-<n>.jpg  the proximal face as delivered (the surface this script cut with), on every traced section: the sheets to open every one of
 Prints: the result record {out, values: {id: {value, unit, definition, kind}}, objects} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels) and eroded_stretches ([{v, u, reason, width_fraction}]; report them)
-Example: python iioc.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
+Example: python iioc.py --spec protocol.json --window scan-settings.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -181,7 +181,7 @@ def first_run(bone, v, u):
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc gives the plate patch width and how far a width point may be off the face")
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--frame', type=sidecar.existing, required=True, help='tibia-frame.json from tibia_frame.py')

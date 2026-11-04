@@ -32,6 +32,21 @@ description: >
   keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar
   (`sidecar.py --like hu.json`). A piece that may be bone of the leg stays, with a To check item asking what it is:
   bone wrongly removed is lost to every step after you.
+- **Choose this scan's display window and segmentation threshold** on the cleaned scan, before anything builds a
+  mask. Scans differ in density and contrast; the workflow's anatomy reference gives the values of the scan it was
+  written on, with that scan's soft-tissue and bone peaks. Find this scan's two peaks on the histogram of the
+  specimen's voxels, and move each reference value to the same place between them: value = soft + (reference -
+  reference soft) / (reference bone - reference soft) x (bone - soft). Take the threshold from there, not from the
+  valley between the peaks: on micro-CT the valley sits higher and drops thin trabeculae, whose voxels are part
+  bone. Then look: save `hu >= threshold` as a mask (`sidecar.py --like hu.json`) and view it on `quad_view.py`
+  slices, zoomed on the joint and on the trabeculae under the growth plate, in your window. Move the threshold
+  until its outline follows the cortex edge and keeps thin trabeculae without taking in soft tissue or cartilage,
+  and the window until trabeculae and the growth plate show and the densest cortex is not clipped white. Write
+  `scan-settings.json` (`{"window_hu": [lo, hi], "segmentation_threshold_hu": t, "peaks_hu": [soft, bone], "why":
+  "..."}`) and report it with the histogram and the views as evidence. Every later render takes
+  `--window scan-settings.json`, and every mask script its threshold as `--threshold-hu`. The measurement threshold
+  (`microct-core`) is the lab's and stays fixed: say in your report where it falls against the chosen threshold,
+  and raise a To check item when the two are more than 300 HU apart.
 - **Find out what each bone piece is.** `components.py` (`sam-segmentation`) lists the bone pieces of the cleaned
   scan; name each one in `pieces.md`, with your results, from the 3D view and the workflow's anatomy reference (two
   bones touching at a joint can be one piece: name both), with its centre and volume.

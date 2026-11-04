@@ -23,8 +23,8 @@ the record says what was used (the spec's hash in `inputs`, and its numbers in `
 from `/workflow/workflows/mouse-oa/outputs.yaml` (`measure.py --outputs`), the one place the labels are declared. A region script
 reads the entry of its own region (`roi-iioc`, `roi-iioc-trabecular`, `roi-metaphyseal`); `morphometry.py` and `measure.py` take
 `--output <id>`, the region's id (or the slab's, or the values' own) whose entry they read. Change a protocol number there, once;
-prose here and in the examples names the quantity, not its value. Every QC image uses the workflow's display window: pass
-`--window /workflow/workflows/mouse-oa/skills/mouse-oa/references/anatomy.json` to `tibia_frame.py`, `iioc.py`,
+prose here and in the examples names the quantity, not its value. Every QC image uses the scan's display window: pass
+`--window <scan-settings.json>` (the `scan-settings` output's file) to `tibia_frame.py`, `iioc.py`,
 `tibial_trabecular.py`, `metaphysis_roi.py`, `morphometry.py trabecular` and `region_from_curves.py` (the first four require it).
 
 **Grid rule.** A volume is counted where the region is defined: a region traced on the aligned stack is counted on

@@ -19,7 +19,7 @@ if __name__ == '__main__':
     ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
     ap.add_argument('--out', required=True, help='clipped labels .npy to write')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels below this are cleared (the segmentation threshold of the workflow\'s anatomy reference)')
+    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels below this are cleared (the scan\'s segmentation threshold, in scan-settings.json from intake)')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels)

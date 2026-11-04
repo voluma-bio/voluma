@@ -26,9 +26,10 @@ first, from a threshold, before any segmentation exists: `orient_joint.py` (`--h
 How it chooses: at the threshold, the bones are the largest 3D piece and the largest other piece near it, and the
 largest smaller piece near the joint is the reference object. Each shaft seeds an axis; the plane the two axes span
 is the bending plane; slices stack along its normal, and the keyframe is the slice through the joint. "Bone A" is
-the shaft nearer the reference object. The threshold, the three sizes (how wide a shaft gets, how near the joint
-the reference object sits, the smallest piece worth considering) and the display window come from the workflow's
-anatomy reference; the sizes have no defaults because they scale with the animal.
+the shaft nearer the reference object. The threshold and the display window are the scan's
+(`scan-settings.json`, `scan-intake`); the three sizes (how wide a shaft gets, how near the joint the reference
+object sits, the smallest piece worth considering) come from the workflow's anatomy reference and have no defaults,
+because they scale with the animal.
 
 A field that holds only the ends of the bones has no shaft. The script then takes the leg axis through the two
 pieces' centroids and reports no bend, or stops with "No shaft in the field" naming the test that failed. When it

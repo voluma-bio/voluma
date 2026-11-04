@@ -49,8 +49,9 @@ segmentation a later step needs (the growth plate traced closely) is that step's
   labelling, the keyframe cuts femur and tibia through the joint, with the joint space dark between them, and the
   femur sits where the orientation puts it; every piece the cleanup found is one you can find in the labels.
 - **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask), `frame` (the
-  rough orientation and its keyframe), `scan-notes` and `bone-pieces` (`scan-intake`, `orient-joint`); then
-  `bone-labels` (with the structures in it), `bone-threshold`, `disagreement`, and the label volumes #1–3 (protocol
+  rough orientation and its keyframe), `scan-notes`, `scan-settings` (this scan's display window and segmentation
+  threshold, chosen before the orientation and every mask) and `bone-pieces` (`scan-intake`, `orient-joint`); then
+  `bone-labels` (with the structures in it), `bone-threshold` (the segmentation threshold of `scan-settings`), `disagreement`, and the label volumes #1–3 (protocol
   step 10). `small-structures`, the account of labels 5 to 12 (`anatomy.md`): each labelled, absent with the reason
   and the view it rests on, or unresolved with a To check item (`sam-segmentation`, `segmentation-check`,
   `anatomy.md` "Segmentation notes").

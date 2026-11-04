@@ -9,8 +9,8 @@ not proof of a wrong label. `anatomy.json` beside this file is the machine-reada
 
 | Item | Value | Where it is used |
 |---|---|---|
-| Display window | 1000 to 8000 HU | orient, keyframe and quad view renders, box drawing (one window for every render) |
-| Segmentation threshold | 2500 HU (`segmentation_threshold_hu` in `anatomy.json`) | `--threshold-hu` of `orient_joint`, `snap_boxes`, `clip_to_bone`, `unlabelled`, `classic_segment`, `disagree`; it builds masks and is **not** the BV threshold |
+| Display window | chosen per scan at intake (`scan-settings.json`); 1000 to 8000 HU on OA6-1RK (`reference_window_hu` in `anatomy.json`) | orient, keyframe and quad view renders, box drawing (one window for every render) |
+| Segmentation threshold | chosen per scan at intake (`scan-settings.json`); 2500 HU on OA6-1RK (`reference_segmentation_threshold_hu` in `anatomy.json`; OA6-1RK's soft-tissue and bone peaks, -12 and 6088 HU, are `reference_peaks_hu`) | `--threshold-hu` of `orient_joint`, `snap_boxes`, `clip_to_bone`, `unlabelled`, `classic_segment`, `disagree`; it builds masks and is **not** the BV threshold |
 | Measurement threshold | the lab's 2.16/cm, computed from `hu.json` (2459.875 HU on OA6-1RK) | every BV, BV/TV and TV script computes it; see `microct-core` |
 | Voxel | read it from `hu.json` (`spacing_zyx_mm`) | never hard-code 0.0105 |
 | Orientation sizes | `--shaft-radius-mm 1.2 --ref-radius-mm 3.15 --min-object-mm3 0.0035` | `orient_joint` (`orient-joint`): a mouse femur shaft is under 1.2 mm in radius, the patella sits within 3.15 mm of the joint |

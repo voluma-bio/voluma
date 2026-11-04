@@ -57,7 +57,7 @@ Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sideca
         <out>/qc-faces-<n>.jpg  the distal face (magenta) and the proximal one (orange) as delivered, the surfaces this script cut with, on every traced
                          section: the sheets to open every one of
 Prints: one JSON line {out, values, objects, qc (the QC images), roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels, eroded_stretches}
-Example: python metaphysis_roi.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
+Example: python metaphysis_roi.py --spec protocol.json --window scan-settings.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -144,7 +144,7 @@ def cortex_depth(bone, dist, max_layers=40):
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-metaphyseal gives the slab's start, length and clearance")
-    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')

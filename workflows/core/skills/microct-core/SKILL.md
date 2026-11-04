@@ -27,7 +27,7 @@ description: >
   place something write it as `objects` in their result record; `quad_view.py --objects <record>.json` draws it. Every
   structure, surface and annotation is reported on the grid `outputs.yaml` declares for it, in voxel indices, never
   world mm (a point or line end may be fractional).
-- The file names later steps look for: `hu.npy`, `hu.json`, `scan-notes.md`, `pieces.md`,
+- The file names later steps look for: `hu.npy`, `hu.json`, `scan-notes.md`, `scan-settings.json`, `pieces.md`,
   and the rough orientation `frame.json`, `oriented.npy`, `keyframe.jpg` (intake); `labels.npy`, the final labels on the scan grid
   (segmentation). Working files go in your own folder (`$WORK`).
 - An **account file** (`pieces.md`, `small-structures.md`) is prose a researcher and a check can read, opened by a
@@ -49,8 +49,9 @@ cause in the data, the mask, the threshold or the method; never in a number adju
 
 ## Two thresholds
 
-- **Segmentation threshold** builds masks (orientation, box snapping, clipping to bone, candidates). The
-  workflow's anatomy reference gives it; scripts take it as `--threshold-hu`.
+- **Segmentation threshold** builds masks (orientation, box snapping, clipping to bone, candidates). It is this
+  scan's: intake chooses it and writes it to `scan-settings.json` (`scan-intake`), with the display window every
+  render takes. Scripts take it as `--threshold-hu`.
 - **Measurement threshold** decides bone volume: the lab's bone threshold, a linear attenuation of 2.16/cm,
   converted to this scan's HU from the calibration in `hu.json`, which the measurement scripts compute
   themselves. BV is the region and HU above it, never gated by a label; BV/TV is in %. When the calibration
