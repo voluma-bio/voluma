@@ -121,7 +121,9 @@ export function digest(steps: Step[]): string {
   for (const s of steps) {
     if (s.kind === "reasoning") thought = true;
     else if (s.kind === "note") {
-      other++;
+      // A note is short runtime text ("Sandbox stopped"): name it like a call.
+      if (s.text.length <= 40) named.push(s.text);
+      else other++;
       if (s.failed) failed++;
     } else {
       if (s.name === "bash") commands++;
