@@ -58,15 +58,30 @@ effect catches up.
 
 ## The outputs review
 
-`outputs-review.tsx` lays out the shell's two `SidePanel`s around the centre. Left: Conversation (default; badged with the
-calls main still holds, `openApprovals`) and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree`
-over `listStudies`). Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`); a value resting on one keeps its own status and says "rests on a To check") and
-Whole run. The value picked opens in place under its row: its version line and Report, its open
-To check items (with those of what it rests on), and Rests on (direct links, ordered measured
-on, beside, made from, drawn on) with Further back (the rest of `trailOf`, nearest first, each
-saying which row it feeds). A row there opens its report under it and frames the panes on it;
-the value's items carried by that row shrink to one line. Reports and items are
-`version-report.tsx`.
+`outputs-review.tsx` lays out the shell's two `SidePanel`s around the centre. Left: Conversation (badged with the
+calls main still holds, `openApprovals`), Labels (`labels-panel.tsx`: what each colour in the views is, from the
+shown grid's `legend`; a label's volume only from the catalog's one mm³ value measured on that label alone
+(`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
+output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
+Agents (`run-agents.tsx`: the run's agents, then a picked agent's whole thread with All agents to go back), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The side
+opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or an agent's name in a reply opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), and
+Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
+reported value resting on an output with open items is not done: its status is "Waiting on a check
+of <output>" (`rowStatus`, the dashed waiting glyph, never a tick; the same rule in Final outputs, Based on, the chip and the whole run), and the open value shows one line
+per such output, "N to check on <output>", which opens that output under it. The value picked opens
+in place under its row: its version line and Report, its own open items, those lines, and Rests on
+(direct links, ordered measured on, beside, made from, drawn on) with Further back (the rest of
+`trailOf`, nearest first, each saying which row it feeds). A row there opens under it its open
+items first, then its report, and frames the panes on it. Show on an item opens the output it is
+about (as `trail` unless it is the value) and frames the panes on its region; it is a history entry,
+so Back returns to the item before. Reports and items are `version-report.tsx`.
+
+The centre has no bar of its own: a chip (`SceneChip`) names the output in view, its value and its
+status (the waiting one a button to the checks), with the saved views menu, only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
+the top-left pane's corner (`QuadViewer`'s `heading`), under the viewer's notes, which stay in the
+flow above the panes; over a file, a list, an empty centre or a grid still preparing it sits above,
+in the flow. The whole run gets a bar with the way back. Delete mark and Undo delete
+get a row above the panes only while one of yours is picked or a deletion can be undone.
 
 While the run goes, Final outputs adds what a run going shows and nothing after it ends: on top,
 Running, "last news <age>" (the newest stored event, on a timer) and the latest `activity` sentence
@@ -76,29 +91,29 @@ its Rests on); "not yet" for nothing published; "N of M in" in the panel head (t
 says only Running), with Needs you only once something does; and "Other outputs so far" under the
 values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
 stays open until Esc. A section's tick waits for every value in it. Until the value has a version or is
-marked missing, the centre shows the nearest link on its chain with a version (the scene bar saying
+marked missing, the centre shows the nearest link on its chain with a version (the scene chip saying
 "<value> is based on"), else the output published last whose whole scene has blocks to draw (the scan, from intake
 on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the
 run is going and the AI is still setting up only while nothing drawable is published. `studiesQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item`,
-`centre` (`run` for the whole run, `agents`) and `agent` (the agent's thread name open in the agents view; none opens main, else the agent working now, else the first). An `output` that isn't a listed value opens under
+`centre` (`run` for the whole run) and `agent` (the agent's thread name open in the Agents tab; none lists them). With no `output`, review opens on the output of the first open check (the bone labels when the checks are about what the values rest on), else the first final output with an open item, else the first. An `output` that isn't a listed value opens under
 the first value resting on it (`show`, also what a click in the whole run does). A published ruler or point in view (an item's own focus wins) puts the slices through its first end once on selecting it, through the one-shot `marking.jump` (not the To check `focus`, so later events and your own panning are left alone), where a Navigate drag can take it; the end is drawn as a dot and shows a grab cursor. The panes'
 layout (`QuadLayout`) is page state and holds across grids. A full pane is the shell's Full view
 (both sides folded) plus that pane: the page keeps only which view fills and derives the rest
 from the shell, so leaving Full view by any means gives the panes back. The whole run folds Final
 outputs while it is up and unfolds it after (the shell's `useFoldWhile`); showing a panel only
 changes its visibility, not the centre. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
-run or agents, an open row, only within its focused workspace and never while typing elsewhere.
+run, an open row, only within its focused workspace and never while typing elsewhere.
 Visible Whole run / Back to the views controls switch the centre. The panes stay mounted (hidden) under the
-whole run and the agents. The agents view (`run-agents.tsx`) is a list of agents beside the picked agent's whole thread (header: state, worked clock, outputs reported; body: run-view's `AgentThread`, see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate,
-Point, Ruler, Angle, Outline, Freehand line (an open path, tag L), Probe. These are
+whole run. The Agents tab's thread has a header (state, worked clock, outputs reported) over run-view's `AgentThread` (see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread in the Agents tab. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate, Point and Ruler named on
+the bar, and Angle, Outline, Freehand line (an open path, tag L) and Probe under More tools (`viewer.tsx`). These are
 labelled choices, with no command-key bindings. Point notes have no editor or display; old stored
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.
 Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
-(`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene bar's
+(`POST /api/review/runs/:runId/views`); the conversation lists each one and the scene chip's
 "Saved views" menu reopens it on its grid. The trail's data is `@voluma/run-view`
 `outputs-trail.ts`.
 
@@ -137,7 +152,7 @@ freezes them from the log; if one failed, nothing is sent.
 A message carries the words, the waiting marks by id (`markIds`; the API freezes them), the output
 in view (`output`), the panes' view as Save view keeps it (`view`, dropped over `MAX_VIEW_BYTES`), a
 PNG of the panes when "With <output>, as you see it" is on (`QuadViewerHandle.snapshot` through
-`SceneHandle`), and the To check item it answers (`toCheck`, set by "Tell main what's wrong" on an
+`SceneHandle`), and the To check item it answers (`toCheck`, set by "Tell the AI what's wrong" on an
 item). It sends through `message-send.ts` (`useIdempotentSend`): a retry keeps the id
 and the exact request; refusals show the API's words. A message or an
 answer to an ended run reopens it: the page reconnects the stream and reads the run again.

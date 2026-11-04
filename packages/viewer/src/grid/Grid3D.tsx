@@ -25,12 +25,15 @@ import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
   Box3,
+  BufferGeometry,
   CylinderGeometry,
   DepthTexture,
   DirectionalLight,
   DoubleSide,
   FrontSide,
   Group,
+  LineBasicMaterial,
+  LineLoop,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -51,6 +54,7 @@ import {
 } from "three";
 import { ArcballControls } from "three/addons/controls/ArcballControls.js";
 import type { Contrast } from "./compose";
+import { planeOutline, type Vec3 } from "./frame";
 import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
@@ -79,8 +83,11 @@ export function Grid3D({
   marks,
   onMark,
   onPick,
+  planes,
 }: {
   scene: GridScene;
+  /** The slice panes' planes through the crosshair, outlined where they cut the grid; none hides them. */
+  planes?: { at: Zyx; cuts: readonly { normal: Vec3; color: string }[] };
   contrast: Contrast | null;
   onPoint(point: Zyx): void;
   /** Point and Line mark here; Box and Outline are drawn on a slice. */
@@ -96,6 +103,7 @@ export function Grid3D({
   const three = useRef<{
     meshes: Group;
     annotations: Scene;
+    planes: Scene;
     volumes: Scene;
     depth: DepthTexture;
     render(): void;
@@ -203,6 +211,7 @@ export function Grid3D({
     const flat = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const volumes = new Scene();
     const annotations = new Scene();
+    const planeScene = new Scene();
     const size2 = new Vector2();
     // No scene, so no gizmos; no fling after a drag, no double-click focus.
     const controls = new ArcballControls(camera, renderer.domElement);
@@ -247,6 +256,7 @@ export function Grid3D({
       renderer.autoClear = false;
       renderer.render(volumes, camera);
       renderer.clearDepth();
+      renderer.render(planeScene, camera);
       renderer.render(annotations, camera);
       renderer.autoClear = true;
       layer.draw();
@@ -280,7 +290,7 @@ export function Grid3D({
     const aim = () => {
       if (!touched) reset();
     };
-    three.current = { meshes, annotations, volumes, depth, render, reset, aim };
+    three.current = { meshes, annotations, planes: planeScene, volumes, depth, render, reset, aim };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
     // Up from the camera's own turn: the controls leave `camera.up` meaningless after a rotate.
     const now = () => ({
@@ -298,6 +308,17 @@ export function Grid3D({
         const { position, target, up } = saved.camera;
         touched = true;
         place(new Vector3(...position), new Vector3(...target), new Vector3(...up));
+      },
+      // From the side it looks from now, close enough that the box's sphere fills the view.
+      frame(box) {
+        touched = true;
+        const lo = toWorld(box.min.map((n) => n - 0.5) as unknown as Zyx);
+        const hi = toWorld(box.max.map((n) => n + 0.5) as unknown as Zyx);
+        const middle = lo.clone().add(hi).multiplyScalar(0.5);
+        const reach = Math.max(hi.distanceTo(lo) / 2, 24 * Math.min(sx, sy, sz));
+        const direction = camera.position.clone().sub(pivot).normalize();
+        const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        place(middle.clone().add(direction.multiplyScalar(reach * 3.2)), middle, up);
       },
     };
     const observer = new ResizeObserver(() => {
@@ -508,6 +529,47 @@ export function Grid3D({
       handle.current = null;
     };
   }, []);
+
+  // The planes: an outline and a faint fill per pane, rebuilt when the crosshair or a tilt moves them.
+  const planesKey = planes && JSON.stringify(planes);
+  useEffect(() => {
+    const t = three.current;
+    if (!t || !planes) return;
+    const objects: (LineLoop | Mesh)[] = [];
+    for (const { normal, color } of planes.cuts) {
+      const corners = planeOutline(normal, planes.at, scene.shapeZyx, scene.spacingZyx);
+      if (!corners.length) continue;
+      // mm (z, y, x) to the scene's (x, y, z).
+      const points = corners.map(([z, y, x]) => new Vector3(x, y, z));
+      const edge = new LineLoop(
+        new BufferGeometry().setFromPoints(points),
+        new LineBasicMaterial({ color, transparent: true, opacity: 0.9 }),
+      );
+      const fill = new BufferGeometry().setFromPoints(points);
+      fill.setIndex(points.slice(2).flatMap((_, i) => [0, i + 1, i + 2]));
+      const face = new Mesh(
+        fill,
+        new MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.08,
+          side: DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      objects.push(edge, face);
+    }
+    if (objects.length) t.planes.add(...objects);
+    t.render();
+    return () => {
+      for (const object of objects) {
+        t.planes.remove(object);
+        object.geometry.dispose();
+        (object.material as LineBasicMaterial).dispose();
+      }
+      t.render();
+    };
+  }, [planesKey, scene.shapeZyx, scene.spacingZyx]);
 
   useEffect(() => {
     const t = three.current;

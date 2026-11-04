@@ -9,6 +9,9 @@ import type { MarkShape } from "@voluma/contracts/agent-events";
 
 export type Zyx = readonly [number, number, number];
 
+/** An inclusive box of source voxels: a region to frame. */
+export type VoxelBox = { min: Zyx; max: Zyx };
+
 /**
  * A mark on the grid in source voxels (z, y, x): a voxel (optionally with a probe reading),
  * an inclusive box, a line, an angle (its vertex between two ends), or a closed outline on
@@ -59,12 +62,16 @@ export type Overlay = ZarrSource & {
   color: string | Readonly<Record<number, string>>;
   /** 0 to 1, of the overlay's full blend: one for the mask, or one per label value (default 1). */
   opacity: number | Readonly<Record<number, number>>;
-  /**
-   * The subject's own region, for every value or per label value: filled stronger, and a pixel
-   * whose 4-neighbour holds another value of this overlay is painted at full opacity.
-   */
-  outline?: boolean | Readonly<Record<number, boolean>>;
+  /** How each value is drawn on the slices, for every value or per label value (default `fill`). */
+  style?: OverlayStyle | Readonly<Record<number, OverlayStyle>>;
 };
+
+/**
+ * `fill`: a see-through fill. `highlight` (the subject's own region, a check's): filled stronger,
+ * and a pixel whose 4-neighbour holds another value of this overlay is painted at full opacity.
+ * `outline`: only those edge pixels, so the image inside stays readable.
+ */
+export type OverlayStyle = "fill" | "highlight" | "outline";
 
 /** float32 vertices (x, y, z) in source voxels, then uint32 indices, little-endian. */
 export type GridMesh = {
@@ -102,6 +109,8 @@ export type GridScene = {
   shapeZyx: Zyx;
   /** mm per voxel along z, y, x: the norms of the affine's columns. */
   spacingZyx: Zyx;
+  /** Whether the run published the grid's geometry; without it the spacing is one per voxel, not mm. */
+  measured?: boolean;
   image: ZarrSource;
   /** What the image's values are (`"HU"`), for the probe; null or absent when unitless. */
   imageUnit?: string | null;
@@ -162,6 +171,12 @@ export type PaneHandle = {
    */
   view(): PaneView | null;
   show(view: PaneView): void;
+  /**
+   * Frames `box`: a slice pane centres on it and zooms until it fills about four fifths of the
+   * pane (never out past the grid's fit), 3D looks at it from the side it faces now. A slice pane
+   * with no size yet frames once it gets one.
+   */
+  frame(box: VoxelBox): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
    * copied in the same task: WebGL clears its buffer once the browser composites it. The marks

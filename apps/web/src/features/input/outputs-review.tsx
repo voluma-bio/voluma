@@ -10,7 +10,8 @@
  *
  * The URL keeps `output` (the value picked in Final outputs), `trail` (an output it rests on,
  * near or further back, whose report is open and which the panes show), `item` (the To check
- * item whose place the panes show) and `centre` (`run` for the whole run, `agents`). An `output`
+ * item whose place the panes frame; showing one is a history entry), `centre` (`run` for the
+ * whole run) and `agent` (the Agents tab's open thread). Over the panes, a chip names what they show and its status. An `output`
  * that is not a final value opens under the first final value resting on it. The panes' layout
  * is page state: it holds while another output, on another grid, is shown.
  */
@@ -30,28 +31,36 @@ import {
   isLive,
   type OutputItem,
   type OutputRow,
+  openItemsOf,
   outputBlocks,
   outputName,
   outputsReview,
   reviewAssetsOf,
+  rowStatus,
+  rowsToCheck,
   shownOf,
   undrawn,
   useEvents,
 } from "@voluma/run-view";
 import {
   Button,
+  cx,
   EmptyState,
   INPUT_WORD,
   LoadingState,
   Menu,
   MenuItem,
   SidePanel,
+  StatusGlyph,
   StatusMark,
+  useFolded,
   useFoldWhile,
   useFullView,
 } from "@voluma/ui";
 import {
   type GridPlanes,
+  LABELS_START,
+  type LabelDisplay,
   type MarkEdit,
   type MarkPlane,
   type PlaneFit,
@@ -62,8 +71,10 @@ import {
 import { outputCatalogOf } from "@voluma/workflow/output-catalogs";
 import {
   Bookmark,
+  Bot,
   ChevronDown,
   ChevronLeft,
+  Layers,
   ListTree,
   MessageSquare,
   Workflow,
@@ -72,9 +83,10 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
+import { LabelsPanel, type Legend, labelVolumes } from "./labels-panel";
 import { MainConversation } from "./main-conversation";
 import { gridKeyOf, useLocalMarks, useMarking, type YourMark } from "./marking";
-import { FinalOutputs, restsOnOpen, statusOf } from "./outputs-panel";
+import { FinalOutputs } from "./outputs-panel";
 import { RunAgents } from "./run-agents";
 import { RunGraphView } from "./run-graph";
 import { useRunMarks } from "./run-marks";
@@ -88,7 +100,7 @@ import type { SceneHandle } from "./viewer";
 // three.js and the zarr reader load only once there is an output to show.
 const SceneViewer = lazy(() => import("./viewer").then((m) => ({ default: m.SceneViewer })));
 
-type Centre = "run" | "agents";
+type Centre = "run";
 
 export function OutputsReview({
   run,
@@ -144,14 +156,19 @@ export function OutputsReview({
   }, [catalog]);
 
   const [params, setParams] = useSearchParams();
+  const [onlyToCheck, setOnlyToCheck] = useState(false);
+  // Showing an item is a step Back undoes; every other pick replaces the entry.
   const select = useCallback(
-    (patch: {
-      output?: string;
-      item?: string | null;
-      trail?: string | null;
-      centre?: Centre | null;
-      agent?: string | null;
-    }) =>
+    (
+      patch: {
+        output?: string;
+        item?: string | null;
+        trail?: string | null;
+        centre?: Centre | null;
+        agent?: string | null;
+      },
+      { push = false } = {},
+    ) =>
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -160,19 +177,23 @@ export function OutputsReview({
             else if (v !== undefined) next.set(k, v);
           return next;
         },
-        { replace: true },
+        { replace: !push },
       ),
     [setParams],
   );
-  // The value open in place: the URL's, else the first final output with an open item, else the
-  // first. An output that is not in the list opens under the first value resting on it.
+  // The value open in place: the URL's, else the output of the first open check, else the first
+  // final output with an open item, else the first. An output that is not in the list opens under the first value resting on it.
   const finals = review.sections.flatMap((s) => s.rows);
-  const listed = [...finals, ...review.undeclared];
+  // With only To check on, the outputs behind the values are rows of their own and open in place.
+  const behind = onlyToCheck ? rowsToCheck(review).behind : [];
+  const listed = [...finals, ...review.undeclared, ...behind];
   const restingOn = useCallback(
     (id: string) => listed.find((r) => r.trail.some((t) => t.id === id)),
     [listed],
   );
-  const asked = params.get("output") ?? "";
+  // With none asked, review opens where the first open check is: its own output, so a check on
+  // what values rest on (the bone labels) opens there, not on the first value above it.
+  const asked = params.get("output") ?? finals.flatMap(openItemsOf)[0]?.output ?? "";
   const askedRow = listed.find((r) => r.id === asked);
   const under = !askedRow && asked ? restingOn(asked) : undefined;
   const selected =
@@ -197,24 +218,26 @@ export function OutputsReview({
   );
   const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
-  const centre: Centre | undefined =
-    centreParam === "run" || centreParam === "agents" ? centreParam : undefined;
+  const centre: Centre | undefined = centreParam === "run" ? centreParam : undefined;
   const item = selected?.items.find((i) => i.key === params.get("item"));
+  // The left side opens on Conversation; the researcher picks another tab.
+  const [leftTab, setLeftTab] = useState("conversation");
   // The agents a name can open: each agent's thread names (`main.2` opens main's thread).
   const agents = useMemo(() => agentEntries(events, fold, live), [events, fold, live]);
   // The links change only when the set of names does, and `open` reads the latest entries and
   // `select`, so the conversation's replies don't re-render on every event of a live run.
   const nameKey = agents.flatMap((a) => a.names).join("\n");
-  const latest = useRef({ agents, select });
-  latest.current = { agents, select };
+  const latest = useRef({ agents, select, setLeftTab });
+  latest.current = { agents, select, setLeftTab };
   const agentLinks = useMemo<AgentLinks>(
     () => ({
       names: new Set(nameKey ? nameKey.split("\n") : []),
-      open: (name) =>
+      open: (name) => {
+        latest.current.setLeftTab("agents");
         latest.current.select({
-          centre: "agents",
           agent: latest.current.agents.find((a) => a.names.includes(name))?.name ?? name,
-        }),
+        });
+      },
     }),
     [nameKey],
   );
@@ -223,10 +246,11 @@ export function OutputsReview({
   const focusKey = item?.focus && JSON.stringify(item.focus);
   const focus = useMemo(() => item?.focus && { ...item.focus }, [focusKey, picked]);
 
-  const [onlyToCheck, setOnlyToCheck] = useState(false);
   const toCheck = review.open.size;
-  const [leftTab, setLeftTab] = useState("conversation");
   const said = useMemo(() => conversation(events), [events]);
+  const [display, setDisplay] = useState<LabelDisplay>(LABELS_START);
+  const [legend, setLegend] = useState<Legend>();
+  const volumes = useMemo(() => labelVolumes(catalog, review.rows), [catalog, review.rows]);
   const runMarks = useRunMarks({
     run,
     me: me.userId,
@@ -367,6 +391,7 @@ export function OutputsReview({
   // leaving Full view (Escape, opening a panel) puts the panes back. The page keeps only which
   // view fills; whether it shows is the shell's.
   const [shellFull, setShellFull] = useFullView();
+  const outputsFolded = useFolded("right");
   const [arranged, setArranged] = useState<QuadLayout>(QUAD_START);
   const [fill, setFill] = useState<QuadLayout["full"]>(null);
   // Forgotten once Full view is left, so entering it later need not fill a pane.
@@ -394,8 +419,9 @@ export function OutputsReview({
     centre,
     trailOpen,
     shellFull,
+    value: selected?.id,
   });
-  keys.current = { layout, centre, trailOpen, shellFull };
+  keys.current = { layout, centre, trailOpen, shellFull, value: selected?.id };
   const workspace = useRef<HTMLDivElement>(null);
   const centreOpener = useRef<HTMLElement | null>(null);
   const skipNavigationFocus = useRef(false);
@@ -428,7 +454,7 @@ export function OutputsReview({
         if (!k.centre && !k.trailOpen) return;
         event.preventDefault();
         if (k.centre) select({ centre: null });
-        else if (k.trailOpen) select({ trail: null, item: null });
+        else if (k.trailOpen) select({ output: k.value, trail: null, item: null });
         requestAnimationFrame(() => centreOpener.current?.focus());
       }
     };
@@ -436,7 +462,29 @@ export function OutputsReview({
     return () => window.removeEventListener("keydown", onKey);
   }, [select]);
 
+  // What the centre shows, its value and status: over the panes' top-left corner, else above.
+  // Only with Final outputs folded: open, its selected row already says this (Jimmy, Nov 4).
+  const heading = outputsFolded && (
+    <SceneChip
+      live={live}
+      root={selected}
+      standIn={!!standIn}
+      soFar={!!soFar}
+      inView={inView}
+      trailOpen={!!trailOpen}
+      // Pins the value: with no `output` in the URL the default may itself open a trail.
+      onBack={() => select({ output: selected?.id, trail: null, item: null })}
+      nameOf={nameOf}
+      onWaitsOn={(id) => select({ trail: id, item: null, centre: null })}
+      views={inView ? views.of(inView.id) : []}
+      viewShown={views.shown}
+      viewError={views.error}
+      onView={views.open}
+    />
+  );
   let panes: React.ReactNode;
+  // Only the panes carry the chip over their corner; a file, a list or an empty centre has it above.
+  let overPanes = false;
   if (live && inView?.state.status !== "missing" && !inView?.state.latest)
     panes = (
       <Centered>
@@ -476,7 +524,8 @@ export function OutputsReview({
         </EmptyState>
       </Centered>
     );
-  else
+  else {
+    overPanes = true;
     panes = (
       <OutputScene
         runId={run.id}
@@ -485,8 +534,12 @@ export function OutputsReview({
         subject={inView.id}
         shown={shownOf(inView)}
         nameOf={nameOf}
-        focus={trailOpen ? undefined : focus}
+        focus={focus}
         marking={marking}
+        display={display}
+        onLegend={setLegend}
+        heading={heading}
+        onShowHidden={() => setDisplay((d) => ({ ...d, hidden: [] }))}
         quad={{
           layout,
           onLayout,
@@ -501,10 +554,32 @@ export function OutputsReview({
         }}
       />
     );
+  }
 
   return (
     <>
-      <InputHeading run={run} study={study.data} waitingOnYou={waiting > 0} toCheck={toCheck} />
+      <InputHeading
+        run={run}
+        study={study.data}
+        waitingOnYou={waiting > 0}
+        toCheck={toCheck}
+        onToCheck={() => {
+          // The first open check, framed in the panes, as its own Show does.
+          const row = finals.find((r) => openItemsOf(r).length > 0);
+          const first = row && openItemsOf(row)[0];
+          if (!row || !first) return;
+          select(
+            {
+              output: row.id,
+              item: first.key,
+              trail: first.output === row.id ? null : first.output,
+              centre: null,
+            },
+            { push: params.get("item") !== first.key },
+          );
+          setPicked((n) => n + 1);
+        }}
+      />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"
@@ -516,7 +591,7 @@ export function OutputsReview({
               label: "Conversation",
               icon: <MessageSquare />,
               badge: waiting || undefined,
-              badgeLabel: "main is waiting on you",
+              badgeLabel: "The AI is waiting on you",
               content: (
                 <MainConversation
                   conversation={said}
@@ -541,6 +616,38 @@ export function OutputsReview({
               ),
             },
             {
+              id: "labels",
+              label: "Labels",
+              icon: <Layers />,
+              content: (
+                <LabelsPanel
+                  legend={legend}
+                  display={display}
+                  onDisplay={setDisplay}
+                  volumes={volumes}
+                  inView={inView?.name}
+                />
+              ),
+            },
+            {
+              id: "agents",
+              label: "Agents",
+              icon: <Bot />,
+              // Built only while open: a thread rebuilds on every event of a live run.
+              content: leftTab === "agents" && (
+                <RunAgents
+                  events={events}
+                  agents={agents}
+                  picked={params.get("agent")}
+                  onPick={(name) => select({ agent: name })}
+                  onBack={() => select({ agent: null })}
+                  links={agentLinks}
+                  live={live}
+                  nameOf={nameOf}
+                />
+              ),
+            },
+            {
               id: "samples",
               label: INPUT_WORD.Many,
               icon: <ListTree />,
@@ -550,85 +657,58 @@ export function OutputsReview({
         />
         <div ref={workspace} className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
           <RunAlert run={run} userId={me.userId} stale={stale} />
-          <div className="flex shrink-0 flex-wrap items-center gap-2 bg-card px-3 py-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-pressed={centre === "run"}
-              onClick={(event) => {
-                centreOpener.current = event.currentTarget;
-                toggleRun();
-              }}
-            >
-              <Workflow aria-hidden /> Whole run
-            </Button>
-            {pickedMark && (
-              <Button
-                data-delete-mark
-                size="sm"
-                variant="ghost"
-                onClick={() => deleteMark(pickedMark.id)}
-              >
-                Delete mark {pickedMark.tag}
-              </Button>
-            )}
-            {undo && (
-              <Button
-                data-undo-delete
-                size="sm"
-                variant="secondary"
-                disabled={!!restoring}
-                onClick={async () => {
-                  setRestoring(undo);
-                  store.place(undo);
-                  try {
-                    if (!run.example) await settled([undo.id]);
-                    setDeleted((had) => had.filter((m) => m !== undo));
-                    setRestored(undo.id);
-                  } catch {
-                    // The mark store shows the write error; keep Undo available to retry.
-                    markActionFocus.current = "undo-delete";
-                  } finally {
-                    setRestoring(null);
-                  }
-                }}
-              >
-                Undo delete {undo.tag}
-              </Button>
-            )}
-          </div>
-          <SceneBar
-            centre={centre}
-            live={live}
-            root={selected}
-            standIn={!!standIn}
-            soFar={!!soFar}
-            inView={inView}
-            trailOpen={!!trailOpen}
-            onBack={() => select({ trail: null, item: null })}
-            onCentre={(c) => select({ centre: c })}
-            views={inView ? views.of(inView.id) : []}
-            viewShown={views.shown}
-            viewError={views.error}
-            onView={views.open}
-          />
+          {(pickedMark || undo) && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 bg-card px-3 py-1.5">
+              {pickedMark && (
+                <Button
+                  data-delete-mark
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => deleteMark(pickedMark.id)}
+                >
+                  Delete mark {pickedMark.tag}
+                </Button>
+              )}
+              {undo && (
+                <Button
+                  data-undo-delete
+                  size="sm"
+                  variant="secondary"
+                  disabled={!!restoring}
+                  onClick={async () => {
+                    setRestoring(undo);
+                    store.place(undo);
+                    try {
+                      if (!run.example) await settled([undo.id]);
+                      setDeleted((had) => had.filter((m) => m !== undo));
+                      setRestored(undo.id);
+                    } catch {
+                      // The mark store shows the write error; keep Undo available to retry.
+                      markActionFocus.current = "undo-delete";
+                    } finally {
+                      setRestoring(null);
+                    }
+                  }}
+                >
+                  Undo delete {undo.tag}
+                </Button>
+              )}
+            </div>
+          )}
+          {centre && <CentreBar onBack={() => select({ centre: null })} />}
           <div className={centre ? "min-h-0 flex-1 bg-card" : "min-h-0 flex-1"}>
-            {/* The panes stay mounted under the whole run and the agents, so coming back is instant. */}
-            <div className="h-full [&[hidden]]:hidden" hidden={!!centre}>
-              {panes}
+            {/* The panes stay mounted under the whole run, so coming back is instant. */}
+            <div className="flex h-full flex-col [&[hidden]]:hidden" hidden={!!centre}>
+              {!overPanes && <div className="flex shrink-0 p-2">{heading}</div>}
+              <div className="min-h-0 flex-1">{panes}</div>
             </div>
             {centre === "run" && (
-              <RunGraphView fold={fold} selected={inView?.id} rows={review.rows} onPick={show} />
-            )}
-            {centre === "agents" && (
-              <RunAgents
-                events={events}
-                agents={agents}
-                picked={params.get("agent")}
-                onPick={(name) => select({ agent: name })}
-                links={agentLinks}
+              <RunGraphView
+                fold={fold}
+                selected={inView?.id}
+                rows={review.rows}
                 live={live}
-                nameOf={nameOf}
+                onPick={show}
               />
             )}
           </div>
@@ -657,6 +737,20 @@ export function OutputsReview({
                   To check <span className="font-semibold">{toCheck}</span>
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant={centre === "run" ? "secondary" : "ghost"}
+                aria-pressed={centre === "run"}
+                onClick={(event) => {
+                  centreOpener.current = event.currentTarget;
+                  toggleRun();
+                }}
+                title={live ? "Whole run" : undefined}
+              >
+                <Workflow aria-hidden />
+                {/* Its icon alone while the run goes: the head also counts what is in. */}
+                <span className={live ? "sr-only" : undefined}>Whole run</span>
+              </Button>
             </>
           }
         >
@@ -674,7 +768,11 @@ export function OutputsReview({
             nameOf={nameOf}
             item={item?.key}
             onItem={(i) => {
-              select({ item: i.key, trail: null, centre: null });
+              // The panes show the output the item is about, framed on its place.
+              select(
+                { item: i.key, trail: i.output === selected?.id ? null : i.output, centre: null },
+                { push: params.get("item") !== i.key },
+              );
               setPicked((n) => n + 1);
             }}
             accepting={accepting}
@@ -685,9 +783,25 @@ export function OutputsReview({
   );
 }
 
-/** Above the centre: what it shows, and the way to the whole run and the agents and back. */
-function SceneBar({
-  centre,
+/** Above the whole run: what the centre shows, and the way back to the views. */
+function CentreBar({ onBack }: { onBack: () => void }) {
+  return (
+    <header className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-card px-3 text-sm">
+      <h2 className="font-semibold">The whole run</h2>
+      <span className="flex-1" />
+      <Button size="sm" variant="ghost" onClick={onBack} aria-keyshortcuts="Escape">
+        <ChevronLeft aria-hidden />
+        Back to the views
+      </Button>
+    </header>
+  );
+}
+
+/**
+ * Over the panes' top-left corner: the output in view, its value and its status (a value resting on
+ * an output with open checks waits on it, one click from them), and its saved views.
+ */
+function SceneChip({
   live,
   root,
   standIn,
@@ -695,13 +809,13 @@ function SceneBar({
   inView,
   trailOpen,
   onBack,
-  onCentre,
+  nameOf,
+  onWaitsOn,
   views,
   viewShown,
   viewError,
   onView,
 }: {
-  centre: Centre | undefined;
   live: boolean;
   root: OutputRow | undefined;
   /** `inView` is what `root`, not in yet, rests on. */
@@ -711,7 +825,9 @@ function SceneBar({
   inView: OutputRow | undefined;
   trailOpen: boolean;
   onBack: () => void;
-  onCentre: (centre: Centre | null) => void;
+  nameOf: (id: string) => string;
+  /** Opens an output the value rests on, under it, with its checks. */
+  onWaitsOn: (id: string) => void;
   /** The views saved of the output in view, oldest first. */
   views: SavedView[];
   /** The saved view the panes were last set to. */
@@ -719,85 +835,89 @@ function SceneBar({
   viewError: string | undefined;
   onView: (view: SavedView) => void;
 }) {
-  const bar = "flex h-10 shrink-0 items-center gap-3 border-b border-border bg-card px-3 text-sm";
-  if (centre)
-    return (
-      <header className={bar}>
-        <h2 className="font-semibold">
-          {centre === "run" ? "The whole run" : "Agents on this run"}
-        </h2>
-        <span className="flex-1" />
-        <Button size="sm" variant="ghost" onClick={() => onCentre(null)} aria-keyshortcuts="Escape">
-          <ChevronLeft aria-hidden />
-          Back to the views
-        </Button>
-      </header>
-    );
   if (!inView || (!root && !soFar)) return null;
-  const { status, word } = statusOf(inView, live);
-  // A reported value can still rest on something to check.
-  const inherited = !trailOpen && restsOnOpen(inView);
+  // A value waiting on the checks of what it rests on names each, one click away.
+  const { status, word, waits } = rowStatus(inView, live, nameOf);
+  const quiet = "shrink-0 text-muted-foreground text-xs";
+  // Two lines, so it stays within the top-left pane: what is shown, then its status.
   return (
-    <header className={bar}>
-      {trailOpen ? (
-        <button
-          type="button"
-          onClick={onBack}
-          aria-keyshortcuts="Escape"
-          className="shrink-0 cursor-pointer text-xs text-muted-foreground hover:text-foreground"
-        >
-          {root?.name} ›
-        </button>
-      ) : soFar ? (
-        <span className="shrink-0 text-xs text-muted-foreground">Made so far, not final:</span>
-      ) : standIn && root ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{root.name} is based on</span>
+    <header className="grid min-w-0 gap-0.5 rounded-md bg-card px-2 py-1 text-sm shadow-sm inset-ring inset-ring-border">
+      <div className="flex min-w-0 items-center gap-2">
+        {trailOpen ? (
+          <button
+            type="button"
+            onClick={onBack}
+            aria-keyshortcuts="Escape"
+            className={cx(quiet, "max-w-28 cursor-pointer truncate hover:text-foreground")}
+          >
+            {root?.name} ›
+          </button>
+        ) : soFar ? (
+          <span className={quiet}>Made so far, not final:</span>
+        ) : (
+          standIn && root && <span className={quiet}>{root.name} is based on</span>
+        )}
+        <h2 className="min-w-0 truncate font-semibold" title={inView.name}>
+          {inView.name}
+        </h2>
+        {inView.value && (
+          <span className="shrink-0 font-mono tabular-nums">
+            {inView.value.text}
+            <span className="text-muted-foreground"> {inView.value.unit}</span>
+          </span>
+        )}
+        {views.length > 0 && (
+          <Menu
+            align="start"
+            trigger={
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto h-6 shrink-0 px-1.5"
+                title={views.find((v) => v.id === viewShown)?.title ?? "Saved views"}
+              >
+                <Bookmark aria-hidden />
+                <span className="sr-only">Saved views</span>
+                <ChevronDown aria-hidden />
+              </Button>
+            }
+          >
+            {views.map((v) => (
+              <MenuItem key={v.id} onSelect={() => onView(v)}>
+                <span className="flex items-baseline justify-between gap-3">
+                  <span>{v.title}</span>
+                  <span className="text-xs text-fg-subtle">{v.time}</span>
+                </span>
+              </MenuItem>
+            ))}
+          </Menu>
+        )}
+      </div>
+      {status === "waiting" && waits.length > 0 ? (
+        // One button per output it waits on, opening that output's checks.
+        waits.map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onWaitsOn(id)}
+            title={`Waiting on a check of ${nameOf(id)}`}
+            className="group flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-muted-foreground text-xs"
+          >
+            <StatusGlyph status={status} />
+            <span className="truncate">
+              Waiting on a check of{" "}
+              <span className="text-primary-text group-hover:underline">{nameOf(id)}</span>
+            </span>
+          </button>
+        ))
       ) : (
-        inView.state.section && (
-          <span className="shrink-0 text-xs text-muted-foreground">{inView.state.section}</span>
-        )
+        <StatusMark status={status} label={word} className="text-xs" />
       )}
-      <h2 className="min-w-0 truncate font-semibold">{inView.name}</h2>
-      {inView.value && (
-        <span className="shrink-0 font-mono tabular-nums">
-          {inView.value.text}
-          <span className="text-muted-foreground"> {inView.value.unit}</span>
-        </span>
-      )}
-      <StatusMark status={status} label={word} className="shrink-0" />
-      {inherited && (
-        <span className="shrink-0 text-muted-foreground text-xs">An input needs checking</span>
-      )}
-      <span className="flex-1" />
       {viewError && (
-        <span className="text-xs text-destructive" role="alert">
+        <span className="text-destructive text-xs" role="alert">
           {viewError}
         </span>
       )}
-      {views.length > 0 && (
-        <Menu
-          align="end"
-          trigger={
-            <Button size="sm" variant="ghost">
-              <Bookmark aria-hidden />
-              {views.find((v) => v.id === viewShown)?.title ?? "Saved views"}
-              <ChevronDown aria-hidden />
-            </Button>
-          }
-        >
-          {views.map((v) => (
-            <MenuItem key={v.id} onSelect={() => onView(v)}>
-              <span className="flex items-baseline justify-between gap-3">
-                <span>{v.title}</span>
-                <span className="text-xs text-fg-subtle">{v.time}</span>
-              </span>
-            </MenuItem>
-          ))}
-        </Menu>
-      )}
-      <Button size="sm" variant="ghost" onClick={() => onCentre("agents")}>
-        Agents
-      </Button>
     </header>
   );
 }
@@ -812,6 +932,10 @@ function OutputScene({
   nameOf,
   focus,
   marking,
+  display,
+  onLegend,
+  heading,
+  onShowHidden,
   quad,
 }: {
   runId: string;
@@ -822,6 +946,10 @@ function OutputScene({
   nameOf: (id: string) => string;
   focus: OutputItem["focus"];
   marking: ReturnType<typeof useMarking>;
+  display: LabelDisplay;
+  onLegend: (legend: Legend) => void;
+  onShowHidden: () => void;
+  heading: React.ReactNode;
   quad: NonNullable<React.ComponentProps<typeof SceneViewer>["quad"]>;
 }) {
   const missing = undrawn(blocks, shown);
@@ -859,6 +987,10 @@ function OutputScene({
               marking.add(mark, volumeId, gridKey, subject, plane)
             }
             onShown={marking.setShown}
+            display={display}
+            onLegend={onLegend}
+            heading={heading}
+            onShowHidden={onShowHidden}
             quad={quad}
           />
         </Suspense>

@@ -1,6 +1,7 @@
 /**
  * A slice pane's pointer, wheel and key gestures (`SlicePane.tsx`): left drag moves the crosshair,
- * the wheel steps slices along the normal, Ctrl or ⌘ + wheel zooms at the pointer, Shift, middle
+ * the wheel (and a trackpad pinch) zooms at the pointer, Shift + wheel steps slices along the normal
+ * (Jimmy, Nov 4: as in the 3D pane and maps), Shift, middle
  * or right drag pans, and a press on a tilt handle turns the other planes. With no marking tool,
  * Alt + left drag turns this pane's image about the crosshair like a dial (`onSpin`), and `,` / `.`
  * (`<` `>` unshifted) turn the pane under the pointer (else the focused one) 1° anticlockwise /
@@ -562,22 +563,21 @@ export function useSliceGestures(args: {
     };
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
-      if (event.ctrlKey || event.metaKey) {
-        const v = view.current!;
-        const rect = element.getBoundingClientRect();
-        const dx = event.clientX - rect.left - rect.width / 2;
-        const dy = event.clientY - rect.top - rect.height / 2;
-        const before = [v.center[0] + dx / v.zoom, v.center[1] - dy / v.zoom];
-        v.zoom = Math.min(
-          v.fit * 64,
-          Math.max(v.fit / 2, v.zoom * Math.exp(-event.deltaY * 0.002)),
-        );
-        v.center = [before[0]! - dx / v.zoom, before[1]! + dy / v.zoom];
-        render();
-        pickLevel();
+      // Shift + wheel steps slices (some browsers turn Shift + wheel into a sideways scroll).
+      if (event.shiftKey) {
+        const by = event.deltaY || event.deltaX;
+        if (by !== 0) step(Math.sign(by));
         return;
       }
-      step(Math.sign(event.deltaY));
+      const v = view.current!;
+      const rect = element.getBoundingClientRect();
+      const dx = event.clientX - rect.left - rect.width / 2;
+      const dy = event.clientY - rect.top - rect.height / 2;
+      const before = [v.center[0] + dx / v.zoom, v.center[1] - dy / v.zoom];
+      v.zoom = Math.min(v.fit * 64, Math.max(v.fit / 2, v.zoom * Math.exp(-event.deltaY * 0.002)));
+      v.center = [before[0]! - dx / v.zoom, before[1]! + dy / v.zoom];
+      render();
+      pickLevel();
     };
     const key = (event: KeyboardEvent) => {
       if (

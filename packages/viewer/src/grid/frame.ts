@@ -263,3 +263,38 @@ export function slabOf(basis: Basis, axis: Axis | null, at: Zyx, spacingZyx: Zyx
   const d = (at[0] * sz * n[0] + at[1] * sy * n[1] + at[2] * sx * n[2]) / h;
   return (p) => (p[0] * sz * n[0] + p[1] * sy * n[1] + p[2] * sx * n[2]) / h - d;
 }
+
+/**
+ * Where a pane's plane through `at` cuts the grid's box, in mm (z, y, x): the polygon's corners in
+ * order round the plane, or none when it misses. The normal is in mm, as `slabOf` reads it.
+ */
+export function planeOutline(normal: Vec3, at: Zyx, shapeZyx: Zyx, spacingZyx: Zyx): Vec3[] {
+  const lo = spacingZyx.map((s) => -0.5 * s) as unknown as Vec3;
+  const hi = shapeZyx.map((n, i) => (n - 0.5) * spacingZyx[i]!) as unknown as Vec3;
+  const d = dot(normal, times3(at, spacingZyx));
+  const corners: Vec3[] = [];
+  for (let i = 0; i < 8; i++)
+    corners.push([i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]]);
+  const cuts: Vec3[] = [];
+  // Each box edge joins two corners that differ in one bit.
+  for (let i = 0; i < 8; i++)
+    for (const bit of [1, 2, 4]) {
+      if (i & bit) continue;
+      const a = corners[i]!;
+      const b = corners[i | bit]!;
+      const da = dot(normal, a) - d;
+      const db = dot(normal, b) - d;
+      if (da === db || da * db > 0) continue;
+      cuts.push(plus(a, plus(b, a, -1), da / (da - db)));
+    }
+  if (cuts.length < 3) return [];
+  const centre = times(
+    cuts.reduce((s, p) => plus(s, p), [0, 0, 0] as Vec3),
+    1 / cuts.length,
+  );
+  const u = unit(plus(cuts[0]!, centre, -1));
+  const v = cross(normal, u);
+  const angle = (p: Vec3) => Math.atan2(dot(plus(p, centre, -1), v), dot(plus(p, centre, -1), u));
+  return cuts.sort((p, q) => angle(p) - angle(q));
+}
+const times3 = (a: Zyx, s: Zyx): Vec3 => [a[0] * s[0], a[1] * s[1], a[2] * s[2]];

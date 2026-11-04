@@ -14,11 +14,11 @@ const meta = {
   component: ApprovalCard,
   decorators: [(Story) => <div className="w-[288px]">{Story()}</div>],
   args: {
-    title: "Start a worker",
-    summary: "Start worker `roi3-face-2` from `roi3-worker` for growth-plate-distal-face.",
+    title: "Hand part of the work to another AI",
+    summary: "Trace the growth plate's distal face again, with the cartilage left out.",
     changes: ["Growth plate distal face"],
     outOfDate: ["ROI-3", "Cortex 100", "Cortex 1000", "BV/TV", "Tb.Th"],
-    yes: "Yes, start roi3-face-2",
+    yes: "Yes, start it",
     onAnswer: () => {},
   },
 } satisfies Meta<typeof ApprovalCard>;
@@ -30,7 +30,7 @@ export const Waiting: Story = {};
 export const SummaryOnly: Story = {
   args: {
     summary:
-      "Start worker `roi3-face-2` from `roi3-worker` for growth-plate-distal-face. This makes out of date: roi-3, cortex-100, cortex-1000, 8 values.",
+      "Trace the growth plate's distal face again, with the cartilage left out. This makes out of date: ROI-3, Cortex 100, Cortex 1000 and 8 values.",
     changes: undefined,
     outOfDate: undefined,
   },

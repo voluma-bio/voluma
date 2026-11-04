@@ -1,10 +1,11 @@
 /**
  * Final outputs, the input page's right side: a run's final values in main's
  * sections, then the outputs a worker reported that the workflow does not declare. The value
- * picked opens in place under its row: what it is, who made it, its report, its To check items
- * (with those of what it rests on), and "Based on": the outputs its latest version was measured on,
- * drawn beside, made from or drawn on, with "Earlier steps" opening the rest of its history in the
- * same list. A row there frames the panes on that output and opens its report under it. The
+ * picked opens in place under its row: what it is, who made it, its report, its own To check
+ * items, a line to each output it rests on that has open items (each item is drawn and decided
+ * only under the output it is about), and "Based on": the outputs its latest version was measured
+ * on, drawn beside, made from or drawn on, with "Earlier steps" opening the rest of its history in
+ * the same list. A row there frames the panes on that output and opens its items and report. The
  * whole run's graph (W) is the place for what rests on an output. Lists separate by spacing.
  *
  * While the run goes, each value's "rests on" chain ticks off as its links are published
@@ -15,41 +16,23 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { LinkRole } from "@voluma/contracts/output-catalog";
-import { hasVersion, type OutputStatus } from "@voluma/contracts/output-fold";
+import { hasVersion } from "@voluma/contracts/output-fold";
 import {
   type ChainLink,
-  itemsOfVersion,
+  OUTPUT_STATUS,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
   openItemsOf,
   ROLE_WORD,
+  rowStatus,
   rowsToCheck,
   type TrailRow,
 } from "@voluma/run-view";
-import { cx, EmptyState, type Status, StatusGlyph } from "@voluma/ui";
+import { cx, EmptyState, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { type Accepting, clockOf, Items, Report, VersionLine } from "./version-report";
-
-/** Each output status on the shared status marks, in the design's words. */
-export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string }> = {
-  pending: { status: "waiting", word: "Pending" },
-  reported: { status: "done", word: "Reported" },
-  "to-check": { status: "check", word: "To check" },
-  missing: { status: "stopped", word: "Missing" },
-  "out-of-date": { status: "paused", word: "Out of date" },
-};
-
-/** A row's status; while the run goes, nothing published yet reads "not yet". */
-export const statusOf = (row: OutputRow, live: boolean) =>
-  live && row.state.status === "pending"
-    ? { ...OUTPUT_STATUS.pending, word: "not yet" }
-    : OUTPUT_STATUS[row.state.status];
-
-/** A reported value whose own status is fine but which rests on an open To check item. */
-export const restsOnOpen = (row: OutputRow) =>
-  row.state.status === "reported" && openItemsOf(row).some((i) => i.output !== row.id);
 
 export type FinalOutputsProps = {
   review: OutputsReview;
@@ -194,7 +177,12 @@ function Section({
               <Opened key={r.id} row={r} {...props} />
             ) : (
               <li key={r.id}>
-                <ValueRow row={r} live={props.live} onSelect={() => props.onSelect(r.id)} />
+                <ValueRow
+                  row={r}
+                  live={props.live}
+                  nameOf={props.nameOf}
+                  onSelect={() => props.onSelect(r.id)}
+                />
                 {props.live && <ChainLine chain={r.chain} nameOf={props.nameOf} />}
               </li>
             ),
@@ -208,18 +196,20 @@ function Section({
 function ValueRow({
   row,
   live,
+  nameOf,
   selected = false,
   bar = false,
   onSelect,
 }: {
   row: OutputRow;
   live: boolean;
+  nameOf: (id: string) => string;
   selected?: boolean;
   /** The selection's blue bar: while nothing under it is open. */
   bar?: boolean;
   onSelect: () => void;
 }) {
-  const { status, word } = statusOf(row, live);
+  const { status, word, waits } = rowStatus(row, live, nameOf);
   const ref = useScrolledTo(selected);
   return (
     <button
@@ -240,9 +230,9 @@ function ValueRow({
       <span className={cx("min-w-0 truncate", row.state.outOfDate && "line-through")}>
         {row.name}
       </span>
-      {restsOnOpen(row) && (
-        <span className="shrink-0 truncate text-muted-foreground text-xs">
-          An input needs checking
+      {status === "waiting" && waits.length > 0 && (
+        <span className="min-w-0 truncate text-muted-foreground text-xs">
+          waits on {waits.map(nameOf).join(", ")}
         </span>
       )}
       {row.provisional && (
@@ -283,9 +273,12 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
   const [report, setReport] = useState(false);
   const trail = row.trail;
   const latest = row.state.latest;
-  const openItems = row.items.filter((i) => !i.resolved);
-  const shown = openItems.filter((i) => i.output !== open);
-  const below = openItems.length - shown.length;
+  // Its own open items; those of what it rests on are drawn and decided there, one line each here.
+  const own = row.items.filter((i) => !i.resolved && i.output === row.id);
+  const waits = rowStatus(row, props.live, nameOf).waits.map((id) => ({
+    id,
+    count: openItemsOf(row).filter((i) => i.output === id).length,
+  }));
   const restsOn = trail
     .filter((r) => r.depth === 1)
     .sort((a, b) => ROLE_ORDER.indexOf(a.role ?? "base") - ROLE_ORDER.indexOf(b.role ?? "base"));
@@ -295,6 +288,7 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
       <ValueRow
         row={row}
         live={props.live}
+        nameOf={nameOf}
         selected
         bar={!open}
         onSelect={() => props.onOpen(null)}
@@ -317,7 +311,7 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
           </VersionLine>
         ) : (
           <p className="m-0 text-muted-foreground text-xs">
-            {row.state.missingReason ?? statusOf(row, props.live).word}
+            {row.state.missingReason ?? rowStatus(row, props.live, nameOf).word}
           </p>
         )}
         {row.provisional && (
@@ -337,13 +331,25 @@ function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
             />
           </div>
         )}
-        {/* Open items only; an open row below shows its own, so here they shrink to a line. */}
-        {shown.length > 0 && <Items {...props} items={shown} own={row.id} />}
-        {below > 0 && open && (
-          <p className="m-0 flex items-center gap-1.5 text-check text-xs">
-            <StatusGlyph status="check" />
-            {below} to check on {nameOf(open)}, open below
-          </p>
+        {own.length > 0 && <Items {...props} items={own} own={row.id} />}
+        {waits.map(({ id, count }) =>
+          id === open ? (
+            <p key={id} className="m-0 flex items-center gap-1.5 text-check text-xs">
+              <StatusGlyph status="check" />
+              {count} to check on {nameOf(id)}, open below
+            </p>
+          ) : (
+            <button
+              key={id}
+              type="button"
+              onClick={() => props.onOpen(id)}
+              className="flex cursor-pointer items-center gap-1.5 justify-self-start rounded-sm text-left text-check text-xs hover:underline"
+            >
+              <StatusGlyph status="check" />
+              {count} to check on {nameOf(id)}, which this rests on
+              <ChevronRight aria-hidden className="size-3.5 shrink-0" />
+            </button>
+          ),
         )}
         {restsOn.length > 0 && (
           <RestsOn {...props} rows={trail} restsOn={restsOn} further={further} />
@@ -419,9 +425,15 @@ function TrailItem({
   const { open, nameOf } = props;
   const isOpen = row.id === open;
   const latest = row.state?.latest;
-  const status = row.state ? OUTPUT_STATUS[row.state.status] : OUTPUT_STATUS.pending;
+  // Its own row when it has one, so an output resting on open checks waits here too.
+  const full = props.review.rows.get(row.id);
+  const status = full
+    ? rowStatus(full, props.live, nameOf)
+    : row.state
+      ? OUTPUT_STATUS[row.state.status]
+      : OUTPUT_STATUS.pending;
   const ref = useScrolledTo(isOpen);
-  const items = latest ? itemsOfVersion(row.id, latest) : [];
+  const items = props.review.rows.get(row.id)?.items.filter((i) => i.output === row.id) ?? [];
   return (
     <li className={cx("grid grid-cols-[minmax(0,1fr)] rounded-sm", isOpen && "bg-select-tint")}>
       <button
@@ -463,6 +475,8 @@ function TrailItem({
       </button>
       {isOpen && latest && (
         <div className="mx-1.5 mb-2 grid grid-cols-[minmax(0,1fr)] gap-2 border-select border-l-2 pt-1 pl-2.5">
+          {/* What to judge first, then the report to judge it by. */}
+          {items.length > 0 && <Items {...props} items={items} own={row.id} />}
           <Report
             runId={props.runId}
             events={props.events}
@@ -470,7 +484,6 @@ function TrailItem({
             outOfDate={!!row.state?.outOfDate}
             nameOf={nameOf}
           />
-          {items.length > 0 && <Items {...props} items={items} own={row.id} />}
         </div>
       )}
     </li>

@@ -9,7 +9,7 @@
  * those planes about this pane's normal; this pane stays still. With `onSpin`, Alt-drag and `,` `.`
  * turn this pane's image in place about the crosshair. Esc drops a mark being drawn.
  */
-import { Button, cx } from "@voluma/ui";
+import { cx } from "@voluma/ui";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   BufferGeometry,
@@ -55,6 +55,7 @@ import {
   type PaneView,
   planeAxes,
   type ShownMark,
+  type VoxelBox,
   type Zyx,
 } from "./scene";
 import { type PaneCamera, type Probe, useSliceGestures } from "./slice-gestures";
@@ -66,6 +67,9 @@ import { tokenColor } from "./token-color";
  */
 export const axisToken = (axis: Axis) =>
   axis === 0 ? "--plane-axial" : axis === 1 ? "--plane-sagittal" : "--plane-coronal";
+
+/** The least a framed region spans, in source voxels of the finest spacing, so a point frames a neighbourhood. */
+const FRAME_MIN_VOXELS = 48;
 
 /** How far out the tilt handles sit, of the pane's half size. */
 const HANDLE_REACH = 0.85;
@@ -130,6 +134,7 @@ export function SlicePane({
   );
   const s = scene.spacingZyx;
   const host = useRef<HTMLDivElement>(null);
+  const scaleBar = useRef<HTMLDivElement>(null);
   const three = useRef<{
     renderer: WebGLRenderer;
     camera: OrthographicCamera;
@@ -144,6 +149,8 @@ export function SlicePane({
   const view = useRef<PaneCamera | null>(null);
   // A saved view shown before the pane had a size: applied when it gets one.
   const pending = useRef<{ zoom: number; center: [number, number] } | null>(null);
+  // A region framed before the pane had a size: framed when it gets one.
+  const pendingBox = useRef<VoxelBox | null>(null);
   const [level, setLevel] = useState(scene.image.levels.length - 1);
   // A tilted pane's fine picture covers this window of pane mm; panning near its edge bumps
   // `reframe`, which loads a new one.
@@ -327,6 +334,7 @@ export function SlicePane({
       for (const o of drawings.children) if (o.userData.dot) o.scale.setScalar(1 / v.zoom);
       renderer.render(sc, camera);
       layer.draw();
+      if (scaleBar.current) placeScale(scaleBar.current, v.zoom);
       // A tilted pane panned or zoomed out near its fine picture's edge loads a new window.
       const w = fineWindow.current;
       if (
@@ -349,11 +357,39 @@ export function SlicePane({
       if (!v) return pending.current;
       return { zoom: v.zoom / v.fit, center: [v.center[0], v.center[1]] };
     };
+    // Centres on the box and zooms until its outline on this plane fills about four fifths of
+    // the pane: at least FRAME_MIN_VOXELS of the finest spacing across, never out past the fit.
+    const frameBox = (box: VoxelBox) => {
+      const v = view.current;
+      const { width, height } = element.getBoundingClientRect();
+      if (!v || !width || !height) {
+        pendingBox.current = box;
+        return;
+      }
+      pendingBox.current = null;
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (const z of [box.min[0] - 0.5, box.max[0] + 0.5])
+        for (const y of [box.min[1] - 0.5, box.max[1] + 0.5])
+          for (const x of [box.min[2] - 0.5, box.max[2] + 0.5]) {
+            const [px, py] = latest.current.toPane([z, y, x]);
+            xs.push(px);
+            ys.push(py);
+          }
+      const least = FRAME_MIN_VOXELS * Math.min(...s);
+      const across = Math.max(Math.max(...xs) - Math.min(...xs), least);
+      const down = Math.max(Math.max(...ys) - Math.min(...ys), least);
+      v.zoom = Math.max(v.fit, Math.min(width / across, height / down) * 0.8);
+      v.center = [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...ys) + Math.min(...ys)) / 2];
+      state.render();
+      pickLevel();
+    };
     handle.current = {
       view: now,
       layers: () => layer.layers(renderer.domElement, paint),
       show(saved: PaneView) {
         if (!("zoom" in saved)) return;
+        pendingBox.current = null;
         if (!view.current) {
           pending.current = saved;
           return;
@@ -363,6 +399,7 @@ export function SlicePane({
         state.render();
         pickLevel();
       },
+      frame: frameBox,
     };
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
@@ -379,8 +416,11 @@ export function SlicePane({
           latest.current.toPane(scene.shapeZyx.map((n) => (n - 1) / 2) as unknown as Zyx),
       };
       view.current.fit = fitted;
-      state.render();
-      pickLevel();
+      if (pendingBox.current) frameBox(pendingBox.current);
+      else {
+        state.render();
+        pickLevel();
+      }
     });
     observer.observe(element);
     return () => {
@@ -401,6 +441,14 @@ export function SlicePane({
     };
     // Runs once: the scene's grid is fixed for the pane's life (the viewer remounts on a new grid).
   }, []);
+
+  // A region waiting to be framed is dropped once the crosshair leaves it (a mark picked, a click
+  // in another pane): framing it later would show a place nobody is looking at.
+  useEffect(() => {
+    const box = pendingBox.current;
+    if (box && point.some((v, a) => v < box.min[a]! - 0.5 || v > box.max[a]! + 0.5))
+      pendingBox.current = null;
+  }, [point]);
 
   // A turned plane keeps the crosshair where it was on screen: the picture turns about it.
   const turned = useRef(basis);
@@ -831,9 +879,9 @@ export function SlicePane({
           ? "failed"
           : "ready";
   useEffect(() => latest.current.onStatus(status), [status]);
-  const scale = shown && Math.max(...scene.image.levels[shown.level]!.scaleZyx);
   // A tilted pane counts along the grid axis nearest its normal, primed.
   const counted = whole ? axis : nearestAxis(basis.normal);
+  const at = Math.round(point[counted]);
   const sliceHelp = useId();
   return (
     // biome-ignore lint/a11y/useSemanticElements: an interactive image surface, not a form fieldset.
@@ -847,25 +895,47 @@ export function SlicePane({
       aria-label={whole ? `Slice ${index + 1} of ${total}` : "Turned slice"}
       aria-describedby={sliceHelp}
     >
-      <div
-        className={cx(CHIP, "pointer-events-auto top-12 left-2 flex items-center gap-1")}
-        onPointerDown={(event) => event.stopPropagation()}
+      {/* The slice as a slider down the pane's left edge, its number above (as in Amira). */}
+      <span
+        className={cx(CHIP, "top-2 left-2 tabular-nums")}
+        title={whole ? undefined : "Counted along the scan's nearest axis"}
       >
-        <Button size="sm" variant="ghost" aria-label="Previous slice" onClick={() => step(-1)}>
-          −
-        </Button>
-        {Math.round(point[counted]) + 1}
+        {at + 1}
         {!whole && "′"} / {scene.shapeZyx[counted]}
-        {scale && scale > 1 && <span className="ml-2">1:{scale}</span>}
-        <Button size="sm" variant="ghost" aria-label="Next slice" onClick={() => step(1)}>
-          +
-        </Button>
-      </div>
-      <span id={sliceHelp} className={cx(CHIP, "top-2 left-2")}>
+      </span>
+      <input
+        type="range"
+        aria-label="Slice"
+        aria-valuetext={`Slice ${at + 1} of ${scene.shapeZyx[counted]}`}
+        title="Drag, or Shift + scroll"
+        min={0}
+        max={scene.shapeZyx[counted]! - 1}
+        value={at}
+        onChange={(event) => {
+          const by = Number(event.target.value) - point[counted];
+          if (whole) return step(Math.round(by));
+          // A turned pane steps along its normal: convert the counted axis's change into that
+          // (the normal's component can be small or negative).
+          const s = scene.spacingZyx;
+          step((by * s[counted]!) / (Math.min(...s) * basis.normal[counted]!));
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [writing-mode:vertical-lr]"
+      />
+      <span id={sliceHelp} className="sr-only">
         Focus slice: ↑/↓ 1 · Page Up/Down 10
       </span>
+      {/* Without the grid's geometry the pane's units are voxels: no scale to show. */}
+      <div
+        ref={scaleBar}
+        hidden={!scene.measured}
+        aria-hidden
+        className="pointer-events-none absolute bottom-2 left-2 z-10 grid justify-items-center border-scale-bar [&[hidden]]:hidden border-t-2 pt-0.5 font-mono text-scale-bar text-xs"
+      >
+        <span />
+      </div>
       {(!shown || refining) && !error && (
-        <span className={cx(CHIP, "top-24 right-2 left-2")} role="status">
+        <span className={cx(CHIP, "top-2 right-2 left-24")} role="status">
           {shown ? "Loading full resolution…" : "Loading…"}
         </span>
       )}
@@ -889,6 +959,17 @@ export function SlicePane({
       )}
     </div>
   );
+}
+
+/** Scale bar lengths to choose from, in mm. */
+const SCALE_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20];
+
+/** Sizes the scale bar to the longest round length under 100 CSS px at `zoom` (px per mm). */
+function placeScale(bar: HTMLElement, zoom: number) {
+  const mm = [...SCALE_STEPS].reverse().find((l) => l * zoom <= 100) ?? SCALE_STEPS[0]!;
+  bar.style.width = `${mm * zoom}px`;
+  const label = mm < 1 ? `${Math.round(mm * 1000)} µm` : `${mm} mm`;
+  if (bar.firstElementChild) bar.firstElementChild.textContent = label;
 }
 
 /** The same object while its value is the same, so effects keyed on it run only on a change. */

@@ -13,7 +13,11 @@ export {
 } from "./QuadViewer";
 export {
   type Blocks,
-  labelsMiddle,
+  LABELS_START,
+  type LabelDisplay,
+  type LegendEntry,
+  labelsBox,
+  middleOf,
   type ReviewGrid,
   reviewGrid,
 } from "./review";
@@ -26,9 +30,11 @@ export type {
   MarkEdit,
   MarkTool,
   Overlay,
+  OverlayStyle,
   PaneView,
   ProbeValue,
   ShownMark,
+  VoxelBox,
   Zyx,
 } from "./scene";
 export { type PlaneFit, planeTargets } from "./targets";

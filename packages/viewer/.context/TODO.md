@@ -55,3 +55,9 @@
   855³ scan at 30° (710 MB, computed with `crossed`). A bigger scan, or wider labels, thrashes
   again: each crosshair move re-fetches the other panes' chunks. Then budget the fine request per
   pane (shrink the window toward the view) rather than coarsen fit zoom.
+- The scan grid's anatomy (`planes` on `scan` in mouse-oa's catalog) assumes the knee stands upright in
+  the holder; panes are now named Axial/Coronal/Sagittal from it. Ask the expert whether the scan's
+  planes should say "about axial" until the joint frame is applied, or name only the tibia grid.
+- Runs published before the grid-affine change (732a2eea's scan has no `detail.affine`) get an
+  identity affine in `outputBlocks`: their marks and rulers read "mm" that are voxels. The scale bar
+  hides there (`GridScene.measured`); the mark measures don't yet.

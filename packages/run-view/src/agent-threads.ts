@@ -47,9 +47,3 @@ export function agentEntries(
   };
   return [main, ...entries.filter((e) => e.place !== "main")];
 }
-
-/** Main, else the agent working now, else the first. */
-export const defaultAgent = (entries: readonly AgentEntry[]): AgentEntry | undefined =>
-  entries.find((e) => e.place === "main") ??
-  entries.find((e) => e.state === "working") ??
-  entries[0];

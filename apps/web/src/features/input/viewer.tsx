@@ -8,16 +8,28 @@
  */
 import { reviewAssetUrl } from "@voluma/api-client";
 import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
-import { EmptyState, ErrorState, SegmentedControl } from "@voluma/ui";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Menu,
+  MenuRadioGroup,
+  MenuRadioItem,
+  SegmentedControl,
+  Tooltip,
+} from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
   type GridPlanes,
   type GridScene,
-  labelsMiddle,
+  type LabelDisplay,
+  type LegendEntry,
+  labelsBox,
   type MarkEdit,
   type MarkPlane,
   type MarkTool,
+  middleOf,
   type PlaneFit,
   planeTargets,
   type QuadLayout,
@@ -27,9 +39,19 @@ import {
   reviewGrid,
   type ShownMark,
   tokenColor,
+  type VoxelBox,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { ChevronDown, EyeOff } from "lucide-react";
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { gridKeyOf, type ShownGrid, TOOLS, type YourMark } from "./marking";
 
 export function SceneViewer({
@@ -46,6 +68,10 @@ export function SceneViewer({
   onJumped,
   onMark,
   onShown,
+  display,
+  onLegend,
+  heading,
+  onShowHidden,
   quad,
 }: {
   runId: string;
@@ -67,6 +93,14 @@ export function SceneViewer({
   onMark: (mark: GridMark, volumeId: string, gridKey: string, plane?: MarkPlane | null) => void;
   /** The mounted output and grid; undefined while no viewer is shown. */
   onShown: (shown: ShownGrid | undefined) => void;
+  /** How the labels and the output's own regions are drawn (the Labels panel). */
+  display: LabelDisplay;
+  /** What each colour drawn on the shown grid is; undefined while none is shown. */
+  onLegend: (legend: LegendEntry[] | "preparing" | undefined) => void;
+  /** Shows every label the display hides. */
+  onShowHidden: () => void;
+  /** What the panes show, over the top-left pane of the shown viewer. */
+  heading?: ReactNode;
   /** The four panes' layout, which holds across grids, and each grid's planes by the image's id. */
   quad: {
     layout: QuadLayout;
@@ -91,46 +125,50 @@ export function SceneViewer({
     ref?: Ref<SceneHandle>;
   };
 }) {
-  const [labels, setLabels] = useState(true);
   const grid = useMemo(
     () =>
       reviewGrid({
         revision,
         shown: subject.shown,
         assets,
-        labels,
+        display,
         focus,
         // The zarr reader resolves level paths against this, so it is absolute.
         assetBase: (sha256) =>
           new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href,
         token: tokenColor,
       }),
-    [runId, revision, subject.shown, assets, labels, focus],
+    [runId, revision, subject.shown, assets, display, focus],
   );
-  // A focused label has no extent in the run's data: find its middle on the grid. Keyed by
-  // what it reads, since `grid` is rebuilt whenever Labels is toggled.
+  const legend =
+    grid.state === "ready" ? grid.legend : grid.state === "preparing" ? "preparing" : undefined;
+  useEffect(() => onLegend(legend), [legend, onLegend]);
+  useEffect(() => () => onLegend(undefined), [onLegend]);
+  // A focused label has no extent in the run's data: find it on the grid. Keyed by what it
+  // reads, since `grid` is rebuilt whenever the display changes.
   const focusLabels = grid.state === "ready" ? grid.focusLabels : undefined;
   const labelsKey = focusLabels && `${focusLabels.source.base}|${focusLabels.labels.join()}`;
   const latestLabels = useRef(focusLabels);
   latestLabels.current = focusLabels;
-  const [labelsFocus, setLabelsFocus] = useState<{ for: string; at?: Zyx }>();
+  const [labelsFocus, setLabelsFocus] = useState<{ for: string; box?: VoxelBox }>();
   useEffect(() => {
     const wanted = latestLabels.current;
     if (!labelsKey || !wanted) return;
     const abort = new AbortController();
-    labelsMiddle(wanted, abort.signal)
-      .then((at) => setLabelsFocus({ for: labelsKey, at }))
+    labelsBox(wanted, abort.signal)
+      .then((box) => setLabelsFocus({ for: labelsKey, box }))
       .catch(() => {});
     return () => abort.abort();
   }, [labelsKey]);
-  // A new object per item selection or found voxel, so the crosshair moves then and not when
-  // Labels is toggled.
-  const at =
-    grid.state === "ready"
-      ? (grid.focus ?? (labelsFocus?.for === labelsKey ? labelsFocus?.at : undefined))
-      : undefined;
-  const atKey = at?.join();
-  const target = useMemo(() => (at ? { at } : undefined), [focus, atKey]);
+  // Where the item is and the region the panes frame. A new object per item selection or found
+  // region, so the panes move then and not when the display changes.
+  const labelsFound = labelsFocus?.for === labelsKey ? labelsFocus?.box : undefined;
+  const region =
+    grid.state !== "ready"
+      ? undefined
+      : (grid.focus ?? (labelsFound && { at: middleOf(labelsFound), box: labelsFound }));
+  const regionKey = region && [region.at, region.box?.min, region.box?.max].join("|");
+  const target = useMemo(() => region, [focus, regionKey]);
   // The crosshair goes to whichever came last: the item's place or a picked mark.
   const imageId = grid.state === "ready" ? grid.imageId : undefined;
   const image = revision.volumes.find((v) => v.id === imageId);
@@ -228,42 +266,44 @@ export function SceneViewer({
     [gridKey, subject.id, shownReady, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
-  // The marking tools and the Labels toggle, on the shown viewer's bar.
+  // The marking tools, on the shown viewer's bar: the ones a reviewer points with named, the
+  // measuring ones under More tools.
+  // Labels hidden on this grid are said on the bar, so a hidden structure is never a surprise.
+  const hiddenHere =
+    grid.state === "ready"
+      ? grid.legend.filter((e) => e.as === "label" && display.hidden.includes(e.id)).length
+      : 0;
   const bar = (on: boolean) =>
     on && (
       <>
-        {onTool && (
-          <SegmentedControl
-            label="Marking tool"
-            options={TOOLS.map((t) => ({
-              value: t.value,
-              label: t.label,
-            }))}
-            className="flex-wrap"
-            value={tool ?? "navigate"}
-            onValueChange={(v) => onTool(v === "navigate" ? null : v)}
-          />
+        {onTool && <ToolBar tool={tool} onTool={onTool} />}
+        {hiddenHere > 0 && (
+          <Tooltip label="Show every hidden label">
+            <Button size="sm" variant="ghost" onClick={onShowHidden}>
+              <EyeOff aria-hidden />
+              {hiddenHere} hidden
+            </Button>
+          </Tooltip>
         )}
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} />
-          Labels
-        </label>
       </>
     );
   // One tree shape whether or not this subject's grid is ready, so the kept viewers never remount.
   return (
     <>
       {grid.state !== "ready" && (
-        <div className="grid h-full place-content-center p-6">
-          {grid.state === "failed" ? (
-            <ErrorState title={grid.message} />
-          ) : (
-            <div role="status">
-              <EmptyState title={grid.state === "preparing" ? "Preparing the views" : "No views"}>
-                {grid.message}
-              </EmptyState>
-            </div>
-          )}
+        <div className="flex h-full flex-col">
+          {heading && <div className="flex shrink-0 p-2">{heading}</div>}
+          <div className="grid min-h-0 flex-1 place-content-center p-6">
+            {grid.state === "failed" ? (
+              <ErrorState title={grid.message} />
+            ) : (
+              <div role="status">
+                <EmptyState title={grid.state === "preparing" ? "Preparing the views" : "No views"}>
+                  {grid.message}
+                </EmptyState>
+              </div>
+            )}
+          </div>
         </div>
       )}
       {slots.map((k) => {
@@ -278,6 +318,7 @@ export function SceneViewer({
               onLayout={quad.onLayout}
               focus={k.focus}
               notes={k.notes}
+              heading={on ? heading : undefined}
               tool={on ? tool : null}
               marks={shown.get(k.key) ?? NO_MARKS}
               onMark={on ? (mark, plane) => onMark(mark, k.imageId, k.key, plane) : undefined}
@@ -316,7 +357,7 @@ type View = {
   name: string;
   scene: GridScene;
   notes: string[];
-  focus: { at: Zyx } | undefined;
+  focus: { at: Zyx; box?: VoxelBox } | undefined;
 };
 type Kept = View & { ready: boolean };
 
@@ -339,3 +380,61 @@ const keep = (had: Kept[], live: View | undefined, revision: Blocks): Kept[] => 
   const ready = had.find((k) => k.key === live.key)?.ready ?? false;
   return [...others, { ...live, ready }].slice(-MAX_KEPT);
 };
+
+/** Tools named on the bar; the rest are under More tools. */
+const NAMED = new Set<MarkTool | "navigate">(["navigate", "point", "line"]);
+
+function ToolBar({
+  tool,
+  onTool,
+}: {
+  tool: MarkTool | null;
+  onTool: (tool: MarkTool | null) => void;
+}) {
+  const value = tool ?? "navigate";
+  const more = TOOLS.filter(
+    (t): t is (typeof TOOLS)[number] & { value: MarkTool } => !NAMED.has(t.value),
+  );
+  const picked = more.find((t) => t.value === value);
+  return (
+    <>
+      <SegmentedControl
+        label="Marking tool"
+        options={TOOLS.filter((t) => NAMED.has(t.value)).map((t) => ({
+          value: t.value,
+          label: t.short,
+        }))}
+        value={value}
+        onValueChange={(v) => onTool(v === "navigate" ? null : v)}
+      />
+      <Menu
+        align="start"
+        trigger={
+          <Button size="sm" variant={picked ? "secondary" : "ghost"}>
+            {picked ? (
+              <>
+                {picked.icon}
+                {picked.short}
+              </>
+            ) : (
+              "More tools"
+            )}
+            <ChevronDown aria-hidden />
+          </Button>
+        }
+      >
+        <MenuRadioGroup
+          label="More tools"
+          value={picked?.value ?? ""}
+          onValueChange={(v) => onTool(v as MarkTool)}
+        >
+          {more.map((t) => (
+            <MenuRadioItem key={t.value} value={t.value}>
+              {t.label}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+      </Menu>
+    </>
+  );
+}

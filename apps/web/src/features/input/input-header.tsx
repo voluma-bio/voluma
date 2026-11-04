@@ -1,5 +1,5 @@
 /**
- * The input review's breadcrumb and separate page heading: input identity, group, run status,
+ * The input review's header line: the breadcrumb ending in the input, its group, run status,
  * and Run details: what the researcher may ask (how long it took, its workflow and models,
  * its cost, Stop while it goes), then what someone fixing a run needs (times, ids, commits, keys, failures,
  * gateway requests). Below the header,
@@ -32,7 +32,6 @@ import {
   FactSections,
   IconButton,
   INPUT_WORD,
-  PageHead,
   Popover,
   ShellHeading,
   type Status,
@@ -85,35 +84,38 @@ export function InputHeading({
   study,
   waitingOnYou,
   toCheck,
+  onToCheck,
 }: {
   run: Run;
   study: StudyDetail | undefined;
   /** The run's main holds a call for your yes: the run waits on you. */
   waitingOnYou: boolean;
   toCheck: number;
+  /** Shows the first open check. */
+  onToCheck: () => void;
 }) {
   const { title, group } = inputTitle(run, study);
   const now = where(run, waitingOnYou);
   const newest = study?.inputs.find((s) => s.member.inputId === run.input.id)?.runs[0];
   const earlier = newest && newest.id !== run.id;
+  // One line: the breadcrumb ends in this sample, then where its run stands, which opens Run details.
   return (
-    <>
-      <InputBreadcrumb study={study} title={title} />
-      <PageHead
-        inline
-        title={title}
-        subtitle={
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            {group && <span>Group: {group}</span>}
-            {earlier && <span className="font-medium text-foreground">Earlier run</span>}
-            <StatusMark status={now.status} label={now.text} />
-            {toCheck > 0 && <StatusMark status="check" label={`${toCheck} to check`} />}
-            {now.detail && <span>{now.detail}</span>}
-          </div>
-        }
-        actions={<RunDetails run={run} workflow={workflowLabel(run, study)} />}
-      />
-    </>
+    <InputBreadcrumb study={study} title={title}>
+      <h1 className="sr-only">{title}</h1>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {group && <span>Group: {group}</span>}
+        {earlier && <span className="font-medium text-foreground">Earlier run</span>}
+        <RunDetails run={run} workflow={workflowLabel(run, study)}>
+          <StatusMark status={now.status} label={now.text} />
+        </RunDetails>
+        {toCheck > 0 && (
+          <Button variant="ghost" size="sm" className="-ml-2" onClick={onToCheck}>
+            <StatusMark status="check" label={`${toCheck} to check`} />
+          </Button>
+        )}
+        {now.detail && <span>{now.detail}</span>}
+      </div>
+    </InputBreadcrumb>
   );
 }
 
@@ -121,9 +123,12 @@ export function InputHeading({
 export function InputBreadcrumb({
   study,
   title = INPUT_WORD.One,
+  children,
 }: {
   study?: StudyDetail;
   title?: string;
+  /** The rest of the header line after the breadcrumb. */
+  children?: ReactNode;
 }) {
   return (
     <ShellHeading>
@@ -143,11 +148,21 @@ export function InputBreadcrumb({
         ]}
         current={title}
       />
+      {children}
     </ShellHeading>
   );
 }
 
-function RunDetails({ run, workflow }: { run: Run; workflow: string }) {
+/** Where the run stands (`children`) is the button that opens its details. */
+function RunDetails({
+  run,
+  workflow,
+  children,
+}: {
+  run: Run;
+  workflow: string;
+  children: ReactNode;
+}) {
   const live = run.state.status !== "ended";
   return (
     <Popover
@@ -156,9 +171,10 @@ function RunDetails({ run, workflow }: { run: Run; workflow: string }) {
       // Wide enough for a usual model id ("deepseek/deepseek-v4-pro") on one line beside its role.
       className="w-96"
       trigger={
-        <Button variant="ghost" size="sm" className="shrink-0">
-          Run details
-          <ChevronDown className="size-3.5" aria-hidden />
+        <Button variant="ghost" size="sm" className="-ml-2 shrink-0">
+          {children}
+          <span className="sr-only">, run details</span>
+          <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
         </Button>
       }
     >

@@ -19,6 +19,7 @@ import {
 } from "react";
 import { Button } from "../button";
 import { cx } from "../cx";
+import { Tooltip } from "../tooltip";
 import { ShellContext, type ShellSide } from "./shell";
 
 const WIDTH: Record<ShellSide, { min: number; max: number; initial: number }> = {
@@ -129,6 +130,8 @@ export function SidePanel(props: SidePanelProps) {
     toggle.current = node;
   }, []);
 
+  // Tabs change what the panel shows, so a tabbed side hides as "the panel".
+  const hideLabel = tabs ? "Hide panel" : `Hide ${label}`;
   const head = (
     <div className="flex h-(--panel-head-h) shrink-0 items-center gap-1 border-b border-border pr-1.5 pl-2 whitespace-nowrap">
       {tabs ? (
@@ -140,9 +143,8 @@ export function SidePanel(props: SidePanelProps) {
         />
       ) : (
         <>
-          <h2 className={cx("ml-1 font-semibold text-base", props.meta ? "shrink-0" : "truncate")}>
-            {props.title}
-          </h2>
+          {/* The title keeps its room; the meta and the tools give way first. */}
+          <h2 className="ml-1 shrink-0 font-semibold text-base">{props.title}</h2>
           {props.meta && (
             <span className="ml-1.5 min-w-0 truncate text-muted-foreground text-xs">
               {props.meta}
@@ -151,19 +153,21 @@ export function SidePanel(props: SidePanelProps) {
         </>
       )}
       <span className="flex-1" />
-      {!tabs && props.tools}
-      <Button
-        asChild
-        aria-label={`Hide ${label}`}
-        variant="ghost"
-        size="sm"
-        onClick={() => shell.fold(side, true)}
-      >
-        <button type="button" ref={folded ? undefined : setToggle}>
-          {side === "left" ? <PanelLeftClose /> : <PanelRightClose />}
-          Hide
-        </button>
-      </Button>
+      {!tabs && <div className="flex min-w-0 items-center gap-1">{props.tools}</div>}
+      <Tooltip label={hideLabel}>
+        <Button
+          asChild
+          aria-label={hideLabel}
+          variant="ghost"
+          size="sm"
+          className="w-6 shrink-0 px-0"
+          onClick={() => shell.fold(side, true)}
+        >
+          <button type="button" ref={folded ? undefined : setToggle}>
+            {side === "left" ? <PanelLeftClose /> : <PanelRightClose />}
+          </button>
+        </Button>
+      </Tooltip>
     </div>
   );
 
@@ -262,7 +266,7 @@ function Tabs({
             title={t.label}
             onClick={() => onChange(t.id)}
             className={cx(
-              "inline-flex h-6.5 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring @max-[260px]:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0",
+              "inline-flex h-6.5 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring @max-[340px]:px-1.5 @min-[260px]:@max-[340px]:[&_svg]:hidden [&_svg]:size-3.5 [&_svg]:shrink-0",
               on
                 ? "bg-secondary font-medium text-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-foreground",
