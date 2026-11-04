@@ -13,7 +13,7 @@ import {
   markPoints,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { Angle, Lasso, Pipette, Spline } from "lucide-react";
+import { Angle, Crosshair, Hand, Lasso, Pipette, Ruler, Spline } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -96,26 +96,32 @@ export function gridKeyOf(image: Volume): string | undefined {
 /** A marking tool and the letter of the tags it makes (not a command key). */
 type Tool = {
   value: MarkTool | "navigate";
-  /** Its full name, in menus. */
+  /** Its name: the icon's accessible name, and its tooltip with `hint`. */
   label: string;
-  /** Its name on the bar. */
-  short: string;
+  /** How to use it ("click two points"). */
+  hint: string;
   letter?: string;
-  icon?: ReactNode;
+  icon: ReactNode;
 };
 
-/** The marking tools on the viewer's bar (`viewer.tsx` names some and puts the rest in a menu). */
+/** The marking tools, every one an icon on the viewer's bar. */
 export const TOOLS: Tool[] = [
-  { value: "navigate", label: "Navigate", short: "Navigate" },
-  { value: "point", label: "Point", short: "Point", letter: "P" },
-  { value: "line", label: "Ruler", short: "Ruler", letter: "R" },
-  { value: "angle", label: "Angle", short: "Angle", letter: "A", icon: <Angle /> },
-  { value: "outline", label: "Outline", short: "Outline", letter: "O", icon: <Lasso /> },
-  { value: "path", label: "Freehand line", short: "Freehand", letter: "L", icon: <Spline /> },
+  { value: "navigate", label: "Navigate", hint: "drag to move the crosshair", icon: <Hand /> },
+  { value: "point", label: "Point", hint: "click to place", letter: "P", icon: <Crosshair /> },
+  { value: "line", label: "Ruler", hint: "click two points", letter: "R", icon: <Ruler /> },
+  { value: "angle", label: "Angle", hint: "click three points", letter: "A", icon: <Angle /> },
+  {
+    value: "outline",
+    label: "Outline",
+    hint: "draw around a region",
+    letter: "O",
+    icon: <Lasso />,
+  },
+  { value: "path", label: "Freehand line", hint: "draw", letter: "L", icon: <Spline /> },
   {
     value: "probe",
-    label: "Probe the image value",
-    short: "Probe",
+    label: "Probe",
+    hint: "click to read the image value",
     letter: "P",
     icon: <Pipette />,
   },

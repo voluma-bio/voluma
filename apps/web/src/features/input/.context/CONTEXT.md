@@ -14,6 +14,12 @@ runs out. Run details stays at the right. “Run finished” means computation e
 results are checked. An earlier run is labelled beside its status. Run details holds the source
 filename and troubleshooting facts; the study member's `inputLabel` is the page identity.
 
+The Samples tab reads complete `StudyDetail.inputs` from the same current-study query as the
+heading, never `StudySummary.newestRuns` (which omits members without runs). `sampleTree` in
+run-view uses `inputLabel`/`inputStatus`, including Not started; those rows open and focus the
+overview row rather than a no-run review error. Search counts say Showing N of the full total.
+All studies returns to the study list; a failed background refresh retains the last membership.
+
 ## The run's stream and the run read
 
 `use-run-stream.ts` feeds the run's durable events into the run store (`@voluma/run-view`
@@ -63,7 +69,7 @@ calls main still holds, `openApprovals`), Labels (`labels-panel.tsx`: what each 
 shown grid's `legend`; a label's volume only from the catalog's one mm³ value measured on that label alone
 (`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
 output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
-Agents (`run-agents.tsx`: the run's workers, then a picked worker's whole thread with All agents to go back; main is not listed, since Conversation is its thread), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The side
+Agents (`run-agents.tsx`: the run's workers, then a picked worker's whole thread with All agents to go back; main is not listed, since Conversation is its thread), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over the current `StudyDetail.inputs`). The side
 opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or a worker's name in main's thread opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), and
 Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
 reported value resting on an output with open items is not done: its status is "Waiting on a check
@@ -77,7 +83,7 @@ about (as `trail` unless it is the value) and frames the panes on its region; it
 so Back returns to the item before. Reports and items are `version-report.tsx`.
 
 The centre has no bar of its own: a chip (`SceneChip`) names the output in view, its value and its
-status (the waiting one a button to the checks), with the saved views menu, only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
+status (the waiting one a button to the checks), only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
 the top-left pane's corner (`QuadViewer`'s `heading`), under the viewer's notes, which stay in the
 flow above the panes; over a file, a list, an empty centre or a grid still preparing it sits above,
 in the flow. The whole run gets a bar with the way back. Delete mark and Undo delete
@@ -94,7 +100,7 @@ stays open until Esc. A section's tick waits for every value in it. Until the va
 marked missing, the centre shows the nearest link on its chain with a version (the scene chip saying
 "<value> is based on"), else the output published last whose whole scene has blocks to draw (the scan, from intake
 on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the
-run is going and the AI is still setting up only while nothing drawable is published. `studiesQuery` refetches while a run is live, so the Samples tab
+run is going and the AI is still setting up only while nothing drawable is published. `studyQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item`,
@@ -107,14 +113,17 @@ outputs while it is up and unfolds it after (the shell's `useFoldWhile`); showin
 changes its visibility, not the centre. Esc goes, one thing per press: a mark being drawn, the tool, Full view (the shell), the whole
 run, an open row, only within its focused workspace and never while typing elsewhere.
 Visible Whole run / Back to the views controls switch the centre. The panes stay mounted (hidden) under the
-whole run. The Agents tab's thread has a header (state, worked clock, outputs reported) over run-view's `AgentThread` (see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread in the Agents tab. The docked bar's tools are `TOOLS` (`marking.tsx`): Navigate, Point and Ruler named on
-the bar, and Angle, Outline, Freehand line (an open path, tag L) and Probe under More tools (`viewer.tsx`). These are
-labelled choices, with no command-key bindings. Point notes have no editor or display; old stored
+whole run. The Agents tab's thread has a header (state, worked clock, outputs reported) over run-view's `AgentThread` (see its `.context`); `outputs-review.tsx` builds the entries once (`agentEntries`) and hands the same names to the conversation, where inline code in main's replies that is exactly an agent's name opens its thread in the Agents tab. The docked bar's tools are `TOOLS` (`marking.tsx`), all on the bar as icons named in their
+tooltips (Jimmy, Nov 4): Navigate, Point, Ruler, Angle, Outline, Freehand line (an open path, tag L) and Probe (`viewer.tsx`).
+They have no command-key bindings. Point notes have no editor or display; old stored
 note fields remain readable and intact when a mark moves or is restored. Probe values still show.
 Your marks are kept in the run (`run-marks.ts`: `mark.placed` / `mark.deleted` through
 `POST`/`DELETE /api/review/runs/:runId/marks`, folded from the stream; a write shows at once, and an example run keeps them in the page only). Everyone who opens the run sees them; others' have no delete. Save view posts `view.saved`
-(`POST /api/review/runs/:runId/views`); the scene chip's "Saved views" menu reopens it on its
-grid. The Conversation does not list views: main never receives one (Jimmy, Nov 4). The trail's data is `@voluma/run-view`
+(`POST /api/review/runs/:runId/views`). The viewer bar's Views menu holds Save this view and
+every view saved in the run, of any output, each named with its output and time; picking one opens
+that output (`show`) and the view on its grid (#594: the old menu only showed the in-view output's
+views, and only while Final outputs was folded). The Conversation does not list views: main never
+receives one (Jimmy, Nov 4). The trail's data is `@voluma/run-view`
 `outputs-trail.ts`.
 
 ### Talking to main (`main-conversation.tsx`, `use-main-message.ts`)

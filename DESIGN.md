@@ -52,10 +52,17 @@ where it is used.
   breadcrumb. A sample uses a compact single title/metadata/status row, with Run details on the
   right; it wraps only when space runs out. Run finished means computation ended, not that the
   results were checked; show outstanding checks separately.
-- **One shell on every page**: the navigation rail at the left, one panel on each side, and the
-  page's work in the centre. A side holds one panel, with tabs when it
+- **One shell on every page**: the navigation rail at the left, one workspace in the centre,
+  and up to one panel on each side, only where it serves a distinct task.
+  Supporting panels are optional: Study and Compare use the centre list, not a second Samples tree;
+  Study details starts folded, uses only the sidebar's own control on desktop, and is an inline
+  disclosure in the one-page scroll below 1100 px.
+  Review's Samples tab lists every member of the current study, including Not started, and links to All studies.
+  A side holds one panel, with tabs when it
   has more than one thing to show. Both sides resize by dragging, keep their width across pages,
-  and fold to 28 px strips with named Show controls. Workspace panels push the centre aside; they never float.
+  and fold to 28 px strips. Icon-only expand controls point in the direction the panel opens;
+  their Show labels live in tooltips and accessible names. Fold controls are also icon-only,
+  named by tooltips and accessible labels. Workspace panels push the centre aside; they never float.
   Transient menus, popovers (including Settings and Run details) and dialogs are the exception.
 - **No divider lines in lists or between side blocks.** Spacing separates them.
 - **Actions use visible controls, not character-key command shortcuts.** Preserve standard
@@ -72,9 +79,9 @@ where it is used.
   else by the grid's axes (XY, YZ, XZ), which the chip's menu also shows. The slice number sits
   small in the pane's corner; a scale bar shows only where the run published the grid's
   geometry. The whole-run graph shows in place of the panes when the researcher asks for it.
-- **The viewer's bar names what a reviewer uses**: Navigate, Point and Ruler, Planes, Contrast
-  and Save view in words; the measuring tools under More tools; the 1, 2 and 4 pane layouts as
-  icons with tooltips.
+- **The viewer's bar is icons with tooltips** (Jimmy, Nov 4): every marking tool (its tooltip
+  says how to use it), Planes, Contrast and the 1, 2 and 4 pane layouts; Views, the one menu in
+  words, saves the view and lists every saved one.
 - **Up front is what the researcher reviews.** Statuses, values, To check, the AI's
   words, QC images and the viewer's controls show. How long something took, tries, counts, cost,
   tokens and ids sit behind an info button (`InfoButton`) or Run details, with the numbers someone

@@ -9,11 +9,10 @@
 import { runThumbnailUrl } from "@voluma/api-client";
 import type { StudyInputDetail } from "@voluma/contracts/study";
 import {
+  inputLabel,
   inputStatus,
-  kneeOf,
   liveStatus,
   needsYouOf,
-  plural,
   toCheckText,
   useNow,
   whenText,
@@ -27,16 +26,17 @@ import {
   SidePanel,
   StatusMark,
   Thumbnail,
+  useFoldWhile,
 } from "@voluma/ui";
-import { ChevronRight, PanelRight } from "lucide-react";
-import { Link, useSearchParams } from "react-router";
+import { ChevronRight } from "lucide-react";
+import { useEffect } from "react";
+import { Link, useLocation, useSearchParams } from "react-router";
 import { measurementsOf } from "../workflow-measurements";
 import { SampleBar } from "./sample-bar";
-import { StudyNextAction, useStudy } from "./study-layout";
+import { useStudy } from "./study-layout";
 import {
   changedAt,
   hasBar,
-  kneeWord,
   type Measurement,
   openHref,
   PLACES,
@@ -44,33 +44,38 @@ import {
   placeParam,
   segmentOf,
 } from "./study-model";
-import { HeadlineBlock, RecentActivity, SideBlock, StudyFacts } from "./study-side";
+import { HeadlineBlock, RecentActivity, StudyFacts } from "./study-side";
 
 export function StudyPage() {
   const { detail, workflow } = useStudy();
+  useFoldWhile("right", true, true);
   const [search] = useSearchParams();
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    const row = [...document.querySelectorAll<HTMLElement>("li[id]")].find(
+      (element) => `#${encodeURIComponent(element.id)}` === hash,
+    );
+    row?.scrollIntoView({ block: "nearest" });
+    row?.focus({ preventScroll: true });
+  }, [hash]);
   const only = placeParam(search.get("status"));
   const measurements = measurementsOf(workflow);
   const live = detail.inputs.some((s) => s.runs[0] && s.runs[0].state.status !== "ended");
   const now = useNow(live);
-  const knees = detail.inputs.some((s) => kneeOf(s) !== null);
   const groups = PLACES.map((p) => ({
     ...p,
     inputs: detail.inputs.filter((s) => placeOf(s, detail.study.example) === p.place),
   })).filter((g) => g.inputs.length > 0 && (!only || g.place === only));
 
   return (
-    <>
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <PageHead
-          className="border-b-0 bg-transparent"
-          title={detail.study.name}
-          subtitle={`${workflow.name} · ${plural(detail.inputs.length, INPUT_WORD.one, INPUT_WORD.many)}`}
-          actions={<StudyNextAction detail={detail} />}
-        />
+    <div className="flex min-h-0 min-w-0 flex-1 max-[1099px]:flex-col max-[1099px]:overflow-y-auto">
+      <div className="min-w-0 flex-1 min-[1100px]:overflow-y-auto">
+        <PageHead className="border-b-0" title={detail.study.name} />
         {only && (
           <p className="m-0 flex items-baseline gap-3 px-6 text-sm text-muted-foreground">
-            Showing only {PLACES.find((p) => p.place === only)?.title}.
+            Showing {groups.reduce((n, g) => n + g.inputs.length, 0)} of {detail.inputs.length}{" "}
+            {INPUT_WORD.many}: {PLACES.find((p) => p.place === only)?.title}.
             <Button asChild variant="link">
               <Link to="?" replace>
                 Show every {INPUT_WORD.one}
@@ -100,7 +105,6 @@ export function StudyPage() {
                       key={input.member.inputId}
                       input={input}
                       measurements={measurements}
-                      knees={knees}
                       now={now}
                     />
                   ))}
@@ -109,17 +113,27 @@ export function StudyPage() {
             ))
           )}
         </div>
-      </div>
-      <SidePanel side="right" title="Study" icon={<PanelRight />}>
-        <div className="grid content-start gap-7 px-4 pt-3 pb-6">
-          <SideBlock title="Study details">
+        <details className="mx-6 mb-6 min-[1100px]:hidden">
+          <summary className="cursor-pointer rounded-sm text-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring">
+            Study details
+          </summary>
+          <div className="grid gap-7 pt-4">
             <StudyFacts detail={detail} workflow={workflow} />
-          </SideBlock>
-          <HeadlineBlock detail={detail} workflow={workflow} />
-          <RecentActivity detail={detail} />
-        </div>
-      </SidePanel>
-    </>
+            <HeadlineBlock detail={detail} workflow={workflow} />
+            <RecentActivity detail={detail} />
+          </div>
+        </details>
+      </div>
+      <div className="hidden min-h-0 min-[1100px]:flex">
+        <SidePanel side="right" title="Study details" foldedLabel="details">
+          <div className="grid content-start gap-7 px-4 pt-3 pb-6">
+            <StudyFacts detail={detail} workflow={workflow} />
+            <HeadlineBlock detail={detail} workflow={workflow} />
+            <RecentActivity detail={detail} />
+          </div>
+        </SidePanel>
+      </div>
+    </div>
   );
 }
 
@@ -127,26 +141,22 @@ function SampleRow({
   studyId,
   input,
   measurements,
-  knees,
   now,
 }: {
   studyId: string;
   input: StudyInputDetail;
   measurements: Measurement[];
-  knees: boolean;
   now: number;
 }) {
   const href = openHref(studyId, input);
-  const knee = kneeOf(input);
   const changed = changedAt(input);
-  const about = [input.member.group, knees && knee ? `${kneeWord(knee)} knee` : null]
-    .filter(Boolean)
-    .join(" · ");
-  const name = <span className="font-mono text-sm font-semibold">{input.member.subject}</span>;
+  const name = <span className="font-mono text-sm font-semibold">{inputLabel(input.member)}</span>;
   return (
     <li
+      id={input.member.inputId}
+      tabIndex={-1}
       className={cx(
-        "group/row relative grid min-h-14 grid-cols-[2.5rem_minmax(0,1fr)_auto_5.5rem_1rem] items-center gap-x-4 rounded-md px-2",
+        "group/row relative grid min-h-14 grid-cols-[2.5rem_minmax(0,1fr)_auto_5.5rem_1rem] items-center gap-x-4 rounded-md px-2 focus-visible:outline-2 focus-visible:outline-ring",
         href && "hover:bg-accent",
       )}
     >
@@ -163,7 +173,7 @@ function SampleRow({
           ) : (
             name
           )}
-          <span className="truncate text-sm text-muted-foreground">{about}</span>
+          <span className="truncate text-sm text-muted-foreground">{input.member.group}</span>
         </p>
         <StatusLine input={input} measurements={measurements} />
       </div>

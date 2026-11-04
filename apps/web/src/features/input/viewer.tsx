@@ -8,16 +8,7 @@
  */
 import { reviewAssetUrl } from "@voluma/api-client";
 import type { Focus, Grid, ReviewAssets } from "@voluma/contracts/review";
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  Menu,
-  MenuRadioGroup,
-  MenuRadioItem,
-  SegmentedControl,
-  Tooltip,
-} from "@voluma/ui";
+import { Button, EmptyState, ErrorState, SegmentedControl, Tooltip } from "@voluma/ui";
 import {
   type Blocks,
   type GridMark,
@@ -37,12 +28,13 @@ import {
   QuadViewer,
   type QuadViewerHandle,
   reviewGrid,
+  type SavedViewEntry,
   type ShownMark,
   tokenColor,
   type VoxelBox,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { ChevronDown, EyeOff } from "lucide-react";
+import { EyeOff } from "lucide-react";
 import {
   type ReactNode,
   type Ref,
@@ -114,6 +106,12 @@ export function SceneViewer({
     onSave?(state: QuadState, grid: string): void;
     /** A saved view to show on its grid: each new object is applied once. */
     restore?: { grid: string; state: QuadState };
+    /** The run's saved views, under Views on the shown viewer's bar. */
+    views?: readonly SavedViewEntry[];
+    /** Why a view couldn't be saved or opened, on the shown viewer. */
+    viewError?: string;
+    /** `restore` has been applied. */
+    onRestored?(): void;
     /**
      * With Navigate, an end dragged in a slice: of your mark, or of a published ruler (a new mark
      * of yours on the grid's image `volumeId`), with the pane's frame.
@@ -266,8 +264,6 @@ export function SceneViewer({
     [gridKey, subject.id, shownReady, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
-  // The marking tools, on the shown viewer's bar: the ones a reviewer points with named, the
-  // measuring ones under More tools.
   // Labels hidden on this grid are said on the bar, so a hidden structure is never a surprise.
   const hiddenHere =
     grid.state === "ready"
@@ -318,6 +314,7 @@ export function SceneViewer({
               onLayout={quad.onLayout}
               focus={k.focus}
               notes={k.notes}
+              viewError={on ? quad.viewError : undefined}
               heading={on ? heading : undefined}
               tool={on ? tool : null}
               marks={shown.get(k.key) ?? NO_MARKS}
@@ -326,6 +323,8 @@ export function SceneViewer({
               targets={k.imageId === live?.imageId ? targets : undefined}
               onSave={on && quad.onSave ? (state) => quad.onSave?.(state, k.imageId) : undefined}
               restore={quad.restore?.grid === k.imageId ? quad.restore.state : undefined}
+              onRestored={quad.onRestored}
+              views={on ? quad.views : undefined}
               onEdit={
                 on && quad.onEdit
                   ? (edit, plane) => quad.onEdit?.(edit, k.imageId, k.key, plane)
@@ -381,9 +380,6 @@ const keep = (had: Kept[], live: View | undefined, revision: Blocks): Kept[] => 
   return [...others, { ...live, ready }].slice(-MAX_KEPT);
 };
 
-/** Tools named on the bar; the rest are under More tools. */
-const NAMED = new Set<MarkTool | "navigate">(["navigate", "point", "line"]);
-
 function ToolBar({
   tool,
   onTool,
@@ -391,50 +387,12 @@ function ToolBar({
   tool: MarkTool | null;
   onTool: (tool: MarkTool | null) => void;
 }) {
-  const value = tool ?? "navigate";
-  const more = TOOLS.filter(
-    (t): t is (typeof TOOLS)[number] & { value: MarkTool } => !NAMED.has(t.value),
-  );
-  const picked = more.find((t) => t.value === value);
   return (
-    <>
-      <SegmentedControl
-        label="Marking tool"
-        options={TOOLS.filter((t) => NAMED.has(t.value)).map((t) => ({
-          value: t.value,
-          label: t.short,
-        }))}
-        value={value}
-        onValueChange={(v) => onTool(v === "navigate" ? null : v)}
-      />
-      <Menu
-        align="start"
-        trigger={
-          <Button size="sm" variant={picked ? "secondary" : "ghost"}>
-            {picked ? (
-              <>
-                {picked.icon}
-                {picked.short}
-              </>
-            ) : (
-              "More tools"
-            )}
-            <ChevronDown aria-hidden />
-          </Button>
-        }
-      >
-        <MenuRadioGroup
-          label="More tools"
-          value={picked?.value ?? ""}
-          onValueChange={(v) => onTool(v as MarkTool)}
-        >
-          {more.map((t) => (
-            <MenuRadioItem key={t.value} value={t.value}>
-              {t.label}
-            </MenuRadioItem>
-          ))}
-        </MenuRadioGroup>
-      </Menu>
-    </>
+    <SegmentedControl
+      label="Marking tool"
+      options={TOOLS}
+      value={tool ?? "navigate"}
+      onValueChange={(v) => onTool(v === "navigate" ? null : v)}
+    />
   );
 }

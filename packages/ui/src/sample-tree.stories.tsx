@@ -3,9 +3,9 @@ import { SampleTree, type TreeSample, type TreeStudy } from "./sample-tree";
 
 /**
  * **What:** the studies and their samples, grouped Needs you, Running and Done, with a search.
- * **Why:** a researcher jumps between samples without leaving review. **Where:** the left side of the
- * study pages, which build it with `sampleTree` (`@voluma/run-view`); the input page is to show it
- * as a tab. On screen it is called by `INPUT_WORD` ("Samples").
+ * **Why:** a researcher jumps between samples without leaving review. **Where:** review's
+ * Samples tab, scoped to complete current study membership, including members without runs.
+ * On screen it is called by `INPUT_WORD` ("Samples").
  *
  * Try: type "oa61" (dashes and case don't matter); Up and Down move, Left and Right close and
  * open a branch, Enter opens a sample. Which branches are open is kept across pages.
@@ -23,7 +23,7 @@ const sample = (
   group: TreeSample["group"],
   status: TreeSample["status"],
   meta?: string,
-): TreeSample => ({ id: name, name, group, status, meta, href: `#${name}` });
+): TreeSample => ({ id: name, name, group, status, meta, statusLabel: meta, href: `#${name}` });
 
 const studies: TreeStudy[] = [
   {
@@ -37,6 +37,10 @@ const studies: TreeStudy[] = [
       sample("OA6-3RK", "done", "done"),
       sample("OA7-1R", "done", "done"),
       sample("OA6-1LK", "done", "done"),
+      {
+        ...sample("OA6-6, left knee", "not-started", "waiting", "Not started"),
+        href: "/studies/oa6#oa6-6",
+      },
     ],
   },
   {
@@ -48,5 +52,7 @@ const studies: TreeStudy[] = [
 ];
 
 export const OnAnInput: Story = { args: { studies, studyId: "oa6", sampleId: "OA6-1RK" } };
-export const OnAStudy: Story = { args: { studies, studyId: "oa8" } };
+export const CurrentStudy: Story = {
+  args: { studies: studies.slice(0, 1), studyId: "oa6", sampleId: "OA6-1RK" },
+};
 export const NoSamples: Story = { args: { studies: [] } };

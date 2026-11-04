@@ -1,36 +1,50 @@
 /**
- * The input page's Samples tab (`INPUT_WORD`): every study's samples in the shared tree, this run's
- * study open and its sample highlighted. `studiesQuery` refetches while a run is live, so a running
- * sample's row ("Running · 1 of 2 in") keeps up.
+ * Review's Samples tab: complete membership of the already-loaded current study, with a way
+ * back to All studies. A failed background refresh keeps the last membership visible.
  */
-import { useQuery } from "@tanstack/react-query";
-import { studiesQuery } from "@voluma/api-client/query";
+import type { StudyDetail } from "@voluma/contracts/study";
 import { sampleTree } from "@voluma/run-view";
-import { ErrorState, INPUT_WORD, LoadingState, SampleTree } from "@voluma/ui";
-import { useMemo } from "react";
+import { Button, ErrorState, INPUT_WORD, LoadingState, SampleTree } from "@voluma/ui";
 import { Link } from "react-router";
 
-export function Samples({ studyId, inputId }: { studyId: string; inputId: string }) {
-  const studies = useQuery(studiesQuery());
-  const tree = useMemo(() => sampleTree(studies.data ?? []), [studies.data]);
-  if (studies.isError)
+export function Samples({
+  detail,
+  inputId,
+  stale,
+  retry,
+}: {
+  detail: StudyDetail | undefined;
+  inputId: string;
+  stale: boolean;
+  retry: () => void;
+}) {
+  if (!detail && stale)
     return (
-      <ErrorState
-        className="m-3"
-        title={`Couldn't load the ${INPUT_WORD.many}`}
-        onRetry={() => void studies.refetch()}
-      >
+      <ErrorState className="m-3" title={`Couldn't load the ${INPUT_WORD.many}`} onRetry={retry}>
         Check your connection, then try again.
       </ErrorState>
     );
-  if (!studies.data)
+  if (!detail)
     return <LoadingState label={`Loading the ${INPUT_WORD.many}`} rows={4} className="m-3" />;
   return (
-    <SampleTree
-      studies={tree}
-      studyId={studyId}
-      sampleId={inputId}
-      renderLink={(href, props) => <Link to={href} {...props} />}
-    />
+    <>
+      <Button asChild variant="link" className="mx-3 mt-2 self-start">
+        <Link to="/">All studies</Link>
+      </Button>
+      {stale && (
+        <p role="status" className="m-0 px-3 py-2 text-sm text-muted-foreground">
+          Couldn't refresh the {INPUT_WORD.many}; showing the last study data.{" "}
+          <Button variant="link" onClick={retry}>
+            Try again
+          </Button>
+        </p>
+      )}
+      <SampleTree
+        studies={sampleTree([detail])}
+        studyId={detail.study.id}
+        sampleId={inputId}
+        renderLink={(href, props) => <Link to={href} {...props} />}
+      />
+    </>
   );
 }

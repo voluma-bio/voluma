@@ -26,17 +26,26 @@ and the LoRA rank. Load it on top of the SAM 3.1 weights from [facebook/sam3.1](
 | File | Prompt | Target |
 |---|---|---|
 | `band-s0.pt`, `band-s1.pt`, `band-s2.pt` | `growth plate` | the plate: from the proximal to the distal face, plus the cut line dilated by 1 voxel |
-| `region-s0.pt`, `region-s1.pt`, `region-s2.pt` | `epiphysis` | the epiphysis (IIOC) above the cut line |
 
-Three seeds per target, each the checkpoint with the lowest validation loss of a 3000-step run. The recommended use is the
-three band seeds:
+This repository holds the three band checkpoints. The region checkpoints (prompt `epiphysis`, the epiphysis above the
+cut line), scored below for comparison, are not published here.
+
+Three seeds per target, each the checkpoint with the lowest validation loss of a 3000-step run. The released recipe is the
+three band seeds, which is also what Voluma's staging production service uses:
 - predict each at detector threshold 0.3 (`predict.py --threshold 0.3`);
 - take each section's cut line from the midline between the band's two faces (`band_to_region.py`, the default);
 - vote the three regions (`vote.py --abstain`; at 0.3 it equals the plain vote).
 
+The inference code is in the private Voluma repository at
+[`training/plate-finetune/`](https://github.com/voluma-bio/voluma/tree/main/training/plate-finetune).
+After obtaining the SAM 3.1 base weights under the SAM License and setting up the lab scan inputs, clone that repository,
+run `uv sync`, and use the release commands in its README: run `predict.py` once for each `band-s0.pt`, `band-s1.pt`,
+and `band-s2.pt` with `--text "growth plate" --threshold 0.3`, convert each with `band_to_region.py`, and combine them
+with `vote.py --abstain`. This public repository contains no scan data.
+
 ## Training data
 
-Coronal sections of 31 micro-CT scans of mouse knees (10.5 µm voxels) from the Yao lab's osteoarthritis scans: 460 training
+Coronal sections of 31 micro-CT scans of mouse knees (10.5 µm voxels) from the Yao lab's osteoarthritis scans, including OA6-2RK: 460 training
 sections, 58 validation sections from 4 further scans, 29 test sections from 2 more. The labels are cut lines through the
 centre of the growth plate, derived from the two plate faces that AI agents traced. Only the test scan OA8-19L was reviewed: an
 expert corrected 12 of its 14 lines and passed the other 2. Every other label, training ones included, is the agent's trace. Fibula, loose bone and ossicles on the plateau are ignored in the loss. The scans themselves are not

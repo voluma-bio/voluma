@@ -2,7 +2,7 @@
  * A few modes of one view (Status / Values, Comfortable / Compact, the marking tools). Radix
  * toggle group underneath: one option is always on, and arrow keys move between options. An
  * option with a shortcut or a reason shows it in a tooltip, as `IconButton` does; an option with
- * an icon shows only the icon, and its label in the tooltip.
+ * an icon shows only the icon, and its label (and `hint`) in the tooltip.
  */
 import { ToggleGroup } from "radix-ui";
 import type { ReactNode } from "react";
@@ -18,6 +18,8 @@ export type SegmentedControlOption<V extends string> = {
   reason?: string;
   /** A lucide icon shown instead of the label, which becomes its name and tooltip. */
   icon?: ReactNode;
+  /** How to use it, after the label in the tooltip ("Ruler: click two points"), not in its name. */
+  hint?: string;
 };
 
 export type SegmentedControlProps<V extends string> = {
@@ -72,7 +74,7 @@ export function SegmentedControl<V extends string>({
             {option.icon ?? option.label}
           </ToggleGroup.Item>
         );
-        if (!option.shortcut && !option.reason && !option.icon) return item;
+        if (!option.shortcut && !option.reason && !option.icon && !option.hint) return item;
         return (
           <Tooltip
             key={option.value}
@@ -81,7 +83,9 @@ export function SegmentedControl<V extends string>({
                 ? option.icon
                   ? `${option.label}: ${option.reason}`
                   : option.reason
-                : option.label
+                : option.hint
+                  ? `${option.label}: ${option.hint}`
+                  : option.label
             }
             shortcut={option.reason ? undefined : option.shortcut}
           >
