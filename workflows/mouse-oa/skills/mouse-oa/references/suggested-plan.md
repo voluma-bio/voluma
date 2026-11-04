@@ -52,7 +52,10 @@ segmentation a later step needs (the growth plate traced closely) is that step's
 - **Check first:** the spacing the researcher stated against the header (a mismatch is a To check item). Before
   labelling, the keyframe cuts femur and tibia through the joint, with the joint space dark between them, and the
   femur sits where the orientation puts it; every piece the cleanup found is one you can find in the labels.
-- **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask), then
+- **Makes:** `header`, `scan` (cleaned: holder, padding and debris set to air, with the removal mask; report the
+  converted scan first, as soon as `hu.npy` and `hu.json` exist and before any cleanup, orientation or SAM, so the
+  researcher sees it at once, with `header` and the To check item "Not yet cleaned: holder and debris still in the
+  field"; the cleaned scan is its next version, and nothing is made from the first), then
   `scan-settings` (this scan's display window and segmentation threshold: chosen next, before the orientation and
   every mask, which take it), `frame` (the rough orientation and its keyframe), `scan-notes` and `bone-pieces`
   (`scan-intake`, `orient-joint`); then
