@@ -36,6 +36,7 @@ import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progre
 import {
   answerApproval,
   decideMessage,
+  endCorrection,
   messageRefusal,
   messageTargetOf,
   openCorrection,
@@ -200,7 +201,8 @@ const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, 
  * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
  * person's message, `messages.ts`) is never left worse than `completed`: only its workers and the
  * root end, and main stays cut off (`cancelReviewWorkers`); the run ends `completed` with its
- * earlier results, and still records `error`. `set` adds columns to the update (a recovery's lease reset).
+ * earlier results, still records `error`, and `correction.ended` says how the request ended. `set`
+ * adds columns to the update (a recovery's lease reset).
  */
 async function endUnfinished(
   tx: Tx,
@@ -211,8 +213,11 @@ async function endUnfinished(
 ) {
   const reopenId = await openCorrection(tx, runId);
   const correcting = reopenId !== null;
-  if (correcting) await cancelReviewWorkers(tx, runId, status === "cancelled");
-  else if (status === "cancelled") await cancelOpenThreads(tx, runId);
+  if (correcting) {
+    await cancelReviewWorkers(tx, runId, status === "cancelled");
+    // The span ends here, so the conversation says the request failed and a later reopen starts a new span.
+    await endCorrection(tx, runId, reopenId, status, error);
+  } else if (status === "cancelled") await cancelOpenThreads(tx, runId);
   await markEnded(tx, runId, correcting ? "completed" : status, error, set);
 }
 
