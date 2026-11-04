@@ -1,9 +1,9 @@
 # TODO
 
-- **A new guest cookie is a fresh upload cap (for Jimmy to decide).** The per-person cap
-  (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and guests cost
-  nothing to mint, so clearing cookies gives 50 GB more. Cap per organization or rate-limit guest
-  minting if storage cost matters.
+- **A new guest cookie is a fresh upload cap: accepted until after the Nov 4 demo (Jimmy, 3 Nov).**
+  The per-person cap (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and
+  guests cost nothing to mint, so clearing cookies gives 50 GB more. After the demo: a combined cap
+  on the guest organization's total, or a per-IP limit on minting guests.
 - **Constrain sealed keys after #533 is live.** Add `CHECK (state <> 'ended' OR sealed_keys IS NULL)`
   on `runs`; before that, the old code's end writes would fail during the deploy overlap.
 - **Let converted runs be reopened (step 2 of retiring the task loop).** `messageRefusal`
