@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
-import type { Files } from "../../ports/files";
+import type { RunBucket } from "../../ports/bucket";
 import type { History } from "../../ports/history";
 import { foldHistory } from "./compaction";
 import { repairToolPairs } from "./history-repair";
@@ -69,15 +69,12 @@ describe("read-time repair is a pure function of the stored rows", () => {
         stored.push(m);
       },
     };
-    const files: Files = {
+    const files: Pick<RunBucket, "read" | "write"> = {
       // biome-ignore lint/correctness/useYield: always fails
       async *read() {
         throw new Error("r2 down");
       },
       async write() {},
-      async list() {
-        return [];
-      },
     };
     const wrapped = withImageRefs(history, files, "r1", () => "t1.worker");
     await wrapped.appendMessage(

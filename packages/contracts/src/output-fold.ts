@@ -2,7 +2,7 @@
  * The output fold: the run's final outputs, every published version, each
  * output's status, and which outputs are out of date. Pure, events in `seq` order in, plain data
  * out, memoized on the log's length. Rules: the design's `outputs.md`; the tools that write the events are the
- * harness's `agents/tools/`.
+ * harness's `tools/`.
  *
  * - **Final outputs.** `outputs.changed` events applied in order by `applyOutputsChange`
  *   (`final-outputs.ts`), which takes any change: the writer checks it first and refuses.

@@ -11,10 +11,10 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { approvalRequestId, openApprovals } from "@voluma/contracts/agents";
-import type { Tool, ToolContext } from "../../tools/tool";
 import { madeStale } from "../approvals";
 import type { AgentsApi } from "./coordination";
 import { Refusal } from "./refusal";
+import type { Tool, ToolContext } from "./tool";
 
 export const heldText = (toolCallId: string) =>
   `Held for the researcher (approval ${toolCallId}). Your turn ends; the answer arrives as a delivery.`;

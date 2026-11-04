@@ -22,19 +22,18 @@ import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
 import type { UserSender } from "./adapters/pi/start-thread";
-import { agentsWire } from "./agents/wire";
 import { BashRuntime } from "./bash-runtime";
 import { errorText } from "./error-text";
 import type { ProviderError } from "./failure-policy";
 import { convertLayout, type SandboxLayout } from "./layout";
 import type { LoopConfig, ModelSetup } from "./loop-config";
 import { runLock } from "./loop-shell";
-import type { Files } from "./ports/files";
+import type { RunBucket } from "./ports/bucket";
 import type { History } from "./ports/history";
-import type { Publish } from "./ports/publish";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { failUnfinishedAssets, type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
+import { agentLayouts, runAgents } from "./run-agents";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import { ROOT_NAME, threadIdOf } from "./thread-id";
@@ -81,10 +80,8 @@ export interface SuperviseRunOptions {
   workflows: WorkflowPin[];
   recorder: Recorder;
   history: History;
-  /** The run's bucket, read host-side by `read`. */
-  files: Files;
-  /** How an agent's named file becomes a published output version (the agent loop's `report_output`). */
-  publish: Publish;
+  /** The run's bucket, read host-side by `read`; `report_output` publishes through it. */
+  bucket: RunBucket;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
   createSandbox: CreateSandbox;
   /** Size and lifetime of every sandbox. */
@@ -160,7 +157,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   let worker: ReviewAssetsWorker | undefined; // set once `prepare` has resolved
   const world = options.prepare(loopSignal).then((prepared) => {
     const { definition } = prepared;
-    const wire = agentsWire({
+    const layouts = agentLayouts({
       runId,
       inputPrefix: options.inputPrefix,
       recorder,
@@ -170,7 +167,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     const convert = convertLayout({ runId, inputId: options.inputId, skills: definition.skills });
     // The sandboxes of the run: one per thread, and the review-asset converter's.
     const sandboxLayout = (id: string): SandboxLayout =>
-      id === CONVERT ? convert : wire.sandboxOf(id);
+      id === CONVERT ? convert : layouts.sandboxOf(id);
     const settings = { runId, ...options.sandbox };
     const session: SandboxSession = sandboxSession(
       (id) => {
@@ -189,7 +186,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
           recorder.emit(id, "sandbox", { name: sandboxLayout(id).name, state, detail });
       },
       // The convert sandbox's commands run with `note: false`, so its note is never read.
-      (id) => (id === CONVERT ? "" : wire.sandboxOf(id).restartNote),
+      (id) => (id === CONVERT ? "" : layouts.sandboxOf(id).restartNote),
     );
     const conversion = reviewAssetsWorker({
       runId,
@@ -201,12 +198,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       log: options.log,
     });
     worker = conversion;
-    return { prepared, wire, session, conversion };
+    return { prepared, layouts, session, conversion };
   });
   world.catch(() => {}); // the loop and the end read its failure
 
   const loop = async (): Promise<void> => {
-    const { prepared, wire, session } = await world;
+    const { prepared, layouts, session } = await world;
     const { definition } = prepared;
     // Not a derived id: each invocation of the root is a thread start of its own.
     recorder.emit(rootThreadId, "thread.started", {
@@ -237,16 +234,16 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     const release = (id: string) =>
       session
         .release(id, () => bash.release(id))
-        .catch((e) => options.log(`releasing ${wire.nameOf(id)} failed: ${e}`));
+        .catch((e) => options.log(`releasing ${layouts.nameOf(id)} failed: ${e}`));
     const running = threads(
       {
         recorder,
-        history: withImageRefs(options.history, options.files, runId, wire.nameOf),
+        history: withImageRefs(options.history, options.bucket, runId, layouts.nameOf),
         sandbox: (id) => session.get(id),
         // An agent keeps its sandbox between turns (the idle timeout ends it) and is released when
         // its loop says it really ended.
         release: (id) => {
-          if (!wire.keepsSandbox(id)) void release(id);
+          if (!layouts.keepsSandbox(id)) void release(id);
         },
       },
       loopSignal,
@@ -264,18 +261,19 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     };
     // Before any thread resumes: the commands the last claim left running are over.
     await bash.endCutOff();
-    await wire.run({
+    await runAgents({
       runId,
       rootThreadId,
       recorder,
+      definition,
+      forAgent: layouts.forAgent,
       model: prepared.model,
       selectedOutputs: options.selectedOutputs,
       notes: options.notes,
       config: options.config,
       providerError: options.providerError,
-      files: options.files,
+      bucket: options.bucket,
       history: options.history,
-      publish: options.publish,
       session,
       pool,
       bash,

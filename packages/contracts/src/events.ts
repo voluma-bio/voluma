@@ -76,9 +76,6 @@ export const modelUsageSchema = z.object({
 });
 export type ModelUsage = z.infer<typeof modelUsageSchema>;
 
-/** A role file's name (`main`, `worker`) or `supervisor`. A label: readers branch on the fields a start records, not on this. */
-export const threadKindSchema = nonEmpty;
-
 const envelope = {
   /** Chosen by the writer (runner or API); appending the same id twice stores one event. */
   id: nonEmpty,
@@ -132,7 +129,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         name: nonEmpty,
         /** Null on a run's root thread. */
         parentThreadId: z.string().nullable(),
-        kind: threadKindSchema,
+        /**
+         * OVERLAP: the role again, or `supervisor` on the root. Nothing reads it; it stays
+         * optional (and is still written) so a thread started by a build before this one parses
+         * in both directions (TODO: drop, `packages/contracts/.context/TODO.md`).
+         */
+        kind: nonEmpty.optional(),
         /** The tool call in the parent thread that started this thread. */
         spawnedBy: nonEmpty.optional(),
         /** The workflow files the run ran, with the commit the runner's checkout was at; required on the root thread; child threads may omit it. */
