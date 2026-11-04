@@ -48,8 +48,8 @@ anything but axis 1 and height row is refused.
 
 ROI-1 follows the tibia mask, so its side (its faces toward U and V, below the articular top and above the face) should be the
 bone's outer surface. The script stops on a patch of that side larger than `cut_max_area_mm2` (spec, entry roi-iioc) with bone
-(HU over the threshold) for `cut_depth_um` beyond it, naming the patch's V and U ranges: the mask stopped inside the bone there,
-which the labels fix, not the face.
+(HU over the threshold) off the mask for `cut_depth_um` beyond it, naming the patch's V and U ranges: the mask stopped inside the
+bone there, which the labels fix, not the face.
 
 Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sidecar:
   iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32, NaN off the tibia (a surface object)
@@ -186,13 +186,14 @@ def shifted(a, axis, step, fill):
     return out
 
 
-def refuse_cut_sides(roi, gp, above, depth, max_area_mm2, vox):
-    """Refuse an ROI-1 whose side (its faces toward U and V) runs through bone: a patch of side surface larger than
-    `max_area_mm2` where every voxel for `depth` beyond it is bone (`above`, HU over the threshold). The bone's outer
-    surface has soft tissue, air or a joint gap beyond it; solid bone beyond means the tibia mask, which ROI-1 follows,
-    stopped inside the bone. `depth` voxels also keep the test off the partial-volume rim, off the cut face `gp` and off
-    the articular top (and the femur on it): a side voxel counts only `depth` below the ROI top and above the face in its
-    own and the neighbouring column, and not where the neighbouring column's ROI starts lower (a step of the top)."""
+def refuse_cut_sides(roi, gp, tib, above, depth, max_area_mm2, vox):
+    """Refuse an ROI-1 whose side (its faces toward U and V) runs through bone the tibia mask `tib` left out: a patch of side
+    surface larger than `max_area_mm2` where the voxel beyond is off the mask and every voxel for `depth` beyond it is bone
+    (`above`, HU over the threshold). The bone's outer surface has soft tissue, air or a joint gap beyond it; solid bone
+    beyond means the mask, which ROI-1 follows, stopped inside the bone. `depth` voxels also keep the test off the
+    partial-volume rim, off the cut face `gp` and off the articular top (and the femur on it): a side voxel counts only
+    `depth` below the ROI top and above the face in its own and the neighbouring column, and not where the neighbouring
+    column's ROI starts lower (a step of the top)."""
     w = np.arange(roi.shape[0])[:, None, None]
     valid = roi.any(axis=0)
     top = np.where(valid, np.argmax(roi, axis=0), 0)  # 0 off the footprint: an empty neighbouring column is no top step
@@ -203,6 +204,7 @@ def refuse_cut_sides(roi, gp, above, depth, max_area_mm2, vox):
             side &= w >= shifted(top, axis - 1, step, 0)[None]
             side &= w < np.minimum(gp, shifted(gp, axis - 1, step, np.inf))[None] - depth
             side &= w >= top[None] + depth
+            side &= ~shifted(tib, axis, step, True)
             for k in range(1, depth + 1):
                 side &= shifted(above, axis, step * k, False)
             cut += side
@@ -282,7 +284,7 @@ def main():
         roi &= keep
     roi, removed = largest(roi)
     above = np.asarray(h) > a.threshold
-    refuse_cut_sides(roi, gp, above, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
+    refuse_cut_sides(roi, gp, tib, above, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
     bone = roi & above
     scan_roi = fr.to_scan(roi, frame, g['shape'])
     values = {

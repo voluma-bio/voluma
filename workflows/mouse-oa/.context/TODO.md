@@ -1,5 +1,11 @@
 # mouse-oa TODO
 
+- **A face's straight line between two pieces reads as a traced face.** Where a coronal section cuts the plateau in two (the
+  notch, the posterior condyles), a curve has points on both pieces and the schema joins them with a line across empty space
+  (4df02afe V=271: 788 um more than `off_tibia_margin_um` off the mask; the hand traces in `~/experiments/plate-data/scans` do the
+  same on 30 of 45 scans, up to 1134 um, and OA6-2RK's NOTES call it "not a traced point"). So no check refuses it: ROI-1 and ROI-3
+  are clipped to the mask, and the line adds no volume. `face_qc.delivered_faces` draws it solid, which a reviewer reads as a face
+  through air: draw it dotted where it is more than the margin off the tibia.
 - **`femoral_frame.py`'s femur-length gate sits at the edge of real scans.** `MIN_FEMUR_MM` 4.5 was set from two scans; femur
   length along the shaft on threshold-split labels of five lab scans: OA6-2RK 5.86, OA6-1RK 5.31, OA7-1L 5.19, OA7-4R 5.14,
   OA8-17L 4.57 mm. A scan framed a little lower stops the femoral step with a To check. Next: fit the shaft on narrow
