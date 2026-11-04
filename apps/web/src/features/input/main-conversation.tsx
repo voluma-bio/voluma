@@ -4,7 +4,7 @@
  * main holds for your yes (`ApprovalCard`), and the views you saved, in log order. Under it the
  * box: your words, the mark changes waiting for them (each chip goes to its mark; x undoes the
  * change), and whether a picture of the panes goes too. Main gets each mark with its change and
- * positions, so the box needs no words about them: while it is empty it shows what the marks say.
+ * positions; the placeholder prompts for your words, while the chips show the attached marks.
  * The message itself is `useMainMessage`.
  */
 import type { ConversationItem } from "@voluma/contracts/conversation";
@@ -22,12 +22,6 @@ const CHANGE_WORD: Record<MarkChange["change"], string | undefined> = {
   move: "moved",
   delete: "deleted",
 };
-
-/** What a waiting change says to main, in the researcher's voice. */
-function lineOf(c: MarkChange, nameOf: (id: string) => string): string {
-  if (c.change === "place") return `I placed ${c.tag} on ${nameOf(c.output)}.`;
-  return `I ${CHANGE_WORD[c.change]} ${c.tag}.`;
-}
 
 /** A mark and what changed of it; its tag shows the mark, unless it is gone (`onShow` absent). */
 function MarkChangeChip({
@@ -247,11 +241,9 @@ export function MainConversation({
           label="Message to main"
           hideLabel
           placeholder={
-            attached.length > 0
-              ? attached.map((c) => lineOf(c, nameOf)).join("\n")
-              : about
-                ? "What's wrong with it, and what should change?"
-                : "Ask about what you're looking at, or say what should change"
+            about
+              ? "What's wrong with it, and what should change?"
+              : "Ask about what you're looking at, or say what should change"
           }
           rows={3}
           maxLength={10_000}
