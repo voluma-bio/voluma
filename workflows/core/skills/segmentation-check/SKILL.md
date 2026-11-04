@@ -12,7 +12,8 @@ SAM proposes; whoever reports the labels owns them. Code checks gate and eyes co
 `unlabelled.py` first, both with `--ranges anatomy.json`, then look at what they flag and at the 3D sheet
 (`visual-check`). Looking alone has passed a fragment carrying the wrong label. A labels volume is finished when you have made every correction below that you
 can make, and each flag you looked at and could not correct, and each disagreement the CT could not settle, is a To
-check item that names its region: then report the labels. The workflow's `anatomy.json`
+check item that names its region: then clear the specks (`drop_specks.py`, the loose fragments a clipped label leaves,
+which show as dots off the bone in 3D), measure from the cleaned volume, and report it. The workflow's `anatomy.json`
 holds the label table, the expected volumes and pieces, and which labels must touch which.
 
 ## 1. Each label
