@@ -35,9 +35,12 @@ description: >
 - **Clean up the scan.** The field can hold the sample holder, padding and debris beside the specimen; every later
   step, and the researcher's 3D view, reads `hu.npy`. Set what is not the specimen to air (-1000 HU) in `hu.npy`,
   keeping its grid so `hu.json` stays true, and save what you set as a mask on the scan grid with its sidecar:
-  `clean_scan.py` does both and prints what it removed. Look at the cleaned scan's slices before you go on. A piece
-  that may be bone of the leg stays (`--keep`), with a To check item asking what it is: bone wrongly removed is lost
-  to every step after you.
+  `clean_scan.py` does both and prints what it removed. Write `--out hu-clean.npy`, look at its slices with a low window
+  (holder plastic is below the bone window), then move it and its sidecar over `hu.npy` and `hu.json`. Read what it
+  printed: a `removed_bone` entry that may be leg is lost to every step after you, so rerun with `--keep` on it; a
+  `kept_far_bone` entry is kept, with a To check item asking what it is (a dense holder rod can show there: remove it
+  yourself and save it in the mask). Holder it left (a scan with no -1000 outside its field keeps most of it, and a part
+  pressed against the leg stays) you remove yourself the same way, never cutting bone.
 - **Choose this scan's display window and segmentation threshold** on the cleaned scan, before anything builds a
   mask. Scans differ in density and contrast; the workflow's anatomy reference gives the values of the scan it was
   written on, with that scan's soft-tissue and bone peaks. Find this scan's two peaks on the histogram of the

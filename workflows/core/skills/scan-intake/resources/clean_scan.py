@@ -214,4 +214,7 @@ if __name__ == '__main__':
     for p in (a.out, a.mask_out):
         if not p.endswith('.npy'):
             ap.error(f'{p} must be a .npy path')
+    paths = [Path(p).resolve() for p in (a.hu, a.out, a.mask_out)]
+    if len(set(paths)) < 3:  # writing the output opens it 'w+', which zero-fills the scan it is reading
+        sidecar.fail('--out, --mask-out and --hu must be three different files: write hu-clean.npy, then move it over hu.npy')
     main(a)

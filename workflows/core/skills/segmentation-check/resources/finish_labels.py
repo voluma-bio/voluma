@@ -202,7 +202,8 @@ if __name__ == '__main__':
         said = f'{len(open_flags)} flag(s) open: '
         if fixed_only:
             said += (f'{", ".join(fixed_only)} must be fixed (a joined pair separated, by a redone track or else a --cut; a fused '
-                     f'candidate labelled; a one-piece bone made one piece: {ONE_PIECE[0].lower() + ONE_PIECE[1:]})')
+                     'candidate labelled' + (f'; a one-piece bone made one piece: {ONE_PIECE[0].lower() + ONE_PIECE[1:]}'
+                                             if set(fixed_only) & whole else '') + ')')
         if rest:
             said += ('; ' if fixed_only else '') + (f'{", ".join(rest)}: fix them, or pass --accept <key>=<why> for one the CT '
                                                     'cannot settle (the To check item that holds it)')
