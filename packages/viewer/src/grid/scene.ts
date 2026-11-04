@@ -148,9 +148,12 @@ export type PaneStatus = "loading" | "refining" | "ready" | "failed";
 
 /** What a pane does for screenshots: its pixels as drawn now, and showing a saved view. */
 export type PaneHandle = {
-  capture(): { pngBase64: string; width: number; height: number; view: PaneView };
-  /** The pane's own view now, without drawing. */
-  view(): PaneView;
+  capture(): { pngBase64: string; width: number; height: number; view: PaneView | null };
+  /**
+   * The pane's own view now, without drawing; null for a slice pane that has never had a size
+   * (a mounted view no layout has shown yet).
+   */
+  view(): PaneView | null;
   show(view: PaneView): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
