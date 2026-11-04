@@ -19,18 +19,21 @@
  * Each frame renders the meshes into a target with depth, copies it to the canvas, then
  * ray-marches the volume, if any, over it (`volume.ts`).
  */
-import { cx, IconButton } from "@voluma/ui";
+import { Button, cx, IconButton } from "@voluma/ui";
 import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
   Box3,
+  BufferGeometry,
   CylinderGeometry,
   DepthTexture,
   DirectionalLight,
   DoubleSide,
   FrontSide,
   Group,
+  LineBasicMaterial,
+  LineLoop,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -51,6 +54,7 @@ import {
 } from "three";
 import { ArcballControls } from "three/addons/controls/ArcballControls.js";
 import type { Contrast } from "./compose";
+import { planeOutline, type Vec3 } from "./frame";
 import { loadMesh, makePickable } from "./geometry";
 import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
@@ -79,8 +83,11 @@ export function Grid3D({
   marks,
   onMark,
   onPick,
+  planes,
 }: {
   scene: GridScene;
+  /** The slice panes' planes through the crosshair, outlined where they cut the grid; none hides them. */
+  planes?: { at: Zyx; cuts: readonly { normal: Vec3; color: string }[] };
   contrast: Contrast | null;
   onPoint(point: Zyx): void;
   /** Point and Line mark here; Box and Outline are drawn on a slice. */
@@ -93,9 +100,11 @@ export function Grid3D({
   onStatus(status: PaneStatus): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const [planesShown, setPlanesShown] = useState(true);
   const three = useRef<{
     meshes: Group;
     annotations: Scene;
+    planes: Scene;
     volumes: Scene;
     depth: DepthTexture;
     render(): void;
@@ -203,6 +212,7 @@ export function Grid3D({
     const flat = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const volumes = new Scene();
     const annotations = new Scene();
+    const planeScene = new Scene();
     const size2 = new Vector2();
     // No scene, so no gizmos; no fling after a drag, no double-click focus.
     const controls = new ArcballControls(camera, renderer.domElement);
@@ -247,6 +257,7 @@ export function Grid3D({
       renderer.autoClear = false;
       renderer.render(volumes, camera);
       renderer.clearDepth();
+      renderer.render(planeScene, camera);
       renderer.render(annotations, camera);
       renderer.autoClear = true;
       layer.draw();
@@ -280,7 +291,7 @@ export function Grid3D({
     const aim = () => {
       if (!touched) reset();
     };
-    three.current = { meshes, annotations, volumes, depth, render, reset, aim };
+    three.current = { meshes, annotations, planes: planeScene, volumes, depth, render, reset, aim };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
     // Up from the camera's own turn: the controls leave `camera.up` meaningless after a rotate.
     const now = () => ({
@@ -509,6 +520,47 @@ export function Grid3D({
     };
   }, []);
 
+  // The planes: an outline and a faint fill per pane, rebuilt when the crosshair or a tilt moves them.
+  const planesKey = planes && JSON.stringify(planes);
+  useEffect(() => {
+    const t = three.current;
+    if (!t || !planes || !planesShown) return;
+    const objects: (LineLoop | Mesh)[] = [];
+    for (const { normal, color } of planes.cuts) {
+      const corners = planeOutline(normal, planes.at, scene.shapeZyx, scene.spacingZyx);
+      if (!corners.length) continue;
+      // mm (z, y, x) to the scene's (x, y, z).
+      const points = corners.map(([z, y, x]) => new Vector3(x, y, z));
+      const edge = new LineLoop(
+        new BufferGeometry().setFromPoints(points),
+        new LineBasicMaterial({ color, transparent: true, opacity: 0.9 }),
+      );
+      const fill = new BufferGeometry().setFromPoints(points);
+      fill.setIndex(points.slice(2).flatMap((_, i) => [0, i + 1, i + 2]));
+      const face = new Mesh(
+        fill,
+        new MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.08,
+          side: DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      objects.push(edge, face);
+    }
+    if (objects.length) t.planes.add(...objects);
+    t.render();
+    return () => {
+      for (const object of objects) {
+        t.planes.remove(object);
+        object.geometry.dispose();
+        (object.material as LineBasicMaterial).dispose();
+      }
+      t.render();
+    };
+  }, [planesKey, planesShown, scene.shapeZyx, scene.spacingZyx]);
+
   useEffect(() => {
     const t = three.current;
     if (!t) return;
@@ -726,6 +778,18 @@ export function Grid3D({
           <span className={cx(CHIP, "static")} role="status">
             {chip}
           </span>
+        )}
+        {planes && (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-pressed={planesShown}
+            title="Show where the three slices cut the knee"
+            className="bg-viewer-chip text-viewer-chip-fg hover:bg-viewer-well hover:text-viewer-chip-fg aria-pressed:bg-viewer-chip aria-pressed:text-viewer-chip-fg"
+            onClick={() => setPlanesShown((shown) => !shown)}
+          >
+            {planesShown ? "Hide planes" : "Show planes"}
+          </Button>
         )}
         <IconButton
           size="sm"

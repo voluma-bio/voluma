@@ -62,7 +62,7 @@ import { Grid3D } from "./Grid3D";
 import { NumberField } from "./number-field";
 import { CHIP, PANE } from "./pane-style";
 import { holdLevel } from "./planes";
-import { SlicePane } from "./SlicePane";
+import { axisToken, SlicePane } from "./SlicePane";
 import {
   type Axis,
   type GridMark,
@@ -618,6 +618,13 @@ export function QuadViewer({
             pane = (
               <Grid3D
                 scene={scene}
+                planes={{
+                  at: point,
+                  cuts: ([0, 1, 2] as const).map((axis) => ({
+                    normal: orientation[axis].normal,
+                    color: tokenColor(planeToken(axis) ?? axisToken(axis)),
+                  })),
+                }}
                 contrast={contrast}
                 onPoint={setPoint}
                 handle={handles[view]!}

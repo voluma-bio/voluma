@@ -79,7 +79,9 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   pane's fit, so resizing and maximizing keep the framing. In 3D, drag turns the scene freely
   like a ball (over the top, and rolling near the edge; three's `ArcballControls`), Shift, Ctrl/⌘ or right
   drag pans, wheel or middle drag zooms, and the pane's reset button returns to the opening view; a click (not a
-  drag) on a mesh moves the crosshair to the voxel under it. 3D opens on the grid's centre, at a
+  drag) on a mesh moves the crosshair to the voxel under it. The three slice planes through the
+  crosshair are drawn in 3D where they cut the grid's box (`planeOutline`, frame.ts), in their pane
+  colours, over the anatomy; they follow tilts, and the pane's Hide/Show planes button toggles them. 3D opens on the grid's centre, at a
   fixed distance, from the side of the output's own meshes (`GridMesh.own`, set by `review.ts`;
   never context or a focused check), so they sit in front of the see-through context; within 5%
   of the radius of the centre, or with none, from a default side. Only visible own meshes count.
