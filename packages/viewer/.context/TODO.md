@@ -19,7 +19,6 @@
   worker to publish the plane itself.
 - Tilted panes reslice from the 3D pane's level (at most 16 M voxels), so they blur at high zoom.
   If that matters, reslice from the zarr chunks the plane crosses at the pane's level.
-- Notes, angles and outlines on a tilted plane have no contract `Mark`; sending them is phase 7.
 - The saved-view format (`saved-view.ts`, the `review` block of `view.saved`) lives outside
   contracts, whose `viewSchema` is loose: a `QuadLayout` change quietly makes old saved views
   unopenable, with none of the stored-event discipline, and `readView` ignores `version`. Move the

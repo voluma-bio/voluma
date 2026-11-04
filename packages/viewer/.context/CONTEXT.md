@@ -123,8 +123,11 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
 - **Tools.** Beyond the marks above: a point may carry a note (typed in place) or a probe value
   (the image under the cursor, from the pane's loaded level, `≈` when coarser than full
   resolution); a line is two clicks or a drag; an angle is three clicks; an outline has no held
-  axis (its area by Newell's method, so it works on a tilted plane). All show in every pane and
-  in 3D. Only points, lines, boxes and outlines on the grid's axes become a contract `Mark`.
+  axis (its area by Newell's method, so it works on a tilted plane); a path is an open freehand
+  line on one slice pane, kept with at least two points, its length beside its last point, with
+  no draggable ends. Points, lines and angles show in every pane and in 3D; an outline or a path
+  shows on the slice it was drawn on and in 3D. Every kind is sent whole as a `mark.placed`
+  (`MarkShape`, `packages/contracts/src/agent-events.ts`).
 - **Saved views.** `saved-view.ts` stores a view in `quad_view.py`'s `.view.json` keys where they
   mean the same (`version` 2, `center_zyx`, `panes` with `normal`, `up`, `right` and `axis`,
   `window`), plus `shown` and a `review` block (grid, aligned target, layout, each pane's zoom and
