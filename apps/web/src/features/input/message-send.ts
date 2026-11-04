@@ -102,7 +102,13 @@ export function useIdempotentSend<M>({
     mutationFn: async (attempt: Attempt<M>) => {
       const { body, unseen } = await attempt.prepared;
       await before?.(attempt.meta);
-      return { response: await sendRunMessage(run.id, body), unseen, meta: attempt.meta };
+      // Read now, not when the message was made: a retry after the user saved their keys carries them.
+      const keys = keysToReopen(userId, run);
+      return {
+        response: await sendRunMessage(run.id, { ...body, ...(keys && { keys }) }),
+        unseen,
+        meta: attempt.meta,
+      };
     },
     onSuccess: (sent) => {
       tried.current = undefined;
@@ -120,12 +126,7 @@ export function useIdempotentSend<M>({
     if (inFlight.current) return;
     if (tried.current?.fingerprint !== fingerprint) {
       const { fields, picture, meta } = make();
-      const keys = keysToReopen(userId, run);
-      const body: SendRunMessageRequest = {
-        id: crypto.randomUUID(),
-        ...fields,
-        ...(keys && { keys }),
-      };
+      const body: SendRunMessageRequest = { id: crypto.randomUUID(), ...fields };
       // The picture goes in the room the rest of the body leaves (base64 is 4 bytes per 3, plus
       // the field's own JSON).
       const room = Math.floor(
