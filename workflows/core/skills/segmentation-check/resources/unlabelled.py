@@ -190,7 +190,7 @@ def find(hu_path, labels, sp, threshold_hu, expected, out_path, min_mm3=0.01, ri
                            f'candidate is never its label by itself')
                 # never accepted (finish_labels.py); a recorded cut passes it (finish_labels.py --cut)
                 flags[f'joined:{s}-{b}'] = (found + fix + f'. Where they still touch, cut them apart at the narrowest bone '
-                                            f'between them: classic_segment.py --within {s},{b} with a seed in each bone\'s core, '
+                                            f'between them: classic_segment.py --within {s},{b}, '
                                             f'then finish_labels.py --cut <that output>; this flag is never accepted')
         fused = []
         for c in cands:

@@ -59,7 +59,7 @@ def drop_specks(labels, vox, min_piece_mm3):
 # labelled, and its id is a size rank that shifts between passes.
 NEVER_ACCEPTED = {
     'joined:': 'separate the two. Redo the track (sam-segmentation, "When a track fails"); where they still touch, cut them '
-               'apart (classic_segment.py --within A,B with a seed in each bone\'s core) and pass the cut with --cut',
+               'apart (classic_segment.py --within A,B) and pass the cut with --cut',
     'fused:': 'it is bone no label holds, touching a big bone: give it its label (relabel.py --pieces, segmentation-check '
               'section 1), and its id shifts between passes',
 }
@@ -68,9 +68,6 @@ NEVER_ACCEPTED = {
 def on_cut(labels, pair, at, joined, contact_mm2):
     """None when the contact of the pair in `labels` is the recorded cut `at` (z,y,x rows of the lower label's voxels that
     touched the other after the cut), else why not."""
-    if joined['mm2'] - joined['direct_mm2'] > contact_mm2:
-        return (f'{round(joined["mm2"] - joined["direct_mm2"], 5)} mm2 of the contact runs through bone no label holds; label that '
-                'bone or cut it too')
     lo, hi = pair
     boxes = ndi.find_objects(labels)
     if lo > len(boxes) or hi > len(boxes) or boxes[lo - 1] is None or boxes[hi - 1] is None:
@@ -86,6 +83,9 @@ def on_cut(labels, pair, at, joined, contact_mm2):
     if off:
         z, y, x = np.argwhere(now & ~near)[0] + [s.start for s in box]
         return f'{off} voxels of their contact lie off the cut, e.g. at {[int(z), int(y), int(x)]}; cut again from these labels'
+    if joined['mm2'] - joined['direct_mm2'] > contact_mm2:
+        return (f'{round(joined["mm2"] - joined["direct_mm2"], 5)} mm2 of the contact runs through bone no label holds, a piece '
+                'the cut left (too large, or touching a third bone): label it first (relabel.py --pieces), then cut again')
     return None
 
 
@@ -138,7 +138,7 @@ if __name__ == '__main__':
         if meta.get('script') != 'classic_segment.py' or not isinstance(pair, list) or len(pair) != 2 or not npz.exists():
             sidecar.fail(f'--cut {c} is not a classic_segment.py --within A,B output with its -cuts.npz beside it')
         lo, hi = sorted(pair)
-        cut_files[(lo, hi)] = (c, np.load(npz)[f'{lo}-{hi}'])
+        cut_files[(lo, hi)] = (c, np.load(npz)[f'{lo}-{hi}'], meta['params'].get('moved_mm3'))
     accepted = dict(a.accept)
     labels = np.load(a.labels)
     sp = sidecar.grid(str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
@@ -157,10 +157,10 @@ if __name__ == '__main__':
         pair = tuple(sorted((j['label'], j['bone'])))
         if key not in flags or pair not in cut_files:
             continue
-        path, at = cut_files[pair]
+        path, at, moved = cut_files[pair]
         why = on_cut(cleaned, pair, at, j, a.contact_mm2)
         if why is None:
-            cuts[key] = {'cut': path, 'voxels': len(at), 'patch_mm2': j['largest_patch_mm2'], 'voxel_zyx': j['voxel_zyx']}
+            cuts[key] = {'cut': path, 'voxels': len(at), 'moved_mm3': moved, 'patch_mm2': j['largest_patch_mm2'], 'voxel_zyx': j['voxel_zyx']}
             del flags[key]
         else:
             flags[key] += f'. The cut in {path} does not account for it: {why}'
