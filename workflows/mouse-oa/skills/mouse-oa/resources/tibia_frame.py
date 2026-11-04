@@ -234,7 +234,7 @@ def main():
     ap.add_argument('--crop-shape-uvw', type=int, nargs=3, metavar=('U', 'V', 'W'), help='explicit crop size in aligned voxels (needs --crop-lower-uvw)')
     ap.add_argument('--depth-mm', type=float, default=3.15, help='mm: how far from the joint end the crop reaches')
     ap.add_argument('--pad-mm', type=float, default=0.105, help='mm: margin around the bone in the crop')
-    ap.add_argument('--axis-mm', type=float, nargs=2, metavar=('FROM', 'TO'), default=[2.5, 3.9],
+    ap.add_argument('--axis-mm', type=float, nargs=2, metavar=('FROM', 'TO'), default=[2.0, 3.9],
                     help='mm along W from the joint end: the shaft sections whose centroids define the axis (below the metaphyseal flare, '
                     'inside the crop)')
     ap.add_argument('--tilt-deg', type=float, nargs=2, metavar=('CORONAL', 'SAGITTAL'), default=[0.0, 0.0],

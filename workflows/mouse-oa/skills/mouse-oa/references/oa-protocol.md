@@ -55,7 +55,7 @@ boundary matters: a sensitivity check, not an error bar.
 
 `tibia_frame.py` writes `tibia-hu.npy`, `tibia-mask.npy` and `tibia-frame.json` on an **aligned grid**: array
 axes (W, V, U), the scan's voxel size, W from the joint toward the shaft. W is the tibia's long axis, fitted on the
-shaft the crop shows: the centroids of the filled shaft sections between `--axis-mm` (default 2.5 to 3.9 mm from the joint
+shaft the crop shows: the centroids of the filled shaft sections between `--axis-mm` (default 2.0 to 3.9 mm from the joint
 end, below the flare on the lab scans) lie on a line along W, under 0.1° off in both planes (`axis_residual_deg`). The fit
 follows the centroids, so when the yellow line is pulled off the shaft (by the flare, the fibula, or a label piece), move
 `--axis-mm` first; use `--tilt-deg CORONAL SAGITTAL` only for a lean the line misses: positive CORONAL when the shaft's
