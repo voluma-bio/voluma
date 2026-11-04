@@ -49,7 +49,9 @@ anything but axis 1 and height row is refused.
 ROI-1 follows the tibia mask, so its side (its faces toward U and V, below the articular top and above the face) should be the
 bone's outer surface. The script stops on a patch of that side larger than `cut_max_area_mm2` (spec, entry roi-iioc) with bone
 (HU over the threshold) off the mask for `cut_depth_um` beyond it, naming the patch's V and U ranges: the mask stopped inside the
-bone there, which the labels fix, not the face.
+bone there, which the labels fix, not the face. Bone beyond that `--labels` (resampled nearest onto the aligned grid) gives to
+another big bone (`cut_other_bones` of the spec: femur, patella, fibula) is that bone, not a cut, and does not count; unlabelled
+bone and the small labels do.
 
 Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sidecar:
   iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32, NaN off the tibia (a surface object)
@@ -61,7 +63,7 @@ Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sid
   and the four rulers, in the shapes `report_output` takes)   qc-coronal.jpg, qc-heights.jpg  QC images
   qc-faces-<n>.jpg  the proximal face as delivered (the surface this script cut with), on every traced section: the sheets to open every one of
 Prints: the result record {out, values: {id: {value, unit, definition, kind}}, objects} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels) and eroded_stretches ([{v, u, reason, width_fraction}]; report them)
-Example: python iioc.py --spec protocol.json --window scan-settings.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
+Example: python iioc.py --spec protocol.json --window scan-settings.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --labels labels.npy --hu-json hu.json --annotations annotations.json --out iioc/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -186,11 +188,11 @@ def shifted(a, axis, step, fill):
     return out
 
 
-def refuse_cut_sides(roi, gp, tib, above, depth, max_area_mm2, vox):
+def refuse_cut_sides(roi, gp, tib, beyond, depth, max_area_mm2, vox):
     """Refuse an ROI-1 whose side (its faces toward U and V) runs through bone the tibia mask `tib` left out: a patch of side
-    surface larger than `max_area_mm2` where the voxel beyond is off the mask and every voxel for `depth` beyond it is bone
-    (`above`, HU over the threshold). The bone's outer surface has soft tissue, air or a joint gap beyond it; solid bone
-    beyond means the mask, which ROI-1 follows, stopped inside the bone. `depth` voxels also keep the test off the
+    surface larger than `max_area_mm2` where the voxel beyond is off the mask and every voxel for `depth` beyond it is
+    `beyond` (bone, HU over the threshold, that no other big bone's label holds). The bone's outer surface has soft tissue,
+    air, a joint gap or another bone beyond it; solid bone beyond means the mask, which ROI-1 follows, stopped inside the bone. `depth` voxels also keep the test off the
     partial-volume rim, off the cut face `gp` and off the articular top (and the femur on it): a side voxel counts only
     `depth` below the ROI top and above the face in its own and the neighbouring column, and not where the neighbouring
     column's ROI starts lower (a step of the top)."""
@@ -206,7 +208,7 @@ def refuse_cut_sides(roi, gp, tib, above, depth, max_area_mm2, vox):
             side &= w >= top[None] + depth
             side &= ~shifted(tib, axis, step, True)
             for k in range(1, depth + 1):
-                side &= shifted(above, axis, step * k, False)
+                side &= shifted(beyond, axis, step * k, False)
             cut += side
     cc, _ = ndi.label(cut > 0, np.ones((3, 3, 3)))
     area = np.bincount(cc.ravel(), cut.ravel())[1:] * vox**2  # mm2: one voxel face per side face counted
@@ -215,8 +217,12 @@ def refuse_cut_sides(roi, gp, tib, above, depth, max_area_mm2, vox):
         big.sort(key=lambda b: -b[0])
         where = '; '.join(f'V {s[1].start}-{s[1].stop - 1}, U {s[2].start}-{s[2].stop - 1} ({a:.3f} mm2)' for a, s in big)
         sidecar.fail(f'ROI-1\'s side runs through bone instead of along the bone\'s outer surface (patches of side over {max_area_mm2:g} mm2 '
-                     f'with bone for {depth * vox * 1000:.0f} um beyond them) at {where}: the tibia label stops inside bone there: '
-                     'give that bone to the tibia in the labels (segmentation-check), then rerun tibia_frame.py')
+                     f'with bone no other big bone\'s label holds for {depth * vox * 1000:.0f} um beyond them) at {where}: the tibia label '
+                     'stops inside bone there, which retracing the face does not fix. Open each patch on the coronal sections; give that '
+                     'bone to the tibia in the labels (segmentation-check) and rerun tibia_frame.py. That makes a new aligned grid, and this '
+                     'script refuses annotations from another grid_id: the growth-plate curves, eroded marks and width points are then '
+                     'traced again on the new grid. Bone beyond that the femur, patella or fibula label holds does not count: if the bone '
+                     'beyond is one of those bones, unlabelled, give it that bone\'s label, not the tibia\'s')
 
 
 def first_run(bone, v, u):
@@ -236,6 +242,9 @@ def main():
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--frame', type=sidecar.existing, required=True, help='tibia-frame.json from tibia_frame.py')
+    ap.add_argument('--labels', type=sidecar.existing, required=True,
+                    help='labels.npy on the scan grid, with its sidecar: the labels tibia_frame.py made the mask from (bone beyond ROI-1\'s side '
+                    'that another big bone\'s label holds is not a cut)')
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: its grid, and the calibration the lab threshold in HU comes from')
     ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
     ap.add_argument('--out', required=True, help='output directory (created)')
@@ -247,7 +256,7 @@ def main():
         help='mm: move the traced growth-plate face by this much (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
-    spec = sidecar.protocol(a.spec, ROI_ID, 'plate_patch_width_um', 'width_point_off_face_um', 'cut_depth_um', 'cut_max_area_mm2')
+    spec = sidecar.protocol(a.spec, ROI_ID, 'plate_patch_width_um', 'width_point_off_face_um', 'cut_depth_um', 'cut_max_area_mm2', 'cut_other_bones')
     plate_qc_panels = sidecar.protocol(a.spec, 'plate-faces', 'qc_panels')['qc_panels']
     frame = fr.load(a.frame)
     ann = load_annotations(a.annotations, frame)
@@ -258,6 +267,8 @@ def main():
     tib = np.load(a.mask)
     if frame['parent_grid_id'] != g['grid_id']:
         sidecar.fail('the frame was made on another scan grid than hu.json: rerun tibia_frame.py on this scan')
+    if sidecar.grid(sidecar.sidecar_path(a.labels))['grid_id'] != frame['parent_grid_id']:
+        sidecar.fail(f'{a.labels} is on another grid than the frame\'s scan: pass the scan-grid labels.npy tibia_frame.py made the mask from')
     gp_spec = need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate')
     gp, gp_traced = traced_surface(gp_spec, 'growth_plate_curves', h.shape)
     v_traced = sorted(int(k) for k in gp_spec['slices'])
@@ -284,7 +295,10 @@ def main():
         roi &= keep
     roi, removed = largest(roi)
     above = np.asarray(h) > a.threshold
-    refuse_cut_sides(roi, gp, tib, above, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
+    labels = np.load(a.labels, mmap_mode='r')
+    other = np.isin(fr.resample(labels, frame, order=0, cval=0, dtype=labels.dtype), spec['cut_other_bones'])
+    refuse_cut_sides(roi, gp, tib, above & ~other, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
+    del other
     bone = roi & above
     scan_roi = fr.to_scan(roi, frame, g['shape'])
     values = {

@@ -1,5 +1,9 @@
 # mouse-oa TODO
 
+- **A labels fix after the tracing voids the tracing.** `iioc.py` stops where ROI-1's side runs through bone the tibia label
+  left out; fixing the labels and rerunning `tibia_frame.py` makes a new `grid_id` (the frame's origin and crop come from the
+  mask), and every traced curve, eroded mark and width point is refused on it. Next: `tibia_frame.py --frame <tibia-frame.json>`
+  to resample a corrected mask onto the existing frame, or run the side test before tracing (at `tibia_frame.py`).
 - **A face's straight line between two pieces reads as a traced face.** Where a coronal section cuts the plateau in two (the
   notch, the posterior condyles), a curve has points on both pieces and the schema joins them with a line across empty space
   (4df02afe V=271: 788 um more than `off_tibia_margin_um` off the mask; the hand traces in `~/experiments/plate-data/scans` do the
