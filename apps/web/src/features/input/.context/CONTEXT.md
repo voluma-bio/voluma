@@ -59,11 +59,14 @@ effect catches up.
 ## The outputs review
 
 `outputs-review.tsx` lays out the shell's two `SidePanel`s around the centre. Left: Conversation (badged with the
-calls main still holds, `openApprovals`), Labels (`segmentation-panel.tsx`: what each colour in the views is, from the
-shown grid's `legend`, with each structure's volume from a value measured on it alone in mm³, and the page's `LabelDisplay`)
-and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). Until you pick a
-tab, the side opens on Conversation once it has something to read or send (a message, a saved view, a mark waiting)
-and on Labels before that, so an empty conversation never takes the column. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`); a value resting on one keeps its own status and says "rests on a To check") and
+calls main still holds, `openApprovals`), Labels (`labels-panel.tsx`: what each colour in the views is, from the
+shown grid's `legend`; a label's volume only from the catalog's one mm³ value measured on that label alone
+(`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
+output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
+and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The tab the side
+opens on is settled once and never switched under you: Conversation while the run goes, else, once the stream
+has closed with the whole log (`useRunStream`'s return), Conversation if it holds a message or a saved view and
+Labels if not, so an empty conversation never takes the column. Using the Labels panel picks it. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`); a value resting on one keeps its own status and says "rests on a To check") and
 Whole run. The value picked opens in place under its row: its version line and Report, its open
 To check items (with those of what it rests on), and Rests on (direct links, ordered measured
 on, beside, made from, drawn on) with Further back (the rest of `trailOf`, nearest first, each

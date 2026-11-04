@@ -6,6 +6,7 @@
  * is sent or the run resumes and, after a backoff, when the browser gives up on the stream while
  * the run still goes (a non-200 answer, as during a deploy, closes an EventSource for good). A
  * stream the server ended because the run ended stays closed until one of those triggers changes.
+ * Returns whether a connection has closed once: an ended run's whole log is in by then.
  */
 import { subscribe } from "@voluma/api-client";
 import type { RunEvent } from "@voluma/contracts/events";
@@ -27,6 +28,7 @@ export function useRunStream(
   const received = useRef<RunEvent[]>([]);
   const [retry, setRetry] = useState(0);
   const failures = useRef(0);
+  const [closedOnce, setClosedOnce] = useState(false);
 
   useEffect(() => {
     const events = received.current;
@@ -50,6 +52,7 @@ export function useRunStream(
         onClosed: (why) => {
           if (frame !== undefined) cancelAnimationFrame(frame);
           publish();
+          setClosedOnce(true);
           onClosedRef.current();
           if (why === "ended" || !goingRef.current) return;
           const wait = BACKOFF_MS[Math.min(failures.current, BACKOFF_MS.length - 1)];
@@ -65,4 +68,5 @@ export function useRunStream(
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [runId, store, reopened, going, retry]);
+  return closedOnce;
 }

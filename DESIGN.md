@@ -86,7 +86,8 @@ where it is used.
   outlined on the slices, opaque in 3D with the context bones see-through. The left side's Labels
   tab says which colour is which structure, by name, with its volume where the run measured one,
   and a recoloured structure says why and shows its usual colour. There the researcher sets the
-  opacity of all and each, hides one, and draws the slices filled or as outlines only. An output that is the
+  labels' opacity, all or each, hides one, and draws the slices filled or as outlines only. The
+  output's own region and the check's always draw; the viewer's bar says how many labels are hidden. An output that is the
   labels as a whole shows them opaque in their own colours. 3D shows meshes only; the raw image
   is volume-rendered only when there are none (the scan before segmentation).
 - **Plane colours follow the anatomy on every grid**: coronal red, sagittal green, axial blue

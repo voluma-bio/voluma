@@ -1,10 +1,11 @@
 /**
  * One To check item waiting for a person's decision: what the AI asks (which output to check, its
- * own or one it rests on, and what to look at), Looks right with what it commits to, and the
+ * own or one it rests on, and what to look at), Looks right with what it commits to in its
+ * tooltip, and the
  * page's other actions. The decision lives here only: other places refer to the item, never draw
  * it again. Data comes in as props; the input review's output report shows it.
  */
-import { Button, cx, StatusGlyph, StatusMark } from "@voluma/ui";
+import { Button, cx, StatusGlyph, StatusMark, Tooltip } from "@voluma/ui";
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -56,20 +57,18 @@ export function ItemToCheck({
           <StatusMark status="done" label="Looked right" />
         ) : (
           <>
-            <Button variant="primary" disabled={!onAccept || accepting} onClick={onAccept}>
-              <Check aria-hidden />
-              {accepting ? "Saving…" : "Looks right"}
-            </Button>
+            <Tooltip label="Closes this check and keeps the result as it is">
+              <Button variant="primary" disabled={!onAccept || accepting} onClick={onAccept}>
+                <Check aria-hidden />
+                {accepting ? "Saving…" : "Looks right"}
+              </Button>
+            </Tooltip>
             {readOnly && <span className="text-xs text-muted-foreground">{readOnly}</span>}
           </>
         )}
         {actions}
       </div>
-      {state === "open" && onAccept && (
-        <p className="text-xs text-muted-foreground">
-          Looks right closes this check and keeps the result as it is.
-        </p>
-      )}
+
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

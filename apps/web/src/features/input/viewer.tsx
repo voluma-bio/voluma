@@ -16,6 +16,7 @@ import {
   MenuRadioGroup,
   MenuRadioItem,
   SegmentedControl,
+  Tooltip,
 } from "@voluma/ui";
 import {
   type Blocks,
@@ -39,7 +40,7 @@ import {
   tokenColor,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, EyeOff } from "lucide-react";
 import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { gridKeyOf, type ShownGrid, TOOLS, type YourMark } from "./marking";
 
@@ -59,6 +60,7 @@ export function SceneViewer({
   onShown,
   display,
   onLegend,
+  onShowHidden,
   quad,
 }: {
   runId: string;
@@ -83,7 +85,9 @@ export function SceneViewer({
   /** How the labels and the output's own regions are drawn (the Segmentation panel). */
   display: LabelDisplay;
   /** What each colour drawn on the shown grid is; undefined while none is shown. */
-  onLegend: (legend: LegendEntry[] | undefined) => void;
+  onLegend: (legend: LegendEntry[] | "preparing" | undefined) => void;
+  /** Shows every label the display hides. */
+  onShowHidden: () => void;
   /** The four panes' layout, which holds across grids, and each grid's planes by the image's id. */
   quad: {
     layout: QuadLayout;
@@ -123,7 +127,8 @@ export function SceneViewer({
       }),
     [runId, revision, subject.shown, assets, display, focus],
   );
-  const legend = grid.state === "ready" ? grid.legend : undefined;
+  const legend =
+    grid.state === "ready" ? grid.legend : grid.state === "preparing" ? "preparing" : undefined;
   useEffect(() => onLegend(legend), [legend, onLegend]);
   useEffect(() => () => onLegend(undefined), [onLegend]);
   // A focused label has no extent in the run's data: find its middle on the grid. Keyed by
@@ -249,7 +254,25 @@ export function SceneViewer({
   useEffect(() => () => onShown(undefined), [onShown]);
   // The marking tools, on the shown viewer's bar: the ones a reviewer points with named, the
   // measuring ones under More tools.
-  const bar = (on: boolean) => on && onTool && <ToolBar tool={tool} onTool={onTool} />;
+  // Labels hidden on this grid are said on the bar, so a hidden structure is never a surprise.
+  const hiddenHere =
+    grid.state === "ready"
+      ? grid.legend.filter((e) => e.as === "label" && display.hidden.includes(e.id)).length
+      : 0;
+  const bar = (on: boolean) =>
+    on && (
+      <>
+        {onTool && <ToolBar tool={tool} onTool={onTool} />}
+        {hiddenHere > 0 && (
+          <Tooltip label="Show every hidden label">
+            <Button size="sm" variant="ghost" onClick={onShowHidden}>
+              <EyeOff aria-hidden />
+              {hiddenHere} hidden
+            </Button>
+          </Tooltip>
+        )}
+      </>
+    );
   // One tree shape whether or not this subject's grid is ready, so the kept viewers never remount.
   return (
     <>
