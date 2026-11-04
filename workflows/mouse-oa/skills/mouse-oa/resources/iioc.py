@@ -296,6 +296,8 @@ def main():
     roi, removed = largest(roi)
     above = np.asarray(h) > a.threshold
     labels = np.load(a.labels, mmap_mode='r')
+    if labels.shape != tuple(g['shape']):
+        sidecar.fail(f'{a.labels} has shape {labels.shape}, not the scan\'s {tuple(g["shape"])}: pass the whole scan-grid labels.npy, not a crop')
     other = np.isin(fr.resample(labels, frame, order=0, cval=0, dtype=labels.dtype), spec['cut_other_bones'])
     refuse_cut_sides(roi, gp, tib, above & ~other, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
     del other

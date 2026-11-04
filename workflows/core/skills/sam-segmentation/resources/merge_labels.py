@@ -118,13 +118,20 @@ if __name__ == '__main__':
                 if n_temp.any():
                     report[temp]['contested'][big_label] = {'to_small': int((n_temp & to_small).sum()), 'to_big': int((n_temp & ~to_small).sum())}
     big_lost = {b: {'voxels': v, 'of': sizes[b]} for b, v in sorted(lost.items())}
-    followed = [(temp, b, c['to_small']) for temp, r in sorted(report.items()) for b, c in sorted(r['contested'].items())
-                if c['to_small'] > a.max_big_share * sizes[b]]
+    taken = {}  # (final label, big label) -> voxels taken, summed over the temps: a track sent as two temps is one track
+    for temp, r in report.items():
+        for b, c in r['contested'].items():
+            taken.setdefault((r['final'], b), []).append((temp, c['to_small']))
+    followed = [(temps, b, sum(n for _, n in temps)) for (_, b), temps in sorted(taken.items())
+                if sum(n for _, n in temps) > a.max_big_share * sizes[b]]
     if followed:
-        drop = ' '.join(f'{t}:0' for t in sorted({t for t, _, _ in followed}))
-        said = '; '.join(f'temp {t} takes {n} of big label {b}\'s {sizes[b]} voxels ({n / sizes[b]:.0%})' for t, b, n in followed)
+        # the temps that carry the take (a quarter of it or more), not every temp that touched the bone
+        drop = ' '.join(f'{t}:0' for t in sorted({t for temps, _, n in followed for t, m in temps if m * 4 >= n}))
+        said = '; '.join(f'temps of label {next(r["final"] for t, _ in temps for r in [report[t]])} take {n} of big label {b}\'s {sizes[b]} '
+                         f'voxels ({n / sizes[b]:.0%}: ' + ', '.join(f'{t} {m / sizes[b]:.1%}' for t, m in temps) + ')'
+                         for temps, b, n in followed)
         sidecar.fail(f'{said} after the nearest rule: a small-structure track that takes more than {a.max_big_share:.0%} of a big bone '
-                     f'followed that bone, not a small structure. Drop each ({drop} in --map) and redo that structure: a new segment_sam '
+                     f'followed that bone, not a small structure. Drop the track(s) that carry it ({drop} in --map) and redo that structure: a new segment_sam '
                      'request with a tight box on the piece itself (snap_boxes.py), negative points on the big bone inside the box, and '
                      'direction or otherFrames where it drifts; or write your own cleanup of the track (keep what lies across the joint '
                      'space from the bone, drop what overlaps its label) and show it on a crop sheet. Never label the bare threshold '
