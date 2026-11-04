@@ -221,7 +221,10 @@ export function QuadViewer({
 }: {
   /** Remount (`key`) for another grid; on the same grid, new overlays redraw in place. */
   scene: GridScene;
-  /** The grid's name ("Aligned tibia grid"), said in the tool bar while the planes lie on its axes. */
+  /**
+   * The grid's name ("Tibia long-axis grid"): said in the tool bar while the planes lie on its axes,
+   * and Align's first entry, which puts them back there (the grid the outputs on it were measured on).
+   */
   gridName?: string;
   planes?: GridPlanes;
   layout: QuadLayout;
@@ -774,6 +777,14 @@ export function QuadViewer({
               </IconButton>
             }
           >
+            {gridName && (
+              <MenuItem disabled={!lie} onSelect={reset}>
+                <span className="flex items-baseline justify-between gap-3">
+                  <span>Along the {gridName.charAt(0).toLowerCase() + gridName.slice(1)}</span>
+                  <span className="text-xs text-fg-subtle">Measured on</span>
+                </span>
+              </MenuItem>
+            )}
             {targets.map((t) => (
               <MenuItem
                 key={t.id}
