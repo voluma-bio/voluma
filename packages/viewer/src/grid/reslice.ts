@@ -41,16 +41,17 @@ export type ChunkGrid = {
   chunks: readonly { data: ArrayLike<number>; stride: readonly number[] }[];
 };
 
-/** The longest side of a resliced picture, in samples: coarser steps beyond it. */
+/** The longest side of a whole-outline picture, and a fine window's usual one, in samples. */
 const MAX_SIDE = 1024;
 
 /** A rectangle in pane mm: x across, y up. */
 export type Window = { xMin: number; xMax: number; yMin: number; yMax: number };
 
 /**
- * The samples over the grid's outline on the plane through `at` (source voxel), within `window`
- * if given. Windowed samples stay on the whole outline's lattice, so two windows' pictures line
- * up.
+ * The samples over the grid's outline on the plane through `at` (source voxel): the whole
+ * outline at `step` or coarser (at most `MAX_SIDE` a side), or the part in `window` at exactly
+ * `step` (`windowAround` bounds it). Windowed samples stay on the whole outline's lattice, so two
+ * windows' pictures line up.
  */
 export function sampling(
   basis: Basis,
@@ -75,11 +76,7 @@ export function sampling(
     Math.max(...ys),
   ];
   const w = window ?? { xMin, xMax, yMin, yMax };
-  const fit = Math.max(
-    step,
-    (Math.min(xMax, w.xMax) - Math.max(xMin, w.xMin)) / MAX_SIDE,
-    (Math.min(yMax, w.yMax) - Math.max(yMin, w.yMin)) / MAX_SIDE,
-  );
+  const fit = window ? step : Math.max(step, (xMax - xMin) / MAX_SIDE, (yMax - yMin) / MAX_SIDE);
   // The outline's lattice of samples, from the first column and row the window reaches.
   const c0 = Math.max(0, Math.floor((w.xMin - xMin) / fit));
   const c1 = Math.min(Math.ceil((xMax - xMin) / fit), Math.ceil((w.xMax - xMin) / fit));
@@ -94,6 +91,19 @@ export function sampling(
     y0: yMax - (r0 + 0.5) * fit,
     depth: dot(mm(at), basis.normal),
   };
+}
+
+/**
+ * The window a fine picture covers around `view` (pane mm), sampled at `step`: the view grown by
+ * half its size each way, room to pan before the next window, but no more than `MAX_SIDE` samples
+ * a side. A view wider than that still gets a quarter of itself each way, so a pane can always
+ * pan an eighth of a view before it loads the next window.
+ */
+export function windowAround(view: Window, step: number): Window {
+  const half = (span: number) => Math.max(Math.min(2 * span, MAX_SIDE * step), 1.5 * span) / 2;
+  const [x, y] = [(view.xMin + view.xMax) / 2, (view.yMin + view.yMax) / 2];
+  const [w, h] = [half(view.xMax - view.xMin), half(view.yMax - view.yMin)];
+  return { xMin: x - w, xMax: x + w, yMin: y - h, yMax: y + h };
 }
 
 /** The picture's corners in pane mm: top left, top right, bottom left, bottom right. */

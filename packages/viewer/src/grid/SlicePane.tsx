@@ -41,7 +41,7 @@ import { sliceShape, useMarkLayer } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { corners, quad, texture } from "./picture";
 import { readPlane, readSlice } from "./planes";
-import { onLevel, sampling, samplingCorners, type Window } from "./reslice";
+import { onLevel, sampling, samplingCorners, type Window, windowAround } from "./reslice";
 import {
   type Axis,
   type GridMark,
@@ -153,8 +153,8 @@ export function SlicePane({
   // `reframe`, which loads a new one.
   const fineWindow = useRef<Window | null>(null);
   const [reframe, setReframe] = useState(0);
-  // The plane the fine picture (`image`) shows.
-  const imageKey = useRef<string | null>(null);
+  // The plane each layer shows: the fine picture (`image`), and a tilted pane's coarse one (`under`).
+  const drawnKey = useRef<Record<"image" | "under", string | null>>({ image: null, under: null });
   const [shown, setShown] = useState<{
     key: string;
     level: number;
@@ -601,17 +601,13 @@ export function SlicePane({
       };
       return { ...picture, corners: corners(picture).map(toPane), read };
     };
+    // A level's finest voxel side in mm: a tilted picture's sample step on it.
+    const stepOf = (k: number) =>
+      Math.min(...scene.image.levels[k]!.scaleZyx.map((v, i) => v * s[i]!));
     const tilted = async (k: number, window?: Window) => {
       const lvl = scene.image.levels[k]!;
       const sc = Math.max(...lvl.scaleZyx);
-      const at = sampling(
-        basis,
-        point,
-        s,
-        scene.shapeZyx,
-        Math.min(...lvl.scaleZyx.map((v, i) => v * s[i]!)),
-        window,
-      );
+      const at = sampling(basis, point, s, scene.shapeZyx, stepOf(k), window);
       const overlays = scene.overlays.map(async (overlay) => {
         // The coarsest overlay level no coarser than the image's (labels never blend).
         const o =
@@ -684,41 +680,53 @@ export function SlicePane({
       show(await fine, level);
     };
     const tiltedPair = async () => {
-      // The view grown by half its size each way: room to pan before the next window.
       const v = view.current;
       const el = host.current;
       const window =
         v && el?.clientWidth
-          ? {
-              xMin: v.center[0] - el.clientWidth / v.zoom,
-              xMax: v.center[0] + el.clientWidth / v.zoom,
-              yMin: v.center[1] - el.clientHeight / v.zoom,
-              yMax: v.center[1] + el.clientHeight / v.zoom,
-            }
+          ? windowAround(
+              {
+                xMin: v.center[0] - el.clientWidth / 2 / v.zoom,
+                xMax: v.center[0] + el.clientWidth / 2 / v.zoom,
+                yMin: v.center[1] - el.clientHeight / 2 / v.zoom,
+                yMax: v.center[1] + el.clientHeight / 2 / v.zoom,
+              },
+              stepOf(level),
+            )
           : undefined;
       fineWindow.current = window ?? null;
       const fine = tilted(level, window);
       let coarseRead: Probe | null = null;
       let fineRead: Probe | null = null;
       const read: Probe = (p) => fineRead?.(p) ?? coarseRead?.(p) ?? null;
-      const coarse = tilted(coarsest).then((made) => {
-        if (abort.signal.aborted) return;
-        draw("under", made, true);
-        coarseRead = made.read;
-        // Another plane's fine picture would cover this one's coarse picture.
-        if (imageKey.current !== planeKey) {
-          draw("image", null);
-          probe.current = read;
-          shown(coarsest);
-        }
+      // Settled here, so an abort never goes unhandled; its failure is the pane's only if the
+      // fine picture fails too.
+      const coarse = tilted(coarsest).then(
+        (made) => {
+          if (abort.signal.aborted) return;
+          draw("under", made, true);
+          coarseRead = made.read;
+          // Another plane's fine picture would cover this one's coarse picture.
+          if (drawnKey.current.image !== planeKey) {
+            draw("image", null);
+            probe.current = read;
+            shown(coarsest);
+          }
+        },
+        () => {},
+      );
+      const made = await fine.catch(async (cause) => {
+        // The coarse picture shows first, so its arrival can't clear this error.
+        await coarse;
+        throw cause;
       });
-      const made = await fine;
       if (abort.signal.aborted) return;
+      // Another plane's coarse picture would show around this one.
+      if (drawnKey.current.under !== planeKey) draw("under", null);
       draw("image", made, true);
       fineRead = made.read;
       probe.current = read;
       shown(level);
-      await coarse;
     };
     (whole ? untilted() : tiltedPair())
       .catch((cause) => {
@@ -739,7 +747,7 @@ export function SlicePane({
     const t = three.current;
     if (!t) return;
     const mesh = t[layer];
-    if (layer === "image") imageKey.current = picture && planeKey;
+    drawnKey.current[layer] = picture && planeKey;
     mesh.visible = !!picture;
     if (picture) {
       mesh.geometry.dispose();
@@ -757,7 +765,7 @@ export function SlicePane({
     if (t) {
       t.image.visible = false;
       t.under.visible = false;
-      imageKey.current = null;
+      drawnKey.current = { image: null, under: null };
       t.render();
     }
     probe.current = null;
