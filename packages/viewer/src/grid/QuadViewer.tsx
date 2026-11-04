@@ -140,11 +140,12 @@ export type PlaneTarget = {
   load?(): Promise<{ normal: Vec3 } | { axes: readonly [Vec3, Vec3, Vec3] }>;
 };
 
-/** A saved view as the Views menu lists it: "View 2", what it is of and when, and opening it. */
+/** A saved view as the Views menu lists it: what it is of, which and when, and opening it. */
 export type SavedViewEntry = {
   id: string;
+  /** What it was saved of ("Bone labels"). */
   title: string;
-  /** What it was saved of and when ("Bone labels · 12:52"). */
+  /** Which of its views and when ("View 2 · 12:52"). */
   detail: string;
   /** The view the panes were last set to. */
   shown: boolean;
@@ -994,9 +995,9 @@ export function QuadViewer({
             {views?.length ? (
               views.map((v) => (
                 <MenuItem key={v.id} icon={v.shown ? <Check /> : <span />} onSelect={v.open}>
-                  <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
-                    <span>{v.title}</span>
-                    <span className="truncate text-fg-subtle text-xs">{v.detail}</span>
+                  <span className="grid min-w-0 flex-1">
+                    <span className="truncate">{v.title}</span>
+                    <span className="text-fg-subtle text-xs">{v.detail}</span>
                   </span>
                 </MenuItem>
               ))

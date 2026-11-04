@@ -535,8 +535,8 @@ export function OutputsReview({
           restore: views.restore,
           views: allViews.map((v) => ({
             id: v.id,
-            title: v.title,
-            detail: `${nameOf(v.output)} · ${v.time}`,
+            title: nameOf(v.output),
+            detail: `${v.title} · ${v.time}`,
             shown: v.id === views.shown,
             open: () => {
               if (v.output !== inView?.id) show(v.output);
