@@ -373,6 +373,10 @@ export function pgRunQueue(
     workflow: { pins: WorkflowPin[]; outputs: OutputEntry[] },
     starts: Starts,
   ) => {
+    if (starts.harness === "tasks")
+      throw new HTTPException(400, {
+        message: "The task loop is retired: start the run on the agent loop.",
+      });
     const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
     if (bad.length)
       throw new HTTPException(400, {

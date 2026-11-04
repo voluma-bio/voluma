@@ -137,6 +137,8 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
   `--remote`. R2 is shared with staging, so a local seed names its example
   `example-local-<runId>` (it refuses `example-<runId>`, the id staging reads, without `--remote`).
+  `convert:task-runs` generated migration `0025` (the task loop's stored runs to agent-loop events;
+  reads R2, writes none): see [.context/convert-task-runs.md](.context/convert-task-runs.md).
   Shared dev data: `dev/runs/<runId>/` (dump) and `dev/backfill/<runId>/` (backfill folder) for
   ce5a0f21-c948-4e20-a03f-04ff7f0e707b. Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
 
