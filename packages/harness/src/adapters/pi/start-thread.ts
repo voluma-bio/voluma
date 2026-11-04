@@ -56,7 +56,7 @@ export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender
 
 export interface StartThreadOptions {
   threadId: string;
-  /** The thread's name and role (`agents/`). */
+  /** The thread's name and role (`workflows/core/agents/`). */
   agent: { name: string; role: "main" | "worker" };
   /** How a message's sender reads in the thread's inbox ("From corin:"). */
   labelOf: (sender: UserSender) => string;
