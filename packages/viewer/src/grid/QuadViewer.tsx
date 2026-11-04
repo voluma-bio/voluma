@@ -765,13 +765,14 @@ export function QuadViewer({
             >
               {pane}
               {heading && view === corner && (
-                // A slice pane's number and slider own its top-left corner.
+                // A slice pane's number and slider own its top-left corner; the 3D pane's
+                // buttons its top-right.
                 <div
                   className={cx(
                     "absolute top-2 z-30 flex",
                     view === "3d"
                       ? "left-2 max-w-[calc(100%-3rem)]"
-                      : "left-24 max-w-[calc(100%-7rem)]",
+                      : "right-2 max-w-[calc(100%-8rem)] justify-end",
                   )}
                 >
                   {heading}

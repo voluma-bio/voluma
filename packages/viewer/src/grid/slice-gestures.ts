@@ -14,7 +14,7 @@
  * (places, probes, adds a line end), and with no tool picks the mark (`onPick`).
  */
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
-import { angleAbout, type Basis, type Slab, unit, type Vec3 } from "./frame";
+import { angleAbout, type Basis, nearestAxis, type Slab, unit, type Vec3 } from "./frame";
 import {
   angleDegrees,
   areaMm2,
@@ -141,7 +141,9 @@ export function useSliceGestures(args: {
     text: string;
   } | null>(null);
   const [hovering, setHovering] = useState(false);
-  // An untilted pane steps whole slices; a tilted one steps the finest spacing along its normal.
+  // An untilted pane steps whole slices; a tilted one steps the finest spacing along its normal,
+  // signed so a positive step raises the slice number it counts (on its nearest axis) however
+  // far the pane is turned.
   const step = useCallback(
     (by: number) => {
       const { scene, axis } = first.current;
@@ -149,7 +151,7 @@ export function useSliceGestures(args: {
       const p = [...at];
       if (w) p[axis] = clamp(Math.round(p[axis]!) + by, scene.shapeZyx[axis]);
       else {
-        const h = Math.min(...scene.spacingZyx) * by;
+        const h = Math.min(...scene.spacingZyx) * by * Math.sign(b.normal[nearestAxis(b.normal)]!);
         for (const k of [0, 1, 2]) p[k] = p[k]! + (h * b.normal[k]!) / scene.spacingZyx[k]!;
         if (p.some((v, k) => v < 0 || v > scene.shapeZyx[k]! - 1)) return;
       }

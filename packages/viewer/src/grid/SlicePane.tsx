@@ -896,9 +896,9 @@ export function SlicePane({
     const by = to - point[counted];
     if (whole) return step(Math.round(by));
     // A turned pane steps along its normal: convert the counted axis's change into that
-    // (the normal's component can be small or negative).
+    // (the normal's component can be small; `step` takes care of its sign).
     const s = scene.spacingZyx;
-    step((by * s[counted]!) / (Math.min(...s) * basis.normal[counted]!));
+    step((by * s[counted]!) / (Math.min(...s) * Math.abs(basis.normal[counted]!)));
   };
   const sliceHelp = useId();
   return (
@@ -969,7 +969,10 @@ export function SlicePane({
         <span />
       </div>
       {(!shown || refining) && !error && (
-        <span className={cx(CHIP, "top-2 right-2 left-24")} role="status">
+        <span
+          className={cx(CHIP, "bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap")}
+          role="status"
+        >
           {shown ? "Loading full resolution…" : "Loading…"}
         </span>
       )}
