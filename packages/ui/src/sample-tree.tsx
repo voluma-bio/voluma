@@ -1,8 +1,7 @@
 /**
  * The Samples tree (on screen, `INPUT_WORD.Many`): the studies, each one's samples grouped Needs
  * you, Running and Done, and a search above them. A researcher jumps between samples with it
- * without leaving review: the study pages show it on the left, and the input page's left side is
- * meant to show the same tree as a tab. Which branches are open is kept across pages
+ * without leaving review. The study overview itself uses its centre list. Which branches are open is kept across pages
  * and visits; while a search is typed every branch with a match is open. Keys follow the ARIA
  * tree: Up and Down move, Left and Right close and open, Enter opens a sample, Home and End.
  * A row's look is a status glyph, the sample's name and one short line: no dividers.
@@ -13,7 +12,7 @@ import { cx } from "./cx";
 import { STATUS_WORD, type Status, StatusGlyph } from "./status-mark";
 import { INPUT_WORD } from "./words";
 
-export type SampleGroup = "waiting-on-you" | "needs-you" | "running" | "done";
+export type SampleGroup = "waiting-on-you" | "needs-you" | "running" | "done" | "not-started";
 
 export type TreeSample = {
   id: string;
@@ -22,8 +21,10 @@ export type TreeSample = {
   /** One short line after the name: what it needs, or its group and knee. */
   meta?: string;
   status: Status;
+  /** The input's actual status, including Not started rather than the generic Waiting. */
+  statusLabel?: string;
   group: SampleGroup;
-  /** Where it opens. */
+  /** Review for a started sample; its study row otherwise. */
   href: string;
 };
 
@@ -60,6 +61,7 @@ const GROUPS: [SampleGroup, string][] = [
   ["needs-you", "Needs you"],
   ["running", "Running"],
   ["done", "Done"],
+  ["not-started", "Not started"],
 ];
 const STORAGE_KEY = "voluma.samples-open";
 
@@ -231,6 +233,19 @@ export function SampleTree({ studies, studyId, sampleId, renderLink }: SampleTre
           className="h-7 w-full rounded-md border border-input bg-card pr-2 pl-7 text-base text-foreground placeholder:text-fg-subtle focus:border-transparent focus:outline-2 focus:outline-ring focus:-outline-offset-1"
         />
       </label>
+      {query.trim() && (
+        <p role="status" className="m-0 px-3.5 py-1 text-xs text-muted-foreground">
+          Showing{" "}
+          {studies.reduce(
+            (n, s) =>
+              n +
+              s.samples.filter((sample) => squash(sample.name).includes(squash(query.trim())))
+                .length,
+            0,
+          )}{" "}
+          of {studies.reduce((n, s) => n + s.samples.length, 0)} {INPUT_WORD.many}
+        </p>
+      )}
       {rows.length ? (
         <div
           ref={list}
@@ -283,7 +298,7 @@ function Row({
       tabIndex: focusable ? 0 : -1,
       "aria-level": 3,
       "aria-current": row.current ? "page" : undefined,
-      title: `${sample.name}: ${STATUS_WORD[sample.status].toLowerCase()}`,
+      title: `${sample.name}: ${sample.statusLabel ?? STATUS_WORD[sample.status]}`,
       "data-key": row.key,
       className: cx(rowClass, indent[3], "no-underline", row.current && "bg-select-tint"),
       children: (

@@ -3,10 +3,10 @@
  * Its head holds tabs (the left side: Conversation, Samples) or a title with tools (the right
  * side: Final outputs), and a fold button. The seam beside it resizes it; each side's width is
  * kept across pages and visits, so the study and an input open at the widths last used. Folded (its
- * button) it is a 28 px strip with its name and badge; what
+ * button) it is a 28 px strip with an expansion arrow, a tooltip naming the panel and its badge; what
  * is inside stays mounted, so a conversation keeps its scroll and its draft.
  */
-import { PanelLeftClose, PanelRightClose } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -81,9 +81,10 @@ export type SidePanelTab = {
 
 type Titled = {
   title: string;
+  /** Tooltip and accessible label after "Show" while folded; defaults to the title. */
+  foldedLabel?: string;
   /** A short fact beside the title, e.g. "1 of 2 in". */
   meta?: ReactNode;
-  icon: ReactNode;
   badge?: number;
   badgeLabel?: string;
   /** Controls in the head, before the fold button. */
@@ -112,16 +113,16 @@ export function SidePanel(props: SidePanelProps) {
   const ids = useId();
   const tabs = props.tabs;
   const active = tabs ? (tabs.find((t) => t.id === props.tab) ?? tabs[0]) : undefined;
-  // Folded, the strip shows the tab shown (or the title) and every tab's badge.
+  // Folded, the tooltip names the active tab (or the title), with every tab's badge.
   const strip = tabs
     ? {
         label: active?.label ?? "",
-        icon: active?.icon,
         badge: tabs.reduce((sum, t) => sum + (t.badge ?? 0), 0),
         badgeLabel: tabs.find((t) => t.badge)?.badgeLabel,
       }
-    : { label: props.title, icon: props.icon, badge: props.badge, badgeLabel: props.badgeLabel };
-  const { label, icon, badge, badgeLabel } = strip;
+    : { label: props.title, badge: props.badge, badgeLabel: props.badgeLabel };
+  const { label, badge, badgeLabel } = strip;
+  const showLabel = tabs ? label : (props.foldedLabel ?? label);
   const toggle = useRef<HTMLButtonElement>(null);
   const setToggle = useCallback((node: HTMLButtonElement | null) => {
     // A shell Escape can also replace Show with Hide, without clicking either control.
@@ -196,16 +197,20 @@ export function SidePanel(props: SidePanelProps) {
     >
       {folded && (
         <div className="flex flex-col items-center gap-1.5 py-1.5">
-          <button
-            ref={setToggle}
-            type="button"
-            aria-label={`Show ${label}`}
-            onClick={() => shell.fold(side, false)}
-            className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-2 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [writing-mode:vertical-rl] [&_svg]:size-3.5"
-          >
-            {icon}
-            Show {label}
-          </button>
+          <Tooltip label={`Show ${showLabel}`} side={side === "left" ? "right" : "left"}>
+            <Button
+              asChild
+              aria-label={`Show ${showLabel}`}
+              variant="ghost"
+              size="sm"
+              className="w-6 px-0"
+              onClick={() => shell.fold(side, false)}
+            >
+              <button type="button" ref={setToggle}>
+                {side === "left" ? <PanelLeftOpen /> : <PanelRightOpen />}
+              </button>
+            </Button>
+          </Tooltip>
           {!!badge && <Badge n={badge} label={badgeLabel} />}
         </div>
       )}

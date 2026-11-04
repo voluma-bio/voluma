@@ -52,10 +52,17 @@ where it is used.
   breadcrumb. A sample uses a compact single title/metadata/status row, with Run details on the
   right; it wraps only when space runs out. Run finished means computation ended, not that the
   results were checked; show outstanding checks separately.
-- **One shell on every page**: the navigation rail at the left, one panel on each side, and the
-  page's work in the centre. A side holds one panel, with tabs when it
+- **One shell on every page**: the navigation rail at the left, one workspace in the centre,
+  and up to one panel on each side, only where it serves a distinct task.
+  Supporting panels are optional: Study and Compare use the centre list, not a second Samples tree;
+  Study details starts folded, uses only the sidebar's own control on desktop, and is an inline
+  disclosure in the one-page scroll below 1100 px.
+  Review's Samples tab lists every member of the current study, including Not started, and links to All studies.
+  A side holds one panel, with tabs when it
   has more than one thing to show. Both sides resize by dragging, keep their width across pages,
-  and fold to 28 px strips with named Show controls. Workspace panels push the centre aside; they never float.
+  and fold to 28 px strips. Icon-only expand controls point in the direction the panel opens;
+  their Show labels live in tooltips and accessible names. Fold controls are also icon-only,
+  named by tooltips and accessible labels. Workspace panels push the centre aside; they never float.
   Transient menus, popovers (including Settings and Run details) and dialogs are the exception.
 - **No divider lines in lists or between side blocks.** Spacing separates them.
 - **Actions use visible controls, not character-key command shortcuts.** Preserve standard

@@ -4,7 +4,8 @@ import { Breadcrumb } from "../breadcrumb";
 import { Button } from "../button";
 import { PageHead } from "../page-head";
 import { StatusMark } from "../status-mark";
-import { AppShell, ShellHeading } from "./shell";
+import { AppShell, ShellHeading, useFoldWhile } from "./shell";
+import { SidePanel } from "./side-panel";
 import { StoryRail } from "./story-rail";
 
 /**
@@ -94,4 +95,28 @@ export const HomeLight: Story = {
 export const HomeDark: Story = {
   globals: { theme: "dark" },
   render: () => <Frame theme="dark" guest home />,
+};
+
+/** A screen can start its optional supporting panel folded, without changing review's default. */
+function SupportingPanel() {
+  useFoldWhile("right", true, true);
+  return (
+    <div className="flex min-h-0 flex-1">
+      <div className="flex-1 p-6">
+        <p>The centre is the sample navigator. No left panel is needed.</p>
+        <p>Open Study details using the sidebar's own control.</p>
+      </div>
+      <SidePanel side="right" title="Study details" foldedLabel="details">
+        <p className="p-4 text-sm text-muted-foreground">Supporting study information.</p>
+      </SidePanel>
+    </div>
+  );
+}
+
+export const OptionalSupport: Story = {
+  render: (_args, { globals }) => (
+    <AppShell theme={globals.theme === "dark" ? "dark" : "light"} rail={<StoryRail />}>
+      <SupportingPanel />
+    </AppShell>
+  ),
 };

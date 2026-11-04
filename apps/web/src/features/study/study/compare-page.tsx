@@ -6,20 +6,19 @@
  * `?status=<place>` shows one group. "Export values" downloads the values as CSV, one row per sample.
  */
 import type { StudyDetail, StudyInputDetail } from "@voluma/contracts/study";
-import { inputHref, inputStatus, kneeOf } from "@voluma/run-view";
+import { inputHref, inputLabel, inputStatus, kneeOf } from "@voluma/run-view";
 import { Button, Count, cx, INPUT_WORD, PageHead, StatusGlyph, StatusMark } from "@voluma/ui";
 import { Download } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { headlinesOf, type Measurement, measurementsOf, unitOf } from "../workflow-measurements";
 import { SEGMENT_LOOK } from "./sample-bar";
-import { StudyNextAction, useStudy } from "./study-layout";
+import { useStudy } from "./study-layout";
 import {
   digitsFor,
   farFromGroup,
   hasBar,
   inputValue,
-  kneeWord,
   otherUnit,
   PLACES,
   placeOf,
@@ -45,10 +44,7 @@ export function ComparePage() {
   const finished = detail.inputs.filter((s) => s.resultRunId !== null).length;
   return (
     <div className="min-w-0 flex-1 overflow-y-auto">
-      <PageHead
-        title={`Compare · ${detail.study.name}`}
-        actions={<StudyNextAction detail={detail} />}
-      />
+      <PageHead title={`Compare · ${detail.study.name}`} />
       {plotted.length > 0 ? (
         <section aria-label="Headline measurements" className="border-b border-border">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] gap-x-8 gap-y-4 px-6 pt-4 pb-3">
@@ -166,7 +162,6 @@ function ValuesTable({
               </tr>
               {g.inputs.map((input) => {
                 const run = input.runs[0];
-                const knee = kneeOf(input);
                 return (
                   <tr key={input.member.inputId} className="group/row">
                     <th
@@ -179,14 +174,14 @@ function ValuesTable({
                             to={inputHref(detail.study.id, input.member.inputId)}
                             className="font-mono font-semibold hover:underline"
                           >
-                            {input.member.subject}
+                            {inputLabel(input.member)}
                           </Link>
                         ) : (
-                          <span className="font-mono font-semibold">{input.member.subject}</span>
+                          <span className="font-mono font-semibold">
+                            {inputLabel(input.member)}
+                          </span>
                         )}
-                        <span className="text-xs text-muted-foreground">
-                          {[input.member.group, knee && kneeWord(knee)].filter(Boolean).join(" · ")}
-                        </span>
+                        <span className="text-xs text-muted-foreground">{input.member.group}</span>
                         <StatusMark {...inputStatus(input)} className="ml-auto text-xs" />
                       </span>
                     </th>

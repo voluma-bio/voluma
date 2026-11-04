@@ -13,8 +13,9 @@ import { StoryRail } from "./story-rail";
  * frame whose sides keep their width across pages. **Where:** the input page (Conversation and
  * Scans; Final outputs) and the study pages.
  *
- * Try: drag a seam (or focus it and use the arrow keys); Hide folds a named panel;
- * a folded side is a 28 px strip with a visible Show action and badge, and its content stays
+ * Try: drag a seam (or focus it and use the arrow keys); icon-only fold and expand controls name
+ * their panels through tooltips and accessible labels. A folded side is a 28 px strip with a
+ * directional expansion arrow and badge, and its content stays
  * mounted. Widths are kept in localStorage (`voluma.sides`).
  */
 const meta = {
@@ -90,7 +91,6 @@ function Page({ theme, waiting }: { theme: "light" | "dark"; waiting?: boolean }
           side="right"
           title="Final outputs"
           meta="1 of 2 in"
-          icon={null}
           badge={12}
           badgeLabel="12 need you"
         >
@@ -103,12 +103,12 @@ function Page({ theme, waiting }: { theme: "light" | "dark"; waiting?: boolean }
 
 export const Light: Story = {
   globals: { theme: "light" },
-  args: { side: "right", title: "", icon: null, children: null },
+  args: { side: "right", title: "", children: null },
   render: () => <Page theme="light" />,
 };
 export const DarkWithBadge: Story = {
   globals: { theme: "dark" },
-  args: { side: "right", title: "", icon: null, children: null },
+  args: { side: "right", title: "", children: null },
   render: () => <Page theme="dark" waiting />,
 };
 

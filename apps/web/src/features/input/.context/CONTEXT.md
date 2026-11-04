@@ -14,6 +14,12 @@ runs out. Run details stays at the right. “Run finished” means computation e
 results are checked. An earlier run is labelled beside its status. Run details holds the source
 filename and troubleshooting facts; the study member's `inputLabel` is the page identity.
 
+The Samples tab reads complete `StudyDetail.inputs` from the same current-study query as the
+heading, never `StudySummary.newestRuns` (which omits members without runs). `sampleTree` in
+run-view uses `inputLabel`/`inputStatus`, including Not started; those rows open and focus the
+overview row rather than a no-run review error. Search counts say Showing N of the full total.
+All studies returns to the study list; a failed background refresh retains the last membership.
+
 ## The run's stream and the run read
 
 `use-run-stream.ts` feeds the run's durable events into the run store (`@voluma/run-view`
@@ -63,7 +69,7 @@ calls main still holds, `openApprovals`), Labels (`labels-panel.tsx`: what each 
 shown grid's `legend`; a label's volume only from the catalog's one mm³ value measured on that label alone
 (`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
 output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
-Agents (`run-agents.tsx`: the run's agents, then a picked agent's whole thread with All agents to go back), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over `listStudies`). The side
+Agents (`run-agents.tsx`: the run's agents, then a picked agent's whole thread with All agents to go back), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over the current `StudyDetail.inputs`). The side
 opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or an agent's name in a reply opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), and
 Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
 reported value resting on an output with open items is not done: its status is "Waiting on a check
@@ -94,7 +100,7 @@ stays open until Esc. A section's tick waits for every value in it. Until the va
 marked missing, the centre shows the nearest link on its chain with a version (the scene chip saying
 "<value> is based on"), else the output published last whose whole scene has blocks to draw (the scan, from intake
 on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the
-run is going and the AI is still setting up only while nothing drawable is published. `studiesQuery` refetches while a run is live, so the Samples tab
+run is going and the AI is still setting up only while nothing drawable is published. `studyQuery` refetches while a run is live, so the Samples tab
 (`samples-tab.tsx`) keeps up.
 
 The URL keeps `output` (the value open), `trail` (an output it rests on, open), `item`,

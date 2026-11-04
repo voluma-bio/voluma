@@ -651,7 +651,14 @@ export function OutputsReview({
               id: "samples",
               label: INPUT_WORD.Many,
               icon: <ListTree />,
-              content: <Samples studyId={run.studyId} inputId={run.input.id} />,
+              content: (
+                <Samples
+                  detail={study.data}
+                  inputId={run.input.id}
+                  stale={study.isError}
+                  retry={() => void study.refetch()}
+                />
+              ),
             },
           ]}
         />
@@ -721,7 +728,6 @@ export function OutputsReview({
               ? `${review.progress.done} of ${review.progress.total} in`
               : undefined
           }
-          icon={null}
           badge={toCheck || undefined}
           badgeLabel={`${toCheck} to check`}
           tools={

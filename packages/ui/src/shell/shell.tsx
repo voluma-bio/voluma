@@ -126,9 +126,11 @@ export function useFullView(): [boolean, (full: boolean) => void] {
 
 /**
  * Folds `side` while `active`, and puts it back when `active` ends or the screen unmounts, unless
- * it was folded already or the person unfolded it in the meantime.
+ * it was folded already or the person unfolded it in the meantime. `restoreOnExit` keeps a
+ * supporting screen's entry fold even after manual toggles. The panel's own control opens and
+ * closes it.
  */
-export function useFoldWhile(side: ShellSide, active: boolean): void {
+export function useFoldWhile(side: ShellSide, active: boolean, restoreOnExit = false): void {
   const shell = useContext(ShellContext);
   if (!shell) throw new Error("useFoldWhile must be used inside AppShell");
   const { fold } = shell;
@@ -140,15 +142,17 @@ export function useFoldWhile(side: ShellSide, active: boolean): void {
   latest.current = folded;
   useEffect(() => {
     if (!active) return;
-    if (!latest.current) {
+    const enteredFolded = latest.current;
+    if (!enteredFolded) {
       mine.current = true;
       fold(side, true);
     }
     return () => {
-      if (mine.current) fold(side, false);
+      if (restoreOnExit) fold(side, enteredFolded);
+      else if (mine.current) fold(side, false);
       mine.current = false;
     };
-  }, [active, side, fold]);
+  }, [active, side, fold, restoreOnExit]);
   useEffect(() => {
     const before = was.current;
     was.current = folded;

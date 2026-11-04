@@ -1,33 +1,19 @@
 /**
- * A study (`/studies/:id/*`): loads it once for its two pages (the inputs, and Compare), puts
- * "Studies › <study> (› Compare)" in the context row, and the
- * input tree on the left side (this study open, the lab's other studies below). Pages read the
- * study through `useStudy` and render the centre, and a right side if they have one, beside the
- * tree. A study of one keeps its overview, like any other study. While an input is still running the
- * study refetches every 5 s.
+ * A study (`/studies/:id/*`): loads it once for its overview and Compare. Pages read the study
+ * through `useStudy` and render the centre, with an optional right side and no second sample
+ * navigator. The context row holds "Studies › <study> (› Compare)"; a study of one keeps its
+ * overview. While an input is still running the study refetches every 5 s.
  */
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
-import { studiesQuery, studyQuery } from "@voluma/api-client/query";
+import { studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { inputLabel, sampleTree } from "@voluma/run-view";
-import {
-  Breadcrumb,
-  Button,
-  ErrorState,
-  INPUT_WORD,
-  LoadingState,
-  SampleTree,
-  ShellHeading,
-  SidePanel,
-} from "@voluma/ui";
+import { Breadcrumb, Button, ErrorState, LoadingState, ShellHeading } from "@voluma/ui";
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
-import { ChevronRight, ListTree } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, Outlet, useLocation, useOutletContext, useParams } from "react-router";
 import { linkTo } from "../link";
-import { nextToAct, openHref } from "./study-model";
 
 export type StudyContext = { detail: StudyDetail; workflow: BundledWorkflow; me: Me };
 
@@ -76,7 +62,6 @@ export function StudyLayout() {
         </p>
       )}
       <div className="flex min-h-0 flex-1">
-        <SamplesSide studyId={detail.study.id} />
         <Outlet context={{ detail, workflow, me } satisfies StudyContext} />
       </div>
     </>
@@ -98,48 +83,6 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
         current={compare ? "Compare" : detail.study.name}
       />
     </ShellHeading>
-  );
-}
-
-/** The same next-sample action on the overview and Compare, outside navigation. */
-export function StudyNextAction({ detail }: { detail: StudyDetail }) {
-  const next = nextToAct(detail.inputs, detail.study.example);
-  const href = next && openHref(detail.study.id, next);
-  return href ? (
-    <Button
-      asChild
-      variant="secondary"
-      size="sm"
-      className="h-auto min-h-6 flex-wrap whitespace-normal py-1 text-left"
-    >
-      <Link to={href}>
-        Next {INPUT_WORD.one} that needs you:
-        <span className="break-words font-mono font-semibold">{inputLabel(next.member)}</span>
-        <ChevronRight aria-hidden />
-      </Link>
-    </Button>
-  ) : null;
-}
-
-/** The left side: the input tree, from the lab's study list. */
-function SamplesSide({ studyId }: { studyId: string }) {
-  const studies = useQuery(studiesQuery());
-  return (
-    <SidePanel side="left" title={INPUT_WORD.Many} icon={<ListTree />}>
-      {studies.data ? (
-        <SampleTree
-          studies={sampleTree(studies.data)}
-          studyId={studyId}
-          renderLink={(href, props) => <Link to={href} {...props} />}
-        />
-      ) : studies.isError ? (
-        <p className="m-0 px-4 py-3 text-sm text-muted-foreground">
-          Couldn't load the {INPUT_WORD.many}.
-        </p>
-      ) : (
-        <LoadingState label={`Loading the ${INPUT_WORD.many}`} rows={4} className="px-3 py-2" />
-      )}
-    </SidePanel>
   );
 }
 
