@@ -32,7 +32,7 @@ import { ChevronRight, PanelRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { measurementsOf } from "../workflow-measurements";
 import { SampleBar } from "./sample-bar";
-import { useStudy } from "./study-layout";
+import { StudyNextAction, useStudy } from "./study-layout";
 import {
   changedAt,
   hasBar,
@@ -66,6 +66,7 @@ export function StudyPage() {
           className="border-b-0 bg-transparent"
           title={detail.study.name}
           subtitle={`${workflow.name} · ${plural(detail.inputs.length, INPUT_WORD.one, INPUT_WORD.many)}`}
+          actions={<StudyNextAction detail={detail} />}
         />
         {only && (
           <p className="m-0 flex items-baseline gap-3 px-6 text-sm text-muted-foreground">

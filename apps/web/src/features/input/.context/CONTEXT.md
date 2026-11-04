@@ -7,6 +7,13 @@ page shows the input's newest run in that study (from the study read, `studyQuer
 several studies, so the input alone can't pick the run. Links use
 `inputHref` (`@voluma/run-view`); they never carry `?run=` unless they mean an earlier run.
 
+The shell keeps global destinations separate from `InputBreadcrumb` (Studies / study / sample).
+`InputHeading` renders the page h1 outside navigation, explicit Group metadata, run state and
+the output fold's outstanding-check count in a compact single row, wrapping only when space
+runs out. Run details stays at the right. “Run finished” means computation ended, not that
+results are checked. An earlier run is labelled beside its status. Run details holds the source
+filename and troubleshooting facts; the study member's `inputLabel` is the page identity.
+
 ## The run's stream and the run read
 
 `use-run-stream.ts` feeds the run's durable events into the run store (`@voluma/run-view`
@@ -123,4 +130,3 @@ A run with a call open that you can answer (`openApprovals`) reads "Waiting on y
 (from the log, not the row); a No is final and ends the call. The Samples tree, the Studies list and the
 study rows say it too, from `waiting` on the study reads (`studyRunSummarySchema`, `studyInputDetailSchema`): the open calls
 (`openApprovals`) counted in the run fold, kept only when the caller can answer (`cannotMessage` null). Waiting on you is its own group, ahead of Needs you, in the Samples tree, the Studies row counts and the study page (`placeOfStatus`, run-view `samples.ts`: one rule, so every count agrees). An answer invalidates the study reads (`useAnswers`), since the run ended and nothing polls them.
-

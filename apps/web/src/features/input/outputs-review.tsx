@@ -456,7 +456,7 @@ export function OutputsReview({
 
   return (
     <>
-      <InputHeading run={run} study={study.data} waitingOnYou={waiting > 0} />
+      <InputHeading run={run} study={study.data} waitingOnYou={waiting > 0} toCheck={toCheck} />
       <div className="flex min-h-0 flex-1">
         <SidePanel
           side="left"

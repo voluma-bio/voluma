@@ -17,15 +17,15 @@ export type BreadcrumbProps = {
 };
 
 const linkClass =
-  "truncate rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
+  "inline-flex min-h-8 items-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 
 export function Breadcrumb({ trail = [], current, className }: BreadcrumbProps) {
   return (
     <nav aria-label="Where you are" className={cx("min-w-0", className)}>
-      <ol className="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-sm">
+      <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-x-2 p-0 text-sm">
         {trail.map(({ label, to }) => (
           <Fragment key={label}>
-            <li className="min-w-0 truncate">
+            <li className="min-w-0 break-words">
               {typeof to === "string" ? (
                 <a href={to} className={linkClass}>
                   {label}
@@ -39,7 +39,7 @@ export function Breadcrumb({ trail = [], current, className }: BreadcrumbProps) 
             </li>
           </Fragment>
         ))}
-        <li aria-current="page" className="min-w-0 truncate font-medium">
+        <li aria-current="page" className="min-w-0 break-words font-medium">
           {current}
         </li>
       </ol>

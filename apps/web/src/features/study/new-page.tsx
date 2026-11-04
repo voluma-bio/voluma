@@ -290,12 +290,9 @@ export function NewPage() {
   return (
     <div className="shrink-0">
       <ShellHeading>
-        <Breadcrumb
-          trail={[{ label: "Studies", to: linkTo("/") }]}
-          current={`Run on new ${INPUT_WORD.many}`}
-        />
+        <Breadcrumb trail={[{ label: "Studies", to: linkTo("/") }]} current="New study" />
       </ShellHeading>
-      <PageHead title={`Run on new ${INPUT_WORD.many}`} />
+      <PageHead title="New study" />
       <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-6 pb-16 max-[760px]:px-4">
         <Step n={1} title={INPUT_WORD.Many}>
           <DropZone compact={table.length > 0} onFiles={(d) => void addDropped(d)} />

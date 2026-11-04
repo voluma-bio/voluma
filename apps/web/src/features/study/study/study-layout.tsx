@@ -1,9 +1,9 @@
 /**
  * A study (`/studies/:id/*`): loads it once for its two pages (the inputs, and Compare), puts
- * "Studies › <study> (› Compare)" and "Next sample that needs you" in the header line, and the
+ * "Studies › <study> (› Compare)" in the context row, and the
  * input tree on the left side (this study open, the lab's other studies below). Pages read the
  * study through `useStudy` and render the centre, and a right side if they have one, beside the
- * tree. A study of one has no study page: it opens its input. While an input is still running the
+ * tree. A study of one keeps its overview, like any other study. While an input is still running the
  * study refetches every 5 s.
  */
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import { ApiError } from "@voluma/api-client";
 import { studiesQuery, studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { sampleTree } from "@voluma/run-view";
+import { inputLabel, sampleTree } from "@voluma/run-view";
 import {
   Breadcrumb,
   Button,
@@ -25,7 +25,7 @@ import {
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
 import { ChevronRight, ListTree } from "lucide-react";
 import type { ReactNode } from "react";
-import { Link, Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router";
+import { Link, Outlet, useLocation, useOutletContext, useParams } from "react-router";
 import { linkTo } from "../link";
 import { nextToAct, openHref } from "./study-model";
 
@@ -53,10 +53,6 @@ export function StudyLayout() {
     );
 
   const detail = study.data;
-  const only = detail.inputs.length === 1 ? detail.inputs[0] : undefined;
-  const onlyRun = only && openHref(detail.study.id, only);
-  if (onlyRun) return <Navigate to={onlyRun} replace />;
-
   const workflow = workflowById(detail.study.workflowId);
   if (!workflow)
     return (
@@ -87,13 +83,11 @@ export function StudyLayout() {
   );
 }
 
-/** The header line: where you are, and the next input that needs you. */
+/** The context row contains navigation only; page actions belong beside the page title. */
 function StudyHeading({ detail }: { detail: StudyDetail }) {
   const { pathname } = useLocation();
   const base = `/studies/${detail.study.id}`;
   const compare = pathname.startsWith(`${base}/compare`);
-  const next = nextToAct(detail.inputs, detail.study.example);
-  const nextHref = next && openHref(detail.study.id, next);
   return (
     <ShellHeading>
       <Breadcrumb
@@ -103,17 +97,28 @@ function StudyHeading({ detail }: { detail: StudyDetail }) {
         ]}
         current={compare ? "Compare" : detail.study.name}
       />
-      {nextHref && (
-        <Button asChild variant="secondary" size="sm" className="ml-auto">
-          <Link to={nextHref}>
-            Next {INPUT_WORD.one} that needs you:
-            <span className="font-mono font-semibold">{next.member.subject}</span>
-            <ChevronRight aria-hidden />
-          </Link>
-        </Button>
-      )}
     </ShellHeading>
   );
+}
+
+/** The same next-sample action on the overview and Compare, outside navigation. */
+export function StudyNextAction({ detail }: { detail: StudyDetail }) {
+  const next = nextToAct(detail.inputs, detail.study.example);
+  const href = next && openHref(detail.study.id, next);
+  return href ? (
+    <Button
+      asChild
+      variant="secondary"
+      size="sm"
+      className="h-auto min-h-6 flex-wrap whitespace-normal py-1 text-left"
+    >
+      <Link to={href}>
+        Next {INPUT_WORD.one} that needs you:
+        <span className="break-words font-mono font-semibold">{inputLabel(next.member)}</span>
+        <ChevronRight aria-hidden />
+      </Link>
+    </Button>
+  ) : null;
 }
 
 /** The left side: the input tree, from the lab's study list. */
@@ -155,6 +160,7 @@ function PageState({
       <ShellHeading>
         <Breadcrumb trail={[{ label: "Studies", to: linkTo("/") }]} current="Study" />
       </ShellHeading>
+      <h1 className="mb-4 text-xl font-semibold">Study</h1>
       {title ? (
         <ErrorState title={title} onRetry={retry}>
           {children}{" "}
