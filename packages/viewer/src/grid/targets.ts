@@ -1,8 +1,8 @@
 /**
  * What the outputs review can align a grid's planes to, in Align's order after the shown grid
- * itself (QuadViewer lists that): every other grid the run published, and every plane fitted
+ * itself (QuadViewer lists that): the frames tasks oriented for, every plane fitted
  * (least squares) through the vertices of published surfaces, such as the growth plate's two
- * faces. A grid is any published base or file output whose `detail` carries a `gridId` and its
+ * faces, then the other grids the run published. A grid is any published base or file output whose `detail` carries a `gridId` and its
  * affine (an image volume, or a frame such as intake's joint frame), one per `gridId`. All reach
  * the shown grid through world mm (`@voluma/contracts/ruler`).
  */
@@ -78,24 +78,30 @@ export function planeTargets({
       : undefined;
   };
   const seen = new Set([gridOf(outputs.find((o) => o.id === imageId)?.latest?.detail)?.gridId]);
-  const grids = outputs.flatMap((o): PlaneTarget[] => {
-    const v = o.latest;
-    const grid = v && (o.kind === "base" || o.kind === "file") ? gridOf(v.detail) : undefined;
-    if (!v || !grid || seen.has(grid.gridId)) return [];
-    seen.add(grid.gridId);
-    const name = nameOf(o.id);
-    return [
-      {
-        id: `grid:${o.id}`,
-        name: `the ${name.charAt(0).toLowerCase()}${name.slice(1)}`,
-        tag: v.by,
-        load: async () => {
-          const [x, y, z] = axesOf(grid.affine);
-          const inGrid = (a: readonly [number, number, number]) => directionInGrid(image.affine, a);
-          return { axes: [inGrid(z), inGrid(y), inGrid(x)] as const };
+  // A base output names its grid; a file on a grid a base already names (the scan's hu.json) adds
+  // nothing, so bases claim their gridId first.
+  const targetsOf = (kind: "base" | "file") =>
+    outputs.flatMap((o): PlaneTarget[] => {
+      const v = o.latest;
+      const grid = v && o.kind === kind ? gridOf(v.detail) : undefined;
+      if (!v || !grid || seen.has(grid.gridId)) return [];
+      seen.add(grid.gridId);
+      const name = nameOf(o.id);
+      return [
+        {
+          id: `grid:${o.id}`,
+          name: `the ${name.charAt(0).toLowerCase()}${name.slice(1)}`,
+          tag: v.by,
+          load: async () => {
+            const [x, y, z] = axesOf(grid.affine);
+            const inGrid = (a: readonly [number, number, number]) =>
+              directionInGrid(image.affine, a);
+            return { axes: [inGrid(z), inGrid(y), inGrid(x)] as const };
+          },
         },
-      },
-    ];
-  });
-  return [...grids, ...planes];
+      ];
+    });
+  const grids = targetsOf("base");
+  // Frames a task oriented for (file outputs) come before the plane fits, other grids after them.
+  return [...targetsOf("file"), ...planes, ...grids];
 }
