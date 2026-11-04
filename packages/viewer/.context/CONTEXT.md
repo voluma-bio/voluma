@@ -82,8 +82,9 @@ QuadViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   drag) on a mesh moves the crosshair to the voxel under it. 3D opens on the grid's centre, at a
   fixed distance, from the side of the output's own meshes (`GridMesh.own`, set by `review.ts`;
   never context or a focused check), so they sit in front of the see-through context; within 5%
-  of the radius of the centre, or with none, from a default side. The camera turns there once,
-  when those meshes have loaded, unless a gesture or a restored view (`show`) placed it first.
+  of the radius of the centre, or with none, from a default side. Only visible own meshes count.
+  The camera turns there each time an output's own meshes have loaded, until a gesture or a
+  restored view (`show`) has touched it.
   Otherwise loading never moves the crosshair or camera; a new `focus` voxel (a check's) moves the crosshair. A pane with no size (hidden) draws
   nothing; showing it resizes it, which draws, so a caller may keep a viewer mounted and hidden.
 - **Marks.** With `tool` set, left clicks and drags mark instead of moving the crosshair, and

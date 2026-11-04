@@ -6,9 +6,9 @@
  * pans; the wheel or middle drag zooms. A click on a mesh moves the crosshair there.
  *
  * The camera opens on the grid's centre from the side of the output's own meshes (`GridMesh.own`),
- * so they sit in front of the see-through context. It turns there once, when they have loaded,
- * and only if no gesture or restored view has placed it first; after that, loading the volume or
- * meshes never moves the camera. The reset button returns to that view for the meshes shown now.
+ * so they sit in front of the see-through context. It turns there each time an output's own
+ * meshes have loaded, until a gesture or a restored view has touched the camera; after that,
+ * loading the volume or meshes never moves it. The reset button returns to that view for the meshes shown now.
  *
  * With Point, a click marks the visible surface under the pointer (the first shown mesh, or the
  * volume where it becomes half opaque, whichever is nearer) and a ring shows where it would land;
@@ -166,7 +166,8 @@ export function Grid3D({
     // view is nearly along z.
     const opening = () => {
       const own = new Box3();
-      for (const child of meshes.children) if (child.userData.own) own.expandByObject(child);
+      for (const child of meshes.children)
+        if (child.visible && child.userData.own) own.expandByObject(child);
       const offset = own.isEmpty() ? new Vector3() : own.getCenter(new Vector3()).sub(center);
       const direction = (
         offset.length() > radius * 0.05 ? offset : new Vector3(1.2, 2.2, -0.8)
@@ -267,16 +268,14 @@ export function Grid3D({
       place(position, target, up);
     };
     reset();
-    // The camera turns to face the output once, when its own meshes have loaded, unless a gesture
-    // or a restored view has placed it first.
-    let placed = false;
+    // The camera turns to face the output whenever its own meshes have loaded, until a gesture or
+    // a restored view has touched it.
+    let touched = false;
     controls.addEventListener("start", () => {
-      placed = true;
+      touched = true;
     });
     const aim = () => {
-      if (placed) return;
-      placed = true;
-      reset();
+      if (!touched) reset();
     };
     three.current = { meshes, annotations, volumes, depth, render, reset, aim };
     const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
@@ -294,7 +293,7 @@ export function Grid3D({
       show(saved) {
         if (!("camera" in saved)) return;
         const { position, target, up } = saved.camera;
-        placed = true;
+        touched = true;
         place(new Vector3(...position), new Vector3(...target), new Vector3(...up));
       },
     };
