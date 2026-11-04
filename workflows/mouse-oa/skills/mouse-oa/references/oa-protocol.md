@@ -76,7 +76,7 @@ schema is `regions-and-landmarks`'):
   curves have a gap over the plate wider than the spec's `max_gap_um` (about 24 rows): on a section, two points that far apart where the tibia lies
   within that below the line between them and anywhere above it (a line across empty space between two pieces of bone does not count); across V, two sections that
   far apart over the rows with tibia near the face. They do not test where a face ends, in U or V: the mask does not show where the plate ends
-  (the condyles overhang it, the fibula lies beside it), so open the ends on the QC. They name the V rows and U ranges; they also stop on a point more than
+  (the condyles overhang it, the fibula lies beside it), so open the ends on the QC. `iioc.py` does stop where ROI-1's side runs through bone (a patch over the spec's `cut_max_area_mm2` with bone off the tibia mask for `cut_depth_um` beyond it, by V and U range): the tibia label stops inside the bone there, so fix the labels (segmentation-check) and rerun `tibia_frame.py`; retracing the face does not move it. They name the V rows and U ranges; they also stop on a point more than
   `off_tibia_margin_um` off the tibia mask, and on a face that jumps between neighbouring traced sections by more than `max_jump_um` plus
   their distance apart (the median W change over the bone both cover): trace each section they name from its own image. Say where the proposal covered and where you traced. Copy its two curve keys
   (`growth_plate_curves`, `growth_plate_distal_curves`) into your `annotations.json`; its flagged stretches are in `plate-faces.json`.
