@@ -1,7 +1,7 @@
 /**
  * Studies, under `/api/run`: a study is a group of runs, one per input, of one workflow. Every
  * run belongs to one (`runSchema.studyId`). A study of one is a study whose input count is 1;
- * nothing marks it. The rules of `run.ts` (org scoping, limits, visitor keys) apply to every
+ * nothing marks it. The rules of `run.ts` (org scoping, limits, own keys) apply to every
  * call here.
  *
  *   POST /api/run/studies      body `createStudyRequestSchema` → 200 `studyDetailSchema`
@@ -38,12 +38,12 @@ import { inputIdSchema, modelRefSchema, runIdSchema, segmentSchema, studyIdSchem
 import type { OutputStatus } from "./output-fold";
 import {
   inputSchema,
+  ownKeysSchema,
   runOutputsInSchema,
   runSchema,
   runStateSchema,
   runThinkingSchema,
   selectedOutputsSchema,
-  visitorKeysSchema,
   workflowIdSchema,
 } from "./run";
 
@@ -190,8 +190,8 @@ export const createStudyRequestSchema = z.preprocess(
       /** For every run started by this call, as in `startRunRequestSchema`. */
       selectedOutputs: selectedOutputsSchema.min(1).optional(),
       notes: z.string().max(4000).optional(),
-      /** Present: these runs use these (`credentials: "visitor"`). */
-      keys: visitorKeysSchema.optional(),
+      /** Present: these runs use these (`credentials: "own"`). */
+      keys: ownKeysSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */
       model: modelRefSchema.optional(),
       /** For every run started by this call, as in `startRunRequestSchema`. */

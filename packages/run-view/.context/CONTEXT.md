@@ -4,7 +4,7 @@
 importing each other: the outputs review's model and trail (`outputs-model.ts`,
 `outputs-trail.ts`), the run's events (`run-store.tsx`), `ItemToCheck`, `ApprovalCard`, the
 model's prose as Markdown (`chat/markdown.tsx`), the clock (`use-now.ts`), an input's status in a
-study (`study-inputs.ts`, `samples.ts`), and the status, formatting and visitor-key helpers. It has
+study (`study-inputs.ts`, `samples.ts`), and the status, formatting and own-key helpers. It has
 no router. Its screens are the input review (`apps/web/src/features/input`) and the study pages
 (`apps/web/src/features/study`).
 
@@ -34,7 +34,7 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   link is ticked by its status (a label overlay's is its map's; pending and missing are not yet in). `outputsReview` carries each row's
   `trail` and `chain` and the run's `others` (published, not final, not on a chain), so components
   only read them.
-- **Visitor keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
+- **Own keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
   way an account without Voluma's key (`Me.volumaKey` false: a guest) runs (the API refuses a start without it, 403); an account with it may keep one too. A key
   in this browser is sent with every start, and with a message or answer to a finished own-key run (`keysToReopen`: the server wiped the run's keys when it ended), and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
