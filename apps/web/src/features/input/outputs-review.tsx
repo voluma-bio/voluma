@@ -80,7 +80,16 @@ import {
   MessageSquare,
   Workflow,
 } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useOutletContext, useSearchParams } from "react-router";
 import { FileOutput } from "./file-output";
 import { InputHeading, RunAlert } from "./input-header";
@@ -230,16 +239,29 @@ export function OutputsReview({
   // The links change only when the set of names does, and `open` reads the latest entries and
   // `select`, so the conversation's replies don't re-render on every event of a live run.
   const nameKey = agents.flatMap((a) => a.names).join("\n");
-  const latest = useRef({ agents, select, setLeftTab });
-  latest.current = { agents, select, setLeftTab };
+  const agentParam = params.get("agent");
+  const latest = useRef({ agents, select, agentParam });
+  latest.current = { agents, select, agentParam };
+  // The router applies a URL change in a transition, after the click's own updates: switching the
+  // tab with the click would show the Agents list until `agent` lands, longer on a live run. So
+  // the tab switches once the URL names the worker opened.
+  const opening = useRef<string>(undefined);
+  useLayoutEffect(() => {
+    if (agentParam === null || opening.current !== agentParam) return;
+    opening.current = undefined;
+    setLeftTab("agents");
+  }, [agentParam]);
   const agentLinks = useMemo<AgentLinks>(
     () => ({
       names: new Set(nameKey ? nameKey.split("\n") : []),
       open: (name) => {
-        latest.current.setLeftTab("agents");
-        latest.current.select({
-          agent: latest.current.agents.find((a) => a.names.includes(name))?.name ?? name,
-        });
+        const { agents, select, agentParam } = latest.current;
+        const agent = agents.find((a) => a.names.includes(name))?.name ?? name;
+        if (agent === agentParam) setLeftTab("agents");
+        else {
+          opening.current = agent;
+          select({ agent });
+        }
       },
     }),
     [nameKey],

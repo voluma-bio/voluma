@@ -118,25 +118,10 @@ function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: 
           </div>
         </ProcessDisclosure>
       );
-    case "step": {
-      const brief = row.step.name === "start_worker" && firstLine(row.step.input);
-      return (
-        <div>
-          <StepView step={row.step} links={links} />
-          {brief && <p className="truncate pl-[27px] text-meta text-muted-foreground">{brief}</p>}
-        </div>
-      );
-    }
+    case "step":
+      return <StepView step={row.step} links={links} />;
     case "brief":
       return <Told label={row.label} text={row.text} />;
-    case "divider":
-      return (
-        <p className="flex items-center gap-3 text-meta text-muted-foreground">
-          <span className="h-px flex-1 bg-border" aria-hidden />
-          <span className="font-mono">{row.text} starts</span>
-          <span className="h-px flex-1 bg-border" aria-hidden />
-        </p>
-      );
     case "failure":
       return (
         <p
@@ -220,6 +205,7 @@ function StepView({ step, links }: { step: Step; links?: AgentLinks }) {
               )}
             </span>
           }
+          subtitle={step.name === "start_worker" ? firstLine(step.input) : undefined}
           status={step.status}
           expand={() => <ToolBody step={step} />}
         />

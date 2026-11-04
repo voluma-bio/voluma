@@ -3,8 +3,8 @@
  * memoized on the run's events, and a scroll that follows the newest line while the reader is at
  * the bottom. It fills the box its caller gives it. Mount it keyed on the
  * agent, so picking another starts at its own end. A screen puts its own rows in by log position
- * (`slots`, rendered by `slot`). Main's Conversation (`conversation`) drops the divider between
- * `main.N` and says its newest status line in the live line, not the running call.
+ * (`slots`, rendered by `slot`). Main's Conversation (`conversation`) says main's newest status
+ * line in the live line, not the running call, and the screen can word the line itself (`line`).
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
@@ -24,7 +24,7 @@ export function AgentThread({
   slot,
   nameOf,
   conversation = false,
-  waiting,
+  line,
   opensAtEnd = false,
   empty,
   className = "",
@@ -44,8 +44,11 @@ export function AgentThread({
   nameOf?: (id: string) => string;
   /** The thread is main's Conversation (see the header). */
   conversation?: boolean;
-  /** Nothing works yet, and why ("Waiting to start · place 2 in line"): a quiet live line. */
-  waiting?: string;
+  /**
+   * The live line in the screen's own words, in place of the thread's: "Waiting to start · place
+   * 2 in line" (`quiet`: nothing works yet), or work outside the thread.
+   */
+  line?: { text: string; quiet?: boolean };
   /** Open an ended thread at its newest line, as a conversation does, not at the top. */
   opensAtEnd?: boolean;
   /** What an empty thread says, when not the default. */
@@ -71,7 +74,7 @@ export function AgentThread({
   useLayoutEffect(() => {
     const el = viewport.current;
     if (el && wasAtBottom.current && rows.length > 0) el.scrollTop = el.scrollHeight;
-  }, [rows, working, waiting]);
+  }, [rows, working, line?.text]);
 
   return (
     <div
@@ -84,8 +87,8 @@ export function AgentThread({
         links={links}
         slot={slot}
         live={
-          waiting
-            ? { text: waiting, words: true, quiet: true }
+          line
+            ? { ...line, words: true }
             : !working
               ? null
               : conversation

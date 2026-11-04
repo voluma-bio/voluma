@@ -5,13 +5,14 @@
  * side holds put in by log position: your messages with the marks they carried (and what main got
  * with them), the calls main holds for your yes (`ApprovalCard`), and a request that didn't
  * finish. The live line follows the run: waiting in the queue, else main's newest status line
- * while it works, else nothing.
+ * while it works, else a call you approved while its job runs, else nothing.
  * Under it the box: your words, the mark changes waiting for them (each chip goes to its mark; x
  * undoes the change), and whether a picture of the panes goes too. Main gets each mark with its
  * change and positions; the placeholder prompts for your words, while the chips show the
  * attached marks. The message itself is `useMainMessage`.
  */
 
+import { agentLog, givenApprovals } from "@voluma/contracts/agents";
 import type { ConversationItem } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { RunRead } from "@voluma/contracts/run";
@@ -105,21 +106,24 @@ export function MainConversation({
   // The thread shows main's replies; the page adds what the thread doesn't hold. A finished
   // request's reply is the answer; only one that didn't finish gets a line of its own.
   const { slots, byId } = useMemo(() => {
-    const own = conversation.filter(
-      (m): m is Exclude<ConversationItem, { from: "agent" }> =>
-        m.from !== "agent" && (m.from !== "outcome" || m.status !== "completed"),
-    );
+    const own = conversation.filter((m) => m.from !== "outcome" || m.status !== "completed");
     return {
       slots: own.map((m): Slot => ({ id: m.id, seq: m.seq, person: m.from === "person" })),
       byId: new Map(own.map((m) => [m.id, m])),
     };
   }, [conversation]);
   // The live line says only what is true of the run: in the queue nothing works yet; while it
-  // runs, main is at work only when it is.
+  // runs, main is at work only when it is. A call you approved runs as a job outside any thread,
+  // with main idle until it settles.
   const live = state.status !== "ended";
-  const waiting =
-    state.status === "queued" ? `Waiting to start · place ${state.position} in line` : undefined;
   const working = state.status === "running" && main?.state === "working";
+  const approved = givenApprovals(agentLog(events).approvals).length > 0;
+  const line =
+    state.status === "queued"
+      ? { text: `Waiting to start · place ${state.position} in line`, quiet: true }
+      : state.status === "running" && !working && approved
+        ? { text: "Doing what you approved" }
+        : undefined;
 
   const slot = (id: string): ReactNode => {
     const m = byId.get(id);
@@ -213,7 +217,7 @@ export function MainConversation({
         events={events}
         ids={main?.ids ?? []}
         working={working}
-        waiting={waiting}
+        line={line}
         live={live}
         links={agents}
         slots={slots}

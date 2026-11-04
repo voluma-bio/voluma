@@ -6,9 +6,9 @@
  * call with no result yet is `running`.
  *
  * A thread is one or several thread ids: main is `main` plus every `main.N` after a review, in
- * log order, with a divider where each later one starts (none in the Conversation). A screen can
- * put its own rows into the thread by log position (`slots`): each closes the fold before it and
- * renders as the screen says.
+ * log order. A screen can put its own rows into the thread by log position (`slots`): each closes
+ * the fold before it and renders as the screen says. A call main held for the researcher's yes
+ * (`approval.requested`) gets no row: the screen's approval slot is that row.
  */
 
 import { agentLog } from "@voluma/contracts/agents";
@@ -131,17 +131,16 @@ export type Row =
   /** What the thread was told: its system prompt, its brief, a message from someone. */
   | { kind: "brief"; id: string; label: string; text: string }
   | { kind: "failure"; id: string; text: string }
-  /** Where a later `main.N` thread of the merged main starts. */
-  | { kind: "divider"; id: string; text: string }
   /**
    * A screen's own row at its place in the log (`Slot`); the screen renders it by id. On a
    * person's slot, `got` is what main was handed with their words.
    */
-  | { kind: "slot"; id: string; got?: string };
+  | { kind: "slot"; id: string; person?: boolean; got?: string };
 
 /**
  * A row a screen puts into the thread: before the first event whose `seq` is past its own.
- * `person`: the researcher's message, which takes what main got with it.
+ * `person`: the researcher's message (its id is the `person.message` event's), which takes what
+ * main got with it.
  */
 export type Slot = { id: string; seq: number; person?: boolean };
 
@@ -237,10 +236,7 @@ export type ThreadOptions = {
   slots?: readonly Slot[];
   /** An output's catalog name. */
   nameOf?: (id: string) => string;
-  /**
-   * Main's thread as the Conversation: no divider where a later `main.N` starts, and each turn's
-   * first words head their row (`head`).
-   */
+  /** Main's thread as the Conversation: each turn's first words head their row (`head`). */
   conversation?: boolean;
 };
 
@@ -260,18 +256,20 @@ export function threadRows(
   const b = rowBuilder();
   const pending = [...slots].sort((x, y) => x.seq - y.seq);
   let next = 0;
-  // The researcher's messages placed so far that have nothing attached yet, newest last.
-  let waiting: Extract<Row, { kind: "slot" }>[] = [];
+  // Every slot's row up front, so a delivery can attach to your message by its id (`covers`).
+  const slotRows = new Map(
+    pending.map((s): [string, Extract<Row, { kind: "slot" }>] => [
+      s.id,
+      { kind: "slot", id: s.id, person: s.person },
+    ]),
+  );
   // The next words open a turn: the thread's first, and the first after each of your messages.
   let turn = conversation;
   const placeSlots = (upTo: number) => {
     for (let s = pending[next]; s && s.seq <= upTo; s = pending[++next]) {
-      const row: Row = { kind: "slot", id: s.id };
-      if (s.person) {
-        waiting.push(row);
-        turn = conversation;
-      }
-      b.row(row);
+      if (s.person) turn = conversation;
+      const row = slotRows.get(s.id);
+      if (row) b.row(row);
     }
   };
   const say = (id: string, text: string, at: string) => {
@@ -281,8 +279,11 @@ export function threadRows(
   const tools = new Map<string, ToolStep>();
   // A report's version folder (`versionPath`) to its call, to name the version once published.
   const reports = new Map<string, ToolStep>();
-  const started = new Set<string>();
   const briefed = new Set<string>();
+  // Calls held for the researcher (main's, in review): their approval slot is their row.
+  const held = new Set(
+    events.flatMap((e) => (e.type === "approval.requested" ? [e.payload.toolCallId] : [])),
+  );
   // Main's deliveries say which log events they cover: a person.message in that range is the researcher.
   const position = new Map(events.map((e, i) => [e.id, i]));
   let lastCovered = -1;
@@ -300,11 +301,6 @@ export function threadRows(
     if (!shown.has(e.threadId)) continue;
     const isMain = names.get(e.threadId)?.place === "main";
     switch (e.type) {
-      case "thread.started":
-        if (!conversation && started.size > 0 && !started.has(e.threadId))
-          b.row({ kind: "divider", id: e.id, text: names.get(e.threadId)?.name ?? e.threadId });
-        started.add(e.threadId);
-        break;
       case "message": {
         const p = e.payload;
         if (p.role === "assistant") {
@@ -333,24 +329,25 @@ export function threadRows(
           let label: string;
           if (sender.kind === "runtime" && sender.notice) label = "Context notice";
           else if (isMain) {
-            // The researcher's words reach main inside a runtime delivery that covers them.
-            let fromYou = sender.kind === "person";
+            // The researcher's words reach main inside a runtime delivery that covers them: the
+            // last of your messages in the range it covers (one delivery can carry several).
+            let yours: string | undefined;
             if (sender.kind === "runtime" && sender.covers) {
               const to = position.get(sender.covers);
               if (to !== undefined) {
-                for (let i = lastCovered + 1; i <= to && !fromYou; i++)
-                  fromYou = events[i]?.type === "person.message";
+                for (let i = lastCovered + 1; i <= to; i++) {
+                  const c = events[i];
+                  if (c?.type === "person.message") yours = c.id;
+                }
                 lastCovered = Math.max(lastCovered, to);
               }
             }
-            // The words show as the screen's own row, and what main was handed with them goes
-            // into it: the newest of your messages with nothing attached (one delivery can carry
-            // several; it goes to the last). Only with no such row does it get a row of its own.
-            if (fromYou) {
-              const mine = waiting.at(-1);
-              if (mine) {
+            // What main was handed goes into your message's own row; only with no such row does
+            // it get a row of its own.
+            if (yours) {
+              const mine = slotRows.get(yours);
+              if (mine?.person) {
                 mine.got = p.text;
-                waiting = [];
                 briefed.add(e.threadId);
                 break;
               }
@@ -384,7 +381,9 @@ export function threadRows(
           typeof input.text === "string"
         )
           say(step.id, input.text, e.createdAt);
-        else if (VISIBLE.has(step.name)) b.row({ kind: "step", id: step.id, step });
+        else if (held.has(step.id)) {
+          // The approval slot says what it would do; the call runs, if you say yes, as a job.
+        } else if (VISIBLE.has(step.name)) b.row({ kind: "step", id: step.id, step });
         else b.step(step);
         const id = (input as { id?: unknown } | undefined)?.id;
         if (step.name === "report_output" && typeof id === "string")
@@ -428,10 +427,14 @@ export function runningTitle(rows: readonly Row[]): string | undefined {
     : undefined;
 }
 
-/** The newest `activity` text in the thread: what the agent last said it is doing. */
+/**
+ * What the agent last said it is doing (`activity`) in its current turn: the scan stops at your
+ * newest message and at anything else main was handed, which start a new turn.
+ */
 export function latestActivity(rows: readonly Row[]): string | undefined {
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i];
+    if ((r?.kind === "slot" && r.person) || r?.kind === "brief") return undefined;
     const said = r?.kind === "process" ? activityOf(r.steps) : undefined;
     if (said) return said;
   }

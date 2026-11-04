@@ -14,17 +14,18 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   the page's stream; `useEvents`), so the page and its header read one log. Only durable events are
   kept.
 - **An agent's thread** (`transcript.ts`, `agent-threads.ts`, `transcript-view.tsx`,
-  `agent-thread.tsx`) is the body of the input page's Conversation (main) and of its Agents tab
-  (a worker): `agentEntries` lists main first (only when the run has one; `main` and every
-  `main.N` of a review are one entry, a divider where each later one starts), then every worker
+  `agent-thread.tsx`) is the body of the input page's Conversation (main) and of a worker's view
+  in its Agents tab: `agentEntries` gives main (only when the run has one; `main` and every
+  `main.N` of a review are one entry, in log order with nothing between them), then every worker
   or check in start order, from `workersOf` and `agentLog`'s `place`, never a thread's `kind` or
   `role`. `threadRows` derives rows for the picked thread only, from durable events (the stream
   sends no token deltas): the agent's words in the open, main's `message` calls to the researcher
   in the same voice (one `prose` row kind). With `conversation` (main's Conversation) each turn's
-  first words, the thread's and each after a `person` slot, carry "The AI" and the time, and no
-  divider marks a later `main.N`. A screen puts its own rows into the thread by log position
+  first words, the thread's and each after a `person` slot, carry "The AI" and the time. A screen puts its own rows into the thread by log position
   (`Slot`s, each placed before the first event past its `seq`, closing the fold it lands in; `slot`
-  renders them): the Conversation's messages and approvals. The calls that change results
+  renders them): the Conversation's messages and approvals. A call main held for the
+  researcher's yes (`approval.requested`) gets no row of its own: its approval slot is the row,
+  and a yes runs it as a job outside any thread. The calls that change results
   (`VISIBLE`: `start_worker`, `report_output`, `change_outputs`) are rows of their own in every
   thread, so the steps around one form two folds; a report reads by catalog name (`nameOf`) and
   gains ", version N" when its `output.published` lands (matched by `versionPath`). Reasoning and
@@ -33,7 +34,9 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   rows inside); a fold with no activity shows the count alone, reasoning alone "Thought", notes
   alone the last note. Bodies are built on first open (`ProcessDisclosure`, `ActivityRow`); a call
   with no result is running, and the live line names it (in the Conversation it is main's newest
-  `activity` text instead, and a screen's `waiting` text, without a pulse, while nothing works);
+  `activity` text in its current turn, which ends at your newest message or anything else main
+  was handed, else "Working"; a screen can word the line itself, `line`: the queue without a
+  pulse, a call you approved while its job runs);
   on an ended run it reads stopped. Tool arguments and output show their last 8000
   characters with a "Shortened" note. `start_worker`, `message` and `close_worker` name their
   worker through `AgentLinks`, and `Markdown`'s `agents` prop turns inline code that is exactly
@@ -42,9 +45,10 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   intake"). What a thread was told folds quieter than its steps: the system prompt is "The AI's
   instructions" (later ones "The AI's tools changed"), a summary "The AI summarized its work so
   far". On main, the researcher's words arrive inside a runtime delivery whose `covers` range holds
-  a `person.message`: that delivery attaches to the newest `person` slot with nothing attached
-  (`got`, shown under it as "What the AI got with your message"; one delivery covering several
-  messages goes to the last), and only with no such slot gets a row of its own; other runtime
+  a `person.message`: that delivery attaches to the slot of the last `person.message` in its
+  range (`got`, shown under it as "What the AI got with your message"; one delivery covering
+  several messages goes to the last), by id, not to whichever of your messages was placed last,
+  and only with no such slot gets a row of its own (`transcript.test.ts` holds this); other runtime
   deliveries are "News from the run". On a worker, the first is "Brief", later ones "Message from
   <name>" or "News from the run". The scroll follows the newest line only when the reader was at the bottom before the
   update, and an ended thread opens at the top unless the screen asks for its end (`opensAtEnd`). Origin: the transcript viewer deleted with the task loop
