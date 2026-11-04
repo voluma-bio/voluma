@@ -188,7 +188,7 @@ function personLines(m: PersonMessage, events: readonly RunEvent[], screenshot?:
     ...about,
     ...(marks.length > 0
       ? [
-          "Marks they attached (their annotations, not outputs; nothing changed until you change it). Their mm are on the image each was drawn on (voxel index times its spacing, from its voxel 0), not the scan's world mm; `marks_to_grid.py --drawn-on` takes that image's header:",
+          "Marks they attached (their annotations, not outputs; nothing changed until you change it). Their mm are on the image each was drawn on, not the scan's world mm:",
           ...marks,
         ]
       : []),
