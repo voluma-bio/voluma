@@ -30,3 +30,5 @@
 - **Delete `preFixStartFailure` in `review-assets.ts`** once no run a person can reopen holds an `assets.failed` from before `START_FAILED` ("the convert sandbox failed: the sandbox could not be started: …", e.g. staging `4df02afe`): reopen those first, or check every staging run's stream for the phrase (#559 review).
 
 - **Delete the image-mm half of a mark's delivery line.** `personLines` (`deliveries.ts`) prints a mark as voxels and, in parentheses, as image mm (voxel times spacing) for runs whose workflow snapshot's `marks_to_grid.py` still reads `--world` mm. Once no run started before `--voxels` (2026-11-04) can be reopened, drop the parentheses.
+
+- **A quick first look at the scan.** On a 2 GB OA6 scan the scan's review assets are ready about 8 minutes after it is published (staging `27ccb04f`: published 11:10:57 PT, `assets.ready` 11:18:51), so the panes show "Preparing" that long. Convert a low-resolution level first (e.g. the 1:4 level and no meshes), record it so review can draw it, then the full pyramid; review asks for what is ready. Needs a contract for a partial `assets.ready` (or a second event) and the viewer to take the coarser level.
