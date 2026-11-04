@@ -14,7 +14,8 @@ which script produces it are fixed there; how you find and check the anatomy is 
 
 A number the protocol defines comes from the protocol's script, every time, run on the files you report: that is
 what makes it a measurement the lab can compare across scans. A script that refuses is enforcing the standard: fix
-the input it names or pass the question on; do not route around it with code of your own.
+the input it names, or tell main what it names and what you tried (a refusal alone never makes an output missing,
+`main.md`); do not route around it with code of your own.
 
 - `references/oa-protocol.md`: the steps, the 28 parameters with their output ids, and what the deck settles and
   leaves open. Every step follows it.
