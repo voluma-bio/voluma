@@ -563,10 +563,11 @@ export function useSliceGestures(args: {
     };
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
-      // Shift + wheel steps slices (some browsers turn Shift + wheel into a sideways scroll).
-      if (event.shiftKey) {
+      // Shift + wheel, or the wheel over the slice slider, steps slices; up is the next slice, as
+      // on the slider (some browsers turn Shift + wheel into a sideways scroll).
+      if (event.shiftKey || (event.target as Element).closest("input[type=range]")) {
         const by = event.deltaY || event.deltaX;
-        if (by !== 0) step(Math.sign(by));
+        if (by !== 0) step(-Math.sign(by));
         return;
       }
       const v = view.current!;
@@ -589,7 +590,7 @@ export function useSliceGestures(args: {
         event.target !== element
       )
         return;
-      const by = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key];
+      const by = { ArrowUp: 1, ArrowDown: -1, PageUp: 10, PageDown: -10 }[event.key];
       if (by === undefined) return;
       event.preventDefault();
       step(by);

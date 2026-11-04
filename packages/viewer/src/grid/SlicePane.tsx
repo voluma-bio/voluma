@@ -895,7 +895,8 @@ export function SlicePane({
       aria-label={whole ? `Slice ${index + 1} of ${total}` : "Turned slice"}
       aria-describedby={sliceHelp}
     >
-      {/* The slice as a slider down the pane's left edge, its number above (as in Amira). */}
+      {/* The slice as a slider down the pane's left edge, the last slice at the top and its number
+          above (as in Amira); the arrows and the wheel move the same way. */}
       <span
         className={cx(CHIP, "top-2 left-2 tabular-nums")}
         title={whole ? undefined : "Counted along the scan's nearest axis"}
@@ -907,7 +908,7 @@ export function SlicePane({
         type="range"
         aria-label="Slice"
         aria-valuetext={`Slice ${at + 1} of ${scene.shapeZyx[counted]}`}
-        title="Drag, or Shift + scroll"
+        title="Drag or scroll"
         min={0}
         max={scene.shapeZyx[counted]! - 1}
         value={at}
@@ -920,7 +921,7 @@ export function SlicePane({
           step((by * s[counted]!) / (Math.min(...s) * basis.normal[counted]!));
         }}
         onPointerDown={(event) => event.stopPropagation()}
-        className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [writing-mode:vertical-lr]"
+        className="pointer-events-auto absolute top-9 bottom-9 left-2 z-10 w-4 cursor-pointer accent-primary [direction:rtl] [writing-mode:vertical-lr]"
       />
       <span id={sliceHelp} className="sr-only">
         Focus slice: ↑/↓ 1 · Page Up/Down 10
