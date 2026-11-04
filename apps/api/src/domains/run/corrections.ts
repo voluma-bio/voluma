@@ -9,7 +9,7 @@ import { approvalAnswerId, approvalSettledId } from "@voluma/contracts/agents";
 import { runEventSchema } from "@voluma/contracts/events";
 import type { AnswerApprovalRequest, PersonMessage } from "@voluma/contracts/messages";
 import { outputsFold } from "@voluma/contracts/output-fold";
-import { type Run, usesOwnKey } from "@voluma/contracts/run";
+import type { Run } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
@@ -126,7 +126,7 @@ function reopenKeys(
   caller: Caller,
   run: { id: string; credentials: Run["credentials"] },
 ) {
-  if (!usesOwnKey(run.credentials)) return null;
+  if (run.credentials !== "own") return null;
   if (!caller.keys)
     throw new HTTPException(403, {
       message:

@@ -270,7 +270,7 @@ export const runSchema = z.object({
   /** Free text the user added at the start; the workflow's main thread reads it. */
   notes: z.string().max(4000).optional(),
   /** Who pays for models and sandboxes; see the header. */
-  credentials: z.enum(["voluma", "own", "visitor"]),
+  credentials: z.enum(["voluma", "own"]),
   /**
    * The model every role of the run uses, chosen by the API when the run is created (see the
    * header). Absent on runs made before the choice existed: the runner then uses its own
@@ -320,12 +320,6 @@ const keyField = z.string().min(1).max(512);
  */
 export const ownKeysSchema = z.object({ metaApiKey: keyField });
 export type OwnKeys = z.infer<typeof ownKeysSchema>;
-
-/**
- * Whether a run spends the starter's own key. `visitor` is the old stored name of `own`
- * (renamed in two deploys); every reader goes through this. Step 2 deletes it and `visitor`.
- */
-export const usesOwnKey = (credentials: Run["credentials"]) => credentials !== "voluma";
 
 export const startRunRequestSchema = z.object({
   studyId: studyIdSchema,

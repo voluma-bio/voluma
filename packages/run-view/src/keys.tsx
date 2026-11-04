@@ -4,7 +4,7 @@
  * id so another user of the browser never sees them; the server seals them in the database only
  * while the run lives.
  */
-import { type OwnKeys, ownKeysSchema, type Run, usesOwnKey } from "@voluma/contracts/run";
+import { type OwnKeys, ownKeysSchema, type Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
 
@@ -35,7 +35,7 @@ export function keysToReopen(
   userId: string,
   run: { credentials: Run["credentials"]; state: { status: string } },
 ): OwnKeys | undefined {
-  return usesOwnKey(run.credentials) && run.state.status === "ended" ? loadKeys(userId) : undefined;
+  return run.credentials === "own" && run.state.status === "ended" ? loadKeys(userId) : undefined;
 }
 
 const saveKeys = (userId: string, keys: OwnKeys) =>

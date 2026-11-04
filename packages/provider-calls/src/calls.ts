@@ -64,8 +64,7 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
     if (!run.lease_ok) return { status: 401, reason: "the run was claimed again" };
     if (!run.lease_live) return { status: 401, reason: "the run's lease expired" };
     // The database decides whose keys a run spends; a token minted the other way is a lane-2 bug.
-    // `visitor` is the old stored name of `own`; step 2 of the rename makes this `=== "own"`.
-    if ((run.credentials !== "voluma") !== call.own) {
+    if ((run.credentials === "own") !== call.own) {
       return { status: 403, reason: "the token's keys do not match the run's credentials" };
     }
     const [open] = await tx

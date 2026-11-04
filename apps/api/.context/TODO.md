@@ -1,12 +1,5 @@
 # TODO
 
-- **Step 2 of `credentials: "visitor"` → `"own"`, once step 1 is live on API, runner and gateway.**
-  Migration `UPDATE runs SET credentials = 'own' WHERE credentials = 'visitor'` (idempotent); the
-  API writes `own` (`pg-queue.ts`) and the `schema.ts` enum and SQL literals (`pg-runs.ts`, `pg-queue.ts`)
-  say `own`; the contracts enum drops `visitor` and `usesOwnKey` is deleted; the runner mints the
-  gateway token's `ownKeys` and the gateway and `TokenClaims` drop `visitorKeys`; `provider-calls`
-  compares `=== "own"`. First parse every staging run's stream and every `run.json` under
-  `r2:dev/runs/` with the new `runSchema`. The localStorage key `voluma.visitor-keys.<userId>` keeps its name.
 - **A new guest cookie is a fresh upload cap: accepted until after the Nov 4 demo (Jimmy, 3 Nov).**
   The per-person cap (`UPLOAD_LIMIT_PER_USER_GB`, [deploy.md](deploy.md)) counts per user id, and
   guests cost nothing to mint, so clearing cookies gives 50 GB more. After the demo: a combined cap

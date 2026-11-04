@@ -97,7 +97,7 @@
  * values from every error it reports (`run.ts`).
  */
 import { z } from "zod";
-import { ownKeysSchema, runSchema, usesOwnKey } from "./run";
+import { ownKeysSchema, runSchema } from "./run";
 
 /**
  * How long a run stays leased after the server's last heartbeat for it. It must stay longer than
@@ -175,7 +175,7 @@ export const claimSchema = z
     /** Present on every claim after the run's first: why the previous claim ended. */
     previousClaim: z.object({ reason: claimEndReasonSchema }).optional(),
   })
-  .refine((c) => usesOwnKey(c.run.credentials) === (c.keys !== undefined), {
+  .refine((c) => (c.run.credentials === "own") === (c.keys !== undefined), {
     path: ["keys"],
     message: "keys go with an own-key run and no other",
   });
