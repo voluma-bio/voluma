@@ -44,7 +44,7 @@ MAX_STEP = 3      # voxels: consecutive line points farther apart than this are 
 ASPECT = 0.42     # crop height / width, the same for every section
 MARGIN = 6        # voxels of background either side of the tibia
 SCALE_UM = 100
-FILL_ALPHA = 0.45
+FILL_ALPHA = 0.6
 # Okabe-Ito orange and sky blue: distinct for every colour-vision type, and both read on grey CT.
 REFERENCE = "#E69F00"
 FINE_TUNE = "#56B4E9"
@@ -72,7 +72,9 @@ def score_map(scan, prediction, label):
 
 
 def release_prediction(data_root, scan, tibia, label):
-    """The release recipe: three band seeds at 0.3, midline cut, regions voted. -> (cut lines, plate bands, scores) per section."""
+    """The release recipe: three band seeds at 0.3, midline cut, regions voted. -> (cut lines, plate bands, scores) per section.
+    The plate is the band where two of the three seeds agree, unclipped like serve.py's band output: pieces on other bone stay in it,
+    while the regions and their cut lines are built on the tibia only (labels.label_section)."""
     regions, bands, vs = [], [], None
     for seed in range(3):
         z = np.load(data_root / "finetune/preds" / f"l33-prob-s{seed}" / f"{scan}.npz")
@@ -87,8 +89,7 @@ def release_prediction(data_root, scan, tibia, label):
     scores = score_map(scan, {"V": np.asarray(vs), "mask": voted}, label)
     plate = np.stack(bands).sum(0) >= 2
     lines = {v: column_line(cutline.cut_boundary(voted[i], cutline.envelope(tibia[:, v, :]))) for i, v in enumerate(vs)}
-    # The plate inside the tibia's envelope, the part the cut line and the score use (the fibula's own plate is left out).
-    return lines, {v: plate[i] & cutline.envelope(tibia[:, v, :]) for i, v in enumerate(vs)}, scores
+    return lines, dict(zip(vs, plate)), scores
 
 
 def stock_prediction(stock_root, scan, label):
@@ -130,8 +131,8 @@ def show_section(ax, image, box):
 
 def draw_line(ax, line, colour):
     u, w = polyline(line)
-    halo = [patheffects.Stroke(linewidth=1.6, foreground="black", alpha=0.4), patheffects.Normal()]
-    ax.plot(u, w, color=colour, lw=0.8, solid_capstyle="round", path_effects=halo)
+    halo = [patheffects.Stroke(linewidth=1.0, foreground="black", alpha=0.5), patheffects.Normal()]
+    ax.plot(u, w, color=colour, lw=0.5, solid_capstyle="round", path_effects=halo)
 
 
 def draw_fill(ax, mask, box, colour):
@@ -189,15 +190,15 @@ def render(rows, out):
     plt.style.use(["science", "nature", "no-latex"])
     plt.rcParams.update(STYLE)
     width_in = 180 / 25.4                                   # a double-column figure
-    label_w, gap = 0.95, 0.04                               # inches
-    panel_w = (width_in - label_w - 2 * gap) / 3
+    label_w, gap, edge = 0.95, 0.04, 0.09                   # inches; edge: the right margin, matching the row labels' left one
+    panel_w = (width_in - label_w - 2 * gap - edge) / 3
     panel_h = panel_w * ASPECT
     header, legend_h, row_gap = 0.3, 0.3, 0.045
     height_in = header + len(rows) * panel_h + (len(rows) - 1) * row_gap + legend_h
     fig = plt.figure(figsize=(width_in, height_in), dpi=300)
-    grid = fig.add_gridspec(len(rows), 3, left=label_w / width_in, right=1, top=1 - header / height_in, bottom=legend_h / height_in,
-                            wspace=gap / panel_w, hspace=row_gap / panel_h)
-    titles = ("Expert labelled", 'Meta SAM 3.1 · prompt "growth plate"', 'Our fine-tune · prompt "growth plate"')
+    grid = fig.add_gridspec(len(rows), 3, left=label_w / width_in, right=1 - edge / width_in, top=1 - header / height_in,
+                            bottom=legend_h / height_in, wspace=gap / panel_w, hspace=row_gap / panel_h)
+    titles = ("Reference cut line", 'Meta SAM 3.1 · prompt "growth plate"', 'Our fine-tune · prompt "growth plate"')
 
     for r, row in enumerate(rows):
         box = crop_box(row["env"], row["reference"])
