@@ -16,3 +16,4 @@
 - A held call's row shows "running" for the few seconds before `approval.requested` lands, then disappears. Defer the visible row for gated tools while the run is reviewing.
 - `held` in `threadRows` is keyed by `toolCallId` alone. Key it by `${threadId}:${toolCallId}`.
 - Fold labels and the live line rely on main's `activity` lines, but main on deepseek-flash wrote none on run 908b9361 (#596).
+- The worker's name link covers the middle of the "Started worker" row, so a click there opens Agents instead of expanding the row. Consider keeping the name link to the name only.

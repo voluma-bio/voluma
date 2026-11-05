@@ -28,8 +28,16 @@ import { plainError } from "./run-error";
 import { clockOf } from "./run-status";
 import type { Row, Step, ToolStep } from "./transcript";
 
-/** The agents a name in the thread can open: the names that are agents, and what opening one does. */
-export type AgentLinks = { names: ReadonlySet<string>; open: (name: string) => void };
+/**
+ * The agents a name in the thread can open: the names that are agents, and what opening one does.
+ * With `ids` (main's Conversation), a "Started worker" row also expands into that worker's thread.
+ */
+export type AgentLinks = {
+  names: ReadonlySet<string>;
+  open: (name: string) => void;
+  /** A worker's thread ids, by any name it answers to. */
+  ids?: (name: string) => readonly string[] | undefined;
+};
 
 /** Most of a call's arguments or output shown when its fold opens; the tail is kept. */
 const SHOWN_CHARS = 8000;
@@ -37,12 +45,15 @@ const SHOWN_CHARS = 8000;
 export function TranscriptView({
   rows,
   links,
+  worker,
   slot,
   live,
   empty,
 }: {
   rows: Row[];
   links?: AgentLinks;
+  /** A started worker's thread, shown when its "Started worker" row is opened; built on open. */
+  worker?: (name: string) => ReactNode;
   /** Renders a `slot` row by its id. */
   slot?: (id: string) => ReactNode;
   /**
@@ -71,7 +82,7 @@ export function TranscriptView({
                   )}
                 </>
               ) : (
-                <RowView row={row} links={links} />
+                <RowView row={row} links={links} worker={worker} />
               )}
             </li>
           ))}
@@ -94,7 +105,9 @@ export function TranscriptView({
   );
 }
 
-function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: AgentLinks }) {
+type StepProps = { links?: AgentLinks; worker?: (name: string) => ReactNode };
+
+function RowView({ row, links, worker }: StepProps & { row: Exclude<Row, { kind: "slot" }> }) {
   switch (row.kind) {
     case "prose":
       return row.head ? (
@@ -113,13 +126,13 @@ function RowView({ row, links }: { row: Exclude<Row, { kind: "slot" }>; links?: 
         <ProcessDisclosure label={row.label}>
           <div className="space-y-1">
             {row.steps.map((s) => (
-              <StepView key={s.id} step={s} links={links} />
+              <StepView key={s.id} step={s} links={links} worker={worker} />
             ))}
           </div>
         </ProcessDisclosure>
       );
     case "step":
-      return <StepView step={row.step} links={links} />;
+      return <StepView step={row.step} links={links} worker={worker} />;
     case "brief":
       return <Told label={row.label} text={row.text} />;
     case "failure":
@@ -170,7 +183,7 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   segment_sam: Wand,
 };
 
-function StepView({ step, links }: { step: Step; links?: AgentLinks }) {
+function StepView({ step, links, worker }: StepProps & { step: Step }) {
   switch (step.kind) {
     case "reasoning":
       return (
@@ -180,7 +193,9 @@ function StepView({ step, links }: { step: Step; links?: AgentLinks }) {
       );
     case "note":
       return <ActivityRow Icon={Cog} title={step.text} status={step.failed ? "error" : "done"} />;
-    case "tool":
+    case "tool": {
+      const started =
+        step.name === "start_worker" && step.target && worker ? step.target : undefined;
       return (
         <ActivityRow
           Icon={TOOL_ICON[step.name] ?? Terminal}
@@ -207,9 +222,16 @@ function StepView({ step, links }: { step: Step; links?: AgentLinks }) {
           }
           subtitle={step.name === "start_worker" ? firstLine(step.input) : undefined}
           status={step.status}
-          expand={() => <ToolBody step={step} />}
+          expand={() =>
+            started && worker ? (
+              <div className="ml-1 border-l border-border pl-3">{worker(started)}</div>
+            ) : (
+              <ToolBody step={step} />
+            )
+          }
         />
       );
+    }
   }
 }
 

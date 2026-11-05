@@ -40,7 +40,9 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   on an ended run it reads stopped. Tool arguments and output show their last 8000
   characters with a "Shortened" note. `start_worker`, `message` and `close_worker` name their
   worker through `AgentLinks`, and `Markdown`'s `agents` prop turns inline code that is exactly
-  an agent's name into the same link. Tool titles are `toolTitle`: a new tool shows as its name and
+  an agent's name into the same link. With `AgentLinks.ids` (only main's Conversation passes
+  it), opening a "Started worker" row shows that worker's thread in place instead of the call
+  (`WorkerRows` in `agent-thread.tsx`, built only while open); its own workers don't expand. Tool titles are `toolTitle`: a new tool shows as its name and
   arguments until it gets a case; a fold's digest names a few other calls ("closed worker
   intake"). What a thread was told folds quieter than its steps: the system prompt is "The AI's
   instructions" (later ones "The AI's tools changed"), a summary "The AI summarized its work so

@@ -5,6 +5,8 @@
  * agent, so picking another starts at its own end. A screen puts its own rows in by log position
  * (`slots`, rendered by `slot`). Main's Conversation (`conversation`) says main's newest status
  * line in the live line, not the running call, and the screen can word the line itself (`line`).
+ * With `links.ids`, a "Started worker" row opens into that worker's thread in place (`WorkerRows`),
+ * whose own workers open only in the Agents tab: one level.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
@@ -85,6 +87,18 @@ export function AgentThread({
       <TranscriptView
         rows={rows}
         links={links}
+        worker={
+          links?.ids &&
+          ((name) => (
+            <WorkerRows
+              events={events}
+              ids={links.ids?.(name) ?? []}
+              live={live}
+              links={links}
+              nameOf={nameOf}
+            />
+          ))
+        }
         slot={slot}
         live={
           line
@@ -99,4 +113,29 @@ export function AgentThread({
       />
     </div>
   );
+}
+
+/** A worker's rows inline under its "Started worker" row, built only while that row is open. */
+function WorkerRows({
+  events,
+  ids,
+  live,
+  links,
+  nameOf,
+}: {
+  events: readonly RunEvent[];
+  ids: readonly string[];
+  live: boolean;
+  links: AgentLinks;
+  nameOf?: (id: string) => string;
+}) {
+  const key = ids.join(" ");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is `ids`' content
+  const rows = useMemo(
+    () => threadRows(events, ids, live, { nameOf }),
+    [events, key, live, nameOf],
+  );
+  // Its own workers' names still open the Agents tab, but don't expand: `ids` dropped.
+  const own = useMemo(() => ({ names: links.names, open: links.open }), [links]);
+  return <TranscriptView rows={rows} links={own} empty="It wrote nothing." />;
 }
