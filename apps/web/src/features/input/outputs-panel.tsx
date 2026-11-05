@@ -21,7 +21,6 @@ import {
   type OutputItem,
   type OutputRow,
   type OutputsReview,
-  openItemsOf,
   ROLE_WORD,
   rowStatus,
   type TrailRow,
@@ -49,11 +48,6 @@ export type FinalOutputsProps = {
   accepting: Accepting;
 };
 
-// An output's own open items, as the head's To check counts them (`OutputsReview.open`: only those
-// of outputs a value rests on), so the sections add up to the head.
-const ownItems = (review: OutputsReview, r: OutputRow) =>
-  r.items.filter((i) => i.output === r.id && review.open.has(i.key));
-
 export function FinalOutputs(props: FinalOutputsProps) {
   const { review, current, live } = props;
   const [listHeight, setListHeight] = useState<number>();
@@ -69,7 +63,8 @@ export function FinalOutputs(props: FinalOutputsProps) {
   return (
     <div ref={box} className="flex min-h-0 flex-1 flex-col">
       <div
-        className="min-h-24 shrink-0 overflow-y-auto pb-2"
+        // The max keeps the details in view when the panel gets shorter after a drag.
+        className="max-h-[calc(100%-10rem)] min-h-24 shrink-0 overflow-y-auto pb-2"
         style={{ height: listHeight ?? "45%" }}
       >
         <OutputList {...props} />
@@ -92,7 +87,7 @@ function Divider({
 }) {
   const clamp = (h: number) => {
     const total = box.current?.clientHeight ?? 600;
-    return Math.round(Math.min(Math.max(h, 96), total - 160));
+    return Math.round(Math.max(Math.min(h, total - 160), 96));
   };
   const now = () => height ?? (box.current?.clientHeight ?? 600) * 0.45;
   return (
@@ -102,6 +97,8 @@ function Divider({
       aria-orientation="horizontal"
       aria-label="Resize the list and the details"
       aria-valuenow={Math.round(now())}
+      aria-valuemin={96}
+      aria-valuemax={Math.max((box.current?.clientHeight ?? 600) - 160, 96)}
       tabIndex={0}
       onPointerDown={(e) => {
         const bar = e.currentTarget;
@@ -109,9 +106,14 @@ function Divider({
         const top = box.current?.getBoundingClientRect().top ?? 0;
         const move = (ev: PointerEvent) => onHeight(clamp(ev.clientY - top));
         bar.addEventListener("pointermove", move);
-        bar.addEventListener("pointerup", () => bar.removeEventListener("pointermove", move), {
-          once: true,
-        });
+        // Released, cancelled or lost: the drag ends either way.
+        bar.addEventListener(
+          "lostpointercapture",
+          () => bar.removeEventListener("pointermove", move),
+          {
+            once: true,
+          },
+        );
       }}
       onKeyDown={(e) => {
         const by = e.key === "ArrowUp" ? -24 : e.key === "ArrowDown" ? 24 : 0;
@@ -125,9 +127,9 @@ function Divider({
 }
 
 function OutputList(props: FinalOutputsProps) {
-  const { review, onlyToCheck } = props;
-  const keep = (rows: OutputRow[]) =>
-    onlyToCheck ? rows.filter((r) => ownItems(review, r).length > 0) : rows;
+  const { review, onlyToCheck, live, nameOf } = props;
+  const ownOpen = (r: OutputRow) => rowStatus(r, live, nameOf).own.length > 0;
+  const keep = (rows: OutputRow[]) => (onlyToCheck ? rows.filter(ownOpen) : rows);
   const groups = [
     ...review.sections.map((s) => ({ title: s.title, rows: s.rows, steps: false })),
     { title: "Not in the workflow", rows: review.undeclared, steps: false },
@@ -148,7 +150,7 @@ function OutputList(props: FinalOutputsProps) {
       opens={
         onlyToCheck ||
         g.rows.some((r) => r.id === props.current?.id) ||
-        (!g.steps && g.rows.some((r) => openItemsOf(r).length > 0))
+        (!g.steps && g.rows.some(ownOpen))
       }
     />
   ));
@@ -171,7 +173,7 @@ function Section({
   // Opens by itself when it comes to hold the selection or an item; a click overrides until then.
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const open = toggled && toggled.when === opens ? toggled.open : opens;
-  const toCheck = rows.reduce((n, r) => n + ownItems(props.review, r).length, 0);
+  const toCheck = rows.reduce((n, r) => n + rowStatus(r, props.live, props.nameOf).own.length, 0);
   return (
     <section aria-label={title} className={cx(steps && "mt-1.5 border-border border-t")}>
       <button
@@ -215,41 +217,28 @@ function Section({
   );
 }
 
-/** What a row's mark says: its own checks, else whether it is in. */
-function markOf(
-  review: OutputsReview,
-  row: OutputRow,
-  live: boolean,
-  nameOf: (id: string) => string,
-) {
-  if (ownItems(review, row).length > 0)
-    return { status: "check" as const, word: OUTPUT_STATUS["to-check"].word };
-  return rowStatus(row, live, nameOf);
-}
-
 /** One output on one line: its mark, its name, then its value or how many to check. */
 function OutputLine({
   row,
-  review,
   current,
   onPick,
   live,
   nameOf,
   right,
   className,
-}: Pick<FinalOutputsProps, "review" | "current" | "onPick" | "live" | "nameOf"> & {
+}: Pick<FinalOutputsProps, "current" | "onPick" | "live" | "nameOf"> & {
   row: OutputRow;
   /** In place of the value: a role in Based on. */
   right?: ReactNode;
   className?: string;
 }) {
-  const { status, word } = markOf(review, row, live, nameOf);
+  const { status, word, own } = rowStatus(row, live, nameOf);
   const selected = row.id === current?.id;
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
-  const open = ownItems(review, row).length;
+  const open = own.length;
   return (
     <button
       ref={ref}
@@ -257,7 +246,8 @@ function OutputLine({
       aria-current={selected || undefined}
       onClick={() => onPick(row.id)}
       className={cx(
-        "relative flex h-7 w-full cursor-pointer items-center gap-2 pr-3 pl-8 text-left text-sm",
+        // scroll-mt: clear of the section's sticky head when scrolled into view.
+        "relative flex h-7 w-full scroll-mt-8 cursor-pointer items-center gap-2 pr-3 pl-8 text-left text-sm",
         selected
           ? "bg-select-tint before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-select"
           : "hover:bg-accent",
@@ -303,13 +293,7 @@ function Details({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
   const { nameOf, live } = props;
   const [report, setReport] = useState(false);
   const latest = row.state.latest;
-  const own = ownItems(props.review, row);
-  const waits = rowStatus(row, live, nameOf)
-    .waits.map((id) => ({
-      id,
-      count: row.items.filter((i) => i.output === id && props.review.open.has(i.key)).length,
-    }))
-    .filter((w) => w.count > 0);
+  const { own, waits, word } = rowStatus(row, live, nameOf);
   const restsOn = row.trail
     .filter((r) => r.depth === 1)
     .sort((a, b) => ROLE_ORDER.indexOf(a.role ?? "base") - ROLE_ORDER.indexOf(b.role ?? "base"));
@@ -348,9 +332,7 @@ function Details({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
           </button>
         </VersionLine>
       ) : (
-        <p className="m-0 text-muted-foreground text-xs">
-          {row.state.missingReason ?? rowStatus(row, live, nameOf).word}
-        </p>
+        <p className="m-0 text-muted-foreground text-xs">{row.state.missingReason ?? word}</p>
       )}
       {row.provisional && (
         <p className="m-0 text-muted-foreground text-xs">

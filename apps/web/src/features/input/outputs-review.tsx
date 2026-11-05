@@ -4,8 +4,8 @@
  * the only place anything on the run changes: `main-conversation.tsx`; badged while main waits on
  * your yes), Labels, the workers (`run-agents.tsx`) and the inputs (the shared tree, named by
  * `INPUT_WORD`). In the centre the output in view on four panes (`QuadViewer`) with the tool bar
- * docked under them, or a file output or the whole run's graph in the panes' place. On the right, Final outputs: the picked value opens in place with what it
- * rests on. Everything comes from the run's stream as it arrives: the output fold
+ * docked under them, or a file output or the whole run's graph in the panes' place. On the right, Final outputs: a list of the
+ * run's outputs over the selected one's details (`outputs-panel.tsx`). Everything comes from the run's stream as it arrives: the output fold
  * (`outputsFold`), its converted assets and the conversation, so statuses and values update live.
  *
  * The URL keeps `output` (the value picked in Final outputs), `trail` (an output it rests on,
@@ -179,7 +179,7 @@ export function OutputsReview({
       ),
     [setParams],
   );
-  // The value open in place: the URL's, else the output of the first open check, else the first
+  // The value selected: the URL's, else the output of the first open check, else the first
   // final output with an open item, else the first. An output that is not in the list opens under the first value resting on it.
   const finals = review.sections.flatMap((s) => s.rows);
   const listed = [...finals, ...review.undeclared];
@@ -205,14 +205,26 @@ export function OutputsReview({
   // value in view when that rests on it, else under the first value resting on it.
   const show = useCallback(
     (id: string) => {
-      if (listed.some((r) => r.id === id)) select({ output: id, trail: null, item: null });
-      else if (selected?.trail.some((t) => t.id === id)) select({ trail: id, item: null });
-      else {
-        const value = restingOn(id);
-        select({ output: value?.id ?? id, trail: id, item: null });
+      if (listed.some((r) => r.id === id)) {
+        select({ output: id, trail: null, item: null });
+        return;
       }
+      // The value in view is read from the URL being replaced, not this render's `selected`: the
+      // router applies a pick in a transition, so a second quick click would see the first's value.
+      setParams(
+        (prev) => {
+          const held = review.rows.get(prev.get("output") ?? "") ?? selected;
+          const value = held?.trail.some((t) => t.id === id) ? held : restingOn(id);
+          const next = new URLSearchParams(prev);
+          next.set("output", value?.id ?? id);
+          next.set("trail", id);
+          next.delete("item");
+          return next;
+        },
+        { replace: true },
+      );
     },
-    [listed, restingOn, select, selected],
+    [listed, restingOn, select, selected, setParams, review.rows],
   );
   const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
@@ -825,8 +837,8 @@ function CentreBar({ onBack }: { onBack: () => void }) {
 }
 
 /**
- * Over the panes' top-left corner: the output in view, its value and its status (a value resting on
- * an output with open checks waits on it, one click from them).
+ * Over the panes' top-left corner: the output in view, its value and its status; a value that is in
+ * and rests on outputs with open checks names each instead, one click from them.
  */
 function SceneChip({
   live,
@@ -853,7 +865,6 @@ function SceneChip({
   onWaitsOn: (id: string) => void;
 }) {
   if (!inView || (!root && !soFar)) return null;
-  // A value waiting on the checks of what it rests on names each, one click away.
   const { status, word, waits } = rowStatus(inView, live, nameOf);
   const quiet = "shrink-0 text-muted-foreground text-xs";
   // Two lines, so it stays within the top-left pane: what is shown, then its status.
@@ -884,9 +895,9 @@ function SceneChip({
           </span>
         )}
       </div>
-      {waits.length > 0 ? (
-        // One button per output it rests on with open checks, opening that output.
-        waits.map((id) => (
+      {status === "done" && waits.length > 0 ? (
+        // In, with nothing of its own open: one button per output it rests on with open checks.
+        waits.map(({ id }) => (
           <button
             key={id}
             type="button"
