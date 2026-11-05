@@ -49,7 +49,10 @@ export type FinalOutputsProps = {
   accepting: Accepting;
 };
 
-const ownOpen = (r: OutputRow) => openItemsOf(r).filter((i) => i.output === r.id).length;
+// An output's own open items, as the head's To check counts them (`OutputsReview.open`: only those
+// of outputs a value rests on), so the sections add up to the head.
+const ownItems = (review: OutputsReview, r: OutputRow) =>
+  r.items.filter((i) => i.output === r.id && review.open.has(i.key));
 
 export function FinalOutputs(props: FinalOutputsProps) {
   const { review, current, live } = props;
@@ -123,7 +126,8 @@ function Divider({
 
 function OutputList(props: FinalOutputsProps) {
   const { review, onlyToCheck } = props;
-  const keep = (rows: OutputRow[]) => (onlyToCheck ? rows.filter((r) => ownOpen(r) > 0) : rows);
+  const keep = (rows: OutputRow[]) =>
+    onlyToCheck ? rows.filter((r) => ownItems(review, r).length > 0) : rows;
   // Every published output that is not a value: what the values were made from.
   const steps = [...review.rows.values()].filter(
     (r) => r.state.latest && !r.state.final && r.state.declared,
@@ -171,7 +175,7 @@ function Section({
   // Opens by itself when it comes to hold the selection or an item; a click overrides until then.
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const open = toggled && toggled.when === opens ? toggled.open : opens;
-  const toCheck = rows.reduce((n, r) => n + ownOpen(r), 0);
+  const toCheck = rows.reduce((n, r) => n + ownItems(props.review, r).length, 0);
   return (
     <section aria-label={title} className={cx(steps && "mt-1.5 border-border border-t")}>
       <button
@@ -216,33 +220,40 @@ function Section({
 }
 
 /** What a row's mark says: its own checks, else whether it is in. */
-function markOf(row: OutputRow, live: boolean, nameOf: (id: string) => string) {
-  if (ownOpen(row) > 0) return { status: "check" as const, word: OUTPUT_STATUS["to-check"].word };
+function markOf(
+  review: OutputsReview,
+  row: OutputRow,
+  live: boolean,
+  nameOf: (id: string) => string,
+) {
+  if (ownItems(review, row).length > 0)
+    return { status: "check" as const, word: OUTPUT_STATUS["to-check"].word };
   return rowStatus(row, live, nameOf);
 }
 
 /** One output on one line: its mark, its name, then its value or how many to check. */
 function OutputLine({
   row,
+  review,
   current,
   onPick,
   live,
   nameOf,
   right,
   className,
-}: Pick<FinalOutputsProps, "current" | "onPick" | "live" | "nameOf"> & {
+}: Pick<FinalOutputsProps, "review" | "current" | "onPick" | "live" | "nameOf"> & {
   row: OutputRow;
   /** In place of the value: a role in Based on. */
   right?: ReactNode;
   className?: string;
 }) {
-  const { status, word } = markOf(row, live, nameOf);
+  const { status, word } = markOf(review, row, live, nameOf);
   const selected = row.id === current?.id;
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
-  const open = ownOpen(row);
+  const open = ownItems(review, row).length;
   return (
     <button
       ref={ref}
@@ -296,11 +307,13 @@ function Details({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
   const { nameOf, live } = props;
   const [report, setReport] = useState(false);
   const latest = row.state.latest;
-  const own = row.items.filter((i) => !i.resolved && i.output === row.id);
-  const waits = rowStatus(row, live, nameOf).waits.map((id) => ({
-    id,
-    count: openItemsOf(row).filter((i) => i.output === id).length,
-  }));
+  const own = ownItems(props.review, row);
+  const waits = rowStatus(row, live, nameOf)
+    .waits.map((id) => ({
+      id,
+      count: row.items.filter((i) => i.output === id && props.review.open.has(i.key)).length,
+    }))
+    .filter((w) => w.count > 0);
   const restsOn = row.trail
     .filter((r) => r.depth === 1)
     .sort((a, b) => ROLE_ORDER.indexOf(a.role ?? "base") - ROLE_ORDER.indexOf(b.role ?? "base"));
