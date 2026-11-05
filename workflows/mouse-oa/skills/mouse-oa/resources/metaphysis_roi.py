@@ -2,7 +2,7 @@
 
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
 it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `start_um` below it, and
-there is no thickness fallback. A curve point more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused,
+there is no thickness fallback. A curve point more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is warned on,
 naming the section, and so is a face with a gap over the plate (on a section, two points more than `max_gap_um` of the spec apart where the tibia lies within that below the line between them and anywhere above it; in V, two sections more than that apart over the rows with tibia within that of the face; where the face ends is not tested),
 and so is a face that jumps between neighbouring traced sections (a median W change, over the U columns both cover on the tibia's footprint
 when they share at least `jump_overlap_um`, of more than `max_jump_um` plus the sections' distance apart). The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
@@ -26,7 +26,7 @@ or from another grid is refused). This script reads these keys; any other unknow
                               traced on the coronal sections of tibia-hu.npy
   plate_eroded                optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
                               of the curve, any U range (integers, first <= last). It never replaces points: the section's distal curve
-                              must reach both ends of every marked range, or the script stops naming the section and U range;
+                              must reach both ends of every marked range, or the script warns, naming the section and U range;
                               inside a marked range its points follow the remaining bone
 Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
 V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
@@ -68,13 +68,14 @@ import objects
 import sidecar
 import viewlib as vl
 from annotations import (
+    check_gaps,
+    check_jumps,
+    check_off_tibia,
     eroded_marks,
     load_annotations,
     need,
-    refuse_gaps,
-    refuse_jumps,
-    refuse_off_tibia,
     traced_surface,
+    warn_on,
 )
 from envelope import close_and_fill, footprint
 from face_qc import delivered_faces
@@ -174,10 +175,10 @@ def main():
     if prox.shape != gd.shape:
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
     dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
-    refuse_off_tibia(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
-    refuse_gaps(ann, 'growth_plate_distal_curves', tib, a.spec, vox)
+    warn_on(check_off_tibia(ann, 'growth_plate_distal_curves', tib, a.spec, vox))
+    warn_on(check_gaps(ann, 'growth_plate_distal_curves', tib, a.spec, vox))
     on_bone = footprint(tib)
-    refuse_jumps(ann, 'growth_plate_distal_curves', on_bone, a.spec, vox)
+    warn_on(check_jumps(ann, 'growth_plate_distal_curves', on_bone, a.spec, vox))
     eroded, plate = eroded_marks(ann, 'growth_plate_distal_curves', h.shape, on_bone)
     check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox, eroded)
     w = np.arange(h.shape[0])[:, None, None]
