@@ -83,3 +83,6 @@
   `compartment_midpoint_u` on that section; none is derived from the growth plate's cross-section centres. Ask the lab
   which centre (per coronal section? the plate's centroid?) and whether the medial/lateral columns are centres of each
   compartment's plate cross-section; then derive the columns from the plate rather than from worker points.
+- **Tibia axis fit on short or flared tibiae.** A sweep of 52 scans: 13 tibia grids ended 0.5 to 50 degrees off W, most
+  where under 2 mm of tibia is in the field (the default `--axis-mm` 2.0-3.9 mm runs off the bone) and some where the
+  centroids sit on the flare. `tibia_frame.py` now warns; next, choose the window from the tibia's length in the field.
