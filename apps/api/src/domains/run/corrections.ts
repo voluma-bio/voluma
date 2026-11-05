@@ -15,7 +15,14 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import type { MessageSent } from "../../ports";
-import { admit, type Limits, refusalMessage, spentUsd } from "./admission";
+import {
+  admit,
+  type Limits,
+  needsModal,
+  noModalMessage,
+  refusalMessage,
+  spentUsd,
+} from "./admission";
 import { freezeAttached } from "./agent-review";
 import { noLease } from "./lease";
 import { eventLock, insertEvent, lockRun } from "./pg-event-log";
@@ -126,20 +133,21 @@ export async function endCorrection(
   });
 }
 
-/** What the reopen of a finished run needs besides the run: how to workflow-check it and seal keys. */
+/** What the reopen of a finished run needs besides the run: how to workflow-check it, judge and seal keys. */
 export type ReopenContext = {
   pinsOf: (workflowId: string) => WorkflowPin[] | undefined;
   sealer: KeySealer;
+  limits: Limits;
 };
 
 /**
  * The sealed keys a reopen stores. An own-key run's keys were wiped when it ended, so the request
- * brings them; a Voluma-key run holds none.
+ * brings them (a guest's with a Modal token, `needsModal`); a Voluma-key run holds none.
  */
 function reopenKeys(
-  sealer: KeySealer,
+  o: ReopenContext,
   caller: Caller,
-  run: { id: string; credentials: Run["credentials"] },
+  run: { id: string; labId: string; credentials: Run["credentials"] },
 ) {
   if (run.credentials === "voluma") return null;
   if (!caller.keys)
@@ -147,7 +155,9 @@ function reopenKeys(
       message:
         "This run used your own key, which Voluma does not keep after a run. Add your key to reopen it.",
     });
-  return sealer.seal(run.id, caller.keys);
+  if (needsModal(o.limits, run.labId, caller.keys))
+    throw new HTTPException(403, { message: noModalMessage });
+  return o.sealer.seal(run.id, caller.keys);
 }
 
 /** What `messageRefusal` judges of a run: a run row's columns, or a `Run` read (`messageTargetOf`). */
@@ -225,7 +235,7 @@ export async function messageRefusal(
  */
 export async function decideMessage(
   tx: Tx,
-  o: ReopenContext & { limits: Limits },
+  o: ReopenContext,
   reader: Reader,
   caller: Caller,
   runId: string,
@@ -288,7 +298,7 @@ export async function decideMessage(
     });
   // A run still going was admitted already; only a finished one is reopened through admission.
   const reopening = run.state === "ended";
-  const sealedKeys = reopening ? reopenKeys(o.sealer, caller, run) : null;
+  const sealedKeys = reopening ? reopenKeys(o, caller, run) : null;
   if (reopening) {
     const refused = admit(o.limits, reader.labId, await spentUsd(tx, reader.labId), run);
     if (refused === "no-key")
@@ -353,7 +363,7 @@ export async function answerApproval(
     throw new HTTPException(404, { message: "That request is not open." });
 
   if (run.state === "ended")
-    await reopen(tx, runId, answerId, caller.userId, reopenKeys(o.sealer, caller, run));
+    await reopen(tx, runId, answerId, caller.userId, reopenKeys(o, caller, run));
   await appendPersonEvent(tx, runId, {
     id: answerId,
     type,

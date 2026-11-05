@@ -11,7 +11,7 @@ export { type AgentEntry, agentEntries } from "./agent-threads";
 export { ApprovalCard, type ApprovalCardProps, approvalWords } from "./approval-card";
 export { Markdown } from "./chat/markdown";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
-export { KeysForm, keysToReopen, loadKeys, RunKeyLine } from "./keys";
+export { canStart, KeysForm, keysToReopen, loadKeys, RunKeyLine, useSavedKeys } from "./keys";
 export {
   inViewOf,
   itemsOfVersion,

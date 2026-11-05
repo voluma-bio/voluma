@@ -11,15 +11,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, createStudy } from "@voluma/api-client";
 import { inputsQuery, runModelsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
-import type { Input, OwnKeys, Run, RunThinking } from "@voluma/contracts/run";
+import type { Input, Run, RunThinking } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
 import {
+  canStart,
   formatDuration,
   formatUsd,
   inputHref,
-  loadKeys,
   RunKeyLine,
   runCost,
+  useSavedKeys,
 } from "@voluma/run-view";
 import {
   Breadcrumb,
@@ -36,7 +37,7 @@ import {
 import { workflowById } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useNavigate, useOutletContext } from "react-router";
+import { useLocation, useNavigate, useOutletContext } from "react-router";
 import { holdLeave } from "../../shell/deploys";
 import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./input-files";
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
@@ -108,6 +109,7 @@ function pilotOf(rows: { id: string; sample: Sample }[]): string[] {
 export function NewPage() {
   const me = useOutletContext<Me>();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
 
   const inputs = useQuery(inputsQuery());
@@ -121,7 +123,7 @@ export function NewPage() {
   const [panel, setPanel] = useState<string>();
   const [studyName, setStudyName] = useState("");
   const [pilot, setPilot] = useState(true);
-  const [keys, setKeys] = useState<OwnKeys | undefined>(() => loadKeys(me.userId));
+  const keys = useSavedKeys(me.userId);
   const [pickedModel, setPickedModel] = useState<string>();
   const [pickedThinking, setPickedThinking] = useState<RunThinking>();
   /** Start was pressed while scans were still uploading. */
@@ -215,8 +217,8 @@ export function NewPage() {
             ? "Name the study first."
             : !workflow
               ? "Choose a workflow first."
-              : !me.volumaKey && !keys
-                ? "Add your Meta key first."
+              : !canStart(me.volumaKey, keys)
+                ? "Add your Meta key and Modal token in Settings first."
                 : undefined;
 
   // One list for everyone. On a run that uses the user's own key (they saved one, or the account has no Voluma key),
@@ -484,7 +486,16 @@ export function NewPage() {
         </div>
 
         <div className="px-1">
-          <RunKeyLine userId={me.userId} volumaKey={me.volumaKey} keys={keys} onChange={setKeys} />
+          <RunKeyLine
+            volumaKey={me.volumaKey}
+            keys={keys}
+            onOpenSettings={() =>
+              navigate(location.pathname + location.search, {
+                replace: true,
+                state: { openSettings: true },
+              })
+            }
+          />
         </div>
 
         {WORKFLOWS.map((w) => (

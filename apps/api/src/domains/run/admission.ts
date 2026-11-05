@@ -3,7 +3,7 @@
  * it. `spentUsd` reads the org's spend; `admit` judges a run at a stage with it.
  * Examples are seeded, not work, so no spend includes them.
  */
-import type { Run } from "@voluma/contracts/run";
+import type { OwnKeys, Run } from "@voluma/contracts/run";
 import { sql } from "drizzle-orm";
 import type { Tx } from "./pg-runs";
 
@@ -46,6 +46,17 @@ export async function spentUsd(tx: Tx, labId: string): Promise<number> {
 
 /** Whether the org is configured to run on Voluma's keys: the one place that reads the org map for it. */
 export const mayUseVolumaKey = (limits: Limits, labId: string) => limits.voluma.has(labId);
+
+/** The 403 for a guest's own keys without a Modal token (`needsModal`). */
+export const noModalMessage =
+  "Add your Modal token in Settings to run on your own sandbox account.";
+
+/**
+ * True when `keys` start or reopen a run that would put its sandboxes on Voluma's Modal account for
+ * an org that may not use Voluma's keys (a guest): a guest must bring a Modal token. Members may.
+ */
+export const needsModal = (limits: Limits, labId: string, keys: OwnKeys | undefined) =>
+  keys !== undefined && !keys.modal && !mayUseVolumaKey(limits, labId);
 
 /**
  * Why `run` may not go on, or null. An own-key run is never refused (it costs Voluma only runner

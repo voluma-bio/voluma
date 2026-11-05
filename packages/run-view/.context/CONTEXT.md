@@ -78,11 +78,14 @@ no router. Its screens are the input review (`apps/web/src/features/input`) and 
   link is ticked by its status (a label overlay's is its map's; pending and missing are not yet in). `outputsReview` carries each row's
   `trail` and `chain` and the run's `others` (published, not final, not on a chain), so components
   only read them.
-- **Own keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
-  way an account without Voluma's key (`Me.volumaKey` false: a guest) runs (the API refuses a start without it, 403); an account with it may keep one too. A key
-  in this browser is sent with every start, and with a message or answer to a finished own-key run (`keysToReopen`: the server wiped the run's keys when it ended), and `RunKeyLine` next to each Start says whose key the
-  run uses and lets the user remove it. They live in localStorage under
-  `voluma.visitor-keys.<userId>`.
+- **Own keys** (`@voluma/run-view`, shared with `features/study`, `features/input` and the shell): a Meta key and a
+  Modal token, entered in the rail's Settings dropdown (`KeysForm`). An account without Voluma's key (`Me.volumaKey`
+  false: a guest) must give both to run (the API refuses a start without them, 403); an account with it may give a
+  Meta key alone, both, or neither. Keys in this browser are sent with every start, and with a message or answer to
+  a finished own-key run (`keysToReopen`: the server wiped the run's keys when it ended). Start and reopen surfaces
+  hold no form: `RunKeyLine` (and the input page's `ReopenKeys`) says whose keys the run uses and opens Settings
+  (location state `openSettings`), and they read the keys with `useSavedKeys`, which follows saves in this tab and
+  others. They live in localStorage under `voluma.visitor-keys.<userId>`.
 - **A run's status** (`runStatus`, `liveStatus`: a word and a `StatusMark` state) and the
   formatters (`formatUsd`, `formatDuration`, `plural`) are `@voluma/run-view`, shared with the study pages;
   `use-now.ts` is the clock. A completed run with open To check items reads "N to check"

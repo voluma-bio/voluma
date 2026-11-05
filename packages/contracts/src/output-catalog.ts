@@ -1,8 +1,8 @@
 /**
  * The outputs of a workflow in the agent model: what `workflows/<name>/outputs.yaml` declares.
  * Nothing here is about one domain: a workflow names its own things (bones, molecules) in the
- * file, not in this schema. This is an authoring schema: no stored payload embeds it
- * (`packages/contracts/.context/CONTEXT.md`).
+ * file, not in this schema. This is an authoring schema: no stored payload embeds it; a run's
+ * snapshot of the file is stored data, read leniently (below; `packages/contracts/.context/CONTEXT.md`).
  *
  * An output is one of five kinds. A `base` is what a scene is drawn on and fixes its coordinates;
  * an `overlay` is drawn on a base; a `value` is a number with a UCUM unit, always measured `on`
