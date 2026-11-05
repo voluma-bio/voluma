@@ -42,7 +42,11 @@ writes paths and prints **one JSON line**, never an array. A script that reports
 record**, for example `{"values": {"tv-roi": {"value": 1.42, "unit": "mm³", "definition": "ROI voxels × voxel
 volume", "kind": "measurement"}}}`, under the output ids you give it, so `report_output` binds to them. `kind` is `measurement` or `diagnostic`: a diagnostic (a voxel size, a count, a
 cross-check) helps you judge a measurement and is not an output. A script that refuses exits 2 with a sentence
-saying what to change: fix the input and run it again.
+saying what to change: fix the input and run it again. A script refuses only when it cannot write a valid result. A check
+the result fails is a **warning**: the script still writes it, and its printed line carries `warnings`, each a sentence
+naming what to look at. For each warning, look: fix the cause and run again, or, when what you see says the result is
+right, report it with a To check item that quotes the warning and says what you saw. Never pass a warning over in
+silence.
 
 Report a value outside the range the anatomy reference gives as it is, and say why in your report. A result that looks wrong has its
 cause in the data, the mask, the threshold or the method; never in a number adjusted to fit.

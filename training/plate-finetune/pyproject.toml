@@ -25,6 +25,8 @@ dependencies = [
 # Moving data and weights: the R2 dataset (dataset_r2.py), Hugging Face (upload_weights.py), the Modal launcher and server
 # (modal_train.py, serve.py; the Modal image installs this group too).
 release = ["boto3", "fastapi[standard]", "huggingface-hub", "modal==1.6.3"]
+# The README's comparison figure (make_comparison_figure.py).
+figure = ["matplotlib==3.11.2", "scienceplots==2.2.2"]
 
 [tool.uv]
 package = false

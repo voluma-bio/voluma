@@ -1,51 +1,44 @@
 /**
- * Final outputs, the input page's right side: a run's final values in main's
- * sections, then the outputs a worker reported that the workflow does not declare. The value
- * picked opens in place under its row: what it is, who made it, its report, its own To check
- * items, a line to each output it rests on that has open items (each item is drawn and decided
- * only under the output it is about), and "Based on": the outputs its latest version was measured
- * on, drawn beside, made from or drawn on, with "Earlier steps" opening the rest of its history in
- * the same list. A row there frames the panes on that output and opens its items and report. The
- * whole run's graph (W) is the place for what rests on an output. Lists separate by spacing.
+ * Final outputs, the input page's right side: a list on top, the selected output's details below,
+ * each scrolling on its own with a bar between them to resize. The list holds the run's values in
+ * main's sections (and "Not in the workflow"), then "Steps behind the values": every other output
+ * published. Every row is one line, and clicking any output's name, in the list or in the details,
+ * makes it the selection (`onPick`); the panes show it. The details: its value and what it is, the
+ * version with its report, its own To check items, a line to each output it rests on that has open
+ * items, and "Based on" (folded, last: Jimmy, Nov 4, "probably not that important to a researcher").
  *
- * While the run goes, each value's "rests on" chain ticks off as its links are published
- * (`OutputRow.chain`), and "Other outputs so far" lists what else is published
- * (`OutputsReview.others`). Once the run ends neither shows: the panel is the review.
+ * While the run goes, a value not in yet shows its chain ticking off as its links are published
+ * (`OutputRow.chain`). The list never changes size when something is selected or decided, so
+ * nothing moves under the pointer.
  *
  * Data: `outputsReview` (`@voluma/run-view`); review.md "Panels and views".
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { LinkRole } from "@voluma/contracts/output-catalog";
-import { hasVersion } from "@voluma/contracts/output-fold";
 import {
   type ChainLink,
-  clockOf,
   OUTPUT_STATUS,
   type OutputItem,
   type OutputRow,
   type OutputsReview,
-  openItemsOf,
   ROLE_WORD,
   rowStatus,
-  rowsToCheck,
   type TrailRow,
 } from "@voluma/run-view";
 import { cx, EmptyState, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { type Accepting, Items, Report, VersionLine } from "./version-report";
 
 export type FinalOutputsProps = {
   review: OutputsReview;
-  /** The value open in place. */
-  selected: OutputRow | undefined;
-  onSelect: (id: string) => void;
-  /** The output of its history whose report is open and whose output the panes show. */
-  open: string | undefined;
-  onOpen: (id: string | null) => void;
-  /** Only the rows with an open To check item (`rowsToCheck`). */
+  /** The output the details show and the panes show. */
+  current: OutputRow | undefined;
+  /** Makes an output the selection, wherever its name was clicked. */
+  onPick: (id: string) => void;
+  /** Only the rows with an open To check item of their own. */
   onlyToCheck: boolean;
-  /** The run has not ended: the panel adds what a run going shows. */
+  /** The run has not ended. */
   live: boolean;
   runId: string;
   events: readonly RunEvent[];
@@ -56,22 +49,10 @@ export type FinalOutputsProps = {
 };
 
 export function FinalOutputs(props: FinalOutputsProps) {
-  const { review, live, open } = props;
-  const others = live ? review.others : [];
-  // An output open from Other outputs opens there, not also under the value.
-  const openOther = others.some((r) => r.id === open);
-  return (
-    <>
-      <Values {...props} open={openOther ? undefined : open} />
-      {others.length > 0 && <OtherOutputs {...props} rows={others} />}
-    </>
-  );
-}
-
-function Values(props: FinalOutputsProps) {
-  const { review, selected, onlyToCheck, live } = props;
-  const { sections, undeclared } = review;
-  if (sections.length === 0 && undeclared.length === 0)
+  const { review, current, live } = props;
+  const [listHeight, setListHeight] = useState<number>();
+  const box = useRef<HTMLDivElement>(null);
+  if (review.sections.length === 0 && review.undeclared.length === 0)
     return (
       <div className="p-4">
         <EmptyState title={live ? "No outputs listed yet" : "No outputs were recorded"}>
@@ -79,70 +60,130 @@ function Values(props: FinalOutputsProps) {
         </EmptyState>
       </div>
     );
-  const checking = onlyToCheck ? rowsToCheck(review) : undefined;
-  const groups = checking
-    ? [
-        ...sections.map((s) => ({ ...s, rows: s.rows.filter((r) => checking.listed.includes(r)) })),
-        {
-          title: "Not in the workflow",
-          rows: undeclared.filter((r) => checking.listed.includes(r)),
-        },
-        { title: "Behind the values", rows: checking.behind },
-      ].filter((s) => s.rows.length > 0)
-    : [
-        ...sections,
-        ...(undeclared.length > 0 ? [{ title: "Not in the workflow", rows: undeclared }] : []),
-      ];
-  if (groups.length === 0)
-    return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing to check.</p>;
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 py-1.5">
-      {groups.map((s) => (
-        <Section
-          key={s.title}
-          {...props}
-          title={s.title}
-          rows={s.rows}
-          opens={
-            onlyToCheck || s.rows.some((r) => r.id === selected?.id || openItemsOf(r).length > 0)
-          }
-        />
-      ))}
+    <div ref={box} className="flex min-h-0 flex-1 flex-col">
+      <div
+        // The max keeps the details in view when the panel gets shorter after a drag.
+        className="max-h-[calc(100%-10rem)] min-h-24 shrink-0 overflow-y-auto pb-2"
+        style={{ height: listHeight ?? "45%" }}
+      >
+        <OutputList {...props} />
+      </div>
+      <Divider box={box} height={listHeight} onHeight={setListHeight} />
+      {current && <Details key={current.id} row={current} {...props} />}
     </div>
   );
+}
+
+/** The bar between the list and the details: drag it, or focus it and use ↑ ↓. */
+function Divider({
+  box,
+  height,
+  onHeight,
+}: {
+  box: React.RefObject<HTMLDivElement | null>;
+  height: number | undefined;
+  onHeight: (h: number) => void;
+}) {
+  const clamp = (h: number) => {
+    const total = box.current?.clientHeight ?? 600;
+    return Math.round(Math.max(Math.min(h, total - 160), 96));
+  };
+  const now = () => height ?? (box.current?.clientHeight ?? 600) * 0.45;
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a focusable separator is the ARIA splitter pattern; <hr> takes no focus.
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize the list and the details"
+      aria-valuenow={Math.round(now())}
+      aria-valuemin={96}
+      aria-valuemax={Math.max((box.current?.clientHeight ?? 600) - 160, 96)}
+      tabIndex={0}
+      onPointerDown={(e) => {
+        const bar = e.currentTarget;
+        bar.setPointerCapture(e.pointerId);
+        const top = box.current?.getBoundingClientRect().top ?? 0;
+        const move = (ev: PointerEvent) => onHeight(clamp(ev.clientY - top));
+        bar.addEventListener("pointermove", move);
+        // Released, cancelled or lost: the drag ends either way.
+        bar.addEventListener(
+          "lostpointercapture",
+          () => bar.removeEventListener("pointermove", move),
+          {
+            once: true,
+          },
+        );
+      }}
+      onKeyDown={(e) => {
+        const by = e.key === "ArrowUp" ? -24 : e.key === "ArrowDown" ? 24 : 0;
+        if (!by) return;
+        e.preventDefault();
+        onHeight(clamp(now() + by));
+      }}
+      className="relative h-[5px] shrink-0 cursor-row-resize touch-none border-border border-y bg-background outline-none after:absolute after:top-px after:left-1/2 after:-ml-3.5 after:h-px after:w-7 after:bg-line-strong hover:bg-select-tint focus-visible:bg-select-tint"
+    />
+  );
+}
+
+function OutputList(props: FinalOutputsProps) {
+  const { review, onlyToCheck, live, nameOf } = props;
+  const ownOpen = (r: OutputRow) => rowStatus(r, live, nameOf).own.length > 0;
+  const keep = (rows: OutputRow[]) => (onlyToCheck ? rows.filter(ownOpen) : rows);
+  const groups = [
+    ...review.sections.map((s) => ({ title: s.title, rows: s.rows, steps: false })),
+    { title: "Not in the workflow", rows: review.undeclared, steps: false },
+    { title: "Steps behind the values", rows: review.steps, steps: true },
+  ]
+    .map((g) => ({ ...g, all: g.rows, rows: keep(g.rows) }))
+    .filter((g) => g.rows.length > 0);
+  if (groups.length === 0)
+    return <p className="m-0 p-4 text-muted-foreground text-sm">Nothing to check.</p>;
+  return groups.map((g) => (
+    <Section
+      key={g.title}
+      {...props}
+      title={g.title}
+      rows={g.rows}
+      all={g.all}
+      steps={g.steps}
+      opens={
+        onlyToCheck ||
+        g.rows.some((r) => r.id === props.current?.id) ||
+        (!g.steps && g.rows.some(ownOpen))
+      }
+    />
+  ));
 }
 
 function Section({
   title,
   rows,
+  all,
+  steps,
   opens,
   ...props
 }: FinalOutputsProps & {
   title: string;
   rows: OutputRow[];
+  all: OutputRow[];
+  steps: boolean;
   opens: boolean;
 }) {
   // Opens by itself when it comes to hold the selection or an item; a click overrides until then.
   const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
   const open = toggled && toggled.when === opens ? toggled.open : opens;
-  // With the filter on, a row counts only the items it owns, so the sections add up to the head.
-  const toCheck = new Set(
-    rows.flatMap((r) =>
-      openItemsOf(r)
-        .filter((i) => !props.onlyToCheck || i.output === r.id)
-        .map((i) => i.key),
-    ),
-  ).size;
-  // While the run goes, a tick only once every row has a version (the panel head counts them).
-  const notIn = props.live ? rows.filter((r) => !hasVersion(r.state)).length : 0;
-  const first = rows.find((r) => r.value);
+  const toCheck = rows.reduce((n, r) => n + rowStatus(r, props.live, props.nameOf).own.length, 0);
   return (
-    <section aria-label={title} className="grid grid-cols-[minmax(0,1fr)]">
+    <section aria-label={title} className={cx(steps && "mt-1.5 border-border border-t")}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setToggled({ when: opens, open: !open })}
-        className="flex h-8 cursor-pointer items-center gap-1.5 px-3 text-left text-sm hover:bg-accent"
+        className={cx(
+          "sticky top-0 z-1 flex h-8 w-full cursor-pointer items-center gap-1.5 bg-card px-3 text-left text-sm hover:bg-accent",
+          steps ? "text-muted-foreground" : "font-semibold",
+        )}
       >
         <ChevronRight
           aria-hidden
@@ -151,354 +192,310 @@ function Section({
             open && "rotate-90",
           )}
         />
-        <span className="shrink-0 font-semibold">{title}</span>
-        {!open && first?.value && (
-          <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
-            {first.name} {first.value.text} {first.value.unit}
-          </span>
-        )}
-        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs">
+        <span className="min-w-0 truncate">{title}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1 font-normal text-xs">
           {toCheck > 0 ? (
             <>
               <StatusGlyph status="check" />
               <span className="text-check">{toCheck} to check</span>
             </>
-          ) : notIn > 0 ? null : (
-            <>
-              <StatusGlyph status="done" />
-              <span className="text-muted-foreground">{rows.length}</span>
-            </>
+          ) : (
+            <span className="text-muted-foreground">{all.length}</span>
           )}
         </span>
       </button>
       {open && (
-        <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] p-0">
-          {rows.map((r) =>
-            r.id === props.selected?.id ? (
-              <Opened key={r.id} row={r} {...props} />
-            ) : (
-              <li key={r.id}>
-                <ValueRow
-                  row={r}
-                  live={props.live}
-                  nameOf={props.nameOf}
-                  onSelect={() => props.onSelect(r.id)}
-                />
-                {props.live && <ChainLine chain={r.chain} nameOf={props.nameOf} />}
-              </li>
-            ),
-          )}
+        <ul className="m-0 list-none p-0">
+          {rows.map((r) => (
+            <li key={r.id}>
+              <OutputLine row={r} {...props} />
+            </li>
+          ))}
         </ul>
       )}
     </section>
   );
 }
 
-function ValueRow({
+/** One output on one line: its mark, its name, then its value or how many to check. */
+function OutputLine({
   row,
+  current,
+  onPick,
   live,
   nameOf,
-  selected = false,
-  bar = false,
-  onSelect,
-}: {
+  right,
+  className,
+}: Pick<FinalOutputsProps, "current" | "onPick" | "live" | "nameOf"> & {
   row: OutputRow;
-  live: boolean;
-  nameOf: (id: string) => string;
-  selected?: boolean;
-  /** The selection's blue bar: while nothing under it is open. */
-  bar?: boolean;
-  onSelect: () => void;
+  /** In place of the value: a role in Based on. */
+  right?: ReactNode;
+  className?: string;
 }) {
-  const { status, word, waits } = rowStatus(row, live, nameOf);
-  const ref = useScrolledTo(selected);
+  const { status, word, own } = rowStatus(row, live, nameOf);
+  const selected = row.id === current?.id;
+  const ref = useRef<HTMLButtonElement>(null);
+  // In view when selected, and again whenever its place in the list moves (sections above open
+  // as the run's events arrive); scrolling by hand doesn't move it, so it never snaps back.
+  const placed = useRef<number>(undefined);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!selected || !el) {
+      placed.current = undefined;
+      return;
+    }
+    if (el.offsetTop === placed.current) return;
+    placed.current = el.offsetTop;
+    el.scrollIntoView({ block: "nearest" });
+  });
+  const open = own.length;
   return (
     <button
       ref={ref}
       type="button"
       aria-current={selected || undefined}
-      onClick={onSelect}
+      onClick={() => onPick(row.id)}
       className={cx(
-        "relative flex h-[26px] w-full cursor-pointer items-center gap-2 pr-3 pl-5 text-left text-sm",
-        selected ? "bg-select-tint" : "hover:bg-accent",
-        bar && "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-select",
+        // scroll-mt: clear of the section's sticky head when scrolled into view.
+        "relative flex h-7 w-full scroll-mt-8 cursor-pointer items-center gap-2 pr-3 pl-8 text-left text-sm",
+        selected
+          ? "bg-select-tint before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-select"
+          : "hover:bg-accent",
+        className,
       )}
     >
-      <span title={word}>
+      <span title={word} className="shrink-0">
         <StatusGlyph status={status} />
         <span className="sr-only">{word}</span>
       </span>
       <span className={cx("min-w-0 truncate", row.state.outOfDate && "line-through")}>
         {row.name}
       </span>
-      {status === "waiting" && waits.length > 0 && (
-        <span className="min-w-0 truncate text-muted-foreground text-xs">
-          waits on {waits.map(nameOf).join(", ")}
-        </span>
-      )}
       {row.provisional && (
         <span className="shrink-0 rounded-sm px-1 font-mono text-[11px] text-muted-foreground inset-ring inset-ring-border">
           provisional
         </span>
       )}
-      <span className="ml-auto shrink-0 font-mono text-sm tabular-nums whitespace-nowrap">
-        {row.value ? (
-          <>
-            {row.value.text}
-            {row.value.unit && (
-              <span className="text-muted-foreground text-xs"> {row.value.unit}</span>
-            )}
-          </>
-        ) : (
-          <span className="text-muted-foreground text-xs">{word}</span>
-        )}
+      <span className="ml-auto flex shrink-0 items-baseline gap-2 whitespace-nowrap">
+        {right}
+        {right === undefined &&
+          (row.value ? (
+            <span className="font-mono text-sm tabular-nums">
+              {row.value.text}
+              {row.value.unit && (
+                <span className="text-muted-foreground text-xs"> {row.value.unit}</span>
+              )}
+            </span>
+          ) : open > 0 ? (
+            <span className="text-check text-xs">{open} to check</span>
+          ) : (
+            !row.state.latest && <span className="text-muted-foreground text-xs">{word}</span>
+          ))}
       </span>
     </button>
   );
 }
 
-/** Brings the row into view when it becomes the selection, only if it is out of view. */
-function useScrolledTo(active: boolean) {
-  const ref = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (active) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [active]);
-  return ref;
-}
-
 const ROLE_ORDER: LinkRole[] = ["on", "context", "input", "base"];
 
-/** The value open in place: what it is, its version, report and items, and what it rests on. */
-function Opened({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
-  const { open, nameOf } = props;
+/** The selection: what it is, its version and report, what to check, and what it is based on. */
+function Details({ row, ...props }: FinalOutputsProps & { row: OutputRow }) {
+  const { nameOf, live } = props;
   const [report, setReport] = useState(false);
-  const trail = row.trail;
   const latest = row.state.latest;
-  // Its own open items; those of what it rests on are drawn and decided there, one line each here.
-  const own = row.items.filter((i) => !i.resolved && i.output === row.id);
-  const waits = rowStatus(row, props.live, nameOf).waits.map((id) => ({
-    id,
-    count: openItemsOf(row).filter((i) => i.output === id).length,
-  }));
-  const restsOn = trail
+  const { own, waits, word } = rowStatus(row, live, nameOf);
+  const restsOn = row.trail
     .filter((r) => r.depth === 1)
     .sort((a, b) => ROLE_ORDER.indexOf(a.role ?? "base") - ROLE_ORDER.indexOf(b.role ?? "base"));
-  const further = trail.filter((r) => r.depth > 1);
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)] bg-select-tint pb-2.5">
-      <ValueRow
-        row={row}
-        live={props.live}
-        nameOf={nameOf}
-        selected
-        bar={!open}
-        onSelect={() => props.onOpen(null)}
-      />
-      {/* Before its trail is published, what it will rest on. */}
-      {props.live && restsOn.length === 0 && <ChainLine chain={row.chain} nameOf={nameOf} />}
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-2 pr-3 pl-9">
+    <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-[minmax(0,1fr)] gap-3 overflow-y-auto px-3 pt-3 pb-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+        <div className="flex items-baseline gap-3">
+          <h3
+            className={cx(
+              "m-0 min-w-0 font-semibold text-base",
+              row.state.outOfDate && "line-through",
+            )}
+          >
+            {row.name}
+          </h3>
+          {row.value && (
+            <span className="ml-auto shrink-0 font-mono text-lg tabular-nums whitespace-nowrap">
+              {row.value.text}
+              {row.value.unit && (
+                <span className="text-muted-foreground text-xs"> {row.value.unit}</span>
+              )}
+            </span>
+          )}
+        </div>
         {row.description && <p className="m-0 text-muted-foreground text-sm">{row.description}</p>}
-        {latest ? (
-          <VersionLine v={latest}>
-            {latest.kept && <span>kept: {latest.kept.reason}</span>}
-            <button
-              type="button"
-              aria-expanded={report}
-              onClick={() => setReport(!report)}
-              className="cursor-pointer text-primary-text hover:underline"
-            >
-              Report
-            </button>
-          </VersionLine>
-        ) : (
-          <p className="m-0 text-muted-foreground text-xs">
-            {row.state.missingReason ?? rowStatus(row, props.live, nameOf).word}
-          </p>
-        )}
-        {row.provisional && (
-          <p className="m-0 text-muted-foreground text-xs">
-            Provisional: no reference comparison yet
-          </p>
-        )}
-        {report && latest && (
-          <div className="border-select border-l-2 pl-2.5">
-            <Report
-              runId={props.runId}
-              events={props.events}
-              v={latest}
-              outOfDate={row.state.outOfDate}
-              nameOf={nameOf}
-              madeFrom={false}
-            />
-          </div>
-        )}
-        {own.length > 0 && <Items {...props} items={own} own={row.id} />}
-        {waits.map(({ id, count }) =>
-          id === open ? (
-            <p key={id} className="m-0 flex items-center gap-1.5 text-check text-xs">
-              <StatusGlyph status="check" />
-              {count} to check on {nameOf(id)}, open below
-            </p>
-          ) : (
+      </div>
+      {latest ? (
+        <VersionLine v={latest}>
+          <button
+            type="button"
+            aria-expanded={report}
+            onClick={() => setReport(!report)}
+            className="cursor-pointer text-primary-text hover:underline"
+          >
+            {report ? "Hide report" : "Report"}
+          </button>
+        </VersionLine>
+      ) : (
+        <p className="m-0 text-muted-foreground text-xs">{row.state.missingReason ?? word}</p>
+      )}
+      {row.provisional && (
+        <p className="m-0 text-muted-foreground text-xs">
+          Provisional: no reference comparison yet
+        </p>
+      )}
+      {/* Before its trail is published, what it will rest on. */}
+      {live && restsOn.length === 0 && <ChainLine chain={row.chain} nameOf={nameOf} />}
+      {report && latest && (
+        <div className="border-select border-l-2 pl-2.5">
+          <Report
+            runId={props.runId}
+            events={props.events}
+            v={latest}
+            outOfDate={row.state.outOfDate}
+            nameOf={nameOf}
+            madeFrom={false}
+          />
+        </div>
+      )}
+      {(own.length > 0 || waits.length > 0) && (
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
+          {own.length > 0 && <Items {...props} items={own} own={row.id} />}
+          {waits.map(({ id, count }) => (
             <button
               key={id}
               type="button"
-              onClick={() => props.onOpen(id)}
+              onClick={() => props.onPick(id)}
               className="flex cursor-pointer items-center gap-1.5 justify-self-start rounded-sm text-left text-check text-xs hover:underline"
             >
               <StatusGlyph status="check" />
               {count} to check on {nameOf(id)}, which this rests on
               <ChevronRight aria-hidden className="size-3.5 shrink-0" />
             </button>
-          ),
-        )}
-        {restsOn.length > 0 && (
-          <RestsOn {...props} rows={trail} restsOn={restsOn} further={further} />
-        )}
-      </div>
-    </li>
+          ))}
+        </div>
+      )}
+      {restsOn.length > 0 && (
+        <BasedOn
+          {...props}
+          rows={row.trail}
+          restsOn={restsOn}
+          further={row.trail.filter((r) => r.depth > 1)}
+        />
+      )}
+    </div>
   );
 }
 
-function RestsOn({
+/** "Based on": folded to one line naming what it rests on; open, the same rows as the list. */
+function BasedOn({
   rows,
   restsOn,
   further,
   ...props
 }: FinalOutputsProps & { rows: TrailRow[]; restsOn: TrailRow[]; further: TrailRow[] }) {
-  const { open, nameOf } = props;
-  // Earlier steps opens by itself when the output open is one of its rows; a click overrides.
-  const holds = further.some((r) => r.id === open);
-  const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
-  const showFurther = toggled && toggled.when === holds ? toggled.open : holds;
+  const { nameOf } = props;
+  const [open, setOpen] = useState(false);
+  const [showFurther, setShowFurther] = useState(false);
   // Which row a row further back feeds: the first, nearest the value, that links it.
   const feeds = (r: TrailRow) => {
     const at = rows.indexOf(r);
     const parent = rows.find((p) => p.from.includes(at));
     return parent ? nameOf(parent.id) : undefined;
   };
+  const line = (r: TrailRow, words: ReactNode) => {
+    const full = props.review.rows.get(r.id);
+    if (!full) return null;
+    return (
+      <li key={r.id}>
+        <OutputLine
+          row={full}
+          {...props}
+          className="rounded-sm pl-2"
+          right={
+            <span className="text-muted-foreground text-xs">
+              {words}
+              {r.superseded &&
+                full.state.latest &&
+                `, used v${r.used} of ${full.state.latest.version}`}
+            </span>
+          }
+        />
+      </li>
+    );
+  };
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-1 pt-1">
-      <h4 className="m-0 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-        Based on
-      </h4>
-      <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] gap-0.5 rounded-md bg-card p-1 inset-ring inset-ring-border">
-        {restsOn.map((r) => (
-          <TrailItem key={r.id} row={r} {...props} />
-        ))}
-        {further.length > 0 && (
-          <li>
-            <button
-              type="button"
-              aria-expanded={showFurther}
-              onClick={() => setToggled({ when: holds, open: !showFurther })}
-              className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 text-left text-sm hover:bg-accent"
-            >
-              <ChevronRight
-                aria-hidden
-                className={cx(
-                  "size-3.5 shrink-0 text-fg-subtle transition-transform motion-reduce:transition-none",
-                  showFurther && "rotate-90",
-                )}
-              />
-              <span className="shrink-0">Earlier steps · {further.length}</span>
-              {!showFurther && (
-                <span className="min-w-0 truncate text-muted-foreground text-xs">
-                  {further.map((r) => nameOf(r.id)).join(", ")}
-                </span>
-              )}
-            </button>
-          </li>
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1 border-border border-t pt-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex h-7 cursor-pointer items-center gap-1.5 rounded-sm text-left text-muted-foreground text-sm hover:text-foreground"
+      >
+        <ChevronRight
+          aria-hidden
+          className={cx(
+            "size-3.5 shrink-0 text-fg-subtle transition-transform motion-reduce:transition-none",
+            open && "rotate-90",
+          )}
+        />
+        <span className="shrink-0">Based on</span>
+        {!open && (
+          <span className="min-w-0 truncate text-xs">
+            {restsOn.map((r) => nameOf(r.id)).join(", ")}
+          </span>
         )}
-        {showFurther &&
-          further.map((r) => <TrailItem key={r.id} row={r} feeds={feeds(r)} {...props} />)}
-      </ul>
+      </button>
+      {open && (
+        <ul className="m-0 list-none p-0">
+          {restsOn.map((r) => line(r, r.role && ROLE_WORD[r.role]))}
+          {further.length > 0 && (
+            <li>
+              <button
+                type="button"
+                aria-expanded={showFurther}
+                onClick={() => setShowFurther(!showFurther)}
+                className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-sm pl-2 text-left text-muted-foreground text-sm hover:bg-accent"
+              >
+                <ChevronRight
+                  aria-hidden
+                  className={cx(
+                    "size-3.5 shrink-0 text-fg-subtle transition-transform motion-reduce:transition-none",
+                    showFurther && "rotate-90",
+                  )}
+                />
+                Earlier steps
+                <span className="ml-auto pr-3 text-xs">{further.length}</span>
+              </button>
+            </li>
+          )}
+          {showFurther &&
+            further.map((r) => {
+              const to = feeds(r);
+              return line(
+                r,
+                [r.role && ROLE_WORD[r.role], to && `for ${to}`].filter(Boolean).join(" "),
+              );
+            })}
+        </ul>
+      )}
     </div>
   );
 }
 
-/** One output a value rests on: two lines, its report under it while open. */
-function TrailItem({
-  row,
-  feeds,
-  ...props
-}: FinalOutputsProps & { row: TrailRow; feeds?: string }) {
-  const { open, nameOf } = props;
-  const isOpen = row.id === open;
-  const latest = row.state?.latest;
-  // Its own row when it has one, so an output resting on open checks waits here too.
-  const full = props.review.rows.get(row.id);
-  const status = full
-    ? rowStatus(full, props.live, nameOf)
-    : row.state
-      ? OUTPUT_STATUS[row.state.status]
-      : OUTPUT_STATUS.pending;
-  const ref = useScrolledTo(isOpen);
-  const items = props.review.rows.get(row.id)?.items.filter((i) => i.output === row.id) ?? [];
-  return (
-    <li className={cx("grid grid-cols-[minmax(0,1fr)] rounded-sm", isOpen && "bg-select-tint")}>
-      <button
-        ref={ref}
-        type="button"
-        aria-expanded={isOpen}
-        onClick={() => props.onOpen(isOpen ? null : row.id)}
-        className={cx(
-          "relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 rounded-sm px-1.5 py-1 text-left text-sm",
-          isOpen
-            ? "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-select"
-            : "hover:bg-accent",
-        )}
-      >
-        <span title={status.word}>
-          <StatusGlyph status={status.status} />
-          <span className="sr-only">{status.word}</span>
-        </span>
-        <span className={cx("truncate", row.state?.outOfDate && "line-through")}>
-          {nameOf(row.id)}
-        </span>
-        <span className="text-muted-foreground text-xs">
-          {row.role && ROLE_WORD[row.role]}
-          {feeds && ` for ${feeds}`}
-        </span>
-        <span className="col-start-2 col-end-4 flex flex-wrap items-baseline gap-x-2 text-muted-foreground text-xs">
-          {row.used !== undefined && (
-            <span className="rounded-sm bg-muted px-1 font-mono">v{row.used}</span>
-          )}
-          {latest && <span className="font-mono">{latest.by}</span>}
-          {latest && <span>{clockOf(latest.at)}</span>}
-          {row.superseded && latest && <span>v{latest.version} is newest</span>}
-          {row.state?.outOfDate && <span>Out of date</span>}
-          {row.state && !row.state.declared && (
-            <span className="rounded-sm bg-muted px-1">not in the workflow</span>
-          )}
-          {!latest && <span>{status.word}</span>}
-        </span>
-      </button>
-      {isOpen && latest && (
-        <div className="mx-1.5 mb-2 grid grid-cols-[minmax(0,1fr)] gap-2 border-select border-l-2 pt-1 pl-2.5">
-          {/* What to judge first, then the report to judge it by. */}
-          {items.length > 0 && <Items {...props} items={items} own={row.id} />}
-          <Report
-            runId={props.runId}
-            events={props.events}
-            v={latest}
-            outOfDate={!!row.state?.outOfDate}
-            nameOf={nameOf}
-          />
-        </div>
-      )}
-    </li>
-  );
-}
-
 /**
- * "Based on ○ Patella ‹ ○ Bone labels ‹ ✓ Scan": the chain a value is computed on, nearest first,
- * each link hollow until a version of it is published. Several at one step read "A, B".
+ * "Based on ○ Patella ‹ ○ Bone labels ‹ ✓ Scan": the chain a value not in yet is computed on,
+ * nearest first, each link hollow until a version of it is published. Several at one step read "A, B".
  */
 function ChainLine({ chain, nameOf }: { chain: ChainLink[][]; nameOf: (id: string) => string }) {
   if (chain.length === 0) return null;
   return (
-    <p className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pr-3 pb-1 pl-10 text-muted-foreground text-xs">
+    <p className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-muted-foreground text-xs">
       <span className="mr-0.5">Based on</span>
       {chain.map((step, i) => (
         <Fragment key={step.map((l) => l.id).join()}>
@@ -525,48 +522,5 @@ function ChainLine({ chain, nameOf }: { chain: ChainLink[][]; nameOf: (id: strin
         </Fragment>
       ))}
     </p>
-  );
-}
-
-/**
- * "Other outputs so far · N" while the run goes: what is published that is neither a final output
- * nor on a value's chain. Each opens like a row of Rests on: its report under it, the panes on it.
- */
-function OtherOutputs({ rows, ...props }: FinalOutputsProps & { rows: OutputRow[] }) {
-  const holds = rows.some((r) => r.id === props.open);
-  const [toggled, setToggled] = useState<{ when: boolean; open: boolean }>();
-  const shown = toggled && toggled.when === holds ? toggled.open : holds;
-  return (
-    <section
-      aria-label="Other outputs so far"
-      className="grid grid-cols-[minmax(0,1fr)] px-1.5 pb-3"
-    >
-      <button
-        type="button"
-        aria-expanded={shown}
-        onClick={() => setToggled({ when: holds, open: !shown })}
-        className="flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 text-left text-muted-foreground text-sm hover:bg-accent hover:text-foreground"
-      >
-        <ChevronRight
-          aria-hidden
-          className={cx(
-            "size-3.5 shrink-0 text-fg-subtle transition-transform motion-reduce:transition-none",
-            shown && "rotate-90",
-          )}
-        />
-        Other outputs so far · {rows.length}
-      </button>
-      {shown && (
-        <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] gap-0.5 p-0">
-          {rows.map((r) => (
-            <TrailItem
-              key={r.id}
-              row={{ id: r.id, depth: 1, state: r.state, superseded: false, from: [] }}
-              {...props}
-            />
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }

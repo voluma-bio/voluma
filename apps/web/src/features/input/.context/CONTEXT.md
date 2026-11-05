@@ -70,20 +70,27 @@ shown grid's `legend`; a label's volume only from the catalog's one mm³ value m
 (`labelVolumes`), else none; and the page's `LabelDisplay`, which hides and fades context labels only, never the
 output's own region or a check's; the viewer's bar says how many are hidden, with Show all)
 Agents (`run-agents.tsx`: the run's workers, then a picked worker's whole thread with All agents to go back; main is not listed, since Conversation is its thread), and Samples (`INPUT_WORD.Many`; the shared `SampleTree`, from `sampleTree` over the current `StudyDetail.inputs`). The side
-opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or a worker's name in main's thread opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`; the "To check" filter lists the rows whose own items are open plus a "Behind the values" row for each open item no value row owns (`rowsToCheck`), which then opens in place like a value), and
-Whole run. Each To check item is drawn and decided in one place: under the output it is about. A
-reported value resting on an output with open items is not done: its status is "Waiting on a check
-of <output>" (`rowStatus`, the dashed waiting glyph, never a tick; the same rule in Final outputs, Based on, the chip and the whole run), and the open value shows one line
-per such output, "N to check on <output>", which opens that output under it. The value picked opens
-in place under its row: its version line and Report, its own open items, those lines, and Rests on
-(direct links, ordered measured on, beside, made from, drawn on) with Further back (the rest of
-`trailOf`, nearest first, each saying which row it feeds). A row there opens under it its open
-items first, then its report, and frames the panes on it. Show on an item opens the output it is
-about (as `trail` unless it is the value) and frames the panes on its region; it is a history entry,
-so Back returns to the item before. Reports and items are `version-report.tsx`.
+opens on Conversation (Jimmy, Nov 4: it is where the researcher steers the AI) and changes tab only when the researcher picks one, or Tell the AI what's wrong or a worker's name in main's thread opens one. Right: Final outputs (`outputs-panel.tsx`), whose head holds To check (the open items, `OutputsFold.openItems`, whose size is `toCheck`: only items of outputs a value rests on; the filter lists the rows with such items of their own) and
+Whole run. The panel is a list over the selection's details, each scrolling on its own with a
+resize bar between (Jimmy, Nov 4: the old panel opened a value in place, grew under the pointer and
+reacted differently per click spot). The list: main's sections of values, "Not in the workflow",
+then "Steps behind the values" (`OutputsReview.steps`, every other published output), every row
+one line (mark, name, value or "N to check"). Clicking any output's name, in the list or the
+details, makes it the selection (`show` in `outputs-review.tsx`: a value is `output`; another
+output is `trail` under the value in view when that rests on it, else under the first value
+resting on it). Each To check item is drawn and decided in one place: under the output it is
+about. A reported value resting on an output with open items shows as in (a tick: Jimmy, Nov 4, the
+hollow waiting glyph read as not done), and its details show one line per such output, "N to check
+on <output>", which selects it (`rowStatus().waits`; the chip has the same line). The details: name
+and value, description, the version line with Report (which holds the kept reason), its own open
+items, those lines, and Based on, folded, last (Jimmy: "probably not that important to a
+researcher"): the direct links ordered measured on, beside, made from, drawn on, then Earlier
+steps. Show on an item opens the output it is about (as `trail` unless it is the value) and frames
+the panes on its region; it is a history entry, so Back returns to the item before. Reports and
+items are `version-report.tsx`.
 
 The centre has no bar of its own: a chip (`SceneChip`) names the output in view, its value and its
-status (the waiting one a button to the checks), only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
+status (with a "To check on <output>" button per output it rests on with open checks), only while Final outputs is folded (open, its selected row says the same; Jimmy, Nov 4). On the panes it sits in
 the top-left pane's corner (`QuadViewer`'s `heading`), under the viewer's notes, which stay in the
 flow above the panes; over a file, a list, an empty centre or a grid still preparing it sits above,
 in the flow. The whole run gets a bar with the way back. Delete mark and Undo delete
@@ -92,11 +99,9 @@ get a row above the panes only while one of yours is picked or a deletion can be
 While the run goes, Final outputs adds what a run going shows and nothing after it ends: on top,
 Running, "last news <age>" (the newest stored event, on a timer) and the latest `activity` sentence
 (`run-news.tsx`, unnamed, mounted by `OutputsReview`); each value's "rests on" chain
-(`OutputRow.chain`), hollow links ticking as they are published, under its row (under an opened value only until its trail is published, then
-its Rests on); "not yet" for nothing published; "N of M in" in the panel head (the scan header
-says only Running), with Needs you only once something does; and "Other outputs so far" under the
-values (`OutputsReview.others`), each opening like a Rests on row; one open when the run ends
-stays open until Esc. A section's tick waits for every value in it. Until the value has a version or is
+(`OutputRow.chain`), hollow links ticking as they are published, in its details until its trail is published, then
+its Based on; "not yet" for nothing published; "N of M in" in the panel head (the scan header
+says only Running), with Needs you only once something does; and the steps list grows as outputs are published. A section's tick waits for every value in it. Until the value has a version or is
 marked missing, the centre shows the nearest link on its chain with a version (the scene chip saying
 "<value> is based on"), else the output published last whose whole scene has blocks to draw (the scan, from intake
 on; the bar saying "Made so far, not final:"), so what the run has made shows as soon as it has; the

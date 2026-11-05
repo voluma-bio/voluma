@@ -1,5 +1,10 @@
 # mouse-oa TODO
 
+- **Warnings, second pass.** Judgement checks in `femoral_frame.py`, `tibia_frame.py` and `orient_joint.py` warn
+  (`sidecar.warn`) instead of refusing (#608). Still refusing, to be judged the same way as one set: the growth-plate trace
+  checks in `iioc.py` and `annotations.py` (`refuse_gaps`, `refuse_jumps`, `refuse_off_tibia`, `refuse_width_points`,
+  `refuse_cut_sides`) and `merge_labels.py`'s track check (`sam-segmentation`). Keep a refusal only where no valid result
+  can be written.
 - **Align the femur before placing a-d (the lab expert's order).** "Alignment by the tibia first. Alignment by tibial
   shaft to growth plate and articular surface as first parameters. Additional parameters for femoral indices would be
   measured after alignment of femur." Today `femoral_frame.py` builds `femur-frame.json` after the points, from the same
@@ -66,7 +71,7 @@
   (OA6-2RK's plate-test-opus trace: 12 of 19); run 0ed8e7d3's copied faces: 15 of 28. The same HU check would catch one misread
   section between sparse neighbours, which `refuse_jumps` passes when it is less than about 330 to 420 µm off with neighbours 16 to 20 apart. It would also catch a worker that clears a jump refusal by deleting the sections in between: the sections left still
   pass the jump and gap checks with the same generated points (0ed8e7d3 with V=202 and 212 removed passes from V=197 to 217).
-- **`tibia_frame.py --joint-end` automatic.** The script already finds the joint end from where the femur lies and refuses a flag that disagrees; drop the flag and take that end.
+- **Drop `tibia_frame.py --joint-end`.** The script finds the joint end from where the femur lies and uses it over a flag that disagrees (with a warning); the flag is now only needed when the femur label is empty. Drop it and its mentions in the plan and protocol.
 - **`tibia_frame.py`'s femur/tibia check and bridged fragments.** A fragment joined to a bone by a thin bridge counts as part of its largest piece, and can make a correct tibia read as swapped, or hide a swap (review of the tibia-pick PR, synthetic bridges on OA6-2RK). Open each bone by 2-3 voxels before taking its largest piece, on a 2x subsample, which also takes back the check's extra 1 GB of peak memory.
 - **Test where a growth-plate face ends.** `refuse_gaps` tests only gaps over the plate: the tibia mask does not show where the plate ends (the condyles overhang it, the fibula lies beside it), and an outline-based end test passed faces 1 mm short while refusing correct ones (#558's review). Build the plate's extent from the plate itself (an HU band, or `segment_plate`'s voted band) and refuse a face that stops short of it; the same extent would close the 6% of sections where a 500 um mid-section gap still passes the mask-based rule.
 - **`refuse_off_tibia` on lab hand traces.** It stops 12 of the 45 hand traces in `~/experiments/plate-data/scans/*/trace/` (37 with their `ends.json` merged): check whether its margin or those traces are wrong.
