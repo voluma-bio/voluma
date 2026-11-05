@@ -1,31 +1,51 @@
 /**
- * A user's own keys (`OwnKeys`): asked on Run on new inputs, when a run is waiting for them,
- * and to reopen a finished own-key run. They stay in this browser's localStorage, under the user's
- * id so another user of the browser never sees them; the server seals them in the database only
- * while the run lives.
+ * A user's own keys (`OwnKeys`): a Meta key and a Modal token, entered in the rail's Settings
+ * (`KeysForm`). They stay in this browser's localStorage, under the user's id so another user of
+ * the browser never sees them, and go to the server only when a run starts or a finished own-key
+ * run is reopened; the server seals them in the database only while the run lives. Start and
+ * reopen surfaces only say whose keys the run uses (`RunKeyLine`) and read the saved keys live
+ * (`useSavedKeys`), so a save in Settings shows at once.
  */
 import { type OwnKeys, ownKeysSchema, type Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState, useSyncExternalStore } from "react";
 
 // The name keeps "visitor" on purpose: renaming the key drops every user's saved keys.
 const storageKey = (userId: string) => `voluma.visitor-keys.${userId}`;
+// `storage` fires only in other tabs; this one tells this tab's readers.
+const changed = "voluma-keys-changed";
+
+function parseKeys(raw: string | null): OwnKeys | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = ownKeysSchema.safeParse(JSON.parse(raw));
+    if (parsed.success) return parsed.data;
+  } catch {}
+  return undefined;
+}
 
 /** The keys this user saved in this browser; stored text that doesn't parse is dropped. */
 export function loadKeys(userId: string): OwnKeys | undefined {
   const raw = localStorage.getItem(storageKey(userId));
-  if (!raw) return undefined;
-  try {
-    const stored = JSON.parse(raw);
-    const parsed = ownKeysSchema.safeParse(stored);
-    if (parsed.success) {
-      // Keys saved when a guest also gave a Modal token: keep only the Meta key.
-      if ("modal" in stored) saveKeys(userId, parsed.data);
-      return parsed.data;
-    }
-  } catch {}
-  forgetKeys(userId);
-  return undefined;
+  const keys = parseKeys(raw);
+  if (raw && !keys) forgetKeys(userId);
+  return keys;
+}
+
+/** `loadKeys`, kept current as keys are saved or removed in this tab or another. */
+export function useSavedKeys(userId: string): OwnKeys | undefined {
+  const raw = useSyncExternalStore(
+    (onChange) => {
+      window.addEventListener("storage", onChange);
+      window.addEventListener(changed, onChange);
+      return () => {
+        window.removeEventListener("storage", onChange);
+        window.removeEventListener(changed, onChange);
+      };
+    },
+    () => localStorage.getItem(storageKey(userId)),
+  );
+  return useMemo(() => parseKeys(raw), [raw]);
 }
 
 /**
@@ -41,115 +61,161 @@ export function keysToReopen(
     : undefined;
 }
 
-const saveKeys = (userId: string, keys: OwnKeys) =>
+function saveKeys(userId: string, keys: OwnKeys) {
   localStorage.setItem(storageKey(userId), JSON.stringify(keys));
+  window.dispatchEvent(new Event(changed));
+}
 
-const forgetKeys = (userId: string) => localStorage.removeItem(storageKey(userId));
+function forgetKeys(userId: string) {
+  localStorage.removeItem(storageKey(userId));
+  window.dispatchEvent(new Event(changed));
+}
+
+/** Whether a start from this account can go: a guest needs both keys. */
+export function canStart(volumaKey: boolean, keys: OwnKeys | undefined): boolean {
+  return volumaKey || !!keys?.modal;
+}
+
+/** What runs use, in the words `RunKeyLine` and Settings share. */
+function whoseKeys(volumaKey: boolean, keys: OwnKeys | undefined): string {
+  if (keys?.modal) return "Runs on your Meta key and Modal account.";
+  if (keys && volumaKey) return "Runs on your Meta key and Voluma's Modal account.";
+  if (volumaKey) return "Runs on Voluma's keys.";
+  return "Add your Meta key and Modal token in Settings to run.";
+}
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-input bg-card px-3 text-ui outline-none focus-visible:border-ring";
+  "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-ui outline-none focus-visible:border-ring";
 
-/** A password field for the Meta key; `onSubmit` gets complete keys, which are saved first. */
-export function KeysForm({
-  userId,
-  submitLabel,
-  busy,
-  onSubmit,
+function KeyField({
+  label,
+  value,
+  required,
+  onChange,
 }: {
-  userId: string;
-  submitLabel: string;
-  busy?: boolean;
-  onSubmit: (keys: OwnKeys) => void;
+  label: string;
+  value: string;
+  required: boolean;
+  onChange: (value: string) => void;
 }) {
-  const saved = loadKeys(userId);
-  const [metaApiKey, setMeta] = useState(saved?.metaApiKey ?? "");
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    const keys = { metaApiKey };
-    saveKeys(userId, keys);
-    onSubmit(keys);
-  }
-
   return (
-    <form onSubmit={submit} className="grid gap-3">
-      <label className="grid gap-1 text-meta font-medium">
-        Meta API key
-        <input
-          type="password"
-          autoComplete="off"
-          required
-          maxLength={512}
-          value={metaApiKey}
-          onChange={(e) => setMeta(e.target.value)}
-          className={inputClass}
-        />
-      </label>
-      <Button type="submit" variant="primary" disabled={busy}>
-        {submitLabel}
-      </Button>
-    </form>
+    <label className="grid gap-1 text-meta font-medium">
+      {label}
+      <input
+        type="password"
+        autoComplete="off"
+        required={required}
+        maxLength={512}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={inputClass}
+      />
+    </label>
   );
 }
 
 /**
- * Next to a Start button: whose key the run uses, from the key stored in this browser. With
- * a key it can be removed; without one an account with Voluma's key can add one, and one without must (the form).
+ * Settings' API keys: whose keys runs use, then the form to save or replace them and Remove.
+ * A guest must give the Meta key and the Modal token; a member may give a Meta key alone, or both.
  */
+export function KeysForm({ userId, volumaKey }: { userId: string; volumaKey: boolean }) {
+  const saved = useSavedKeys(userId);
+  const [editing, setEditing] = useState(false);
+  const [metaApiKey, setMeta] = useState("");
+  const [tokenId, setTokenId] = useState("");
+  const [tokenSecret, setTokenSecret] = useState("");
+  const modalRequired = !volumaKey || tokenId !== "" || tokenSecret !== "";
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    saveKeys(userId, {
+      metaApiKey,
+      ...(tokenId && tokenSecret && { modal: { tokenId, tokenSecret } }),
+    });
+    setMeta("");
+    setTokenId("");
+    setTokenSecret("");
+    setEditing(false);
+  }
+
+  const status = (
+    <p className="m-0 text-sm">
+      {canStart(volumaKey, saved)
+        ? whoseKeys(volumaKey, saved)
+        : "Runs need your Meta key and Modal token."}
+    </p>
+  );
+  const where = (
+    <p className="m-0 text-muted-foreground text-xs">
+      Kept in this browser only. Voluma gets them when a run starts and keeps them only while it
+      runs.
+    </p>
+  );
+
+  if (saved && !editing)
+    return (
+      <div className="grid gap-2">
+        {status}
+        {where}
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => setEditing(true)}>
+            Replace keys
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => forgetKeys(userId)}>
+            Remove
+          </Button>
+        </div>
+      </div>
+    );
+
+  return (
+    <form onSubmit={submit} className="grid gap-2">
+      {status}
+      <KeyField label="Meta API key" value={metaApiKey} required onChange={setMeta} />
+      <KeyField
+        label={modalRequired ? "Modal token ID" : "Modal token ID (optional)"}
+        value={tokenId}
+        required={modalRequired}
+        onChange={setTokenId}
+      />
+      <KeyField
+        label={modalRequired ? "Modal token secret" : "Modal token secret (optional)"}
+        value={tokenSecret}
+        required={modalRequired}
+        onChange={setTokenSecret}
+      />
+      {where}
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" variant="primary">
+          Save keys
+        </Button>
+        {editing && (
+          <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+            Cancel
+          </Button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/** Next to a Start button: whose keys the run uses, and a link to Settings to change them. */
 export function RunKeyLine({
-  userId,
   volumaKey,
   keys,
-  onChange,
+  onOpenSettings,
 }: {
-  userId: string;
-  /** Whether the account has Voluma's key; without it the form is required. */
+  /** Whether the account has Voluma's key; without it the run needs both of the user's keys. */
   volumaKey: boolean;
   keys: OwnKeys | undefined;
-  onChange: (keys: OwnKeys | undefined) => void;
+  onOpenSettings: () => void;
 }) {
-  const [adding, setAdding] = useState(false);
-  const link = "text-primary-text underline";
   return (
-    <div className="grid max-w-sm gap-2 text-ui text-muted-foreground">
-      {keys ? (
-        <p>
-          Runs on your Meta key.{" "}
-          <button
-            type="button"
-            className={link}
-            onClick={() => {
-              forgetKeys(userId);
-              onChange(undefined);
-            }}
-          >
-            Remove it
-          </button>
-          .
-        </p>
-      ) : !volumaKey ? (
-        <>
-          <p>Runs on your Meta key.</p>
-          <KeysForm userId={userId} submitLabel="Save key" onSubmit={onChange} />
-        </>
-      ) : adding ? (
-        <KeysForm
-          userId={userId}
-          submitLabel="Save key"
-          onSubmit={(k) => {
-            setAdding(false);
-            onChange(k);
-          }}
-        />
-      ) : (
-        <p>
-          Runs on Voluma's keys.{" "}
-          <button type="button" className={link} onClick={() => setAdding(true)}>
-            Use your own Meta key
-          </button>
-          .
-        </p>
-      )}
-    </div>
+    <p className="text-ui text-muted-foreground">
+      {whoseKeys(volumaKey, keys)}{" "}
+      <button type="button" className="text-primary-text underline" onClick={onOpenSettings}>
+        {canStart(volumaKey, keys) && !keys ? "Use your own keys" : "Open Settings"}
+      </button>
+    </p>
   );
 }

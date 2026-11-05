@@ -148,7 +148,7 @@ a queued run said "The AI is on it"): queued, "Waiting to start · place N in li
 running with main working, main's newest `activity` line this turn (or "Working"); running with a
 call you approved and main idle (its job runs outside any thread), "Doing what you approved";
 otherwise none.
-A finished own-key run holds no key, so `RunAlert` shows a key form (`ReopenKeys`) until this browser has one saved, and every message and answer to such a run carries it (`keysToReopen`).
+A finished own-key run holds no key, so `RunAlert` shows a line (`ReopenKeys`) saying whether this browser has the user's keys saved, with a link that opens Settings to add them; every message and answer to such a run carries them (`keysToReopen`).
 
 **Editing a mark is a correction, and nothing reaches main until Send.** A new mark, a moved one
 (Navigate: drag an end of your point, line or angle in a slice; a click on an end picks the mark),

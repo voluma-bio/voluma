@@ -1,13 +1,15 @@
 /**
  * The brand lockup (the sign-in screen), the sidebar's mark, and the rail's Settings and Account
- * dropdowns: the theme and who is signed in, with Sign in or Sign out. Settings opens by itself
- * when the location's state carries `openSettings` (the old `/settings` page redirects so).
+ * dropdowns: the theme and the user's own API keys, and who is signed in, with Sign in or Sign out.
+ * Settings opens by itself when the location's state carries `openSettings` (the old `/settings`
+ * page redirects so, and the start and reopen surfaces' key lines navigate so).
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { signIn, signOut } from "@voluma/api-client";
 import { userSettingsQuery, useUpdateUserSettings } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
+import { KeysForm } from "@voluma/run-view";
 import { Button, Popover, RailButton, SegmentedControl, volumaMarkUrl } from "@voluma/ui";
 import { CircleUserRound, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -53,7 +55,7 @@ export function SettingsMenu({ me }: { me: Me }) {
       side="right"
       align="end"
       label="Settings"
-      className="w-64 p-3"
+      className="w-72 p-3"
       open={open}
       onOpenChange={setOpen}
       trigger={<RailButton label="Settings" icon={<Settings />} />}
@@ -81,6 +83,8 @@ export function SettingsMenu({ me }: { me: Me }) {
           Couldn't save your theme. Choose it again to retry.
         </p>
       )}
+      <p className="m-0 mt-4 mb-1.5 text-muted-foreground text-sm">API keys</p>
+      <KeysForm userId={me.userId} volumaKey={me.volumaKey} />
     </Popover>
   );
 }
