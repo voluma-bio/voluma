@@ -71,7 +71,7 @@ const entryBase = {
   description: nonEmpty.optional(),
   /**
    * One plain sentence for the researcher reviewing the run: what the output is and where, with no
-   * file names, scripts or step names.
+   * file names, scripts or step names. Review shows it in place of `description`.
    */
   summary: nonEmpty.optional(),
   /** Where the expected value or definition comes from, e.g. the lab deck's number. */

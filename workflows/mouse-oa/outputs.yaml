@@ -10,6 +10,7 @@
 - id: header
   kind: file
   name: Scan header
+  summary: "The scan's voxel size, dimensions and the evidence for its density calibration, as read from the scan files."
   description:
     "hu.json from scan-intake: voxel spacing (z, y, x, mm), shape, calibration evidence and
     the grid id every later step uses"
@@ -20,6 +21,7 @@
 - id: frame
   kind: file
   name: Joint frame
+  summary: "The knee's rough orientation: the shaft axes, the bending plane, and a slice through the joint."
   description:
     "frame.json from orient-joint: intake's rough orientation of the knee (the shaft axes,
     the bending plane and the keyframe the oriented stack is cut on)"
@@ -32,6 +34,7 @@
 - id: scan
   kind: base
   name: Scan
+  summary: "The micro-CT scan in Hounsfield units, with the holder, padding and debris removed."
   description: hu.npy from scan-intake, in HU, with the affine from hu.json
   planes: { XY: axial, XZ: sagittal, YZ: coronal }
   expect:
@@ -44,6 +47,7 @@
 - id: tibia-grid
   kind: base
   name: Tibia long-axis grid
+  summary: "The tibia, resampled so its long axis runs vertically, the lab's convention; the tibial regions sit on it."
   description: the tibia resampled onto a grid whose z (W, joint end toward the shaft) is the tibia's fitted long axis, so the shaft is vertical in the coronal and sagittal panes, the lab's convention; the regions and surfaces below sit on it
   from: scan
   planes: { XY: axial, XZ: coronal, YZ: sagittal }
@@ -54,6 +58,7 @@
 - id: scan-notes
   kind: file
   name: Scan notes
+  summary: "Notes on the scan and what is in the field of view, taken from the files supplied with it."
   description: "scan-notes.md from scan-intake: the researcher's account of the field"
   mediaType: text/markdown
   expect:
@@ -63,6 +68,7 @@
 - id: scan-settings
   kind: file
   name: Scan settings
+  summary: "This scan's display window and bone segmentation threshold, chosen from its density histogram."
   description:
     "scan-settings.json from scan-intake: this scan's display window and segmentation threshold,
     chosen from its histogram, which every later render and mask uses"
@@ -75,6 +81,7 @@
 - id: bone-pieces
   kind: file
   name: Bone pieces
+  summary: "Each separate piece of bone in the cleaned scan, named as a bone of the knee or marked unknown."
   description: "pieces.md from intake: each bone piece of the cleaned scan, named"
   mediaType: text/markdown
   expect:
@@ -84,6 +91,7 @@
 - id: small-structures
   kind: file
   name: Small structures
+  summary: "Each small structure around the joint (labels 5 to 12): labelled, absent, or left to check."
   description: "small-structures.md from segmentation: an account of each of labels 5 to 12"
   mediaType: text/markdown
   expect:
@@ -95,6 +103,7 @@
 - id: removal-mask
   kind: overlay
   name: Removal mask
+  summary: "What was removed from the scan: the holder, padding and debris."
   description: "what intake set to air in the scan: holder, padding and debris"
   base: scan
   shape: mask
@@ -102,6 +111,7 @@
 - id: bone-labels
   kind: overlay
   name: Bone labels
+  summary: "The segmentation: each bone and small structure of the knee, with its own label."
   description: labels.npy on the scan grid; the bones below are values in it
   base: scan
   shape: labels
@@ -117,6 +127,7 @@
 - id: disagreement
   kind: overlay
   name: Segmentation disagreement
+  summary: "Where this segmentation and an independent classic segmentation disagree: the places to check."
   description:
     "disagreement.npy from disagree.py on the scan grid: the regions where your labels and
     the classic method's differ, for To check items to point at"
@@ -126,42 +137,49 @@
 - id: femur
   kind: overlay
   name: Femur
+  summary: "The femur, as segmented from the scan."
   base: scan
   label: { of: bone-labels, value: 1 }
 
 - id: tibia
   kind: overlay
   name: Tibia
+  summary: "The tibia, as segmented from the scan."
   base: scan
   label: { of: bone-labels, value: 2 }
 
 - id: patella
   kind: overlay
   name: Patella
+  summary: "The patella, as segmented from the scan."
   base: scan
   label: { of: bone-labels, value: 3 }
 
 - id: fibula
   kind: overlay
   name: Fibula
+  summary: "The fibula, as segmented from the scan."
   base: scan
   label: { of: bone-labels, value: 4 }
 
 - id: medial-meniscus-osteophyte
   kind: overlay
   name: Medial meniscus/osteophyte
+  summary: "The medial meniscus with its osteophytes, segmented as one structure; the lab's working reading of this label."
   base: scan
   label: { of: bone-labels, value: 5 }
 
 - id: lateral-meniscus-osteophyte
   kind: overlay
   name: Lateral meniscus/osteophyte
+  summary: "The lateral meniscus with its osteophytes, segmented as one structure; the lab's working reading of this label."
   base: scan
   label: { of: bone-labels, value: 6 }
 
 - id: roi-iioc
   kind: overlay
   name: ROI-1 (IIOC)
+  summary: "ROI-1, the IIOC: the tibia from the growth plate to the articular surface, marrow included."
   description: "the voxels measured for deck #4-6: growth plate to articular surface"
   base: tibia-grid
   shape: mask
@@ -175,6 +193,7 @@
 - id: roi-iioc-trabecular
   kind: overlay
   name: ROI-2 (IIOC trabecular)
+  summary: "ROI-2: the IIOC's trabecular core, without the subchondral plate and the cortical line by the growth plate."
   description: "the voxels measured for deck #13-15"
   base: tibia-grid
   shape: mask
@@ -186,6 +205,7 @@
 - id: roi-metaphyseal
   kind: overlay
   name: ROI-3 (metaphyseal)
+  summary: "ROI-3: a band of trabecular bone in the marrow below the growth plate, clear of the cortex."
   description: "the voxels measured for deck #16-23"
   base: tibia-grid
   shape: mask
@@ -197,6 +217,7 @@
 - id: roi-subchondral-plate-medial
   kind: overlay
   name: Medial subchondral plate
+  summary: "The slab of subchondral bone plate measured under the middle of the medial plateau."
   description: "the voxels measured for deck #11"
   base: tibia-grid
   shape: mask
@@ -209,6 +230,7 @@
 - id: roi-subchondral-plate-lateral
   kind: overlay
   name: Lateral subchondral plate
+  summary: "The slab of subchondral bone plate measured under the middle of the lateral plateau."
   description: "the voxels measured for deck #12"
   base: tibia-grid
   shape: mask
@@ -217,6 +239,7 @@
 - id: roi-cortex-100um
   kind: overlay
   name: Cortex at 100 µm
+  summary: "The slab of tibial cortex measured 100 µm below the growth plate."
   description: "the voxels measured for deck #24"
   base: tibia-grid
   shape: mask
@@ -228,6 +251,7 @@
 - id: roi-cortex-1000um
   kind: overlay
   name: Cortex at 1000 µm
+  summary: "The slab of tibial cortex measured 1000 µm below the growth plate."
   description: "the voxels measured for deck #25"
   base: tibia-grid
   shape: mask
@@ -236,6 +260,7 @@
 - id: cortex
   kind: overlay
   name: Cortex
+  summary: "The tibia's cortical wall below the growth plate, where cortical thickness is measured."
   description: the cortical shell mask the cortical thickness step reads
   base: tibia-grid
   shape: mask
@@ -245,6 +270,7 @@
 - id: articular-surface
   kind: overlay
   name: Articular surface
+  summary: "The top surface of the tibia's articular bone, the upper limit of the IIOC."
   description: the top of the articular bone as a height field
   base: tibia-grid
   shape: surface
@@ -252,6 +278,7 @@
 - id: growth-plate-proximal-face
   kind: overlay
   name: Growth plate, proximal face
+  summary: "The growth plate's proximal (joint-side) face, traced across the tibia; ROI-1 starts here."
   description: traced once; the later steps read it
   base: tibia-grid
   shape: surface
@@ -260,6 +287,7 @@
 - id: growth-plate-distal-face
   kind: overlay
   name: Growth plate, distal face
+  summary: "The growth plate's distal (shaft-side) face, traced across the tibia; ROI-3 and the cortical levels are measured below it."
   description: traced once; the later steps read it
   base: tibia-grid
   shape: surface
@@ -268,6 +296,7 @@
 - id: under-plate-boundary
   kind: overlay
   name: Under-plate boundary
+  summary: "The lower edge of the subchondral plate, where the IIOC's trabecular core (ROI-2) begins."
   description: the lower edge of the subchondral plate
   base: tibia-grid
   shape: surface
@@ -275,6 +304,7 @@
 - id: dfl-ruler
   kind: overlay
   name: DFL ruler
+  summary: "The distal femoral length line, from the midpoint of the intercondylar groove's upper line (a) to the notch (b)."
   description: "from point a to the intercondylar notch point b of deck #26"
   base: scan
   shape: line
@@ -285,6 +315,7 @@
 - id: dfw-ruler
   kind: overlay
   name: DFW ruler
+  summary: "The distal femoral width line, between the outer vertices of the lateral and medial condyles (c and d)."
   description: "from point c to point d of deck #27"
   base: scan
   shape: line
@@ -295,6 +326,7 @@
 - id: femur-frame
   kind: file
   name: Femur frame
+  summary: "The femur's shaft and side-to-side axes, used to align the view to the femur."
   description:
     "femur-frame.json from femoral_frame.py: the femur's shaft and mediolateral axes; Align turns
     the view to it"
@@ -306,6 +338,7 @@
 - id: iioc-height-ruler
   kind: overlay
   name: IIOC height ruler
+  summary: "The line IIOC height is measured along, from the middle of the growth plate to the articular bone's top."
   description: "deck #7"
   base: tibia-grid
   shape: line
@@ -313,6 +346,7 @@
 - id: iioc-medial-ruler
   kind: overlay
   name: Medial IIOC height ruler
+  summary: "The line the medial compartment's IIOC height is measured along."
   description: "deck #8"
   base: tibia-grid
   shape: line
@@ -320,6 +354,7 @@
 - id: iioc-lateral-ruler
   kind: overlay
   name: Lateral IIOC height ruler
+  summary: "The line the lateral compartment's IIOC height is measured along."
   description: "deck #9"
   base: tibia-grid
   shape: line
@@ -327,6 +362,7 @@
 - id: tibial-width-ruler
   kind: overlay
   name: Tibial width ruler
+  summary: "The line tibial width is measured along, on the growth plate's proximal face."
   description: "deck #10"
   base: tibia-grid
   shape: line
@@ -335,6 +371,7 @@
 - id: patella-volume
   kind: value
   name: Patella volume
+  summary: "Volume of the patella, counted from its segmented voxels."
   section: Segmentation
   description: patella label, thresholded voxels
   source: "deck #1"
@@ -347,6 +384,7 @@
 - id: lateral-meniscus-osteophyte-volume
   kind: value
   name: Lateral meniscus/osteophyte volume
+  summary: "Volume of the lateral meniscus and its osteophytes together; the label's identity is the lab's working reading, and whether nearby fragments count is open."
   section: Segmentation
   description:
     "lateral meniscus and its spurs together, one volume per side (the lab cannot separate
@@ -361,6 +399,7 @@
 - id: medial-meniscus-osteophyte-volume
   kind: value
   name: Medial meniscus/osteophyte volume
+  summary: "Volume of the medial meniscus and its osteophytes together; the label's identity is the lab's working reading, and whether nearby fragments count is open."
   section: Segmentation
   description: "medial meniscus and its spurs together, one volume per side (the lab cannot separate
     them); on OA6-1RK label 5. Open: whether label 9's pieces and tibial margin fragments 10 and 11
@@ -374,6 +413,7 @@
 - id: bone-threshold
   kind: value
   name: Bone threshold
+  summary: "The density that separates bone from soft tissue in this scan's segmentation; not the threshold bone volume uses."
   section: Segmentation
   description: the HU threshold that separates bone from soft tissue in this scan's segmentation,
     chosen at intake (scan-settings); not the BV threshold, which is the lab's fixed 2.16/cm
@@ -384,6 +424,7 @@
 - id: tv-tibial-iioc
   kind: value
   name: TV, tibial IIOC
+  summary: "Total volume of the IIOC (ROI-1), from the growth plate to the articular surface."
   section: Tibial IIOC
   description: "ROI-1: growth plate to articular surface"
   source: "deck #4"
@@ -395,6 +436,7 @@
 - id: bv-tibial-iioc
   kind: value
   name: BV, tibial IIOC
+  summary: "Bone volume in the IIOC (ROI-1), from the growth plate to the articular surface."
   section: Tibial IIOC
   description: ROI-1
   source: "deck #5"
@@ -406,6 +448,7 @@
 - id: bv-tv-tibial-iioc
   kind: value
   name: BV/TV, tibial IIOC
+  summary: "Bone volume fraction of the IIOC (ROI-1), from the growth plate to the articular surface."
   section: Tibial IIOC
   description: ROI-1
   source: "deck #6"
@@ -418,6 +461,7 @@
 - id: iioc-height
   kind: value
   name: IIOC height
+  summary: "Height of the IIOC, growth plate middle to articular bone top, along the shaft (or perpendicular to the growth plate: the lab hasn't decided)."
   section: Tibial IIOC
   description: middle of the growth plate to the top of the articular bone, vertical
   source: "deck #7"
@@ -437,6 +481,7 @@
 - id: iioc-height-medial-compartment
   kind: value
   name: IIOC height, medial compartment
+  summary: "IIOC height in the medial compartment, growth plate to articular bone top, along the shaft (or perpendicular to the growth plate: the lab hasn't decided)."
   section: Tibial IIOC
   description: "as #7, medial"
   source: "deck #8"
@@ -449,6 +494,7 @@
 - id: iioc-height-lateral-compartment
   kind: value
   name: IIOC height, lateral compartment
+  summary: "IIOC height in the lateral compartment, growth plate to articular bone top, along the shaft (or perpendicular to the growth plate: the lab hasn't decided)."
   section: Tibial IIOC
   description: "as #7, lateral"
   source: "deck #9"
@@ -461,6 +507,7 @@
 - id: tibial-width-at-the-growth-plate
   kind: value
   name: Tibial width at the growth plate
+  summary: "Width of the tibia at the growth plate, from the fibula–tibia junction to the most prominent point opposite."
   section: Tibial IIOC
   description: "centre of the fibula–tibia junction on the tibial surface to the prominent point on
     the other side (open question for the lab: confirm the endpoints on one annotated scan)"
@@ -477,6 +524,7 @@
 - id: subchondral-bone-plate-thickness-medial
   kind: value
   name: Subchondral bone plate thickness, medial
+  summary: "Thickness of the subchondral bone plate under the middle of the medial plateau; unvalidated, as two methods differ about twofold."
   section: Subchondral plate
   description: medial plate
   source: "deck #11"
@@ -488,6 +536,7 @@
 - id: subchondral-bone-plate-thickness-lateral
   kind: value
   name: Subchondral bone plate thickness, lateral
+  summary: "Thickness of the subchondral bone plate under the middle of the lateral plateau; unvalidated, as two methods differ about twofold."
   section: Subchondral plate
   description: lateral plate
   source: "deck #12"
@@ -499,6 +548,7 @@
 - id: tv-iioc-trab
   kind: value
   name: TV, IIOC-trab
+  summary: "Total volume of the IIOC's trabecular core (ROI-2), under the subchondral plate."
   section: IIOC trabecular bone
   description: "ROI-2: ROI-1 minus the subchondral plate and the cortical line next to the growth plate"
   source: "deck #13"
@@ -510,6 +560,7 @@
 - id: bv-iioc-trab
   kind: value
   name: BV, IIOC-trab
+  summary: "Bone volume in the IIOC's trabecular core (ROI-2), under the subchondral plate."
   section: IIOC trabecular bone
   description: ROI-2
   source: "deck #14"
@@ -521,6 +572,7 @@
 - id: bv-tv-iioc-trab
   kind: value
   name: BV/TV, IIOC-trab
+  summary: "Bone volume fraction of the trabecular bone in the IIOC (ROI-2), under the subchondral plate."
   section: IIOC trabecular bone
   description: ROI-2
   source: "deck #15"
@@ -532,6 +584,7 @@
 - id: metaphyseal-tv
   kind: value
   name: TV, proximal tibial trabeculae
+  summary: "Total volume of ROI-3, the metaphyseal trabecular band below the growth plate."
   section: Proximal tibial trabeculae
   description: "ROI-3: a band below the growth plate, clear of cortical bone (offsets in protocol.json)"
   source: "deck #16"
@@ -543,6 +596,7 @@
 - id: metaphyseal-bv
   kind: value
   name: BV, proximal tibial trabeculae
+  summary: "Bone volume in ROI-3, the metaphyseal trabecular band below the growth plate."
   section: Proximal tibial trabeculae
   description: ROI-3
   source: "deck #17"
@@ -554,6 +608,7 @@
 - id: metaphyseal-bv-tv
   kind: value
   name: BV/TV, proximal tibial trabeculae
+  summary: "Bone volume fraction of the metaphyseal trabecular bone below the growth plate (ROI-3)."
   section: Proximal tibial trabeculae
   description: ROI-3
   source: "deck #18"
@@ -565,6 +620,7 @@
 - id: metaphyseal-tb-n
   kind: value
   name: Tb.N, proximal tibial trabeculae
+  summary: "Trabecular number below the growth plate (ROI-3), derived from BV/TV and Tb.Th rather than counted."
   section: Proximal tibial trabeculae
   description: ROI-3
   source: "deck #19"
@@ -576,6 +632,7 @@
 - id: metaphyseal-tb-th
   kind: value
   name: Tb.Th, proximal tibial trabeculae
+  summary: "Mean trabecular thickness below the growth plate (ROI-3), by the largest-sphere method."
   section: Proximal tibial trabeculae
   description: ROI-3, largest contained sphere
   source: "deck #20"
@@ -587,6 +644,7 @@
 - id: metaphyseal-tb-sp
   kind: value
   name: Tb.Sp, proximal tibial trabeculae
+  summary: "Mean trabecular separation, the width of the marrow spaces, below the growth plate (ROI-3), by the largest-sphere method."
   section: Proximal tibial trabeculae
   description: ROI-3, largest contained sphere in marrow
   source: "deck #21"
@@ -598,6 +656,7 @@
 - id: metaphyseal-tb-nd
   kind: value
   name: Tb.Nd, trabecular nodes
+  summary: "Junctions of three or more trabeculae per mm³ below the growth plate (ROI-3), from a 3D skeleton; exploratory."
   section: Proximal tibial trabeculae
   description: ROI-3, 3D skeleton junctions of ≥3 struts (the lab reports a count per tissue volume)
   source: "deck #22"
@@ -609,6 +668,7 @@
 - id: metaphyseal-tb-tm
   kind: value
   name: Tb.Tm, trabecular ends
+  summary: "Free trabecular ends per mm³ below the growth plate (ROI-3), from a 3D skeleton; exploratory."
   section: Proximal tibial trabeculae
   description: ROI-3, skeleton free ends (the lab reports a count per tissue volume)
   source: "deck #23"
@@ -620,6 +680,7 @@
 - id: cortical-thickness-100-um-below-the-growth-plate
   kind: value
   name: Cortical thickness, 100 µm below the growth plate
+  summary: "Thickness of the tibial cortex 100 µm below the growth plate."
   section: Cortical bone
   description: cortical shell at that level
   source: "deck #24"
@@ -631,6 +692,7 @@
 - id: cortical-thickness-1000-um-below-the-growth-plate
   kind: value
   name: Cortical thickness, 1000 µm below the growth plate
+  summary: "Thickness of the tibial cortex 1000 µm below the growth plate."
   section: Cortical bone
   description: "as #24"
   source: "deck #25"
@@ -643,6 +705,7 @@
 - id: distal-femoral-length-dfl
   kind: value
   name: Distal femoral length (DFL)
+  summary: "Length of the distal femur, from the midpoint of the intercondylar groove's upper line to the intercondylar notch."
   section: Distal femur
   description: midpoint (a) of the upper line of the intercondylar groove to the intercondylar notch (b)
   source: "deck #26"
@@ -654,6 +717,7 @@
 - id: distal-femoral-width-dfw
   kind: value
   name: Distal femoral width (DFW)
+  summary: "Width of the distal femur, between the outer vertices of the lateral and medial condyles."
   section: Distal femur
   description: outer vertex of the lateral condyle (c) to outer vertex of the medial condyle (d), across the distal condyles
   source: "deck #27"
@@ -664,6 +728,7 @@
 - id: width-length-ratio
   kind: value
   name: Width/length ratio
+  summary: "Distal femoral width divided by distal femoral length."
   section: Distal femur
   description: "#27 ÷ #26"
   source: "deck #28"
