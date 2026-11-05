@@ -77,17 +77,13 @@ Three paths, from the environment:
 | `PLATE_PIECES` | `<scan>.npy` per scan with reviewed plateau pieces (ossicles, fragments; bool, W, V, U); a scan without one has none. `export.py` only |
 | `SAM31_WEIGHTS` | Meta's `sam3.1_multiplex.pt` from [facebook/sam3.1](https://huggingface.co/facebook/sam3.1) (gated: accept the SAM License there), revision `daa63191845a41281374e725f4c9e51c7a824460`, sha256 `0567debeec80ba4ac6369540c6c248025283cb3ff2b92827509e57e2b3541cb6` |
 
-The scans are the Yao lab's and are not public. The exported training sets (next section) are in Voluma's R2 bucket and need
-Voluma's R2 credentials. With them and the SAM 3.1 weights you can train; prediction (`predict.py` reads the scan's HU grid),
+The scans and the training sets made from them are the Yao lab's and are not public. With them and the SAM 3.1 weights you
+can train; prediction (`predict.py` reads the scan's HU grid),
 band-to-region, scoring and `faces.py` (the tibia mask, the traced faces) and export all need the lab's scans.
 
 ## Data and weights
 
-- **Training sets** in the Voluma R2 bucket under `dev/datasets/plate-finetune/v1/`: `region/` (images, COCO annotations,
-  label arrays; 265 MB) and `band/` (its own annotations; its `img/`, `labels/` and `meta.json` link into `region/`), plus
-  `manifest.json` (size and sha256 of every file, and the links). Fetch with R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
-  `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`): `uv run --group release python dataset_r2.py pull --out data`, which checks every sha256.
-  `region` is byte-identical to the L29 export and `band` to the L32 one.
+- **Training sets:** labelled coronal sections exported from the lab's scans by `export.py` and `band.py`; not public.
 - **Checkpoints** (about 175 MB each: our trained tensors only, loaded on top of the SAM 3.1 weights): the three band seeds
   are public at [VolumaBio/mouse-knee-growth-plate](https://huggingface.co/VolumaBio/mouse-knee-growth-plate), with
   [MODEL_CARD.md](MODEL_CARD.md) as its README (`upload_weights.py` pushed them, 4 Nov 2026). The region seeds are not
@@ -100,7 +96,7 @@ band-to-region, scoring and `faces.py` (the tibia mask, the traced faces) and ex
 uv sync                                     # Python 3.12, torch 2.10 (CUDA 12.8), SAM 3 at the pinned commit
 export PLATE_SCANS=... PLATE_PIECES=... SAM31_WEIGHTS=...   # PLATE_PIECES: export.py only
 
-# 1. training sets (or pull them from R2, above)
+# 1. training sets
 uv run python export.py --split splits/v1.json --out data/region     # ~3 min, CPU
 uv run python band.py --src data/region --out data/band
 
