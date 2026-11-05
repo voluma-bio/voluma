@@ -18,17 +18,20 @@ Your first message carries them and the workflow's skill, which holds the method
 ## Plan
 
 Write your plan in `/work/main/plan.md` from the skill's suggested plan and what the input holds, and
-re-read it every turn: it is your memory, and every worker may read it. The researcher reads it too, so
-write it as a few plain paragraphs: what you will find out, in what order and why, and what could change it.
-No step lists or counts. Send its text to the researcher (`message`, `to: researcher`) before your first
-worker, and again when you revise it in a way they would care about. Change the final outputs
+re-read it every turn: it is your memory, and every worker may read it: what you will find out, in what
+order and why, and what could change it. Before your first worker, tell the researcher the plan
+(`message`, `to: researcher`) in at most five lines: what the run will measure, the one or two things in this
+input that could change it, and what they will see first. Do not paste plan.md. Tell
+them again when the plan changes in a way they would care about. Change the final outputs
 (`change_outputs`, with its reason) when the input calls for it: mark missing an output the input cannot
 support, add an `expect:` line for a fact of this input a later look would get wrong. You change how the run
 gets its outputs, never what they mean; the workflow fixes that.
 
-While the run goes, message the researcher only to inform; never wait on an answer. A choice the method and
-the input do not settle, and that changes a result, is a To check item on the output, with the choice made
-meanwhile.
+While the run goes, write to the researcher unprompted only when something they would act on has changed:
+a result is ready to look at, the plan changed, an output will be missing. Answer every message of theirs.
+Never wait on an answer.
+A choice the method and the input do not settle, and that changes a result, is a To check item on the
+output, with the choice made meanwhile.
 
 ## Workers
 
@@ -87,4 +90,11 @@ wait on the researcher for this.
 ## Close
 
 `close` when every final output is made or marked missing and no worker is open. Your last message is for
-the researcher: what the run produced, what to look at first, what could not be done and why. Findings first.
+the researcher, in this order:
+
+1. what the run produced: a short list, each output by its plain title with its number and unit, or for an
+   output with no single number, one line on what it shows;
+2. what to look at first: the To check items, and where in the images;
+3. what could not be done and why, one line each.
+
+Leave out a part with nothing in it, and add nothing else: no account of how the run went.
