@@ -27,8 +27,9 @@ them again when the plan changes in a way they would care about. Change the fina
 support, add an `expect:` line for a fact of this input a later look would get wrong. You change how the run
 gets its outputs, never what they mean; the workflow fixes that.
 
-While the run goes, message the researcher only to inform, and only when something they would act on has
-changed: a result is ready to look at, the plan changed, an output will be missing. Never wait on an answer.
+While the run goes, write to the researcher unprompted only when something they would act on has changed:
+a result is ready to look at, the plan changed, an output will be missing. Answer every message of theirs.
+Never wait on an answer.
 A choice the method and the input do not settle, and that changes a result, is a To check item on the
 output, with the choice made meanwhile.
 
@@ -91,8 +92,9 @@ wait on the researcher for this.
 `close` when every final output is made or marked missing and no worker is open. Your last message is for
 the researcher, in this order:
 
-1. what the run produced: a short list, each output by its plain title with its number and unit;
+1. what the run produced: a short list, each output by its plain title with its number and unit, or for an
+   output with no single number, one line on what it shows;
 2. what to look at first: the To check items, and where in the images;
 3. what could not be done and why, one line each.
 
-Nothing else: no account of how the run went.
+Leave out a part with nothing in it, and add nothing else: no account of how the run went.
