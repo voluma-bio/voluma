@@ -24,7 +24,7 @@ How it chooses (details in the comments of joint_frame):
     the leg axis and the reference object, or, with none, the widest spread of the bones. Bone A is the shaft passing
     nearer the reference object (at the knee, the femur: the patella sits on it); with no shaft or no reference object
     it is the bigger bone, and the side of the slice the reference sits on is then arbitrary.
- 5. It counts each bone's voxels in the keyframe (`keyframe_bone_vox`) and stops if one has under 5% of the other's.
+ 5. It counts each bone's voxels in the keyframe (`keyframe_bone_vox`) and warns if one has under 5% of the other's.
 Where it fails: a joint inside either 30% end portion (a very short stub); two axes far apart out of plane (one slice
 cannot cut both shafts: see `skew_vox`); no shaft and no second piece of at least --second-bone-frac (stops); a non-bone
 piece taken for the second bone or the reference object when size cannot tell (a large patella, a fragment). The keyframe

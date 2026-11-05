@@ -1,5 +1,10 @@
 # mouse-oa TODO
 
+- **Warnings, second pass.** Judgement checks in `femoral_frame.py`, `tibia_frame.py` and `orient_joint.py` warn
+  (`sidecar.warn`) instead of refusing (#608). Still refusing, to be judged the same way as one set: the growth-plate trace
+  checks in `iioc.py` and `annotations.py` (`refuse_gaps`, `refuse_jumps`, `refuse_off_tibia`, `refuse_width_points`,
+  `refuse_cut_sides`) and `merge_labels.py`'s track check (`sam-segmentation`). Keep a refusal only where no valid result
+  can be written.
 - **Align the femur before placing a-d (the lab expert's order).** "Alignment by the tibia first. Alignment by tibial
   shaft to growth plate and articular surface as first parameters. Additional parameters for femoral indices would be
   measured after alignment of femur." Today `femoral_frame.py` builds `femur-frame.json` after the points, from the same

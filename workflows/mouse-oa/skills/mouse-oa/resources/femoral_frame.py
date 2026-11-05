@@ -17,10 +17,11 @@ joint face puts a and b across the notch and DFL comes out a third of its size);
 width along ML across its distal end (c and d on the condyles' outer vertices, not on a ridge inside them); a-b in the
 sagittal plane (|cos| to ML at most 0.5) and c-d across the condyles (|cos| to ML at least 0.7), so points placed with the
 sides and the front swapped are caught on any knee, left or right; SI (b to a) pointing toward the shaft; and a femur label
-at least 4.5 mm along its shaft, or its axes, and the checks that use them, cannot be trusted. A ruler that fails against
+at least 4.5 mm along its shaft, or its axes, and the checks that use them, cannot be trusted (no femur-frame.json is
+written then). A ruler that fails against
 the label's ML axis is told apart by the bending-plane normal: both axes agree and the ruler fails both (the points are
 wrong), both rulers fit the normal (the label's axis may be wrong), or there is no usable normal. Refused, nothing written:
-a missing landmark, coincident landmarks, a points file or frame on another grid.
+an empty femur label, a missing landmark, coincident landmarks, a points file or frame on another grid.
 
 Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
         distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml and si vectors, zyx), checks
@@ -55,7 +56,7 @@ MIN_WIDTH_ML = 0.7
 # |cos| between the label's ML axis and the bending-plane normal at or above which the axis counts as confirmed (about 32
 # degrees). On threshold-split labels of ten lab scans with a bending plane in the frame: OA7-1L 0.996, OA6-1RK 0.98, OA6-2RK
 # 0.95, OA6-9RK 0.90, OA6-17LK9 0.86 confirm; OA7-3R 0.76, OA8-17L 0.58, OA8-19L 0.53 do not (OA6-14LK3 and OA7-4R had no
-# bending plane). A ruler is refused with no way out only when it fails against both reads and they agree, so correct points
+# bending plane). A ruler is called wrong outright only when it fails against both reads and they agree, so correct points
 # within the checks' limits of either read are never sent back.
 MIN_ML_AGREE = 0.85
 BENDING_PLANE = 'span of the two shaft axes'  # orient_joint.py's plane_rule when the normal is the bending-plane normal
@@ -84,7 +85,7 @@ def unit(v):
 
 
 def direction(v):
-    """A direction for a refusal: the unit vector in scan (z, y, x) and the scan axis it runs mostly along, or the two it
+    """A direction for a warning: the unit vector in scan (z, y, x) and the scan axis it runs mostly along, or the two it
     runs between."""
     u = unit(np.asarray(v, float))
     first, second = np.argsort(np.abs(u))[::-1][:2]
@@ -105,8 +106,8 @@ def femur_axes(femur, sp, distal_mm):
     does not move them. The mediolateral axis is the long axis of the cross-section of every femur voxel in the
     EPIPHYSIS_MM above that end: the condyles are wider side to side than front to back (standard deviation 0.875
     against 0.702 mm on OA6-1RK, 0.900 against 0.648 on OA6-2RK). On a short stub of femur the long axis is the condyles' width, not the shaft, and both axes are
-    wrong: the caller refuses a label shorter than MIN_FEMUR_MM along the shaft."""
-    pieces, _ = ndi.label(femur[::2, ::2, ::2])  # the caller has checked there is femur bone at the landmarks
+    wrong: the caller writes no femur frame from a label shorter than MIN_FEMUR_MM along the shaft."""
+    pieces, _ = ndi.label(femur[::2, ::2, ::2])  # the caller has refused an empty label
     idx = np.argwhere(pieces)
     main = pieces[tuple(idx.T)] == np.argmax(np.bincount(pieces.ravel())[1:]) + 1
     p = idx * 2 * sp
@@ -192,6 +193,8 @@ def main():
     pm = {i: p[i] * sp for i in names}  # mm, zyx
     checks = {}
     femur = np.asarray(np.load(a.labels, mmap_mode='r')) == a.label
+    if not femur.any():
+        sidecar.fail(f'label {a.label} is empty in {a.labels}: pass the femur\'s label as --label (1 in outputs.yaml)')
     checks['off_bone_mm'] = {i: off_bone_mm(p[i], femur, sp[0]) for i in names}
     far = [i for i, d in checks['off_bone_mm'].items() if d is None or d > MAX_OFF_BONE_MM]
     if far:
@@ -206,8 +209,8 @@ def main():
     if checks['femur_length_mm'] < MIN_FEMUR_MM:
         sidecar.warn(f"the femur label runs only {checks['femur_length_mm']:.2f} mm along its shaft (at least {MIN_FEMUR_MM}): "
                      "too little shaft is labelled or in the field of view to find the femur's axes, so the labels or the scan "
-                     'are the problem, not the points, and the checks below that use its axes may be wrong. Do not move the points '
-                     'for this: raise a To check item naming it')
+                     'are the problem, not the points: no femur-frame is written, and the checks below that use its axes may be '
+                     'wrong. Do not move the points for this: raise a To check item naming it')
     normal = unit(np.array(knee['normal_zyx'], float))  # voxel-index direction; frames need isotropic voxels, so mm agrees
     plane = checks['bending_plane'] = knee.get('plane_rule') == BENDING_PLANE and (knee.get('bend_deg') or 0) >= MIN_BEND_DEG
     agree = abs(ml @ normal)
@@ -227,8 +230,7 @@ def main():
         fit_ml[name] = fits(abs(v @ ml))
         fit_normal[name] = plane and fits(abs(v @ normal))
     failing = [r for r in rulers if not fit_ml[r[0]]]
-    if failing:
-        name, ends, limit, _, wrong, rule = failing[0]
+    for name, ends, limit, _, wrong, rule in failing:
         v = unit(pm[name[0]] - pm[name[2]])
         head = (f"{name} runs along {direction(v)}, {wrong} (|cos| {checks[f'{name[0]}_{name[2]}_cos_to_ml']:.2f} to the "
                 f"mediolateral axis in the femur label, {limit}), but {rule}. The label's axis runs along {direction(ml)}")
@@ -277,7 +279,8 @@ def main():
     if (centroid - (pm['c'] + pm['d']) / 2) @ si <= 0:
         sidecar.warn('SI (b toward a) points away from the femoral bulk: a is not the groove end nearer the shaft, or the '
                      'points are on the wrong view. Re-place a and b, or, if a render shows them right, raise a To check item')
-    femur_frame = make_femur_frame(grid, femur, shaft, ml)
+    short = checks['femur_length_mm'] < MIN_FEMUR_MM  # its axes are wrong, so no frame is built on them
+    femur_frame = None if short else make_femur_frame(grid, femur, shaft, ml)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     sidecar.emit_values(
@@ -286,9 +289,10 @@ def main():
         meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks,
               'inputs': {a.spec: sidecar.sha256_file(a.spec), a.frame: sidecar.sha256_file(a.frame)}},
         objects=placed,
-        frame_file=str(out / 'femur-frame.json'),
+        **({} if short else {'frame_file': str(out / 'femur-frame.json')}),
     )
-    fr.save(femur_frame, out / 'femur-frame.json')  # after emit_values, which can still exit 2
+    if not short:
+        fr.save(femur_frame, out / 'femur-frame.json')  # after emit_values, which can still exit 2
 
 
 if __name__ == '__main__':

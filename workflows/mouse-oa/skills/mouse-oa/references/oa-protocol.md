@@ -44,7 +44,7 @@ on.
 | 6 | Check the distal face the proposal gave and retrace what is wrong or flagged (annotation C), then ROI-3 and the cortex under the plate (`--out meta`; the cortical step reads this cortex and face) | `metaphysis_roi.py` | `qc-roi3.jpg` and `qc-roi3-axial.jpg` against `examples/README.md` (metaphyseal-roi), and every `qc-faces-<n>.jpg`: both faces as delivered, on every traced section, which you open sheet by sheet |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes --output roi-iioc` and `roi-iioc-trabecular`; `trabecular --output roi-metaphyseal` | the QC images `trabecular` writes (`bone-morphometry`) |
 | 8 | Ct.Th at the two levels below the distal face (#24, #25), on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment (#11, #12) on the plate runs `iioc.py` wrote, under the articular top surface | `morphometry.py cortical --output roi-cortex-100um`, `roi-cortex-1000um`, `roi-subchondral-plate-medial` or `-lateral` (the slab's declared id; its depth and thickness are in the spec) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
-| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote; it also writes `femur-frame.json`, reported as `femur-frame` (its first file) | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
+| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote; it also writes `femur-frame.json`, reported as `femur-frame` (its first file) | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script warns on a bad landmark (D) |
 | 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec <protocol.json> --outputs /workflow/workflows/mouse-oa/outputs.yaml --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab | `amira_landmarks.py` | the lab opens it in Amira |
 
@@ -157,7 +157,7 @@ schema is `regions-and-landmarks`'):
   which side is lateral or where the front is: read those from a render of this scan. When the warning says the axis is
   confirmed, a render that seems to disagree has its image axes mislabelled: name the scan axis along each image axis,
   then re-place. Keep the points, and raise a To check item quoting the warning and what you saw, when the label and not
-  the points is at fault: a femur label too short along its shaft; two rulers that both fit the knee's bending plane but
+  the points is at fault: a femur label too short along its shaft (no `femur-frame` is written then); two rulers that both fit the knee's bending plane but
   not the label's axis; an axis the bending plane does not confirm that a render of this scan, its image axes named,
   contradicts; or `c` and `d` already on the condyles' outermost points while one of the two label voxels the warning
   prints at the ends of that width is on something fused to the femur label (a fabella, a piece of patella or meniscus,

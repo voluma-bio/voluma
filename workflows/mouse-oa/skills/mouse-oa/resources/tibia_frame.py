@@ -221,7 +221,7 @@ def main():
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json that scan-intake wrote: grid id and spacing')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
-    ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script refuses a --label whose joint end looks like the femur\'s, and a --joint-end on the wrong side')
+    ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script warns on a --label whose joint end looks like the femur\'s, and uses the detected joint end over a --joint-end on the wrong side')
     ap.add_argument('--fibula-label', type=int, default=4, help='label id of the fibula (4), which is lateral: the grid is turned to put it at -U (0: none)')
     ap.add_argument('--patella-label', type=int, default=3, help='label id of the patella (3), which is anterior: reported as anterior_side, a check on +V (0: none)')
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
