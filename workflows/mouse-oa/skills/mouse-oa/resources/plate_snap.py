@@ -30,14 +30,11 @@ Writes: in <out>,
   qc-snap-<V>.jpg  one image per snapped section, rough against the output
 Prints: the result record {out, values, annotations, qc, sections}
 Example: python plate_snap.py --spec protocol.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --annotations annotations.json --out snap/ [--sections 34,46] [--face distal] [--snap-unsure]
-Exits 2 with one sentence on bad input, before writing anything; and when the snapped curves break a rule (`refuse_off_tibia`, `refuse_gaps`,
-`refuse_jumps`, or the faces crossing) that your curves met: the sentence says the snap caused it.
+Exits 2 with one sentence on bad input, before writing anything; and when the snapped curves break a rule (`check_off_tibia`, `check_gaps`,
+`check_jumps`, or the faces crossing) that your curves met: the sentence says the snap caused it.
 """
 
-import contextlib
-import io
 import json
-import sys
 import tempfile
 from itertools import pairwise
 from pathlib import Path
@@ -45,7 +42,7 @@ from pathlib import Path
 import numpy as np
 import sidecar
 import viewlib as vl
-from annotations import load_annotations, refuse_gaps, refuse_jumps, refuse_off_tibia, tibia_margin
+from annotations import check_gaps, check_jumps, check_off_tibia, load_annotations, tibia_margin
 from envelope import footprint
 from scipy import ndimage as ndi
 from skimage.feature import hessian_matrix, hessian_matrix_eigvals
@@ -377,10 +374,9 @@ def main():
     # the snapped curves obey every rule your curves obeyed, and the schema every later script reads; nothing is written before this passes
     on_bone = footprint(tib)
     for key in KEYS.values():
-        for refuse, arg in ((refuse_off_tibia, tib), (refuse_gaps, tib), (refuse_jumps, on_bone)):
-            if passes(refuse, ann, key, arg, a.spec, vox) and not passes(refuse, new, key, arg, a.spec, vox):
-                print('The snap, not your tracing, broke this rule: your curves met it.', file=sys.stderr)
-                refuse(new, key, arg, a.spec, vox)
+        for check, arg in ((check_off_tibia, tib), (check_gaps, tib), (check_jumps, on_bone)):
+            if not check(ann, key, arg, a.spec, vox) and (problem := check(new, key, arg, a.spec, vox)):
+                sidecar.fail(f'The snap, not your tracing, broke this rule: your curves met it. {problem}')
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, 'annotations.json').write_text(json.dumps(new) + '\n')
         load_annotations(Path(tmp, 'annotations.json'), grid)
@@ -405,16 +401,6 @@ def main():
         qc=images,
         sections_moved_beyond_capture=far,
     )
-
-
-def passes(refuse, ann, *args):
-    """Whether `refuse` (one of annotations.py's refuse_*, which exits with a sentence when it refuses) accepts `ann`."""
-    try:
-        with contextlib.redirect_stderr(io.StringIO()):
-            refuse(ann, *args)
-    except SystemExit:
-        return False
-    return True
 
 
 if __name__ == '__main__':

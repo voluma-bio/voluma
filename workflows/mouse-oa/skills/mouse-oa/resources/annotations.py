@@ -181,10 +181,16 @@ def off_tibia(tib, v, points_wu, margin):
     return [(p, d) for p, d in zip(points_wu, near) if d > margin]
 
 
-def refuse_off_tibia(ann, key, tib, spec_path, vox):
-    """Refuse curve points that lie off the tibia: on the section's coronal cut of the tibia mask (axes W, U), farther than the spec's
+def warn_on(problem):
+    """Warn with a check_* function's sentence, if it found a problem."""
+    if problem:
+        sidecar.warn(problem)
+
+
+def check_off_tibia(ann, key, tib, spec_path, vox):
+    """The problem sentence, or None: curve points that lie off the tibia: on the section's coronal cut of the tibia mask (axes W, U), farther than the spec's
     `off_tibia_margin_um` (entry plate-faces) from any tibia voxel. A line run across empty space or up a cortical wall's far side is
-    an invented face, so the script stops and names the section, the count and the first point."""
+    an invented face, so the script warns and names the section, the count and the first point."""
     margin = tibia_margin(spec_path, vox)
     refused = []
     for k, pts in sorted(ann[key]['slices'].items(), key=lambda kv: int(kv[0])):
@@ -193,11 +199,11 @@ def refuse_off_tibia(ann, key, tib, spec_path, vox):
             refused.append(f'V={k}: {len(off)} of {len(pts)} points, the first at W={off[0][0]:g}, U={off[0][1]:g}')
     if refused:
         shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more sections' if len(refused) > 6 else '')
-        sidecar.fail(f'"{key}" has points more than {margin * vox * 1000:.0f} um off the tibia: {shown}. Trace the face on the bone only')
+        return (f'"{key}" has points more than {margin * vox * 1000:.0f} um off the tibia: {shown}. Trace the face on the bone only')
 
 
-def refuse_gaps(ann, key, tib, spec_path, vox):
-    """Refuse a face with a gap over the plate, at the spec's `max_gap_um` (entry plate-faces): on a traced section, two
+def check_gaps(ann, key, tib, spec_path, vox):
+    """The problem sentence, or None: a face with a gap over the plate, at the spec's `max_gap_um` (entry plate-faces): on a traced section, two
     neighbouring points further apart than that over columns where the tibia lies within it below the line between them and
     anywhere above it (the plate sits on the metaphysis under the epiphysis, which can be porous, and the mask often leaves the
     plate out; a line across empty space between two pieces of bone has no bone close below it); or two neighbouring traced sections further
@@ -248,7 +254,7 @@ def refuse_gaps(ann, key, tib, spec_path, vox):
                 problems.append(f'sections V={a} and V={b} have {n} rows with bone at plate level between them')
     if problems:
         shown = '; '.join(problems[:6]) + (f'; and {len(problems) - 6} more' if len(problems) > 6 else '')
-        sidecar.fail(f'"{key}" has a gap over the plate wider than {gap * um:.0f} um (between points on a section, or between sections in V): {shown}. Trace the plate there ({len(levels)} traced sections: V={levels[0]}..{levels[-1]})')
+        return (f'"{key}" has a gap over the plate wider than {gap * um:.0f} um (between points on a section, or between sections in V): {shown}. Trace the plate there ({len(levels)} traced sections: V={levels[0]}..{levels[-1]})')
 
 
 def face_jumps(spec, on_bone, overlap):
@@ -270,11 +276,11 @@ def face_jumps(spec, on_bone, overlap):
     return jumps
 
 
-def refuse_jumps(ann, key, on_bone, spec_path, vox):
-    """Refuse a face that jumps between neighbouring traced sections farther than a plate moves: a median W change (`face_jumps`)
+def check_jumps(ann, key, on_bone, spec_path, vox):
+    """The problem sentence, or None: a face that jumps between neighbouring traced sections farther than a plate moves: a median W change (`face_jumps`)
     of more than the spec's `max_jump_um` (entry plate-faces) plus the sections' distance apart, where they share at least its
     `jump_overlap_um` of bone. A face read off each section's image moves less than that between sections so close; one assembled
-    by code from a detector's fragments or another section's points jumps where its source changes, so the script stops and names
+    by code from a detector's fragments or another section's points jumps where its source changes, so the script warns and names
     each pair, the move and the U range."""
     p = sidecar.protocol(spec_path, 'plate-faces', 'max_jump_um', 'jump_overlap_um')
     um = vox * 1000
@@ -288,7 +294,7 @@ def refuse_jumps(ann, key, on_bone, spec_path, vox):
         shown = '; '.join(problems[:6]) + (f'; and {len(problems) - 6} more' if len(problems) > 6 else '')
         shared = sorted(v for v in set(refused) if refused.count(v) > 1)
         odd = f' V={", ".join(map(str, shared))} jumps against both neighbours, so start there.' if shared else ''
-        sidecar.fail(f'"{key}" jumps between neighbouring traced sections farther than a plate moves (the median W change over the U columns '
+        return (f'"{key}" jumps between neighbouring traced sections farther than a plate moves (the median W change over the U columns '
                      f'both cover on bone, at most {p["max_jump_um"]:g} um plus the sections\' distance apart): {shown}.{odd} '
                      'Trace the face on each of those sections from its own image; a section kept from the proposal next to one you traced '
                      'is as likely to be the wrong one. Deleting a section does not fix the face: the sections left keep the same points')
@@ -313,7 +319,7 @@ def eroded_marks(ann, key, shape, on_bone):
         marked.setdefault(v, np.zeros(shape[2], bool))[a : b + 1] = True
     if refused:
         shown = '; '.join(refused[:6]) + (f'; and {len(refused) - 6} more' if len(refused) > 6 else '')
-        sidecar.fail(f'"plate_eroded" marks {len(refused)} range(s) the curves "{key}" do not trace: {shown}. Trace the remaining bone through each marked range')
+        sidecar.warn(f'"plate_eroded" marks {len(refused)} range(s) the curves "{key}" do not trace: {shown}. Trace the remaining bone through each marked range')
     sections = sorted(int(k) for k in slices)
     eroded = np.zeros(shape[1:], bool)
     for v in range(sections[0], sections[-1] + 1):

@@ -12,7 +12,7 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
 or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections; a point more than
-                          `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is refused, naming the section, and so
+                          `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask is warned on, naming the section, and so
                           is a face with a gap over the plate: on a section, two points more than `max_gap_um` of the spec (entry
                           plate-faces) apart where the tibia lies within that below the line between them and anywhere above it (a
                           line across empty space between two pieces of bone does not count); in V, two sections more than that apart over the
@@ -21,7 +21,7 @@ or from another grid is refused). This script reads these keys; any other key is
                           tibia's footprint (when they share at least `jump_overlap_um`), of more than `max_jump_um` plus the sections' distance apart
   plate_eroded            optional: {"<V>": [{"u": [first, last], "eroded": "<why>"}]}, where the plate is gone: any section
                           of the curve, any U range (integers, first <= last). It never replaces points: the section's curve must
-                          reach both ends of every marked range, or the script stops naming the section and U range; inside
+                          reach both ends of every marked range, or the script warns, naming the section and U range; inside
                           a marked range its points follow the remaining bone. The marked ranges and their share of the footprint are in
                           the result record
   articular_corrections   optional list of {"u_range": [lo, hi], "v_range": [lo, hi], "curves": curves}: where part of the
@@ -31,7 +31,7 @@ or from another grid is refused). This script reads these keys; any other key is
                           point outside the ROI-1 footprint (or within 3 voxels of its edge) stops the script: move the point
   width_points_uvw        required: two [u, v, w] points (deck #10) on the growth plate's proximal face, on one coronal section:
                           the centre of the fibula-tibia junction on the tibial surface, and the most prominent point on the
-                          other side. Points more than 2 apart in V are refused, and so is a point more than `width_point_off_face_um`
+                          other side. Points more than 2 apart in V are warned on, and so is a point more than `width_point_off_face_um`
                           (spec, entry roi-iioc) from the face on its coronal section (the nearest point of the face's curve there)
                           or more than `off_tibia_margin_um` (spec, entry plate-faces) off the tibia mask there
   growth_plate_mid_u      optional: U of "the middle of the growth plate" for height #7 (default: the mean U of the two width points)
@@ -76,15 +76,16 @@ import objects
 import sidecar
 import viewlib as vl
 from annotations import (
+    check_gaps,
+    check_jumps,
+    check_off_tibia,
     eroded_marks,
     load_annotations,
     need,
     off_tibia,
-    refuse_gaps,
-    refuse_jumps,
-    refuse_off_tibia,
     tibia_margin,
     traced_surface,
+    warn_on,
 )
 from envelope import close_and_fill, footprint
 from face_qc import delivered_faces
@@ -145,14 +146,14 @@ def ray_length(roi, start, direction, step=0.05, max_lead=3.0):
     return t
 
 
-def refuse_width_points(wp, gp, tib, off_face_um, margin, vox):
-    """Refuse width points (deck #10, [u, v, w] rows of `wp`) that are not on the growth plate's proximal face on one coronal
+def check_width_points(wp, gp, tib, off_face_um, margin, vox):
+    """Warn on width points (deck #10, [u, v, w] rows of `wp`) that are not on the growth plate's proximal face on one coronal
     section: two points more than 2 apart in V; a point more than `margin` voxels off the tibia mask `tib` on its section (past the
     curves' ends the face is held flat across the grid, so a point beside the tibia would sit on it); or a point farther than
     `off_face_um` from the face `gp` on its section (the nearest point of the face's curve W(U) there, over U and W)."""
     (_, v0, _), (_, v1, _) = wp
     if abs(v1 - v0) > 2:
-        sidecar.fail(f'"width_points_uvw" (#10) must be two points on one coronal section, but they are on V={v0:g} and V={v1:g}, '
+        sidecar.warn(f'"width_points_uvw" (#10) must be two points on one coronal section, but they are on V={v0:g} and V={v1:g}, '
                      'more than 2 apart: put both on the same section, each on the growth plate\'s proximal face')
     cols = np.arange(gp.shape[1], dtype=float)
     off = []
@@ -171,7 +172,7 @@ def refuse_width_points(wp, gp, tib, off_face_um, margin, vox):
         if um[i] > off_face_um:
             off.append(f'[{u:g}, {v:g}, {w:g}] is {um[i]:.0f} um from the face (the nearest face point is [{nu[i]:.1f}, {sv}, {nw[i]:.1f}])')
     if off:
-        sidecar.fail(f'"width_points_uvw" (#10) must be two points on the growth plate\'s proximal face, on the tibia, but {" and ".join(off)}: '
+        sidecar.warn(f'"width_points_uvw" (#10) must be two points on the growth plate\'s proximal face, on the tibia, but {" and ".join(off)}: '
                      f'move each point onto the face on the tibia, within {off_face_um:g} um of the face on its coronal section '
                      f'and {margin * vox * 1000:.0f} um of the tibia')
 
@@ -188,8 +189,8 @@ def shifted(a, axis, step, fill):
     return out
 
 
-def refuse_cut_sides(roi, gp, tib, beyond, depth, max_area_mm2, vox):
-    """Refuse an ROI-1 whose side (its faces toward U and V) runs through bone the tibia mask `tib` left out: a patch of side
+def check_cut_sides(roi, gp, tib, beyond, depth, max_area_mm2, vox):
+    """Warn on an ROI-1 whose side (its faces toward U and V) runs through bone the tibia mask `tib` left out: a patch of side
     surface larger than `max_area_mm2` where the voxel beyond is off the mask and every voxel for `depth` beyond it is
     `beyond` (bone, HU over the threshold, that no other big bone's label holds). The bone's outer surface has soft tissue,
     air, a joint gap or another bone beyond it; solid bone beyond means the mask, which ROI-1 follows, stopped inside the bone. `depth` voxels also keep the test off the
@@ -216,7 +217,7 @@ def refuse_cut_sides(roi, gp, tib, beyond, depth, max_area_mm2, vox):
     if big:
         big.sort(key=lambda b: -b[0])
         where = '; '.join(f'V {s[1].start}-{s[1].stop - 1}, U {s[2].start}-{s[2].stop - 1} ({a:.3f} mm2)' for a, s in big)
-        sidecar.fail(f'ROI-1\'s side runs through bone instead of along the bone\'s outer surface (patches of side over {max_area_mm2:g} mm2 '
+        sidecar.warn(f'ROI-1\'s side runs through bone instead of along the bone\'s outer surface (patches of side over {max_area_mm2:g} mm2 '
                      f'with bone no other big bone\'s label holds for {depth * vox * 1000:.0f} um beyond them) at {where}: the tibia label '
                      'stops inside bone there, which retracing the face does not fix. Open each patch on the coronal sections; give that '
                      'bone to the tibia in the labels (segmentation-check) and rerun tibia_frame.py. That makes a new aligned grid, and this '
@@ -273,14 +274,14 @@ def main():
     gp, gp_traced = traced_surface(gp_spec, 'growth_plate_curves', h.shape)
     v_traced = sorted(int(k) for k in gp_spec['slices'])
     gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
-    refuse_off_tibia(ann, 'growth_plate_curves', tib, a.spec, vox)
-    refuse_gaps(ann, 'growth_plate_curves', tib, a.spec, vox)
+    warn_on(check_off_tibia(ann, 'growth_plate_curves', tib, a.spec, vox))
+    warn_on(check_gaps(ann, 'growth_plate_curves', tib, a.spec, vox))
     on_bone = footprint(tib)
-    refuse_jumps(ann, 'growth_plate_curves', on_bone, a.spec, vox)
+    warn_on(check_jumps(ann, 'growth_plate_curves', on_bone, a.spec, vox))
     wp = np.array(need(ann, 'width_points_uvw', 'two [u, v, w] points on the growth plate\'s proximal face, on one coronal section: '
                        'the centre of the fibula-tibia junction on the tibial surface, and the prominent point on the other side'), float)
     # against the face as traced: --gp-shift-mm moves the cut, not the plate
-    refuse_width_points(wp, gp, tib, spec['width_point_off_face_um'], tibia_margin(a.spec, vox), vox)
+    check_width_points(wp, gp, tib, spec['width_point_off_face_um'], tibia_margin(a.spec, vox), vox)
     gp = gp + a.gp_shift_mm / vox
     _, plate = eroded_marks(ann, 'growth_plate_curves', h.shape, on_bone)
     env = envelope(tib, gp, vox)
@@ -299,7 +300,7 @@ def main():
     if labels.shape != tuple(g['shape']):
         sidecar.fail(f'{a.labels} has shape {labels.shape}, not the scan\'s {tuple(g["shape"])}: pass the whole scan-grid labels.npy, not a crop')
     other = np.isin(fr.resample(labels, frame, order=0, cval=0, dtype=labels.dtype), spec['cut_other_bones'])
-    refuse_cut_sides(roi, gp, tib, above & ~other, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
+    check_cut_sides(roi, gp, tib, above & ~other, max(round(spec['cut_depth_um'] / 1000 / vox), 1), spec['cut_max_area_mm2'], vox)
     del other
     bone = roi & above
     scan_roi = fr.to_scan(roi, frame, g['shape'])

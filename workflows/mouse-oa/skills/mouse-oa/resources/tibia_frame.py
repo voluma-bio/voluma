@@ -16,10 +16,10 @@ heights, plate patches) is indexed on this aligned grid: array axes (W, V, U), W
 The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
 because its sign rule and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
-voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, and fewer than ten sections with
+voxels, HU and labels of different shapes, an empty tibia or femur label (the joint end is the tibia's end facing the
+femur, so the femur must be labelled), no bone in the epiphysis range, and fewer than ten sections with
 bone in the `--axis-mm` range. Warned, with the grid still written: a `--label` whose joint end has the femur's notch where
-`--femur-label`'s is solid (the two labels look swapped; the joint-end caps' solidities are in the result record), and a
-`--joint-end` on the side away from the femur (the grid uses the detected end), and a final axis more than 0.5 degrees
+`--femur-label`'s is solid (the two labels look swapped; the joint-end caps' solidities are in the result record), and a final axis more than 0.5 degrees
 off W in either plane (not checked with `--tilt-deg`).
 
 Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolation, -1000 outside the scan), with its sidecar
@@ -38,7 +38,7 @@ Prints: one JSON line {out, values, objects, hu, mask, frame, qc, qc_sagittal, g
         axis_residual_deg: the axis's angle to W on the final grid, at full resolution; positive coronal = the shaft's lower
         end (toward +W) at larger U than its top, positive sagittal the same with V. axis_w: the --axis-mm range as W indices
         of the output grid; its end may lie past the grid's last W index (the fit samples the scan, not the crop).
-Example: python tibia_frame.py --window scan-settings.json --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
+Example: python tibia_frame.py --window scan-settings.json --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -70,14 +70,15 @@ def extent(m):
     return f'{zs[0]} to {zs[-1]}'
 
 
-def check_bone(labels, mask, label, other, joint_end, vox):
-    """Check that `label` is the tibia across the joint from `other` (the femur) and that --joint-end faces it. Returns the
-    joint end to use (the detected one when --joint-end points away from the femur) and the diagnostics for the record."""
+def check_bone(labels, mask, label, other, vox):
+    """Check that `label` is the tibia across the joint from `other` (the femur). Returns the joint end (the end of scan z
+    that faces the femur) and the diagnostics for the record."""
     if label == other:
         sidecar.fail(f'--label and --femur-label are both {label}: pass the tibia\'s label as --label (2 in outputs.yaml)')
     oth = labels == other
     if not oth.any():
-        return joint_end, {'tibia_check': f'not made: label {other} (the femur) is empty, so nothing to compare against; check the QC'}
+        sidecar.fail(f'label {other} (--femur-label, the femur) is empty: the joint end is found from where the femur lies, '
+                     'so pass the femur\'s label')
     mask, oth = jc.largest_piece(mask), jc.largest_piece(oth)
     s, so, facing_low = jc.caps(mask, oth, vox)  # facing_low: the end of this bone that faces the femur
     if s < so - jc.CAP_GAP:
@@ -94,9 +95,6 @@ def check_bone(labels, mask, label, other, joint_end, vox):
     else:
         verdict = 'unclear: the caps are too alike to tell the bones apart; check the QC montage for the plateau'
     found = 'low' if facing_low else 'high'
-    if joint_end != found:
-        sidecar.warn(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {found} end of scan z '
-                     f'for label {label} on this scan, so this grid uses {found}')
     return found, {'tibia_check': verdict, 'cap_solidity': {'tibia_label': round(s, 3), 'femur_label': round(so, 3)}}
 
 
@@ -114,7 +112,7 @@ def fit_frame(mask, shaft_z, epi_z, joint_end, vox):
     for z in range(shaft_z[0], shaft_z[1], 10):
         yy, xx = np.where(close_and_fill(mask[z], vox))
         if len(yy) == 0:
-            sidecar.fail(f'label has no voxels at slice {z}: widen --shaft-frac or check --label and --joint-end')
+            sidecar.fail(f'label has no voxels at slice {z}: widen --shaft-frac or check --label')
         centers.append([xx.mean(), yy.mean(), z])
     centers = np.array(centers)
     w = np.array([np.polyfit(centers[:, 2], centers[:, 0], 1)[0], np.polyfit(centers[:, 2], centers[:, 1], 1)[0], 1.0])
@@ -225,18 +223,12 @@ def main():
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json that scan-intake wrote: grid id and spacing')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
-    ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script warns on a --label whose joint end looks like the femur\'s, and uses the detected joint end over a --joint-end on the wrong side')
+    ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the joint end is the tibia\'s end facing it, and the script warns on a --label whose joint end looks like the femur\'s')
     ap.add_argument('--fibula-label', type=int, default=4, help='label id of the fibula (4), which is lateral: the grid is turned to put it at -U (0: none)')
     ap.add_argument('--patella-label', type=int, default=3, help='label id of the patella (3), which is anterior: reported as anterior_side, a check on +V (0: none)')
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--name', default='tibia', help='prefix of the output files')
-    ap.add_argument(
-        '--joint-end',
-        choices=['low', 'high'],
-        default='low',
-        help='which end of scan z the knee joint is at (low = small slice index)',
-    )
     ap.add_argument(
         '--shaft-frac',
         type=float,
@@ -279,7 +271,7 @@ def main():
     mask = labels == a.label
     if not mask.any():
         sidecar.fail(f'label {a.label} is empty in {a.labels}')
-    a.joint_end, check = check_bone(labels, mask, a.label, a.femur_label, a.joint_end, sp[0])
+    a.joint_end, check = check_bone(labels, mask, a.label, a.femur_label, sp[0])
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)
