@@ -17,9 +17,10 @@ heights, plate patches) is indexed on this aligned grid: array axes (W, V, U), W
 The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
 because its sign rule and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
-voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, fewer than ten sections with bone
-in the `--axis-mm` range, a `--joint-end` on the side away from the femur, and a `--label` whose joint end has the femur's
-notch where `--femur-label`'s is solid (the two labels swapped): the joint-end caps' solidities, in the result record, tell the two bones apart.
+voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, and fewer than ten sections with
+bone in the `--axis-mm` range. Warned, with the grid still written: a `--label` whose joint end has the femur's notch where
+`--femur-label`'s is solid (the two labels look swapped; the joint-end caps' solidities are in the result record), and a
+`--joint-end` on the side away from the femur (the grid uses the detected end).
 
 Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolation, -1000 outside the scan), with its sidecar
         <out>/<name>-mask.npy  bool bone mask on the aligned grid (nearest), with its sidecar
@@ -66,28 +67,33 @@ def extent(m):
 
 
 def check_bone(labels, mask, label, other, joint_end, vox):
-    """Refuse a `label` that is not the tibia across the joint from `other` (the femur), then a --joint-end on the wrong
-    side. Returns the diagnostics for the result record."""
+    """Check that `label` is the tibia across the joint from `other` (the femur) and that --joint-end faces it. Returns the
+    joint end to use (the detected one when --joint-end points away from the femur) and the diagnostics for the record."""
     if label == other:
         sidecar.fail(f'--label and --femur-label are both {label}: pass the tibia\'s label as --label (2 in outputs.yaml)')
     oth = labels == other
     if not oth.any():
-        return {'tibia_check': f'not made: label {other} (the femur) is empty, so nothing to compare against; check the QC'}
+        return joint_end, {'tibia_check': f'not made: label {other} (the femur) is empty, so nothing to compare against; check the QC'}
     mask, oth = jc.largest_piece(mask), jc.largest_piece(oth)
     s, so, facing_low = jc.caps(mask, oth, vox)  # facing_low: the end of this bone that faces the femur
     if s < so - jc.CAP_GAP:
-        sidecar.fail(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap '
-                     f'solidity {s:.3f} against {so:.3f}). First suspect: the two labels are swapped (on a staging run the 3D sheet '
-                     f'was read three times as right while they were swapped). Compare each label with the scan: label {label} '
-                     f'spans scan z {extent(mask)}, label {other} z {extent(oth)}. If label {label} is the femur, swap them with '
-                     f'segmentation-check\'s relabel.py --swap {label},{other} and report the corrected bone-labels. Only if '
-                     f'label {label} really is the tibia, look for a femur piece merged into its joint end. Tell main either way, with '
-                     'the 3D sheet, before any tibial step')
-    if (joint_end == 'low') != facing_low:
-        sidecar.fail(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {"low" if facing_low else "high"} '
-                     f'end of scan z for label {label} on this scan, so pass --joint-end {"low" if facing_low else "high"}')
-    verdict = 'tibia' if s > so + jc.CAP_GAP else 'unclear: the caps are too alike to tell the bones apart; check the QC montage for the plateau'
-    return {'tibia_check': verdict, 'cap_solidity': {'tibia_label': round(s, 3), 'femur_label': round(so, 3)}}
+        verdict = 'femur: the labels look swapped'
+        sidecar.warn(f'label {label} has the notched joint end of a femur and label {other} the solid one of a tibia (cap '
+                     f'solidity {s:.3f} against {so:.3f}), so this grid may be built on the femur. First suspect: the two labels '
+                     f'are swapped (a staging run read its 3D sheet three times as right while they were swapped). Compare each '
+                     f'label with the scan: label {label} spans scan z {extent(mask)}, label {other} z {extent(oth)}. If label '
+                     f'{label} is the femur, swap them with segmentation-check\'s relabel.py --swap {label},{other}, report the '
+                     f'corrected bone-labels and run this again. If label {label} really is the tibia, look for a femur piece '
+                     'merged into its joint end; if there is none, keep this grid and raise a To check item naming both caps')
+    elif s > so + jc.CAP_GAP:
+        verdict = 'tibia'
+    else:
+        verdict = 'unclear: the caps are too alike to tell the bones apart; check the QC montage for the plateau'
+    found = 'low' if facing_low else 'high'
+    if joint_end != found:
+        sidecar.warn(f'--joint-end {joint_end} is the end away from label {other}: the joint is at the {found} end of scan z '
+                     f'for label {label} on this scan, so this grid uses {found}')
+    return found, {'tibia_check': verdict, 'cap_solidity': {'tibia_label': round(s, 3), 'femur_label': round(so, 3)}}
 
 
 def zrange(frac, lo, hi, joint_end):
@@ -215,7 +221,7 @@ def main():
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json that scan-intake wrote: grid id and spacing')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
-    ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script refuses a --label whose joint end looks like the femur\'s, and a --joint-end on the wrong side')
+    ap.add_argument('--femur-label', type=int, default=1, help='label id of the femur across the joint (1): the script warns on a --label whose joint end looks like the femur\'s, and uses the detected joint end over a --joint-end on the wrong side')
     ap.add_argument('--fibula-label', type=int, default=4, help='label id of the fibula (4), which is lateral: the grid is turned to put it at -U (0: none)')
     ap.add_argument('--patella-label', type=int, default=3, help='label id of the patella (3), which is anterior: reported as anterior_side, a check on +V (0: none)')
     ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the scan's scan-settings.json")
@@ -269,7 +275,7 @@ def main():
     mask = labels == a.label
     if not mask.any():
         sidecar.fail(f'label {a.label} is empty in {a.labels}')
-    check = check_bone(labels, mask, a.label, a.femur_label, a.joint_end, sp[0])
+    a.joint_end, check = check_bone(labels, mask, a.label, a.femur_label, a.joint_end, sp[0])
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)

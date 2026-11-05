@@ -36,7 +36,7 @@ on.
 
 | # | Do | Script | Look at |
 |---|---|---|---|
-| 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): the shaft's long axis on W (0° in coronal and sagittal sections; the growth plate keeps its own roll), +W from joint toward shaft, crop around the joint end | `tibia_frame.py` (it refuses a femur passed as the tibia, and a `--joint-end` on the wrong side: fix the labels or the flag it names) | `tibia-frame-qc.jpg` (coronal) and `tibia-frame-qc-sagittal.jpg`: joint at top, the tibial plateau at the top of the outline (not the femoral condyles and the notch between them), the fibula beside the shaft, tibia outline following the bone; on the two sections of each sheet that carry the yellow axis line, the centroid dots and the line run down the middle of the tibial shaft, below the metaphyseal flare and not on the fibula (the other four cut the shaft obliquely, so no line is drawn on them; the line lying on the magenta W line is not a check, the fit puts it there). Dots on the flare or the fibula, or `converged: false`: rerun with `--axis-mm` on the shaft. Shaft still leaning where the dots are wrong: `--tilt-deg`, after which the yellow line leaves magenta by about the tilt. A crop that cuts bone: set the epiphysis range |
+| 1 | Align the tibia (`--out frame`; the later tibial steps work on this frame): the shaft's long axis on W (0° in coronal and sagittal sections; the growth plate keeps its own roll), +W from joint toward shaft, crop around the joint end | `tibia_frame.py` (it warns when the labels look swapped, a femur passed as the tibia: check the labels, swap them with `relabel.py` and run again, or raise a To check item; a `--joint-end` on the wrong side is replaced by the detected end, with a warning) | `tibia-frame-qc.jpg` (coronal) and `tibia-frame-qc-sagittal.jpg`: joint at top, the tibial plateau at the top of the outline (not the femoral condyles and the notch between them), the fibula beside the shaft, tibia outline following the bone; on the two sections of each sheet that carry the yellow axis line, the centroid dots and the line run down the middle of the tibial shaft, below the metaphyseal flare and not on the fibula (the other four cut the shaft obliquely, so no line is drawn on them; the line lying on the magenta W line is not a check, the fit puts it there). Dots on the flare or the fibula, or `converged: false`: rerun with `--axis-mm` on the shaft. Shaft still leaning where the dots are wrong: `--tilt-deg`, after which the yellow line leaves magenta by about the tilt. A crop that cuts bone: set the epiphysis range |
 | 2 | Propose the growth plate's two faces, check them, and trace the proximal face (annotation A) | `segment_plate` (`plate_faces.py` only when it is not in your tools or returns an error), `prune_plate.py` for strays, then you write `annotations.json` | `qc-plate-<n>.jpg`: every proposed section (the default), each framed on the U span the proposal covered, flagged stretches ticked red, suspect band pieces named in the title; `qc-prune-<n>.jpg` for what you pruned; then zoomed coronal sections of `tibia-hu.npy` with a pixel grid over each flagged or wrong stretch, and over each stretch you trace beyond the spans |
 | 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`; the later tibial steps read ROI-1 and its faces) | `iioc.py`, with `--labels`: the scan-grid `labels.npy` the frame was made from | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc), and every `qc-faces-<n>.jpg`: the proximal face as delivered, on every traced section, which you open sheet by sheet before you report |
 | 4 | Trace the boundary under the subchondral plate (annotation B) | you | coronal sections with the ROI-1 outline |
@@ -44,7 +44,7 @@ on.
 | 6 | Check the distal face the proposal gave and retrace what is wrong or flagged (annotation C), then ROI-3 and the cortex under the plate (`--out meta`; the cortical step reads this cortex and face) | `metaphysis_roi.py` | `qc-roi3.jpg` and `qc-roi3-axial.jpg` against `examples/README.md` (metaphyseal-roi), and every `qc-faces-<n>.jpg`: both faces as delivered, on every traced section, which you open sheet by sheet |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes --output roi-iioc` and `roi-iioc-trabecular`; `trabecular --output roi-metaphyseal` | the QC images `trabecular` writes (`bone-morphometry`) |
 | 8 | Ct.Th at the two levels below the distal face (#24, #25), on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment (#11, #12) on the plate runs `iioc.py` wrote, under the articular top surface | `morphometry.py cortical --output roi-cortex-100um`, `roi-cortex-1000um`, `roi-subchondral-plate-medial` or `-lateral` (the slab's declared id; its depth and thickness are in the spec) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
-| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote; it also writes `femur-frame.json`, reported as `femur-frame` (its first file) | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
+| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote; it also writes `femur-frame.json`, reported as `femur-frame` (not written when the femur label is too short to give its axes) (its first file) | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script warns on a bad landmark (D) |
 | 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec <protocol.json> --outputs /workflow/workflows/mouse-oa/outputs.yaml --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab | `amira_landmarks.py` | the lab opens it in Amira |
 
@@ -146,21 +146,22 @@ schema is `regions-and-landmarks`'):
   `b` go on a long view of the femur that shows the shaft and the groove side-on. `c` and `d` go on the front
   (anterior) view: the most lateral and the most medial points of the condyles, at the level of the distal condyles,
   where the deck figure (`examples/femoral-geometry/deck-points-a-d.jpg`) draws DFW (5) across the condyles; not on
-  a ridge or face inside that outline. `femoral_frame.py` refuses a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
+  a ridge or face inside that outline. `femoral_frame.py` warns on a landmark more than 0.05 mm from femur bone, a DFL under 0.4 of DFW
   (`a` and `b` placed end-on), a DFW under 0.9 of the femur label's width across its distal end (`c` and `d` inside
   the outer vertices), an `a`-`b` that runs side to side or a `c`-`d` that does not
   (against the femur's mediolateral axis, which it finds from the label, checks against the knee's bending plane in the
-  `frame` output and prints: the sides and the front swapped, which happens when an image's axes are read as the wrong scan axes) or an SI axis pointing away from the femur: re-place the points; the
-  refusal is not a warning to explain. The printed axis says which scan direction runs side to side, not which side is
-  lateral or where the front is: read those from a render of this scan. When the refusal says the axis is confirmed,
-  a render that seems to disagree has its image axes mislabelled: name the scan axis along each image axis, then
-  re-place. Four refusals are not about the points, so do not move them: a femur label too short along its shaft to
-  give the axes (the labels or the field of view cut the shaft off); points whose two rulers both fit the knee's bending plane
-  but not the label's axis (the refusal says so); an axis the bending plane does not confirm that a render of this scan,
-  its image axes named, contradicts; and a DFW under 0.9 of the label's width where `c` and `d` already sit on the
-  condyles' outermost points and one of the two label voxels the refusal prints at the ends of that width is on something
-  fused to the femur label (a fabella, a piece of patella or meniscus, an osteophyte). For each, stop and raise a To check
-  item naming it.
+  `frame` output and prints: the sides and the front swapped, which happens when an image's axes are read as the wrong scan axes),
+  an SI axis pointing away from the femur, and a femur label too short along its shaft to give the axes. It still writes
+  the measurement; each warning, in the printed line's `warnings`, says what to look at. Look before you report: usually
+  the points are wrong, so re-place them and run again. The printed axis says which scan direction runs side to side, not
+  which side is lateral or where the front is: read those from a render of this scan. When the warning says the axis is
+  confirmed, a render that seems to disagree has its image axes mislabelled: name the scan axis along each image axis,
+  then re-place. Keep the points, and raise a To check item quoting the warning and what you saw, when the label and not
+  the points is at fault: a femur label too short along its shaft (no `femur-frame` is written then); two rulers that both fit the knee's bending plane but
+  not the label's axis; an axis the bending plane does not confirm that a render of this scan, its image axes named,
+  contradicts; or `c` and `d` already on the condyles' outermost points while one of the two label voxels the warning
+  prints at the ends of that width is on something fused to the femur label (a fabella, a piece of patella or meniscus,
+  an osteophyte).
 
 `oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (A and B, no C) in that schema, with
 the `grid_id` of the frame it was traced on: a worked example of the keys and the point order, and a record of that

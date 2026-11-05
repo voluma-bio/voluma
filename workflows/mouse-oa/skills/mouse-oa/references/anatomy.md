@@ -28,7 +28,7 @@ else (the fibula head, say): it is harmless to the cut but sets the side of the 
 `notes`; `label_stats.py --ranges` reads it. Labels 5-12 carry `apart_from: [1, 2, 3, 4]`: each sits across joint space
 or cartilage from the big bones, so `unlabelled.py --ranges` refuses one joined to them through bone. The femur carries
 `apart_from: [2, 3]`: a femur joined to the tibia or the patella through bone means one label holds the other bone's
-bone, which the tibial frame then refuses. The tibia and the fibula fuse on a threshold, so they carry no such key.
+bone, which the tibial frame then warns on. The tibia and the fibula fuse on a threshold, so they carry no such key.
 
 | Id | Name | OA6-1RK reference (mm3, pieces) | Range in anatomy.json |
 |---|---|---|---|
