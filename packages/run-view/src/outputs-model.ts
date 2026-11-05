@@ -195,8 +195,8 @@ export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string 
 /**
  * An output's status as every place on the run page shows it. `waits` are the outputs it rests on
  * that have open items, nearest first; their items are drawn and decided under each of them, never
- * under what rests on them. A reported output with any is not done: it waits on those checks. While
- * the run goes, nothing published yet reads "not yet".
+ * under what rests on them. A reported output with any still shows as in. While the run goes,
+ * nothing published yet reads "not yet".
  */
 export function rowStatus(
   row: OutputRow,
@@ -208,31 +208,15 @@ export function rowStatus(
   ];
   if (live && row.state.status === "pending")
     return { ...OUTPUT_STATUS.pending, word: "not yet", waits };
+  // A value that is in shows as in, even while what it rests on has open checks: those are
+  // marked on that output, and `waits` names it (Jimmy, Nov 4: a hollow "waiting" read as not done).
   if (row.state.status === "reported" && waits.length > 0)
     return {
-      status: "waiting",
-      word: `Waiting on a check of ${waits.map(nameOf).join(", ")}`,
+      status: "done",
+      word: `Reported; ${waits.map(nameOf).join(", ")}, which it rests on, has checks open`,
       waits,
     };
   return { ...OUTPUT_STATUS[row.state.status], waits };
-}
-
-/**
- * What "only To check" lists: the rows whose own items are open, plus a row for each open item no
- * listed row owns (a label map the values rest on), so one open item is one row, not every value
- * that rests on it.
- */
-export function rowsToCheck(review: OutputsReview): { listed: OutputRow[]; behind: OutputRow[] } {
-  const listed = [...review.sections.flatMap((s) => s.rows), ...review.undeclared];
-  const owns = (r: OutputRow) => openItemsOf(r).some((i) => i.output === r.id);
-  const shown = new Set(listed.map((r) => r.id));
-  const behind = new Set<string>();
-  for (const r of listed)
-    for (const i of openItemsOf(r)) if (!shown.has(i.output)) behind.add(i.output);
-  return {
-    listed: listed.filter(owns),
-    behind: [...behind].flatMap((id) => review.rows.get(id) ?? []),
-  };
 }
 
 export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): OutputsReview {

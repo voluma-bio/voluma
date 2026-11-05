@@ -38,7 +38,6 @@ import {
   outputsReview,
   reviewAssetsOf,
   rowStatus,
-  rowsToCheck,
   shownOf,
   undrawn,
   useEvents,
@@ -183,9 +182,7 @@ export function OutputsReview({
   // The value open in place: the URL's, else the output of the first open check, else the first
   // final output with an open item, else the first. An output that is not in the list opens under the first value resting on it.
   const finals = review.sections.flatMap((s) => s.rows);
-  // With only To check on, the outputs behind the values are rows of their own and open in place.
-  const behind = onlyToCheck ? rowsToCheck(review).behind : [];
-  const listed = [...finals, ...review.undeclared, ...behind];
+  const listed = [...finals, ...review.undeclared];
   const restingOn = useCallback(
     (id: string) => listed.find((r) => r.trail.some((t) => t.id === id)),
     [listed],
@@ -204,16 +201,18 @@ export function OutputsReview({
   const opened = review.rows.get(params.get("trail") ?? (under ? asked : ""));
   const live = run.state.status !== "ended";
   const { trailOpen, standIn, soFar } = inViewOf(review, selected, opened, live, blocks);
-  // Picking any output: a listed value opens in place; anything else under the value resting on it.
+  // Picking any output: a listed value becomes the selection; anything else opens under the
+  // value in view when that rests on it, else under the first value resting on it.
   const show = useCallback(
     (id: string) => {
       if (listed.some((r) => r.id === id)) select({ output: id, trail: null, item: null });
+      else if (selected?.trail.some((t) => t.id === id)) select({ trail: id, item: null });
       else {
         const value = restingOn(id);
         select({ output: value?.id ?? id, trail: id, item: null });
       }
     },
-    [listed, restingOn, select],
+    [listed, restingOn, select, selected],
   );
   const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
@@ -787,10 +786,8 @@ export function OutputsReview({
           {live && <RunNews events={events} state={run.state} />}
           <FinalOutputs
             review={review}
-            selected={selected}
-            onSelect={(id) => select({ output: id, item: null, trail: null })}
-            open={trailOpen?.id}
-            onOpen={(id) => select({ trail: id, item: null, centre: null })}
+            current={trailOpen ?? selected}
+            onPick={show}
             onlyToCheck={onlyToCheck}
             live={live}
             runId={run.id}
@@ -887,21 +884,17 @@ function SceneChip({
           </span>
         )}
       </div>
-      {status === "waiting" && waits.length > 0 ? (
-        // One button per output it waits on, opening that output's checks.
+      {waits.length > 0 ? (
+        // One button per output it rests on with open checks, opening that output.
         waits.map((id) => (
           <button
             key={id}
             type="button"
             onClick={() => onWaitsOn(id)}
-            title={`Waiting on a check of ${nameOf(id)}`}
-            className="group flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-muted-foreground text-xs"
+            className="group flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-check text-xs"
           >
-            <StatusGlyph status={status} />
-            <span className="truncate">
-              Waiting on a check of{" "}
-              <span className="text-primary-text group-hover:underline">{nameOf(id)}</span>
-            </span>
+            <StatusGlyph status="check" />
+            <span className="truncate group-hover:underline">To check on {nameOf(id)}</span>
           </button>
         ))
       ) : (
