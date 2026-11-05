@@ -68,7 +68,7 @@ function StoryBrand() {
       alt="Voluma"
       width={224}
       height={176}
-      className="size-9 object-contain"
+      className="size-5 object-contain"
     />
   );
 }

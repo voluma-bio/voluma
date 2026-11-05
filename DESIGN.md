@@ -40,12 +40,12 @@ where it is used.
 
 ## The shell
 
-- **One labelled vertical navigation rail**: Studies and Workflows sit at the top of the 80 px rail,
-  beneath the non-interactive Voluma mark. The sidebar spans the full height; its mark is 36 px in
-  a 56 px slot because it has no label. Breadcrumbs sit beside it, not across its top; top-level
+- **One icon-only vertical navigation rail**: Studies and Workflows sit at the top of the 44 px rail,
+  beneath the non-interactive Voluma mark. The sidebar spans the full height; its mark and icons
+  are 20 px in 36 px slots, separated by 4 px. Breadcrumbs sit beside it, not across its top; top-level
   pages have no empty breadcrumb header.
   Separate Settings (gear) and Account actions sit at its foot. All four controls share 20 px icons
-  with visible text beneath them. Settings holds preferences; Account holds identity and Sign in or
+  with accessible names and hover/focus tooltips. Settings holds preferences; Account holds identity and Sign in or
   Sign out. There is no duplicate horizontal navigation. Top-level pages omit breadcrumbs;
   nested pages keep a separate, wrapping breadcrumb for study context.
   Below it each page has one h1 with metadata, status and actions; these never sit inside the

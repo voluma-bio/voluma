@@ -3,9 +3,9 @@ import { Rail } from "./rail";
 import { StoryRail } from "./story-rail";
 
 /**
- * **What:** an 80 px vertical rail: Studies and Workflows above, Settings and Account at the
- * foot, all with visible labels beneath their icons. **Why:** researchers can read destinations
- * without decoding icons, with no duplicate horizontal bar.
+ * **What:** a 44 px vertical rail: Studies and Workflows above, Settings and Account at the
+ * foot, all icon-only with accessible names and hover/focus tooltips. **Why:** navigation stays
+ * quiet without losing named destinations or adding a duplicate horizontal bar.
  * **Where:** every screen's AppShell. Settings holds theme; Account holds Sign in (a guest) or
  * Sign out (a member). Both actions open popovers; Escape restores trigger focus.
  */
