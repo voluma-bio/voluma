@@ -10,8 +10,8 @@ on the shaft between `--axis-mm` from the joint end: a first guess from scan-z s
 times, the scan's mask is sampled on the provisional grid's W sections over that range (sampled from the scan, so the range
 does not depend on how far the output crop reaches), each section is filled and its largest piece kept (so the fibula and
 specks do not pull it), lines u(w), v(w) are fitted through the centroids, and W is turned onto them until both are under
-0.1 degrees. If five turns do not get there, the record says `converged: false` and the last turn stands: look at both QC
-sheets, and if the centroids sit on the flare or the fibula, rerun with an `--axis-mm` range on the shaft. `--tilt-deg` then
+0.1 degrees. If five turns do not get there, the record says `converged: false` and the last turn stands; a final axis more
+than 0.5 degrees off W is warned on (with no `--tilt-deg`): look at both QC sheets, and if the centroids sit on the flare or the fibula, rerun with an `--axis-mm` range on the shaft. `--tilt-deg` then
 turns W further, to cancel a lean seen on the QC. Everything the protocol annotates (growth-plate curves,
 heights, plate patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
 The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
@@ -57,6 +57,10 @@ SUBSAMPLE = 2  # epiphysis points for the PCA are taken every 2nd voxel
 FIT_STEP = 2  # the axis refit samples the mask every 2nd aligned voxel; the reported residual is at full resolution
 MAX_ITER = 5
 CONVERGED_DEG = 0.1
+# The final axis this far off W, in either plane, is warned on. On threshold-split labels of 52 scans (OA6-8, KW, RZ),
+# converged fits end within 0.15 degrees; 13 that did not converge ended 0.5 to 50 degrees off, most where little shaft
+# is in the field (under 2 mm of tibia) or the centroids sit on the flare.
+MAX_RESIDUAL_DEG = 0.5
 MIN_SECTIONS = 10
 
 
@@ -328,6 +332,13 @@ def main():
     cen, (u0, u1, v0, v1) = scan_sections(mask, basis, origin, low, shape_xyz, w_range, sp[0], 1)
     su, sv, pu, pv = axis_fit(cen)
     residual = {'coronal': degrees(su), 'sagittal': degrees(sv)}
+    off = max(abs(residual['coronal']), abs(residual['sagittal']))
+    if off > MAX_RESIDUAL_DEG and not any(a.tilt_deg):
+        sidecar.warn(f'the shaft axis ends {residual["coronal"]:+.2f} degrees coronal and {residual["sagittal"]:+.2f} sagittal off W '
+                     f'(the fit {"converged" if converged else f"did not converge in {MAX_ITER} turns"}), so the grid is not aligned '
+                     'to the shaft. Look at both QC sheets: if the centroids sit on the metaphyseal flare or the fibula, or the '
+                     f'tibia runs out before {a.axis_mm[1]} mm, rerun with an --axis-mm range on the shaft that is in the field. If '
+                     'no range fits, keep this grid and raise a To check item quoting this')
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     params = {
