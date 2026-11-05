@@ -291,7 +291,9 @@ def main():
         objects=placed,
         **({} if short else {'frame_file': str(out / 'femur-frame.json')}),
     )
-    if not short:
+    if short:
+        (out / 'femur-frame.json').unlink(missing_ok=True)  # an earlier run's frame is not this label's
+    else:
         fr.save(femur_frame, out / 'femur-frame.json')  # after emit_values, which can still exit 2
 
 
