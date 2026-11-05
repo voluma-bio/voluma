@@ -265,9 +265,10 @@ def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, 
     cut = [int(side.sum()), int((~side).sum())]
     frame['keyframe_bone_vox'] = {'bone_a': cut[0], 'bone_b': cut[1]}
     if min(cut) < MIN_CUT_FRAC * max(cut):
-        sidecar.fail(f'The keyframe cuts one bone and barely the other (bone voxels in it: A {cut[0]}, B {cut[1]}), so '
-                     'the frame is wrong. Scan more of the leg or adjust --threshold-hu; a field that holds only the ends '
-                     'of the bones, or a second bone cut by the edge of the field, gives this')
+        sidecar.warn(f'The keyframe cuts one bone and barely the other (bone voxels in it: A {cut[0]}, B {cut[1]}), so '
+                     'the frame is probably wrong. Try --threshold-hu; a field that holds only the ends of the bones, or a '
+                     'second bone cut by the edge of the field, gives this. If the keyframe still shows the joint, keep this '
+                     'frame and raise a To check item quoting this')
     return frame
 
 
