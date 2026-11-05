@@ -22,7 +22,7 @@ volumes and pieces, which labels must touch which, and which sit apart from whic
 
 | Flag | It means | The correction |
 |---|---|---|
-| `swapped:A-B`: A has the solid joint end, B the notched one | the two labels are each other's bone (a femur labelled tibia and the tibia femur): a SAM request named the boxes the wrong way round, or a relabel moved the wrong piece | `relabel.py --swap A,B`, check the 3D sheet, run the checks again. Never accepted; the tibial frame refuses swapped labels too |
+| `swapped:A-B`: A has the solid joint end, B the notched one | the two labels are each other's bone (a femur labelled tibia and the tibia femur): a SAM request named the boxes the wrong way round, or a relabel moved the wrong piece | `relabel.py --swap A,B`, check the 3D sheet, run the checks again. Never accepted; the tibial frame warns on swapped labels too |
 | volume above range | the label took bone from a neighbour | a piece wholly the neighbour's goes to it (`relabel.py`); two bones joined at a contact are split (`classic_segment.py --within <label> --seeds`, one seed per connected piece of each part, the contact piece included) |
 | volume below range | it lost bone to a neighbour that is above | the pair is corrected together |
 | `identity_unsupported` (far below range) | the box found a different piece, or a sliver | not that structure: the label is removed (`relabel.py --to 0`) and the real one looked for (section 2) |

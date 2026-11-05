@@ -26,7 +26,8 @@ Library use (other resources import this file):
   sidecar.save_image(fig, path)  # the image limits below, JPEG
   sidecar.protocol(spec_path, output_id, *keys)   # one output's entry of the workflow's protocol.json (below): the numbers and ids a script uses
   sidecar.load_points(paths, grid_id)   # {name: [z, y, x]} merged from points files (`pick.py` writes one per view); refuses another grid
-  sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
+  sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2: only when nothing valid can be written
+  sidecar.warn(sentence)   # a check the result failed: printed to stderr and carried in the printed line's `warnings`
   sidecar.parser(__doc__)  # the argparse parser every resource uses: the docstring is the `--help` text, defaults appended;
                            # any argument error is one sentence on stderr and exit 2
   ap.add_argument('--hu', type=sidecar.existing)   # an input file or directory: refused after parsing, before anything is written
@@ -237,7 +238,10 @@ def protocol(spec_path, output_id, *keys):
 
 
 def emit(**fields):
-    """Print the one JSON line a resource prints. NaN and infinity are not JSON: a value that is one is a failure."""
+    """Print the one JSON line a resource prints, with any `warn` sentences as `warnings`. NaN and infinity are not JSON: a
+    value that is one is a failure."""
+    if _warnings:
+        fields['warnings'] = list(_warnings)
     try:
         line = json.dumps(fields, default=float, allow_nan=False)
     except ValueError:
@@ -255,6 +259,8 @@ def emit_values(out_json, values, meta=None, objects=None, **fields):
     """Write the result record to `out_json` and print it. `fields` (paths of what the script wrote) and `objects` ({id: entry}
     from `objects.py`) go in both, so the record alone names every file a worker reports and a caller never retypes an entry."""
     record = {'values': values, **fields, **(meta or {}), **({'objects': objects} if objects else {})}  # meta wins a shared key
+    if _warnings:
+        record['warnings'] = list(_warnings)
     try:
         text = json.dumps(record, indent=1, default=float, allow_nan=False)
     except ValueError:
@@ -277,6 +283,16 @@ def _has_nonfinite(v):
 def fail(sentence):
     print(sentence, file=sys.stderr)
     sys.exit(2)
+
+
+_warnings = []
+
+
+def warn(sentence):
+    """Record a check the result failed without stopping: the result is still written, and the sentence says what to look at.
+    Use `fail` only when no valid result can be written (bad input, a grid mismatch, nothing to measure)."""
+    _warnings.append(sentence)
+    print(f'warning: {sentence}', file=sys.stderr)
 
 
 def save_image(fig, path, dpi=100):

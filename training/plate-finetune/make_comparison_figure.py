@@ -1,237 +1,263 @@
-"""Render cross-scan cut-line examples from the local plate experiment outputs.
+"""Render the README's growth-plate comparison figure: reference cut line, stock SAM 3.1 and the released fine-tune, per section.
 
-By default this reads ~/experiments/plate-data and writes the compressed figure used by
-the README. The stock SAM 3.1 run returned an empty mask on every displayed section;
-the figure renders that observed result as "nothing found".
+  uv run --group figure python make_comparison_figure.py
+
+Reads ~/experiments/plate-data (scans, the L32pub labels, the released band seeds' l33-prob-s* predictions) and the stock SAM 3.1
+"growth plate" predictions in --stock (predict.py's output format, stock weights, threshold 0.3). Writes figures/plate-cut-comparison.png
+(300 dpi) and the README's compressed .webp beside it. The µm numbers are score.py's per-section median cut-line distance.
 """
 import argparse
-import json
 import os
-import sys
 from pathlib import Path
 
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+import scienceplots  # noqa: F401  (registers the "science" styles)
+from matplotlib import patheffects
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from PIL import Image
+
+import band_to_region
+import cutline
+import scans
+import score
 
 HERE = Path(__file__).resolve().parent
 TEST_SCANS = {"OA8-19L", "OA6-9RK"}
+EXPERT, AGENT = "expert-corrected", "agent-traced, not expert-checked"
+# Mid-scan sections whose reference line crosses the whole tibia; OA8-19L's are among its 14 expert sections. The worst displayed
+# fine-tune result is asserted in main() so a changed prediction cannot silently swap the honest worst case out.
 ROWS = (
-    ("OA8-19L", 34, "expert-corrected"),
-    ("OA8-19L", 208, "expert-corrected"),
-    ("OA6-9RK", 63, "agent-traced\nnot expert-checked"),
-    ("OA6-9RK", 103, "agent-traced\nnot expert-checked"),
-    ("OA6-11RK", 88, "agent-traced\nnot expert-checked"),
-    ("OA7-2R", 55, "agent-traced\nnot expert-checked"),
-    ("OA8-21L", 58, "agent-traced\nnot expert-checked"),
-    ("OA6-5RK", 78, "agent-traced\nnot expert-checked"),
+    ("OA8-19L", 64, EXPERT),
+    ("OA8-19L", 118, EXPERT),
+    ("OA8-19L", 208, EXPERT),
+    ("OA6-9RK", 103, AGENT),
+    ("OA6-11RK", 223, AGENT),
+    ("OA7-2R", 150, AGENT),
+    ("OA8-21L", 194, AGENT),
+    ("OA6-5RK", 163, AGENT),
 )
-REFERENCE = (255, 214, 0, 255)
-FINE_TUNE = (0, 220, 255, 255)
-EMPTY = (255, 88, 88, 235)
+WORST = ("OA6-9RK", 103)
+ASPECT = 0.42     # crop height / width, the same for every section
+MARGIN = 6        # voxels of background either side of the tibia
+SCALE_UM = 100
+FILL_ALPHA = 0.6
+# Okabe-Ito orange and sky blue: distinct for every colour-vision type, and both read on grey CT.
+REFERENCE = "#E69F00"
+FINE_TUNE = "#56B4E9"
+STYLE = {
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
+    "font.size": 7,
+    "axes.titlesize": 7,
+    "legend.fontsize": 7,
+    "axes.linewidth": 0.5,
+    "savefig.bbox": "standard",
+    "image.interpolation": "lanczos",
+}
 
 
-def font(size, bold=False):
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    for root in (Path("/usr/share/fonts/truetype/dejavu"), Path("/usr/share/fonts/truetype/liberation2")):
-        path = root / name
-        if path.exists():
-            return ImageFont.truetype(path, size)
-    return ImageFont.load_default()
-
-
-def read_curves(path):
-    data = json.loads(path.read_text())
-    proximal = data.get("growth_plate_curves", {}).get("slices", {})
-    distal = data.get("growth_plate_distal_curves", {}).get("slices", {})
-    return {int(v): (np.asarray(proximal[v], float), np.asarray(distal[v], float)) for v in proximal if v in distal}
-
-
-def trace_lines(root, sections, n_u):
-    curves = read_curves(root / "trace/annotations.json")
-    ends_path = root / "trace/ends.json"
-    ends = {int(v): x for v, x in json.loads(ends_path.read_text()).items()} if ends_path.exists() else {}
-    return {
-        v: cutline.flatten(cutline.derive(*curves[v], n_u, ends.get(v)))
-        for v in sections
-        if v in curves
-    }
-
-
-def draw_line(draw, line, offset, fit, colour, width=3):
-    if line is None:
-        return
-    points, gaps = line if isinstance(line, tuple) else (line, [])
-    points = np.asarray(points, float)
-    for a, b in zip(points[:-1], points[1:]):
-        in_gap = any(g0 - 1 <= min(a[1], b[1]) <= max(a[1], b[1]) <= g1 + 1 for g0, g1 in gaps)
-        xy = [
-            ((a[1] - offset[1]) * fit[0], (a[0] - offset[0]) * fit[1]),
-            ((b[1] - offset[1]) * fit[0], (b[0] - offset[0]) * fit[1]),
-        ]
-        draw.line(xy, fill=colour[:3] + ((110 if in_gap else colour[3]),), width=width)
-
-
-def line_from_region(region, env):
-    boundary = cutline.cut_boundary(region, env)
-    points = []
-    for u in range(boundary.shape[1]):
-        rows = np.flatnonzero(boundary[:, u])
-        if len(rows):
-            points.append((float(np.median(rows)), float(u)))
-    return np.asarray(points, float) if points else None
-
-
-def crop_box(env):
-    rows = np.flatnonzero(env.any(1))
-    cols = np.flatnonzero(env.any(0))
-    w0, w1 = max(int(rows[0]) - 8, 0), min(int(rows[-1]) + 9, env.shape[0])
-    w1 = min(w1, w0 + 150)
-    u0, u1 = max(int(cols[0]) - 8, 0), min(int(cols[-1]) + 9, env.shape[1])
-    return w0, w1, u0, u1
-
-
-def score_map(scan, prediction, labels):
-    rows = score.score_scan(scan, prediction, labels)
+def score_map(scan, prediction, label):
+    rows = score.score_scan(scan, prediction, label)
     return {v: float(np.median(dist)) if len(dist) else None for v, (_, dist, _) in rows.items()}
 
 
-def release_prediction(data_root, scan, tibia, labels):
-    prediction_root = data_root / "finetune" / "preds"
-    regions, vs = [], None
+def release_prediction(data_root, scan, tibia, label):
+    """The release recipe: three band seeds at 0.3, midline cut, regions voted. -> (cut lines, plate bands, scores) per section.
+    The plate is the band where two of the three seeds agree, unclipped like serve.py's band output: pieces on other bone stay in it,
+    while the regions and their cut lines are built on the tibia only (labels.label_section)."""
+    regions, bands, vs = [], [], None
     for seed in range(3):
-        z = np.load(prediction_root / f"l33-prob-s{seed}" / f"{scan}.npz")
+        z = np.load(data_root / "finetune/preds" / f"l33-prob-s{seed}" / f"{scan}.npz")
         seed_vs = [int(v) for v in z["V"]]
-        if vs is None:
-            vs = seed_vs
-        if seed_vs != vs:
+        if vs is not None and seed_vs != vs:
             raise ValueError(f"release predictions cover different sections for {scan}")
+        vs = seed_vs
         band = z["smax"].transpose(1, 0, 2) > 0.3
-        region, _, _ = band_to_region.band_regions(band, vs, tibia, "midline")
-        regions.append(region)
-    voted = (np.stack(regions).sum(0) >= 1.5) & (np.stack(regions).sum(0) > 0)
-    prediction = {"V": np.asarray(vs), "mask": voted}
-    scores = score_map(scan, prediction, labels)
-    lines = {v: line_from_region(voted[vs.index(v)], cutline.envelope(tibia[:, v, :])) for v in vs}
-    return lines, scores
+        bands.append(band)
+        regions.append(band_to_region.band_regions(band, vs, tibia, "midline")[0])
+    voted = np.stack(regions).sum(0) >= 2
+    scores = score_map(scan, {"V": np.asarray(vs), "mask": voted}, label)
+    plate = np.stack(bands).sum(0) >= 2
+    lines = {v: cutline.cut_boundary(voted[i], cutline.envelope(tibia[:, v, :])) for i, v in enumerate(vs)}
+    return lines, dict(zip(vs, plate)), scores
 
 
-def panel(image, line, score_text, box, method):
+def stock_prediction(stock_root, scan, label):
+    z = np.load(stock_root / f"{scan}.npz")
+    empty = {int(v): not m.any() for v, m in zip(z["V"], z["mask"])}
+    return empty, score_map(scan, {"V": z["V"], "mask": z["mask"]}, label)
+
+
+def line_segments(mask):
+    """A line mask -> (n, 2, 2) segments in (u, w) joining 8-adjacent line voxels, so the drawing runs only through the voxels
+    themselves: two pieces in one column stay two pieces, never averaged into a line between them. A diagonal step is skipped where
+    a shared 4-neighbour already joins the pair, and a voxel with no line neighbour is a zero-length segment (drawn as a dot)."""
+    w, u = np.nonzero(mask)
+    on = np.pad(mask, 1)
+    segments = []
+    for dw, du in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        hit = on[w + 1 + dw, u + 1 + du]
+        if dw and du:
+            hit &= ~on[w + 1 + dw, u + 1] & ~on[w + 1, u + 1 + du]
+        segments.append(np.stack([np.stack([u[hit], w[hit]], 1), np.stack([u[hit] + du, w[hit] + dw], 1)], 1))
+    near = np.zeros_like(on)
+    for dw in (-1, 0, 1):
+        for du in (-1, 0, 1):
+            if dw or du:
+                near[1:-1, 1:-1] |= on[1 + dw:on.shape[0] - 1 + dw, 1 + du:on.shape[1] - 1 + du]
+    alone = ~near[w + 1, u + 1]
+    segments.append(np.repeat(np.stack([u[alone], w[alone]], 1)[:, None], 2, 1))
+    return np.concatenate(segments).astype(float)
+
+
+def crop_box(env, reference):
+    """[w0, w1) x [u0, u1): the tibia's width plus MARGIN, ASPECT tall, centred on the reference line."""
+    cols = np.flatnonzero(env.any(0))
+    u0, u1 = max(int(cols[0]) - MARGIN, 0), min(int(cols[-1]) + 1 + MARGIN, env.shape[1])
+    height = round((u1 - u0) * ASPECT)
+    centre = float(np.median(np.nonzero(reference)[0]))
+    w0 = int(np.clip(round(centre - height / 2), 0, env.shape[0] - height))
+    return w0, w0 + height, u0, u1
+
+
+def show_section(ax, image, box):
+    """Draw the cropped section in voxel coordinates: pixel (w, u) is centred on x=u, y=w, so every overlay uses data coordinates."""
     w0, w1, u0, u1 = box
-    crop = image[w0:w1, u0:u1]
-    height, width = crop.shape
-    max_w, max_h = 345, 142
-    fit_value = min(max_w / width, max_h / height)
-    size = (max(1, round(width * fit_value)), max(1, round(height * fit_value)))
-    base = Image.fromarray(crop).resize(size, Image.Resampling.LANCZOS).convert("RGBA")
-    canvas = Image.new("RGBA", (max_w, max_h), (10, 12, 14, 255))
-    left, top = (max_w - size[0]) // 2, (max_h - size[1]) // 2
-    canvas.alpha_composite(base, (left, top))
-    if line is not None:
-        layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-        colour = REFERENCE if method == "reference" else FINE_TUNE
-        draw_line(ImageDraw.Draw(layer, "RGBA"), line, (w0, u0), (fit_value, fit_value), colour)
-        canvas.alpha_composite(layer, (left, top))
-    if method == "untrained":
-        draw = ImageDraw.Draw(canvas, "RGBA")
-        draw.rounded_rectangle((max_w // 2 - 67, max_h // 2 - 24, max_w // 2 + 67, max_h // 2 + 24), radius=7, fill=(20, 22, 24, 220), outline=EMPTY, width=2)
-        draw.text((max_w // 2, max_h // 2 - 9), "nothing found", font=font(13, True), fill=(255, 245, 240), anchor="mm")
-    draw = ImageDraw.Draw(canvas, "RGBA")
-    draw.rounded_rectangle((7, 7, 100, 30), radius=4, fill=(8, 10, 12, 205))
-    draw.text((13, 10), score_text, font=font(12, True), fill=(255, 255, 255))
-    return canvas.convert("RGB")
+    ax.imshow(image[w0:w1, u0:u1], cmap="gray", vmin=0, vmax=255, extent=(u0 - 0.5, u1 - 0.5, w1 - 0.5, w0 - 0.5))
+    ax.set_xlim(u0 - 0.5, u1 - 0.5)
+    ax.set_ylim(w1 - 0.5, w0 - 0.5)
+    ax.set_aspect("equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def draw_line(ax, line, colour):
+    halo = [patheffects.Stroke(linewidth=1.0, foreground="black", alpha=0.5), patheffects.Normal()]
+    # One path with NaN breaks, not a LineCollection: a collection strokes each segment's halo over its neighbours' colour.
+    segments = line_segments(line)
+    path = np.concatenate([segments, np.full((len(segments), 1, 2), np.nan)], 1).reshape(-1, 2)
+    ax.plot(path[:, 0], path[:, 1], color=colour, lw=0.5, solid_capstyle="round", solid_joinstyle="round", path_effects=halo)
+
+
+def draw_fill(ax, mask, box, colour):
+    w0, w1, u0, u1 = box
+    rgba = np.zeros((w1 - w0, u1 - u0, 4))
+    rgba[..., :3] = mpl.colors.to_rgb(colour)
+    rgba[..., 3] = mask[w0:w1, u0:u1] * FILL_ALPHA
+    ax.imshow(rgba, extent=(u0 - 0.5, u1 - 0.5, w1 - 0.5, w0 - 0.5), interpolation="nearest")
+
+
+def corner_text(ax, text, colour):
+    ax.text(0.025, 0.94, text, transform=ax.transAxes, ha="left", va="top", color=colour, fontsize=6,
+            bbox={"boxstyle": "round,pad=0.25,rounding_size=0.15", "facecolor": "black", "alpha": 0.55, "linewidth": 0})
+
+
+def scale_bar(ax, box):
+    w0, w1, u0, u1 = box
+    x1 = u1 - 0.5 - 0.03 * (u1 - u0)
+    y = w1 - 0.5 - 0.09 * (w1 - w0)
+    ax.plot([x1 - SCALE_UM / scans.UM, x1], [y, y], color="white", lw=1.5, solid_capstyle="butt",
+            path_effects=[patheffects.withStroke(linewidth=2.5, foreground="black", alpha=0.7)])
+    ax.text(x1 - SCALE_UM / scans.UM - 0.015 * (u1 - u0), y, f"{SCALE_UM} µm", color="white", fontsize=5.5, ha="right", va="center",
+            path_effects=[patheffects.withStroke(linewidth=1.5, foreground="black", alpha=0.7)])
+
+
+def load_rows(data_root, stock_root):
+    """-> (rows, per-scan means): one row per ROWS entry, with score.py's per-section numbers."""
+    rows, means = [], {}
+    for scan in dict.fromkeys(row[0] for row in ROWS):
+        split = "heldout" if scan in TEST_SCANS else "val"
+        label = np.load(data_root / f"finetune/data/L32pub/{split}/labels/{scan}.npz")
+        tibia = scans.load_tibia_mask(scan)
+        volume = scans.load_vol(scan)
+        lines, plates, scores = release_prediction(data_root, scan, tibia, label)
+        stock_empty, stock_scores = stock_prediction(stock_root, scan, label)
+        means[scan] = (np.mean([x for x in scores.values() if x is not None]), sum(stock_empty.values()), len(stock_empty),
+                       np.mean([x for x in stock_scores.values() if x is not None]))
+        cuts = dict(zip((int(v) for v in label["V"]), label["cut"]))
+        for row_scan, v, source in ROWS:
+            if row_scan != scan:
+                continue
+            if not stock_empty[v]:
+                raise ValueError(f"stock SAM 3.1 returned a mask on {scan} V{v}; the panel would need to show it")
+            rows.append({"scan": scan, "v": v, "source": source, "image": scans.section_img(volume, v)[:, :, 0],
+                         "env": cutline.envelope(tibia[:, v, :]), "reference": cuts[v], "line": lines[v],
+                         "plate": plates[v], "score": scores[v]})
+    rows.sort(key=lambda row: ROWS.index((row["scan"], row["v"], row["source"])))
+    worst = max(rows, key=lambda row: row["score"])
+    if (worst["scan"], worst["v"]) != WORST:
+        raise ValueError(f"expected the worst displayed section to be {WORST}, got {worst['scan']} V{worst['v']} ({worst['score']:.1f} µm)")
+    return rows, means
+
+
+def render(rows, out):
+    plt.style.use(["science", "nature", "no-latex"])
+    plt.rcParams.update(STYLE)
+    width_in = 180 / 25.4                                   # a double-column figure
+    label_w, gap, edge = 0.95, 0.04, 0.09                   # inches; edge: the right margin, matching the row labels' left one
+    panel_w = (width_in - label_w - 2 * gap - edge) / 3
+    panel_h = panel_w * ASPECT
+    header, legend_h, row_gap = 0.3, 0.3, 0.045
+    height_in = header + len(rows) * panel_h + (len(rows) - 1) * row_gap + legend_h
+    fig = plt.figure(figsize=(width_in, height_in), dpi=300)
+    grid = fig.add_gridspec(len(rows), 3, left=label_w / width_in, right=1 - edge / width_in, top=1 - header / height_in,
+                            bottom=legend_h / height_in, wspace=gap / panel_w, hspace=row_gap / panel_h)
+    titles = ("Reference cut line", 'Meta SAM 3.1 · prompt "growth plate"', 'Our fine-tune · prompt "growth plate"')
+
+    for r, row in enumerate(rows):
+        box = crop_box(row["env"], row["reference"])
+        axes = [fig.add_subplot(grid[r, c]) for c in range(3)]
+        for ax in axes:
+            show_section(ax, row["image"], box)
+        draw_line(axes[0], row["reference"], REFERENCE)
+        scale_bar(axes[0], box)
+        corner_text(axes[1], "no mask returned", "0.8")
+        draw_fill(axes[2], row["plate"], box, FINE_TUNE)
+        draw_line(axes[2], row["line"], FINE_TUNE)
+        corner_text(axes[2], f"{row['score']:.1f} µm", "white")
+        axes[0].text(-0.04, 0.5, f"{row['scan']} · V{row['v']}\n", transform=axes[0].transAxes, ha="right", va="center",
+                     fontsize=7, fontweight="bold")
+        axes[0].text(-0.04, 0.5, "\n" + row["source"].replace(", ", ",\n"), transform=axes[0].transAxes, ha="right", va="top",
+                     fontsize=6, color="0.35", linespacing=1.15)
+        if r == 0:
+            for c, (ax, title) in enumerate(zip(axes, titles)):
+                ax.text(0, 1.05, "abc"[c], transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom", ha="left")
+                ax.text(0.05, 1.05, title, transform=ax.transAxes, fontsize=7, va="bottom", ha="left")
+
+    handles = [
+        Line2D([], [], color=REFERENCE, lw=1.0, label="Reference cut line"),
+        Patch(facecolor=FINE_TUNE, alpha=FILL_ALPHA, edgecolor="none", label="Fine-tune growth plate"),
+        Line2D([], [], color=FINE_TUNE, lw=1.0, label="Fine-tune cut line, with its distance to the reference"),
+    ]
+    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(label_w / width_in, 0), ncol=3, frameon=False,
+               handlelength=1.6, columnspacing=1.6, borderaxespad=0.15)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, facecolor="white")
+    plt.close(fig)
+    with Image.open(out) as png:
+        png.convert("RGB").save(out.with_suffix(".webp"), "WEBP", quality=90, method=6)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", type=Path, default=Path.home() / "experiments/plate-data")
-    parser.add_argument("--out", type=Path, default=HERE / "figures/plate-cut-comparison.webp")
+    parser.add_argument("--stock", type=Path, default=Path.home() / "experiments/plate-figure/stock-growth-plate",
+                        help='stock SAM 3.1 predictions with the prompt "growth plate", one npz per scan (predict.py format)')
+    parser.add_argument("--out", type=Path, default=HERE / "figures/plate-cut-comparison.png")
     args = parser.parse_args()
-    data_root = args.data_root.expanduser()
-    os.environ["PLATE_SCANS"] = str(data_root / "scans")
-    sys.path.insert(0, str(HERE))
-    global band_to_region, cutline, labels, scans, score
-    import band_to_region
-    import cutline
-    import labels
-    import scans
-    import score
-
-    scans_data = {}
-    release_lines, release_scores = {}, {}
-    reference_lines, labels_data = {}, {}
-    for scan in sorted({row[0] for row in ROWS}):
-        split = "heldout" if scan in TEST_SCANS else "val"
-        label_path = data_root / f"finetune/data/L32pub/{split}/labels/{scan}.npz"
-        labels_data[scan] = np.load(label_path)
-        tibia = scans.load_tibia_mask(scan)
-        volume = scans.load_vol(scan)
-        scans_data[scan] = (volume, tibia)
-        n_u = tibia.shape[2]
-        if scan == "OA8-19L":
-            reference_lines[scan], _ = labels.label_sections(scan)
-        else:
-            reference_lines[scan] = trace_lines(data_root / "scans" / scan, [v for row_scan, v, _ in ROWS if row_scan == scan], n_u)
-        release_lines[scan], release_scores[scan] = release_prediction(data_root, scan, tibia, labels_data[scan])
-
-    rows = []
-    for scan, v, source in ROWS:
-        reference = reference_lines[scan][v]
-        release_score = release_scores[scan][v]
-        rows.append((scan, v, source, reference, release_lines[scan][v], release_score))
-    worst = max(rows, key=lambda row: row[5])
-    if worst[:2] != ("OA8-21L", 58):
-        raise ValueError(f"expected selected worst case OA8-21L V58, got {worst[0]} V{worst[1]} ({worst[5]:.1f} µm)")
-
-    headers = [
-        ('Expert labelled', "reference"),
-        ('Meta SAM 3.1\nprompt "growth plate"', "untrained"),
-        ('Our fine-tune\nprompt "growth plate"', "release"),
-    ]
-    row_h, row_gap, left, top, label_w, col_w, col_gap = 142, 14, 18, 92, 166, 345, 14
-    width = left + label_w + len(headers) * col_w + (len(headers) - 1) * col_gap + left
-    height = top + len(rows) * row_h + (len(rows) - 1) * row_gap + 94
-    figure = Image.new("RGB", (width, height), (246, 244, 239))
-    draw = ImageDraw.Draw(figure)
-    draw.text((left, 18), "Growth-plate cut lines", font=font(24, True), fill=(25, 29, 32))
-    draw.text((left, 48), "Six scans; each panel shows only its own line and its distance to that row's reference.", font=font(12), fill=(75, 80, 84))
-    for i, (header, _) in enumerate(headers):
-        x = left + label_w + i * (col_w + col_gap) + col_w // 2
-        draw.multiline_text((x, top - 34), header, font=font(12, True), fill=(25, 29, 32), anchor="ma", align="center")
-
-    for r, (scan, v, source, reference, release_line, release_score) in enumerate(rows):
-        volume, tibia = scans_data[scan]
-        box = crop_box(cutline.envelope(tibia[:, v, :]))
-        image = scans.section_img(volume, v)[:, :, 0]
-        row_y = top + r * (row_h + row_gap)
-        label = f"{scan} V{v}\n{source}"
-        draw.multiline_text((left + label_w - 8, row_y + row_h // 2), label, font=font(10, True), fill=(45, 49, 52), anchor="rm", align="right")
-        panels = {
-            "reference": (reference, "reference"),
-            "untrained": (None, "1050.0 µm"),
-            "release": (release_line, f"{release_score:.1f} µm"),
-        }
-        for c, (_, method) in enumerate(headers):
-            line, score_text = panels[method]
-            tile = panel(image, line, score_text, box, method)
-            x = left + label_w + c * (col_w + col_gap)
-            figure.paste(tile, (x, row_y))
-            ImageDraw.Draw(figure).rectangle((x, row_y, x + col_w - 1, row_y + row_h - 1), outline=(205, 201, 194), width=1)
-
-    legend_y = height - 68
-    draw = ImageDraw.Draw(figure)
-    draw.line((left + label_w, legend_y + 8, left + label_w + 23, legend_y + 8), fill=REFERENCE[:3], width=3)
-    draw.text((left + label_w + 30, legend_y), "reference line", font=font(11), fill=(55, 60, 63))
-    x = left + label_w + 145
-    draw.line((x, legend_y + 8, x + 23, legend_y + 8), fill=FINE_TUNE[:3], width=3)
-    draw.text((x + 30, legend_y), "our fine-tune", font=font(11), fill=(55, 60, 63))
-    draw.text((left + label_w, legend_y + 28), "The stock SAM 3.1 returned no mask on every displayed section; empty sections score 1050 µm.", font=font(11), fill=(75, 80, 84))
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    figure.save(args.out, "WEBP", quality=88, method=6)
-    print(f"wrote {args.out} ({figure.width}×{figure.height})")
-    print("fine-tune worst displayed row:", worst[0], f"V{worst[1]}", f"{worst[5]:.1f} µm")
-    for scan in sorted(release_scores):
-        values = list(release_scores[scan].values())
-        print(scan, f"mean={np.mean(values):.1f} µm")
+    os.environ["PLATE_SCANS"] = str(args.data_root.expanduser() / "scans")
+    rows, means = load_rows(args.data_root.expanduser(), args.stock.expanduser())
+    render(rows, args.out)
+    print(f"wrote {args.out} and {args.out.with_suffix('.webp')}")
+    for row in rows:
+        print(f"{row['scan']} V{row['v']}: fine-tune {row['score']:.1f} µm")
+    for scan, (fine_tune, empty, n, stock) in means.items():
+        print(f"{scan}: fine-tune mean {fine_tune:.1f} µm; stock SAM 3.1 empty on {empty} of {n} sections, mean {stock:.0f} µm")
 
 
 if __name__ == "__main__":

@@ -12,8 +12,11 @@
  * `input` for what a step read (reported with a version, in `madeFrom`; not declared here).
  *
  * The file is strict and cross-checked: a dangling id, a link to the wrong kind or a cycle fails
- * with the path to it. `loadWorkflow` (`packages/workflow`) parses it for every run, and
- * `@voluma/workflow/bundled` parses it at build time for the web app. Write `"on":` quoted:
+ * with the path to it. The API at start and `@voluma/workflow/bundled` (the web app's build)
+ * parse the checkout's file with `outputCatalogSchema`. `loadWorkflow` (`packages/workflow`)
+ * parses a run's snapshot with `snapshotOutputCatalogSchema`, the same checks but dropping
+ * unknown keys: a snapshot written by newer code (a new optional field) must still load in the
+ * older code of a deploy overlap or a revert. Write `"on":` quoted:
  * PyYAML reads a bare `on` key as `True`, and the loader refuses it.
  */
 import { z } from "zod";
@@ -68,7 +71,7 @@ const entryBase = {
   description: nonEmpty.optional(),
   /**
    * One plain sentence for the researcher reviewing the run: what the output is and where, with no
-   * file names, scripts or step names. Review shows it in place of `description` when present.
+   * file names, scripts or step names. Review shows it in place of `description`.
    */
   summary: nonEmpty.optional(),
   /** Where the expected value or definition comes from, e.g. the lab deck's number. */
@@ -92,88 +95,95 @@ const entryBase = {
   views: z.array(viewSchema).min(1).optional(),
 };
 
-/** A member of a collection: typed like an output; a link names a sibling member first, then a catalog id. */
-const memberSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("base") }),
-  z.strictObject({ kind: z.literal("overlay"), base: segmentSchema }),
-  z.strictObject({
-    kind: z.literal("value"),
-    unit: nonEmpty,
-    on: z.array(segmentSchema).min(1),
-  }),
-  z.strictObject({ kind: z.literal("file"), mediaType: nonEmpty }),
-]);
-
 /** The anatomical plane a grid's plane lies in; review colours each plane by it (DESIGN.md). */
 export const anatomySchema = z.enum(["axial", "coronal", "sagittal"]);
 export type Anatomy = z.infer<typeof anatomySchema>;
 
-export const outputEntrySchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    ...entryBase,
-    kind: z.literal("base"),
-    /** Another base this one is resampled from or registered to, so overlays on either draw in one scene. */
-    from: segmentSchema.optional(),
-    /**
-     * Which anatomical plane each of the grid's planes is: XY holds z (the array's first axis)
-     * constant, XZ holds y, YZ holds x. Absent: review shows the planes uncoloured.
-     */
-    planes: z.strictObject({ XY: anatomySchema, XZ: anatomySchema, YZ: anatomySchema }).optional(),
-  }),
-  z.strictObject({
-    ...entryBase,
-    kind: z.literal("overlay"),
-    /** The base it is drawn on. */
-    base: segmentSchema,
-    /**
-     * How it is represented, for the viewer and the workflow's converter. Required, except on a
-     * label overlay, which has the map's.
-     */
-    shape: overlayShapeSchema.optional(),
-    /**
-     * This overlay is one value of another overlay's label map: the map holds the voxels, this
-     * names the part of it. It is reported with the map, never as a file of its own, so a link to
-     * it (`on`, `context`, `madeFrom`) resolves to the map's version: fixing one label makes
-     * everything linked to any label of that map out of date, and main keeps the rest in one
-     * call. The map must be an overlay of shape `labels` that is itself no label.
-     */
-    label: z.strictObject({ of: segmentSchema, value: z.int().positive() }).optional(),
-    /**
-     * A surface review fits one plane through, with every other surface of the same `code`, so
-     * the views can be aligned to it and a pane can show it ("GP", "growth plate").
-     */
-    fitsPlane: z
-      .strictObject({ code: z.string().regex(/^[A-Z]{1,3}$/), name: nonEmpty })
-      .optional(),
-  }),
-  z.strictObject({
-    ...entryBase,
-    kind: z.literal("value"),
-    /** UCUM (`mm`, `mm3`, `%`, `1/mm`). */
-    unit: nonEmpty,
-    /** The overlays it is measured on; shown with it. A number always has something to look at. */
-    on: z.array(segmentSchema).min(1),
-    /** Overlays drawn beside it to judge it. */
-    context: z.array(segmentSchema).optional(),
-    /** Acceptance range `[min, max]` in `unit`; advice for the review screen. */
-    range: z
-      .tuple([z.number(), z.number()])
-      .refine(([min, max]) => min <= max, "range must be [min, max] with min <= max")
-      .optional(),
-    /** The study page plots this value for every scan. */
-    headline: z.boolean().optional(),
-    /** No reference comparison yet: review labels it instead of hiding it. */
-    provisional: z.boolean().optional(),
-  }),
-  z.strictObject({ ...entryBase, kind: z.literal("file"), mediaType: nonEmpty }),
-  z.strictObject({
-    ...entryBase,
-    kind: z.literal("collection"),
-    members: z.record(segmentSchema, memberSchema).refine((m) => Object.keys(m).length > 0, {
-      message: "a collection has at least one member",
+/**
+ * An entry of the file, its objects built by `object`: `z.strictObject` for the file as authored,
+ * `z.object` (unknown keys dropped) for a run's snapshot. `viewSchema` passes unknown keys through
+ * in both.
+ */
+const entrySchemaOf = (object: typeof z.strictObject) => {
+  /** A member of a collection: typed like an output; a link names a sibling member first, then a catalog id. */
+  const memberSchema = z.discriminatedUnion("kind", [
+    object({ kind: z.literal("base") }),
+    object({ kind: z.literal("overlay"), base: segmentSchema }),
+    object({
+      kind: z.literal("value"),
+      unit: nonEmpty,
+      on: z.array(segmentSchema).min(1),
     }),
-  }),
-]);
+    object({ kind: z.literal("file"), mediaType: nonEmpty }),
+  ]);
+
+  return z.discriminatedUnion("kind", [
+    object({
+      ...entryBase,
+      kind: z.literal("base"),
+      /** Another base this one is resampled from or registered to, so overlays on either draw in one scene. */
+      from: segmentSchema.optional(),
+      /**
+       * Which anatomical plane each of the grid's planes is: XY holds z (the array's first axis)
+       * constant, XZ holds y, YZ holds x. Absent: review shows the planes uncoloured.
+       */
+      planes: object({ XY: anatomySchema, XZ: anatomySchema, YZ: anatomySchema }).optional(),
+    }),
+    object({
+      ...entryBase,
+      kind: z.literal("overlay"),
+      /** The base it is drawn on. */
+      base: segmentSchema,
+      /**
+       * How it is represented, for the viewer and the workflow's converter. Required, except on a
+       * label overlay, which has the map's.
+       */
+      shape: overlayShapeSchema.optional(),
+      /**
+       * This overlay is one value of another overlay's label map: the map holds the voxels, this
+       * names the part of it. It is reported with the map, never as a file of its own, so a link to
+       * it (`on`, `context`, `madeFrom`) resolves to the map's version: fixing one label makes
+       * everything linked to any label of that map out of date, and main keeps the rest in one
+       * call. The map must be an overlay of shape `labels` that is itself no label.
+       */
+      label: object({ of: segmentSchema, value: z.int().positive() }).optional(),
+      /**
+       * A surface review fits one plane through, with every other surface of the same `code`, so
+       * the views can be aligned to it and a pane can show it ("GP", "growth plate").
+       */
+      fitsPlane: object({ code: z.string().regex(/^[A-Z]{1,3}$/), name: nonEmpty }).optional(),
+    }),
+    object({
+      ...entryBase,
+      kind: z.literal("value"),
+      /** UCUM (`mm`, `mm3`, `%`, `1/mm`). */
+      unit: nonEmpty,
+      /** The overlays it is measured on; shown with it. A number always has something to look at. */
+      on: z.array(segmentSchema).min(1),
+      /** Overlays drawn beside it to judge it. */
+      context: z.array(segmentSchema).optional(),
+      /** Acceptance range `[min, max]` in `unit`; advice for the review screen. */
+      range: z
+        .tuple([z.number(), z.number()])
+        .refine(([min, max]) => min <= max, "range must be [min, max] with min <= max")
+        .optional(),
+      /** The study page plots this value for every scan. */
+      headline: z.boolean().optional(),
+      /** No reference comparison yet: review labels it instead of hiding it. */
+      provisional: z.boolean().optional(),
+    }),
+    object({ ...entryBase, kind: z.literal("file"), mediaType: nonEmpty }),
+    object({
+      ...entryBase,
+      kind: z.literal("collection"),
+      members: z.record(segmentSchema, memberSchema).refine((m) => Object.keys(m).length > 0, {
+        message: "a collection has at least one member",
+      }),
+    }),
+  ]);
+};
+
+export const outputEntrySchema = entrySchemaOf(z.strictObject);
 export type OutputEntry = z.infer<typeof outputEntrySchema>;
 
 /** The ids in `selected` that are not a `selectable` output of `catalog` (a run can't select them). */
@@ -334,13 +344,22 @@ function problemsOf(entries: OutputEntry[]): { path: Path; message: string }[] {
   return problems;
 }
 
+const catalogSchemaOf = (entry: typeof outputEntrySchema) =>
+  z
+    .array(entry)
+    .min(1)
+    .superRefine((entries, ctx) => {
+      for (const p of problemsOf(entries)) ctx.addIssue({ code: "custom", ...p });
+    });
+
 /** `outputs.yaml`: every output a run of the workflow can produce. */
-export const outputCatalogSchema = z
-  .array(outputEntrySchema)
-  .min(1)
-  .superRefine((entries, ctx) => {
-    for (const p of problemsOf(entries)) ctx.addIssue({ code: "custom", ...p });
-  });
+export const outputCatalogSchema = catalogSchemaOf(outputEntrySchema);
+
+/** A run's snapshot of `outputs.yaml`: the same checks, unknown keys dropped (see the header). */
+export const snapshotOutputCatalogSchema = catalogSchemaOf(
+  // The strip-mode objects infer the same entries; only the unknown-key policy differs.
+  entrySchemaOf(z.object as typeof z.strictObject),
+);
 export type OutputCatalog = z.infer<typeof outputCatalogSchema>;
 
 const SUPERSCRIPT: Record<string, string> = { "2": "²", "3": "³", "-1": "⁻¹", "-2": "⁻²" };

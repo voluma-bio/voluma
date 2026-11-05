@@ -10,7 +10,7 @@
 - id: header
   kind: file
   name: Scan header
-  summary: "The scan's voxel size, dimensions and density calibration, as read from the scan files."
+  summary: "The scan's voxel size, dimensions and the evidence for its density calibration, as read from the scan files."
   description:
     "hu.json from scan-intake: voxel spacing (z, y, x, mm), shape, calibration evidence and
     the grid id every later step uses"
@@ -47,7 +47,7 @@
 - id: tibia-grid
   kind: base
   name: Tibia long-axis grid
-  summary: "The scan resampled so the tibia's long axis runs vertically, the lab's convention; the tibial regions sit on it."
+  summary: "The tibia, resampled so its long axis runs vertically, the lab's convention; the tibial regions sit on it."
   description: the tibia resampled onto a grid whose z (W, joint end toward the shaft) is the tibia's fitted long axis, so the shaft is vertical in the coronal and sagittal panes, the lab's convention; the regions and surfaces below sit on it
   from: scan
   planes: { XY: axial, XZ: coronal, YZ: sagittal }
@@ -91,7 +91,7 @@
 - id: small-structures
   kind: file
   name: Small structures
-  summary: "Each small structure around the joint (menisci with osteophytes, sesamoids, fragments): labelled, absent, or left to check."
+  summary: "Each small structure around the joint (labels 5 to 12): labelled, absent, or left to check."
   description: "small-structures.md from segmentation: an account of each of labels 5 to 12"
   mediaType: text/markdown
   expect:
@@ -384,7 +384,7 @@
 - id: lateral-meniscus-osteophyte-volume
   kind: value
   name: Lateral meniscus/osteophyte volume
-  summary: "Volume of the lateral meniscus and its osteophytes together, which the lab cannot separate."
+  summary: "Volume of the lateral meniscus and its osteophytes together; the label's identity is the lab's working reading, and whether nearby fragments count is open."
   section: Segmentation
   description:
     "lateral meniscus and its spurs together, one volume per side (the lab cannot separate
@@ -399,7 +399,7 @@
 - id: medial-meniscus-osteophyte-volume
   kind: value
   name: Medial meniscus/osteophyte volume
-  summary: "Volume of the medial meniscus and its osteophytes together, which the lab cannot separate."
+  summary: "Volume of the medial meniscus and its osteophytes together; the label's identity is the lab's working reading, and whether nearby fragments count is open."
   section: Segmentation
   description: "medial meniscus and its spurs together, one volume per side (the lab cannot separate
     them); on OA6-1RK label 5. Open: whether label 9's pieces and tibial margin fragments 10 and 11
@@ -461,7 +461,7 @@
 - id: iioc-height
   kind: value
   name: IIOC height
-  summary: "Height of the IIOC, from the middle of the growth plate up to the top of the articular bone."
+  summary: "Height of the IIOC, growth plate middle to articular bone top, along the shaft (or perpendicular to the growth plate: the lab hasn't decided)."
   section: Tibial IIOC
   description: middle of the growth plate to the top of the articular bone, vertical
   source: "deck #7"
@@ -481,7 +481,7 @@
 - id: iioc-height-medial-compartment
   kind: value
   name: IIOC height, medial compartment
-  summary: "Height of the IIOC in the medial compartment, from the growth plate up to the top of the articular bone."
+  summary: "IIOC height in the medial compartment, growth plate to articular bone top, along the shaft (or perpendicular to the growth plate: the lab hasn't decided)."
   section: Tibial IIOC
   description: "as #7, medial"
   source: "deck #8"
@@ -494,7 +494,7 @@
 - id: iioc-height-lateral-compartment
   kind: value
   name: IIOC height, lateral compartment
-  summary: "Height of the IIOC in the lateral compartment, from the growth plate up to the top of the articular bone."
+  summary: "IIOC height in the lateral compartment, growth plate to articular bone top, along the shaft (or perpendicular to the growth plate: the lab hasn't decided)."
   section: Tibial IIOC
   description: "as #7, lateral"
   source: "deck #9"
@@ -524,7 +524,7 @@
 - id: subchondral-bone-plate-thickness-medial
   kind: value
   name: Subchondral bone plate thickness, medial
-  summary: "Thickness of the subchondral bone plate under the middle of the medial plateau."
+  summary: "Thickness of the subchondral bone plate under the middle of the medial plateau; unvalidated, as two methods differ about twofold."
   section: Subchondral plate
   description: medial plate
   source: "deck #11"
@@ -536,7 +536,7 @@
 - id: subchondral-bone-plate-thickness-lateral
   kind: value
   name: Subchondral bone plate thickness, lateral
-  summary: "Thickness of the subchondral bone plate under the middle of the lateral plateau."
+  summary: "Thickness of the subchondral bone plate under the middle of the lateral plateau; unvalidated, as two methods differ about twofold."
   section: Subchondral plate
   description: lateral plate
   source: "deck #12"
