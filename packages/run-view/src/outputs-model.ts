@@ -143,13 +143,15 @@ function aimed(fold: OutputsFold, catalog: OutputCatalog, focus: Focus): Focus {
 }
 
 function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): OutputRow {
-  // The description is the run's own (its final list's, written from the catalog of the run's
-  // commit, or a worker's for an output the workflow does not declare), since it says how this
-  // run measured the number; the bundled catalog's only when the run has none.
+  // What the researcher reads: the bundled catalog's plain summary when it has one, else the run's
+  // own description (its final list's, written from the catalog of the run's commit, or a
+  // worker's for an output the workflow does not declare), else the bundled catalog's.
   const entry = catalog.find((e) => e.id === state.id);
   const loose = state.entry;
   const description =
-    (typeof loose?.description === "string" ? loose.description : undefined) ?? entry?.description;
+    entry?.summary ??
+    (typeof loose?.description === "string" ? loose.description : undefined) ??
+    entry?.description;
   const latest = state.latest;
   const value = entry?.kind === "value" ? entry : undefined;
   const links = (role: string) =>

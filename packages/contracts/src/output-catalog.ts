@@ -64,8 +64,13 @@ const entryBase = {
   id: segmentSchema,
   /** The label people see. */
   name: nonEmpty,
-  /** Plain-text definition of what it is and where, for agents and the review screen. */
+  /** Plain-text definition of what it is and where, for agents (and review, when there is no `summary`). */
   description: nonEmpty.optional(),
+  /**
+   * One plain sentence for the researcher reviewing the run: what the output is and where, with no
+   * file names, scripts or step names. Review shows it in place of `description` when present.
+   */
+  summary: nonEmpty.optional(),
   /** Where the expected value or definition comes from, e.g. the lab deck's number. */
   source: nonEmpty.optional(),
   /** What a correct one looks like, one check per line. Main may add lines for one scan (`outputs.changed`). */
