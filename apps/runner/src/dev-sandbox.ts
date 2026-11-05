@@ -62,6 +62,8 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(apiHost) && !values["allow-rem
 const claim = await claimRun(config.api, "dev-sandbox");
 if (!claim) throw new Error("no queued run: start one in the web app (pnpm dev) first");
 const { run, leaseToken } = claim;
+/** The Modal account of this claim's sandboxes: the starter's own token, else Voluma's. */
+const modalToken = claim.keys?.modal ?? config.modal;
 if (run.id !== values.run) {
   // Not ours: hand it back to the queue.
   await runClient(
@@ -129,7 +131,7 @@ const close = () =>
     lease.halt();
     await lease.sendFinalUsage().catch(() => {});
     await sandbox?.destroy().catch((e) => log(`destroy failed: ${e}`));
-    await terminateClaim(config.modal, run.id, claimId).catch((e) => log(`terminate failed: ${e}`));
+    await terminateClaim(modalToken, run.id, claimId).catch((e) => log(`terminate failed: ${e}`));
     if (counted) meter.sandboxDown();
     await client
       .report({ kind: "ended", outcome: "failed", error: "closed by dev-sandbox" })
@@ -158,7 +160,7 @@ try {
   counted = true;
   sandbox = await claimSandboxes(
     config,
-    config.modal,
+    modalToken,
     claimId,
   )(
     specOf(

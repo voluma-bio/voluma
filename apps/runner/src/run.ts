@@ -166,7 +166,12 @@ async function claimBody(
   /** The key for a provider: an own Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
     own ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
-  const redact: Redact = redactor([...config.secrets, ...(own ? [keys.metaApiKey] : [])]);
+  /** The Modal account of every sandbox of this claim: the starter's own token, else Voluma's. */
+  const modalToken = keys?.modal ?? config.modal;
+  const redact: Redact = redactor([
+    ...config.secrets,
+    ...(own ? [keys.metaApiKey, keys.modal?.tokenId, keys.modal?.tokenSecret] : []),
+  ]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
   /** The report keeps only `errorText`; the stack shows where an error came from. */
   const logStack = (e: unknown) => log(e instanceof Error && e.stack ? e.stack : String(e));
@@ -246,7 +251,7 @@ async function claimBody(
     log(`claimed (${own ? "own" : "voluma"} key)`);
 
     // Metered from the start of creation (the sweep included) to destroy: a conservative upper bound.
-    const modal = claimSandboxes(config, config.modal, claimId);
+    const modal = claimSandboxes(config, modalToken, claimId);
     const createSandbox: CreateSandbox = async (spec, signal) => {
       meter.sandboxUp();
       try {
@@ -353,7 +358,7 @@ async function claimBody(
     const prepare = async (signal: AbortSignal): Promise<Prepared> => {
       // What an earlier claim of this run left running must not keep writing or spending, so this
       // claim starts no sandbox (and restores nothing) until Modal reports each one terminated.
-      const orphans = await endOtherClaims(config.modal, runId, claimId, signal, log);
+      const orphans = await endOtherClaims(modalToken, runId, claimId, signal, log);
       if (orphans > 0)
         log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
 
@@ -575,9 +580,7 @@ async function claimBody(
     // A shutdown during the close switches to the stopped budget.
     if (!(await untilShutdownPlus(CLOSE_BUDGET_MS.stopped, Promise.race([closed, timeout])))) {
       log("sandbox did not close in time; terminating this claim's sandboxes");
-      await terminateClaim(config.modal, runId, claimId).catch((e) =>
-        log(`terminate failed: ${e}`),
-      );
+      await terminateClaim(modalToken, runId, claimId).catch((e) => log(`terminate failed: ${e}`));
     }
   }
 }
