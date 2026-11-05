@@ -116,3 +116,23 @@ export const Queued: Story = {
 export const Empty: Story = { args: { rows: [], live: null } };
 /** The Agents tab's live line: the running call's title. */
 export const RunningCall: Story = { args: { live: { text: "Read tibia-roi/notes.md" } } };
+/** Main's Conversation: opening "Started worker tibia-roi" shows that worker's thread in place. */
+export const WorkerInline: Story = {
+  args: {
+    live: null,
+    worker: () => (
+      <TranscriptView
+        rows={[
+          { kind: "brief", id: "wb", label: "What the worker was told", text: "Crop the tibia." },
+          {
+            kind: "prose",
+            id: "wp",
+            at: "2026-11-04T17:09:00Z",
+            text: "Cropped the tibia to 240 × 260 × 310 voxels.",
+          },
+        ]}
+        empty="It wrote nothing."
+      />
+    ),
+  },
+};

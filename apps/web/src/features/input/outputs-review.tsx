@@ -251,6 +251,7 @@ export function OutputsReview({
           select({ agent });
         }
       },
+      ids: (name) => latest.current.agents.find((a) => a.names.includes(name))?.ids,
     }),
     [nameKey],
   );
