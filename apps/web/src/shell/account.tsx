@@ -25,7 +25,7 @@ export function BrandLockup({ className }: { className: string }) {
   );
 }
 
-/** The sidebar's non-interactive brand mark; it fills the slot without a text label. */
+/** The sidebar's non-interactive brand mark, sized to match the navigation icons. */
 export function BrandMark() {
   return (
     <img
@@ -33,7 +33,7 @@ export function BrandMark() {
       alt="Voluma"
       width={224}
       height={176}
-      className="size-9 object-contain"
+      className="size-5 object-contain"
     />
   );
 }

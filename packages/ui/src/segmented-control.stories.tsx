@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Angle, Crosshair, Lasso, MapPin, Pipette, Ruler } from "lucide-react";
+import { Angle, Crosshair, Hand, Lasso, Pipette, Ruler, Spline } from "lucide-react";
 import { useState } from "react";
 import { SegmentedControl } from "./segmented-control";
 
@@ -8,7 +8,7 @@ import { SegmentedControl } from "./segmented-control";
  * key, or why it can't be picked now, shows on hover.
  * **Why:** one look for mode switches that were drawn ad hoc. **Where:** the matrix's Status /
  * Values, a list's Comfortable / Compact, the Agents stream filter, the input review's marking
- * tools (visible text labels, with no command shortcuts).
+ * tools (icons with names on hover/focus, with no command shortcuts).
  */
 function Demo({
   initial,
@@ -43,11 +43,12 @@ function Demo({
 }
 
 const ICONS = [
-  <Crosshair key="v" />,
-  <MapPin key="p" />,
+  <Hand key="navigate" />,
+  <Crosshair key="p" />,
   <Ruler key="l" />,
   <Angle key="a" />,
   <Lasso key="o" />,
+  <Spline key="path" />,
   <Pipette key="i" />,
 ];
 
@@ -67,13 +68,12 @@ export const MarkingTools: Story = {
   args: {
     initial: "Navigate",
     options: ["Navigate", "Point", "Ruler", "Angle", "Outline", "Freehand line", "Probe"],
+    icons: true,
   },
 };
 export const Icons: Story = {
   args: {
-    initial: "Navigate",
-    options: ["Navigate", "Point", "Ruler", "Angle", "Outline", "Probe"],
-    icons: true,
+    ...MarkingTools.args,
   },
 };
 export const HeldOff: Story = {
