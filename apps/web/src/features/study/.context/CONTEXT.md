@@ -88,8 +88,8 @@ shown as its input and linked straight to its page (`/studies/:id/inputs/:inputI
   far-from-group rule, the unit rule and the bar). Nothing on them judges or changes a result:
   every row, cell and dot opens the input review (Compare's cells on their measurement, `?output=`).
 - **To check means needs you.** `needsYou` in the study read's `review` (the newest completed
-  run's open To check items, each once: a value that only rests on one is not counted; the input
-  review shows it waiting on that check) is what every "N to check" reads in a sample's status
+  run's open To check items, each once: a value that only rests on one is not counted, and shows
+  as in, here and in the input review) is what every "N to check" reads in a sample's status
   (`needsYouOf`).
 - **Links into the input review**: a sample opens at `inputHref`. Adding samples to an existing study isn't designed, so there is no
   "Add samples". The knee reads from `attributes.knee`, as intake stores it.

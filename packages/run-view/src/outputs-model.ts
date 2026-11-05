@@ -64,7 +64,10 @@ export type OutputRow = {
   trail: TrailRow[];
   /** A final output's chain, nearest first (`chainOf`); empty for any other. */
   chain: ChainLink[][];
-  /** The open and resolved items of its latest version and of what that was made from. */
+  /**
+   * The resolved items of its latest version and of what that was made from, and the open ones a
+   * person can answer (`OutputsFold.openItems`, what To check counts), so every count agrees.
+   */
   items: OutputItem[];
 };
 
@@ -73,11 +76,8 @@ export type OutputsReview = {
   /** Published outputs the workflow does not declare (a worker's own mask). */
   undeclared: OutputRow[];
   rows: Map<string, OutputRow>;
-  /**
-   * Published outputs that are neither final nor on a final output's chain (each shows there), nor
-   * undeclared: what "Other outputs so far" lists while the run goes.
-   */
-  others: OutputRow[];
+  /** Every published output of the workflow that is not a value: what the values were made from. */
+  steps: OutputRow[];
   /** The open To check items a person can answer (`OutputsFold.openItems`): what To check counts. */
   open: Set<string>;
   /** Final outputs with a version, of all final outputs. */
@@ -172,9 +172,9 @@ function rowOf(fold: OutputsFold, catalog: OutputCatalog, state: OutputState): O
     chain: state.final ? chainOf(fold, catalog, state.id, on) : [],
     items: trail.flatMap(({ id: output, state }) =>
       state?.latest
-        ? itemsOfVersion(output, state.latest).map((i) =>
-            i.focus ? { ...i, focus: aimed(fold, catalog, i.focus) } : i,
-          )
+        ? itemsOfVersion(output, state.latest)
+            .filter((i) => i.resolved || fold.openItems.has(i.key))
+            .map((i) => (i.focus ? { ...i, focus: aimed(fold, catalog, i.focus) } : i))
         : [],
     ),
   };
@@ -193,46 +193,45 @@ export const OUTPUT_STATUS: Record<OutputStatus, { status: Status; word: string 
 };
 
 /**
- * An output's status as every place on the run page shows it. `waits` are the outputs it rests on
- * that have open items, nearest first; their items are drawn and decided under each of them, never
- * under what rests on them. A reported output with any is not done: it waits on those checks. While
- * the run goes, nothing published yet reads "not yet".
+ * An output's status as every place on the run page shows it, with what is open on it: `own`, its
+ * open items, and `waits`, each output it rests on that has open items with how many, nearest
+ * first. Those items are drawn and decided under that output, never under what rests on it, so a
+ * reported output with waits still shows as in (Jimmy, Nov 4: a hollow "waiting" read as not done)
+ * and its words name them. While the run goes, nothing published yet reads "not yet".
  */
 export function rowStatus(
   row: OutputRow,
   live: boolean,
   nameOf: (id: string) => string,
-): { status: Status; word: string; waits: string[] } {
-  const waits = [
-    ...new Set(openItemsOf(row).flatMap((i) => (i.output === row.id ? [] : [i.output]))),
-  ];
+): {
+  status: Status;
+  word: string;
+  own: OutputItem[];
+  waits: { id: string; count: number }[];
+} {
+  const open = openItemsOf(row);
+  const own = open.filter((i) => i.output === row.id);
+  const waits = [...new Set(open.flatMap((i) => (i.output === row.id ? [] : [i.output])))].map(
+    (id) => ({ id, count: open.filter((i) => i.output === id).length }),
+  );
+  const open_ = { own, waits };
   if (live && row.state.status === "pending")
-    return { ...OUTPUT_STATUS.pending, word: "not yet", waits };
-  if (row.state.status === "reported" && waits.length > 0)
+    return { ...OUTPUT_STATUS.pending, word: "not yet", ...open_ };
+  // Out of date or missing says so first: its open items may be on a version about to be replaced.
+  if (row.state.status === "out-of-date" || row.state.status === "missing")
+    return { ...OUTPUT_STATUS[row.state.status], ...open_ };
+  if (own.length > 0) return { ...OUTPUT_STATUS["to-check"], ...open_ };
+  // "to-check" with none of its own open: its items are resolved or not ones a person answers.
+  const status = row.state.status === "to-check" ? "reported" : row.state.status;
+  if (status === "reported" && waits.length > 0)
     return {
-      status: "waiting",
-      word: `Waiting on a check of ${waits.map(nameOf).join(", ")}`,
-      waits,
+      status: "done",
+      word: `Reported; ${waits.map((w) => nameOf(w.id)).join(", ")}, which it rests on, ${
+        waits.length > 1 ? "have" : "has"
+      } checks open`,
+      ...open_,
     };
-  return { ...OUTPUT_STATUS[row.state.status], waits };
-}
-
-/**
- * What "only To check" lists: the rows whose own items are open, plus a row for each open item no
- * listed row owns (a label map the values rest on), so one open item is one row, not every value
- * that rests on it.
- */
-export function rowsToCheck(review: OutputsReview): { listed: OutputRow[]; behind: OutputRow[] } {
-  const listed = [...review.sections.flatMap((s) => s.rows), ...review.undeclared];
-  const owns = (r: OutputRow) => openItemsOf(r).some((i) => i.output === r.id);
-  const shown = new Set(listed.map((r) => r.id));
-  const behind = new Set<string>();
-  for (const r of listed)
-    for (const i of openItemsOf(r)) if (!shown.has(i.output)) behind.add(i.output);
-  return {
-    listed: listed.filter(owns),
-    behind: [...behind].flatMap((id) => review.rows.get(id) ?? []),
-  };
+  return { ...OUTPUT_STATUS[status], ...open_ };
 }
 
 export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): OutputsReview {
@@ -241,16 +240,11 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     title: s.title,
     rows: s.outputs.flatMap((o) => rows.get(o.id) ?? []),
   }));
-  const onChain = new Set(
-    [...rows.values()].flatMap((r) => r.chain.flatMap((step) => step.map((l) => l.id))),
-  );
   return {
     sections,
     undeclared: fold.outputs.filter((o) => !o.declared).flatMap((o) => rows.get(o.id) ?? []),
     rows,
-    others: [...rows.values()].filter(
-      (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
-    ),
+    steps: [...rows.values()].filter((r) => r.state.latest && !r.state.final && r.state.declared),
     open: fold.openItems,
     progress: outputsIn(fold),
   };
@@ -260,7 +254,7 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
  * What the centre shows besides the selected value: `opened`, else while the run goes `standIn`,
  * the nearest published link of the value's chain when the value is pending, else (`soFar`) the
  * output published last whose whole scene `blocks` can draw (the scan, from intake on), so a run
- * going shows what it has made as soon as it has. One opened from Other outputs stays open after the run ends (until
+ * going shows what it has made as soon as it has. One opened from the steps list stays open after the run ends (until
  * Esc): the whole run opens outputs the same way.
  */
 export function inViewOf(

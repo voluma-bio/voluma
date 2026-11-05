@@ -110,7 +110,7 @@ export interface OutputsFold {
    * final or undeclared output and of everything it was made from. The one source every screen
    * counts To check from for an agent-loop run (the output panel and its filter, the Samples tree,
    * the study row, the heading). A value that only rests on an open item isn't counted for it; the
-   * input review shows it waiting on that check (`rowStatus`, run-view).
+   * input review shows it as in and names that check in its details (`rowStatus`, run-view).
    */
   openItems: Set<string>;
   /** `openItems.size`. */
