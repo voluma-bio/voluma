@@ -73,11 +73,8 @@ export type OutputsReview = {
   /** Published outputs the workflow does not declare (a worker's own mask). */
   undeclared: OutputRow[];
   rows: Map<string, OutputRow>;
-  /**
-   * Published outputs that are neither final nor on a final output's chain (each shows there), nor
-   * undeclared: what "Other outputs so far" lists while the run goes.
-   */
-  others: OutputRow[];
+  /** Every published output of the workflow that is not a value: what the values were made from. */
+  steps: OutputRow[];
   /** The open To check items a person can answer (`OutputsFold.openItems`): what To check counts. */
   open: Set<string>;
   /** Final outputs with a version, of all final outputs. */
@@ -225,16 +222,11 @@ export function outputsReview(fold: OutputsFold, catalog: OutputCatalog): Output
     title: s.title,
     rows: s.outputs.flatMap((o) => rows.get(o.id) ?? []),
   }));
-  const onChain = new Set(
-    [...rows.values()].flatMap((r) => r.chain.flatMap((step) => step.map((l) => l.id))),
-  );
   return {
     sections,
     undeclared: fold.outputs.filter((o) => !o.declared).flatMap((o) => rows.get(o.id) ?? []),
     rows,
-    others: [...rows.values()].filter(
-      (r) => r.state.latest && !r.state.final && r.state.declared && !onChain.has(r.id),
-    ),
+    steps: [...rows.values()].filter((r) => r.state.latest && !r.state.final && r.state.declared),
     open: fold.openItems,
     progress: outputsIn(fold),
   };

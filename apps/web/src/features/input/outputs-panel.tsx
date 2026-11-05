@@ -128,14 +128,10 @@ function OutputList(props: FinalOutputsProps) {
   const { review, onlyToCheck } = props;
   const keep = (rows: OutputRow[]) =>
     onlyToCheck ? rows.filter((r) => ownItems(review, r).length > 0) : rows;
-  // Every published output that is not a value: what the values were made from.
-  const steps = [...review.rows.values()].filter(
-    (r) => r.state.latest && !r.state.final && r.state.declared,
-  );
   const groups = [
     ...review.sections.map((s) => ({ title: s.title, rows: s.rows, steps: false })),
     { title: "Not in the workflow", rows: review.undeclared, steps: false },
-    { title: "Steps behind the values", rows: steps, steps: true },
+    { title: "Steps behind the values", rows: review.steps, steps: true },
   ]
     .map((g) => ({ ...g, all: g.rows, rows: keep(g.rows) }))
     .filter((g) => g.rows.length > 0);
