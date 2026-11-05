@@ -97,7 +97,7 @@
  * run never falls back to Voluma's model credentials. An account without Voluma's key
  * (`Me.volumaKey` false: a guest) may only start own-key runs: a start without `keys` is
  * refused 403 (`no-key`), as is a reopen of a run on Voluma's key, and must carry a Modal
- * token in `keys` too (403 `no-modal`). A run's sandboxes are on the Modal account of
+ * token in `keys` too (403, `needsModal` in the API). A run's sandboxes are on the Modal account of
  * `keys.modal` when given, else Voluma's.
  *
  * Model (`model`): the API picks the run's model when it creates the run (the request's
