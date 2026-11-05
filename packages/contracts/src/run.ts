@@ -96,8 +96,9 @@
  * carries `keys`, else `voluma`. It never changes afterwards, and an own-key
  * run never falls back to Voluma's model credentials. An account without Voluma's key
  * (`Me.volumaKey` false: a guest) may only start own-key runs: a start without `keys` is
- * refused 403 (`no-key`), as is a reopen of a run on Voluma's key. Every run's sandbox
- * is on Voluma's Modal account; `keys` is the model key alone.
+ * refused 403 (`no-key`), as is a reopen of a run on Voluma's key, and must carry a Modal
+ * token in `keys` too (403 `no-modal`). A run's sandboxes are on the Modal account of
+ * `keys.modal` when given, else Voluma's.
  *
  * Model (`model`): the API picks the run's model when it creates the run (the request's
  * `model` if it is in the `GET /run/models` list, else the list's default, or the
@@ -302,10 +303,16 @@ export type RunRead = z.infer<typeof runReadSchema>;
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
 const keyField = z.string().min(1).max(512);
 /**
- * The starter's own credentials: a Meta API key. Their sandboxes run on Voluma's Modal
- * account. Sent only in requests, never returned; see the header.
+ * The starter's own credentials: a Meta API key and, optionally, a Modal token. With `modal`,
+ * every sandbox of the run (and its review-asset conversion) is created on that Modal account;
+ * without it, on Voluma's. The plate model (`plate-serve`) is always on Voluma's account,
+ * reached through the gateway. An account without Voluma's key must give both. Sent only in
+ * requests, never returned; see the header.
  */
-export const ownKeysSchema = z.object({ metaApiKey: keyField });
+export const ownKeysSchema = z.object({
+  metaApiKey: keyField,
+  modal: z.object({ tokenId: keyField, tokenSecret: keyField }).optional(),
+});
 export type OwnKeys = z.infer<typeof ownKeysSchema>;
 
 export const startRunRequestSchema = z.object({
