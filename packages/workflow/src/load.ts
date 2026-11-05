@@ -14,7 +14,7 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type OutputCatalog, snapshotOutputCatalogSchema } from "@voluma/contracts/output-catalog";
+import { snapshotOutputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
 import { isScalar, parseDocument, parse as parseYaml, visit } from "yaml";
 import { z } from "zod";
