@@ -81,7 +81,17 @@ def release_prediction(data_root, scan, tibia, label):
     voted = np.stack(regions).sum(0) >= 2
     scores = score_map(scan, {"V": np.asarray(vs), "mask": voted}, label)
     plate = np.stack(bands).sum(0) >= 2
-    lines = {v: cutline.cut_boundary(voted[i], cutline.envelope(tibia[:, v, :])) for i, v in enumerate(vs)}
+    where = {v: i for i, v in enumerate(vs)}
+    lines = {}
+    for v, ign, cols, cut in zip(label["V"], label["ignore"], label["ign_cols"], label["cut"]):
+        if int(v) not in where:
+            continue
+        region, env = voted[where[int(v)]], cutline.envelope(tibia[:, int(v), :])
+        reference, boundary = score.scored_lines(region, cut, ign, cols, env)
+        # The scored boundary also holds the region's side walls, where it ends inside the envelope; the drawn line keeps the
+        # cut face only: boundary voxels whose distal (+W) neighbour is envelope outside the region.
+        outside = env & ~(region & env & ~ign)
+        lines[int(v)] = reference, boundary & np.pad(outside[1:], ((0, 1), (0, 0)))
     return lines, dict(zip(vs, plate)), scores
 
 
@@ -179,14 +189,13 @@ def load_rows(data_root, stock_root):
         stock_empty, stock_scores = stock_prediction(stock_root, scan, label)
         means[scan] = (np.mean([x for x in scores.values() if x is not None]), sum(stock_empty.values()), len(stock_empty),
                        np.mean([x for x in stock_scores.values() if x is not None]))
-        cuts = dict(zip((int(v) for v in label["V"]), label["cut"]))
         for row_scan, v, source in ROWS:
             if row_scan != scan:
                 continue
             if not stock_empty[v]:
                 raise ValueError(f"stock SAM 3.1 returned a mask on {scan} V{v}; the panel would need to show it")
             rows.append({"scan": scan, "v": v, "source": source, "image": scans.section_img(volume, v)[:, :, 0],
-                         "env": cutline.envelope(tibia[:, v, :]), "reference": cuts[v], "line": lines[v],
+                         "env": cutline.envelope(tibia[:, v, :]), "reference": lines[v][0], "line": lines[v][1],
                          "plate": plates[v], "score": scores[v]})
     rows.sort(key=lambda row: ROWS.index((row["scan"], row["v"], row["source"])))
     worst = max(rows, key=lambda row: row["score"])

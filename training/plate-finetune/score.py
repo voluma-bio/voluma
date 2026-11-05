@@ -26,13 +26,18 @@ CAP = 100   # voxels: a label cut voxel with no predicted boundary nearer than t
 TEST = ("OA8-19L", "OA6-9RK")
 
 
-def cutline_distance(pred, cut, ignore, ign_cols, env):
-    """Distances in voxels, both parts concatenated. cut: the label line's voxels inside the envelope (the export's `cut`)."""
+def scored_lines(pred, cut, ignore, ign_cols, env):
+    """-> (label cut voxels, predicted cut-side boundary voxels), both outside ignore voxels and columns: the two lines scored.
+    cut: the label line's voxels inside the envelope (the export's `cut`)."""
     keep = ~ign_cols[None] & ~ignore
-    c = cut & keep
+    return cut & keep, cutline.cut_boundary(pred & env & ~ignore, env) & keep
+
+
+def cutline_distance(pred, cut, ignore, ign_cols, env):
+    """Distances in voxels, both parts concatenated."""
+    c, pb = scored_lines(pred, cut, ignore, ign_cols, env)
     if not c.any():
         return np.zeros(0)
-    pb = cutline.cut_boundary(pred & env & ~ignore, env) & keep
     if not pb.any():
         return np.full(int(c.sum()), float(CAP))
     d_pb = np.minimum(distance_transform_edt(~pb), CAP)
