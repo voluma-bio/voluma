@@ -27,7 +27,7 @@ import {
 } from "@voluma/run-view";
 import { cx, EmptyState, StatusGlyph } from "@voluma/ui";
 import { ChevronRight } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { type Accepting, Items, Report, VersionLine } from "./version-report";
 
 export type FinalOutputsProps = {
@@ -235,9 +235,19 @@ function OutputLine({
   const { status, word, own } = rowStatus(row, live, nameOf);
   const selected = row.id === current?.id;
   const ref = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+  // In view when selected, and again whenever its place in the list moves (sections above open
+  // as the run's events arrive); scrolling by hand doesn't move it, so it never snaps back.
+  const placed = useRef<number>(undefined);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!selected || !el) {
+      placed.current = undefined;
+      return;
+    }
+    if (el.offsetTop === placed.current) return;
+    placed.current = el.offsetTop;
+    el.scrollIntoView({ block: "nearest" });
+  });
   const open = own.length;
   return (
     <button
