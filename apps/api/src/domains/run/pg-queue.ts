@@ -26,6 +26,8 @@ import {
   admit,
   type Limits,
   mayUseVolumaKey,
+  needsModal,
+  noModalMessage,
   type Refusal,
   refusalError,
   refusalMessage,
@@ -379,6 +381,8 @@ export function pgRunQueue(
           message: `You have ${open} runs on your own key that have not finished. Wait for some to finish, or stop one, before starting more.`,
         });
     }
+    if (needsModal(limits, reader.labId, starts.keys))
+      throw new HTTPException(403, { message: noModalMessage });
     const refused = admit(limits, reader.labId, await spentUsd(tx, reader.labId), {
       credentials,
     });
