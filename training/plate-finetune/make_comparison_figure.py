@@ -40,7 +40,6 @@ ROWS = (
     ("OA6-5RK", 163, AGENT),
 )
 WORST = ("OA6-9RK", 103)
-MAX_STEP = 3      # voxels: consecutive line points farther apart than this are a gap, drawn as a break
 ASPECT = 0.42     # crop height / width, the same for every section
 MARGIN = 6        # voxels of background either side of the tibia
 SCALE_UM = 100
@@ -58,12 +57,6 @@ STYLE = {
     "savefig.bbox": "standard",
     "image.interpolation": "lanczos",
 }
-
-
-def column_line(mask):
-    """A one-voxel-wide line mask -> one point per column (its median row), (m, 2) [w, u], or None if empty."""
-    points = [(float(np.median(rows)), float(u)) for u in range(mask.shape[1]) if len(rows := np.flatnonzero(mask[:, u]))]
-    return np.asarray(points, float) if points else None
 
 
 def score_map(scan, prediction, label):
@@ -88,7 +81,7 @@ def release_prediction(data_root, scan, tibia, label):
     voted = np.stack(regions).sum(0) >= 2
     scores = score_map(scan, {"V": np.asarray(vs), "mask": voted}, label)
     plate = np.stack(bands).sum(0) >= 2
-    lines = {v: column_line(cutline.cut_boundary(voted[i], cutline.envelope(tibia[:, v, :]))) for i, v in enumerate(vs)}
+    lines = {v: cutline.cut_boundary(voted[i], cutline.envelope(tibia[:, v, :])) for i, v in enumerate(vs)}
     return lines, dict(zip(vs, plate)), scores
 
 
@@ -98,12 +91,26 @@ def stock_prediction(stock_root, scan, label):
     return empty, score_map(scan, {"V": z["V"], "mask": z["mask"]}, label)
 
 
-def polyline(points):
-    """Per-column points -> u, w arrays with NaN wherever consecutive points are more than MAX_STEP apart, so a gap is drawn
-    as a break, never bridged."""
-    breaks = np.flatnonzero(np.abs(np.diff(points, axis=0)).max(1) > MAX_STEP) + 1
-    points = np.insert(points, breaks, np.nan, axis=0)
-    return points[:, 1], points[:, 0]
+def line_segments(mask):
+    """A line mask -> (n, 2, 2) segments in (u, w) joining 8-adjacent line voxels, so the drawing runs only through the voxels
+    themselves: two pieces in one column stay two pieces, never averaged into a line between them. A diagonal step is skipped where
+    a shared 4-neighbour already joins the pair, and a voxel with no line neighbour is a zero-length segment (drawn as a dot)."""
+    w, u = np.nonzero(mask)
+    on = np.pad(mask, 1)
+    segments = []
+    for dw, du in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        hit = on[w + 1 + dw, u + 1 + du]
+        if dw and du:
+            hit &= ~on[w + 1 + dw, u + 1] & ~on[w + 1, u + 1 + du]
+        segments.append(np.stack([np.stack([u[hit], w[hit]], 1), np.stack([u[hit] + du, w[hit] + dw], 1)], 1))
+    near = np.zeros_like(on)
+    for dw in (-1, 0, 1):
+        for du in (-1, 0, 1):
+            if dw or du:
+                near[1:-1, 1:-1] |= on[1 + dw:on.shape[0] - 1 + dw, 1 + du:on.shape[1] - 1 + du]
+    alone = ~near[w + 1, u + 1]
+    segments.append(np.repeat(np.stack([u[alone], w[alone]], 1)[:, None], 2, 1))
+    return np.concatenate(segments).astype(float)
 
 
 def crop_box(env, reference):
@@ -111,7 +118,7 @@ def crop_box(env, reference):
     cols = np.flatnonzero(env.any(0))
     u0, u1 = max(int(cols[0]) - MARGIN, 0), min(int(cols[-1]) + 1 + MARGIN, env.shape[1])
     height = round((u1 - u0) * ASPECT)
-    centre = float(np.median(reference[:, 0]))
+    centre = float(np.median(np.nonzero(reference)[0]))
     w0 = int(np.clip(round(centre - height / 2), 0, env.shape[0] - height))
     return w0, w0 + height, u0, u1
 
@@ -130,9 +137,11 @@ def show_section(ax, image, box):
 
 
 def draw_line(ax, line, colour):
-    u, w = polyline(line)
     halo = [patheffects.Stroke(linewidth=1.0, foreground="black", alpha=0.5), patheffects.Normal()]
-    ax.plot(u, w, color=colour, lw=0.5, solid_capstyle="round", path_effects=halo)
+    # One path with NaN breaks, not a LineCollection: a collection strokes each segment's halo over its neighbours' colour.
+    segments = line_segments(line)
+    path = np.concatenate([segments, np.full((len(segments), 1, 2), np.nan)], 1).reshape(-1, 2)
+    ax.plot(path[:, 0], path[:, 1], color=colour, lw=0.5, solid_capstyle="round", solid_joinstyle="round", path_effects=halo)
 
 
 def draw_fill(ax, mask, box, colour):
@@ -177,7 +186,7 @@ def load_rows(data_root, stock_root):
             if not stock_empty[v]:
                 raise ValueError(f"stock SAM 3.1 returned a mask on {scan} V{v}; the panel would need to show it")
             rows.append({"scan": scan, "v": v, "source": source, "image": scans.section_img(volume, v)[:, :, 0],
-                         "env": cutline.envelope(tibia[:, v, :]), "reference": column_line(cuts[v]), "line": lines[v],
+                         "env": cutline.envelope(tibia[:, v, :]), "reference": cuts[v], "line": lines[v],
                          "plate": plates[v], "score": scores[v]})
     rows.sort(key=lambda row: ROWS.index((row["scan"], row["v"], row["source"])))
     worst = max(rows, key=lambda row: row["score"])
