@@ -14,7 +14,7 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type OutputCatalog, outputCatalogSchema } from "@voluma/contracts/output-catalog";
+import { type OutputCatalog, snapshotOutputCatalogSchema } from "@voluma/contracts/output-catalog";
 import { deletePrefix, getText, type ObjectStore } from "@voluma/object-store";
 import { isScalar, parseDocument, parse as parseYaml, visit } from "yaml";
 import { z } from "zod";
@@ -292,7 +292,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       },
     });
     const data: unknown = doc.toJS();
-    const catalog = outputCatalogSchema.safeParse(data);
+    const catalog = snapshotOutputCatalogSchema.safeParse(data);
     if (!catalog.success) {
       const issue = catalog.error.issues[0];
       throw new WorkflowParseError(file, `${issue?.path.join(".")}: ${issue?.message}`);

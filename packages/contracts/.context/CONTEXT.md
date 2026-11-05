@@ -5,6 +5,11 @@
   would stop parsing the day it changed, which is how recorded plans took the runs list down after
   #177. `outputs.changed.add` keeps entries loose (`id`, `kind`, the rest passes through); the
   writer checks them against the catalog, the parser never does.
+- **A run's snapshot of `outputs.yaml` drops unknown keys** (`snapshotOutputCatalogSchema`, read
+  by `loadWorkflow`); the checkout's file stays strict (the API at start, the web build). So an
+  optional field added to the entry schema is one step: older code in a deploy overlap or a revert
+  still loads a snapshot that has it. A new required field, or a narrowed one, still breaks old
+  snapshots.
 - **Every place a payload names an output takes `outputRefSchema`** (a catalog id, or
   `<worker>/<id>` for an output a worker reported that the catalog does not declare). The catalog
   file itself can only name its own entries.
