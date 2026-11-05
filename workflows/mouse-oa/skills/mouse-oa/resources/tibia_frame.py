@@ -10,8 +10,7 @@ on the shaft between `--axis-mm` from the joint end: a first guess from scan-z s
 times, the scan's mask is sampled on the provisional grid's W sections over that range (sampled from the scan, so the range
 does not depend on how far the output crop reaches), each section is filled and its largest piece kept (so the fibula and
 specks do not pull it), lines u(w), v(w) are fitted through the centroids, and W is turned onto them until both are under
-0.1 degrees. If five turns do not get there, the record says `converged: false` and the last turn stands; a final axis more
-than 0.5 degrees off W is warned on (with no `--tilt-deg`): look at both QC sheets, and if the centroids sit on the flare or the fibula, rerun with an `--axis-mm` range on the shaft. `--tilt-deg` then
+0.1 degrees. If five turns do not get there, the record says `converged: false` and the last turn stands (warned on below): look at both QC sheets, and if the centroids sit on the flare or the fibula, rerun with an `--axis-mm` range on the shaft. `--tilt-deg` then
 turns W further, to cancel a lean seen on the QC. Everything the protocol annotates (growth-plate curves,
 heights, plate patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
 The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
@@ -20,7 +19,8 @@ because its sign rule and its crop defaults are the mouse tibia protocol's. Refu
 voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range, and fewer than ten sections with
 bone in the `--axis-mm` range. Warned, with the grid still written: a `--label` whose joint end has the femur's notch where
 `--femur-label`'s is solid (the two labels look swapped; the joint-end caps' solidities are in the result record), and a
-`--joint-end` on the side away from the femur (the grid uses the detected end).
+`--joint-end` on the side away from the femur (the grid uses the detected end), and a final axis more than 0.5 degrees
+off W in either plane (not checked with `--tilt-deg`).
 
 Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolation, -1000 outside the scan), with its sidecar
         <out>/<name>-mask.npy  bool bone mask on the aligned grid (nearest), with its sidecar
