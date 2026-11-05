@@ -13,17 +13,17 @@ import type { Run, RunRead } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { failedThreads } from "@voluma/contracts/threads";
 import {
+  canStart,
   formatDuration,
   formatUsd,
   inputLabel,
-  KeysForm,
-  loadKeys,
   runCost,
   runStatus,
   runWork,
   stoppedText,
   useEvents,
   useNow,
+  useSavedKeys,
 } from "@voluma/run-view";
 import {
   Breadcrumb,
@@ -40,7 +40,7 @@ import {
 import { workflowById, workflowName } from "@voluma/workflow/bundled";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { Fragment, type ReactNode, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 /** "OA6-1, right knee", from the study's input; the input's file name when the study can't say. */
 export function inputTitle(run: Run, study: StudyDetail | undefined) {
@@ -349,7 +349,17 @@ function StopRun({ run }: { run: Run }) {
 const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
 
 /** The run's own problems, over the views: failed, or out of touch. */
-export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string; stale: boolean }) {
+export function RunAlert({
+  run,
+  userId,
+  volumaKey,
+  stale,
+}: {
+  run: RunRead;
+  userId: string;
+  volumaKey: boolean;
+  stale: boolean;
+}) {
   const { state } = run;
   if (
     state.status === "ended" &&
@@ -357,7 +367,7 @@ export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string;
     run.credentials !== "voluma" &&
     run.cannotMessage === null
   )
-    return <ReopenKeys userId={userId} />;
+    return <ReopenKeys userId={userId} volumaKey={volumaKey} />;
   if (state.status === "ended" && state.outcome === "failed")
     return (
       <p role="alert" className={`${bar} bg-destructive-tint text-destructive`}>
@@ -374,39 +384,28 @@ export function RunAlert({ run, userId, stale }: { run: RunRead; userId: string;
 }
 
 /**
- * A finished own-key run holds no key, so a message to it needs the user's: the form shows until
- * this browser has one saved (the messages then carry it, `keysToReopen`), and "Change key"
- * brings it back to replace a wrong or revoked one.
+ * A finished own-key run holds no key, so a message to it needs the user's, saved in Settings:
+ * the line says whether this browser has them (the messages then carry them, `keysToReopen`)
+ * and opens Settings to add or replace them.
  */
-function ReopenKeys({ userId }: { userId: string }) {
-  const [saved, setSaved] = useState(() => !!loadKeys(userId));
-  const [changing, setChanging] = useState(false);
-  if (saved && !changing)
-    return (
-      <p className={`${bar} flex items-center gap-2 bg-muted text-muted-foreground`}>
-        Corrections to this run use your saved Meta key.
-        <Button size="sm" variant="ghost" onClick={() => setChanging(true)}>
-          Change key
-        </Button>
-      </p>
-    );
+function ReopenKeys({ userId, volumaKey }: { userId: string; volumaKey: boolean }) {
+  const keys = useSavedKeys(userId);
+  const { pathname, search } = useLocation();
+  const ready = !!keys && canStart(volumaKey, keys);
   return (
-    <section className={`${bar} grid gap-2 bg-muted text-muted-foreground`}>
-      <p>
-        This run used your own Meta key, which Voluma does not keep once a run ends. Add it to send
-        a correction.
-      </p>
-      <div className="max-w-sm">
-        <KeysForm
-          userId={userId}
-          submitLabel="Save key"
-          onSubmit={() => {
-            setSaved(true);
-            setChanging(false);
-          }}
-        />
-      </div>
-    </section>
+    <p className={`${bar} bg-muted text-muted-foreground`}>
+      {ready
+        ? "Corrections to this run use your saved keys. "
+        : "This run used your own keys, which Voluma does not keep once a run ends. Add them in Settings to send a correction. "}
+      <Link
+        to={pathname + search}
+        replace
+        state={{ openSettings: true }}
+        className="text-primary-text underline"
+      >
+        Open Settings
+      </Link>
+    </p>
   );
 }
 

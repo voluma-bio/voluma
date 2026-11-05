@@ -159,6 +159,8 @@ who ends it:
    terminates every live sandbox in the `voluma-runs` Modal app and prints each one's run,
    name and age (from the `startedAt` tag the adapter sets). `--run <id>` limits it to one
    run, which is what to use when other agents have runs going: the bare form ends theirs too.
+   It sees only Voluma's Modal account: a run on the starter's own Modal token (`keys.modal`, which `claimBody`
+   passes to every Modal call of the claim) has its sandboxes on that account.
 
 Run `sandboxes:clean --run <your run>` before finishing any work that started sandboxes.
 
