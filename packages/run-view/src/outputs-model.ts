@@ -217,6 +217,9 @@ export function rowStatus(
   const open_ = { own, waits };
   if (live && row.state.status === "pending")
     return { ...OUTPUT_STATUS.pending, word: "not yet", ...open_ };
+  // Out of date or missing says so first: its open items may be on a version about to be replaced.
+  if (row.state.status === "out-of-date" || row.state.status === "missing")
+    return { ...OUTPUT_STATUS[row.state.status], ...open_ };
   if (own.length > 0) return { ...OUTPUT_STATUS["to-check"], ...open_ };
   // "to-check" with none of its own open: its items are resolved or not ones a person answers.
   const status = row.state.status === "to-check" ? "reported" : row.state.status;

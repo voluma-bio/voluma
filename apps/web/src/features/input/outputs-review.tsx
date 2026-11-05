@@ -205,26 +205,14 @@ export function OutputsReview({
   // value in view when that rests on it, else under the first value resting on it.
   const show = useCallback(
     (id: string) => {
-      if (listed.some((r) => r.id === id)) {
-        select({ output: id, trail: null, item: null });
-        return;
+      if (listed.some((r) => r.id === id)) select({ output: id, trail: null, item: null });
+      else if (selected?.trail.some((t) => t.id === id)) select({ trail: id, item: null });
+      else {
+        const value = restingOn(id);
+        select({ output: value?.id ?? id, trail: id, item: null });
       }
-      // The value in view is read from the URL being replaced, not this render's `selected`: the
-      // router applies a pick in a transition, so a second quick click would see the first's value.
-      setParams(
-        (prev) => {
-          const held = review.rows.get(prev.get("output") ?? "") ?? selected;
-          const value = held?.trail.some((t) => t.id === id) ? held : restingOn(id);
-          const next = new URLSearchParams(prev);
-          next.set("output", value?.id ?? id);
-          next.set("trail", id);
-          next.delete("item");
-          return next;
-        },
-        { replace: true },
-      );
     },
-    [listed, restingOn, select, selected, setParams, review.rows],
+    [listed, restingOn, select, selected],
   );
   const inView = trailOpen ?? standIn ?? selected;
   const centreParam = params.get("centre");
